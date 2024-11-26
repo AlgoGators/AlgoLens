@@ -12,7 +12,7 @@ import { Label } from "@/components/ui/label";
 
 export const LoginForm = () => {
 	return (
-		<Card>
+		<Card className="w-full max-w-lg">
 			<CardHeader>
 				<CardTitle>Login In</CardTitle>
 				<CardDescription>
