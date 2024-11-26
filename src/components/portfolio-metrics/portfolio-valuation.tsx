@@ -3,14 +3,18 @@ import {
   Card,
   CardContent,
   CardDescription,
-  CardFooter,
   CardHeader,
-  CardTitle,
 } from "@/components/ui/card";
 
-export const PortfolioMetrics = () => {
-  const portfolioInvested = 10000;
-  const totalReturn = 0.2;
+interface PortfolioValuationProps {
+  value: number;
+  totalReturn: number;
+}
+
+export const PortfolioValuation = ({
+  value = 0,
+  totalReturn = 0,
+}: PortfolioValuationProps) => {
   const isPositve = totalReturn >= 0;
 
   return (
@@ -26,7 +30,7 @@ export const PortfolioMetrics = () => {
           <div className="space-y-1.5 ">
             <Label htmlFor="total-invested">Total Invested</Label>
             <p className="text-lg font-semibold">
-              ${portfolioInvested.toLocaleString("en-US")}
+              ${value.toLocaleString("en-US", { maximumFractionDigits: 2 })}
             </p>
           </div>
 
