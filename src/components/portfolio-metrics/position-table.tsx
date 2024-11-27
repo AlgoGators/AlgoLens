@@ -29,58 +29,64 @@ export const PositionsTable = ({ positions }: PositionsTableProps) => {
         <CardTitle>Portfolio Positions</CardTitle>
       </CardHeader>
       <CardContent>
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Symbol</TableHead>
-              <TableHead>Quantity</TableHead>
-              <TableHead>Entry Price</TableHead>
-              <TableHead>Current Price</TableHead>
-              <TableHead>P&L</TableHead>
-              <TableHead>Return %</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {positions.map((position) => (
-              <TableRow key={position.id}>
-                <TableCell className="font-medium">{position.symbol}</TableCell>
-                <TableCell>{position.quantity}</TableCell>
-                <TableCell>
-                  $
-                  {position.entryPrice.toLocaleString("en-US", {
-                    minimumFractionDigits: 2,
-                  })}
-                </TableCell>
-                <TableCell>
-                  $
-                  {position.currentPrice.toLocaleString("en-US", {
-                    minimumFractionDigits: 2,
-                  })}
-                </TableCell>
-                <TableCell
-                  className={
-                    position.pnl >= 0 ? "text-green-600" : "text-red-600"
-                  }
-                >
-                  $
-                  {Math.abs(position.pnl).toLocaleString("en-US", {
-                    minimumFractionDigits: 2,
-                  })}
-                </TableCell>
-                <TableCell
-                  className={
-                    position.returnPercent >= 0
-                      ? "text-green-600"
-                      : "text-red-600"
-                  }
-                >
-                  {position.returnPercent >= 0 ? "+" : ""}
-                  {position.returnPercent.toFixed(2)}%
-                </TableCell>
+        <div style={{ height: "200px", overflowY: "auto" }}>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Symbol</TableHead>
+                <TableHead>Quantity</TableHead>
+                <TableHead>Entry Price</TableHead>
+                <TableHead>Current Price</TableHead>
+                <TableHead>P&L</TableHead>
+                <TableHead>Return %</TableHead>
               </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+            </TableHeader>
+            <TableBody>
+              {positions.map((position) => (
+                <TableRow key={position.id}>
+                  <TableCell className="font-medium">
+                    {position.symbol}
+                  </TableCell>
+                  <TableCell>{position.quantity}</TableCell>
+                  <TableCell>
+                    $
+                    {position.entryPrice.toLocaleString("en-US", {
+                      minimumFractionDigits: 2,
+                    })}
+                  </TableCell>
+                  <TableCell>
+                    $
+                    {position.currentPrice.toLocaleString("en-US", {
+                      minimumFractionDigits: 2,
+                    })}
+                  </TableCell>
+                  <TableCell
+                    className={
+                      position.pnl >= 0 ? "text-green-600" : "text-red-600"
+                    }
+                  >
+                    $
+                    {Math.abs(position.pnl).toLocaleString("en-US", {
+                      minimumFractionDigits: 2,
+                    })}
+                  </TableCell>
+                  <TableCell
+                    className={
+                      position.returnPercent >= 0
+                        ? "text-green-600"
+                        : "text-red-600"
+                    }
+                  >
+                    {position.returnPercent >= 0 ? "+" : ""}
+                    {position.returnPercent.toFixed(
+                      2,
+                    )}%
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
       </CardContent>
     </Card>
   );
