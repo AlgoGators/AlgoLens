@@ -12,8 +12,8 @@ A web application for displaying algorithmic trading portfolio information and m
 1. Clone the repository:
 
 ```bash
-git clone [your-repository-url]
-cd [repository-name]
+git clone https://github.com/AlgoGators/AlgoLens.git algo-lens
+cd algo-lens
 ```
 
 2. Install dependencies:
@@ -78,4 +78,4 @@ src/
 
 ## License
 
-[Your chosen license] Algo-Lens
+[Apache 2.0]("./LICENSE") Algo-Lens
