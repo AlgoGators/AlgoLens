@@ -6,10 +6,22 @@ import {
   CardHeader,
 } from "@/components/ui/card";
 
+import { TrendingUp, TrendingDown } from "lucide-react";
+
 interface PortfolioValuationProps {
   value: number;
   totalReturn: number;
 }
+
+const DECIMAL_PLACES = 2;
+const CURRENCY = "USD";
+
+const formatCurrency = (value: number) =>
+  value.toLocaleString("en-US", {
+    style: "currency",
+    currency: CURRENCY,
+    maximumFractionDigits: DECIMAL_PLACES,
+  });
 
 export const PortfolioValuation = ({
   value = 0,
@@ -29,9 +41,7 @@ export const PortfolioValuation = ({
         <div className="flex justify-between items-center">
           <div className="space-y-1.5 ">
             <Label htmlFor="total-invested">Total Invested</Label>
-            <p className="text-lg font-semibold">
-              ${value.toLocaleString("en-US", { maximumFractionDigits: 2 })}
-            </p>
+            <p className="text-lg font-semibold">{formatCurrency(value)}</p>
           </div>
 
           <div className="text-right space-y-1">
@@ -41,6 +51,7 @@ export const PortfolioValuation = ({
             >
               {isPositve && "+"}
               {totalReturn * 100}%{" "}
+              {isPositve ? <TrendingUp /> : <TrendingDown />}
             </div>
           </div>
         </div>
