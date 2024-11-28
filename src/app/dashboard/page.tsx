@@ -17,8 +17,8 @@ export default function DashboardPage() {
       returnPercent: 0.2,
     },
     {
-      id: "1",
-      symbol: "ES",
+      id: "2",
+      symbol: "CL",
       quantity: 100,
       entryPrice: 3000.0,
       currentPrice: 3010.0,
@@ -26,8 +26,8 @@ export default function DashboardPage() {
       returnPercent: 0.2,
     },
     {
-      id: "1",
-      symbol: "ES",
+      id: "3",
+      symbol: "NQ",
       quantity: 100,
       entryPrice: 3000.0,
       currentPrice: 3010.0,
@@ -37,9 +37,18 @@ export default function DashboardPage() {
   ];
 
   return (
-    <div className="flex min-h-screen items-start justify-center space-y-6">
-      <PortfolioValuation value={portfolioValue} totalReturn={totalReturn} />
-      <PositionsTable positions={positions} />
+    <div className="container mx-auto p-4">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div className="w-full">
+          <PortfolioValuation
+            value={portfolioValue}
+            totalReturn={totalReturn}
+          />
+        </div>
+        <div className="w-full lg:col-span-2">
+          <PositionsTable positions={positions} />
+        </div>
+      </div>
     </div>
   );
 }
