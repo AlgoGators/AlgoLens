@@ -1,5 +1,7 @@
 import { PortfolioValuation } from "@/components/portfolio-metrics/portfolio-valuation";
 import { PositionsTable } from "@/components/portfolio-metrics/position-table";
+import { PositionTreemap } from "@/components/portfolio-metrics/position-treemap";
+import { PortfolioData } from "@/types/portfolio";
 
 export default function DashboardPage() {
   // TODO: This is a dummy data
@@ -28,13 +30,19 @@ export default function DashboardPage() {
     {
       id: "3",
       symbol: "NQ",
-      quantity: 100,
+      quantity: 10,
       entryPrice: 3000.0,
       currentPrice: 3010.0,
       pnl: 1000.0,
       returnPercent: 0.2,
     },
   ];
+
+  const portfolioData: PortfolioData = {
+    portfolioValue: 10000,
+    totalReturn: 0.05,
+    positions: positions,
+  };
 
   return (
     <div className="container mx-auto p-4">
@@ -47,6 +55,9 @@ export default function DashboardPage() {
         </div>
         <div className="w-full lg:col-span-2">
           <PositionsTable positions={positions} />
+        </div>
+        <div className="w-full">
+          <PositionTreemap positions={positions} />
         </div>
       </div>
     </div>

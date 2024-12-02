@@ -7,10 +7,11 @@ import {
 } from "@/components/ui/card";
 
 import { TrendingUp, TrendingDown } from "lucide-react";
+import { PortfolioData, Position } from "@/types/portfolio";
 
 interface PortfolioValuationProps {
-  value: number;
-  totalReturn: number;
+  value: PortfolioData["portfolioValue"];
+  totalReturn: PortfolioData["totalReturn"];
 }
 
 const DECIMAL_PLACES = 2;

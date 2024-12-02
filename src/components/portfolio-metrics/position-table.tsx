@@ -7,19 +7,10 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-
-interface Position {
-  id: string;
-  symbol: string;
-  quantity: number;
-  entryPrice: number;
-  currentPrice: number;
-  pnl: number;
-  returnPercent: number;
-}
+import { PortfolioData, Position } from "@/types/portfolio";
 
 interface PositionsTableProps {
-  positions: Position[];
+  positions: PortfolioData["positions"];
 }
 
 export const PositionsTable = ({ positions }: PositionsTableProps) => {
@@ -78,9 +69,7 @@ export const PositionsTable = ({ positions }: PositionsTableProps) => {
                     }
                   >
                     {position.returnPercent >= 0 ? "+" : ""}
-                    {position.returnPercent.toFixed(
-                      2,
-                    )}%
+                    {position.returnPercent.toFixed(2)}%
                   </TableCell>
                 </TableRow>
               ))}
