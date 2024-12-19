@@ -1,0 +1,4 @@
+arch
+ci
+doc
+examples
