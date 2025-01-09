@@ -26,9 +26,10 @@ npm install
 
 ```bash
 npm run dev
+python app.py
 ```
 
-The application will be available at `http://localhost:3000`
+The application will be available at `http://localhost:3000` and Flask will run on `http://localhost:5000`
 
 ## Project Structure
 

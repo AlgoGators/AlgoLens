@@ -1,129 +1,192 @@
 "use client";
 
-import { useState } from "react";
-import { useStrategyContext } from "@/components/StrategyContext";
-import PositionsSummary from "@/components/PositionsSummary";
-import StrategyManager from "@/components/StrategyManager";
-import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import { useState, useEffect } from "react";
+import { Line } from "react-chartjs-2";
+import {
+  Chart as ChartJS,
+  CategoryScale,
+  LinearScale,
+  LineElement,
+  PointElement,
+  Tooltip,
+  Legend,
+  Title,
+} from "chart.js";
+
+ChartJS.register(CategoryScale, LinearScale, LineElement, PointElement, Tooltip, Legend, Title);
 
 export default function DashboardPage() {
-  const { metrics, positions, setPositions } = useStrategyContext();
-  const [isStrategySubmitted, setIsStrategySubmitted] = useState(false);
+  const [metrics, setMetrics] = useState<any>(null);
+  const [isFetching, setIsFetching] = useState(true);
 
-  const handleStrategySubmission = async () => {
-    setIsStrategySubmitted(true);
+  // Fetch metrics from the backend
+  useEffect(() => {
+    const fetchMetrics = async () => {
+      setIsFetching(true);
+      try {
+        const response = await fetch("http://localhost:5000/api/quantstats", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+        });
 
-    // Fetch positions and metrics (assuming an API call function exists)
-    const response = await fetch("/api/submit-strategies", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ /* strategy payload */ }),
-    });
-    const data = await response.json();
-    setPositions(data.positions); // Save positions
+        if (response.ok) {
+          const data = await response.json();
+          console.log("Fetched metrics:", data);
+          setMetrics(data);
+        } else {
+          const error = await response.json();
+          console.error("Backend error response:", error);
+          alert(error.error || "Failed to fetch metrics.");
+        }
+      } catch (error) {
+        console.error("Network or parsing error:", error);
+        alert("An error occurred while fetching metrics.");
+      } finally {
+        setIsFetching(false);
+      }
+    };
+
+    fetchMetrics();
+  }, []);
+
+  // Helper function to format titles
+  const formatTitle = (title: string): string => {
+    return title
+      .replace(/_/g, " ") // Replace underscores with spaces
+      .replace(/\b\w/g, (char) => char.toUpperCase()); // Capitalize the first letter of each word
   };
 
+  // Helper function to parse chart data for implied volatility
+  const parseImpliedVolatilityData = (data: any) => {
+    if (!data) return { labels: [], datasets: [] }; // Fallback for undefined data
+
+    const labels = Object.keys(data);
+    const values = Object.values(data);
+
+    return {
+      labels,
+      datasets: [
+        {
+          label: "Implied Volatility",
+          data: values,
+          borderColor: "#4C78A8", // Seaborn-like blue
+          backgroundColor: "rgba(76, 120, 168, 0.1)", // Light blue for fill
+          borderWidth: 2,
+          tension: 0, // Smooth line
+          pointRadius: 0, // Small points for simplicity
+          pointBackgroundColor: "#4C78A8",
+        },
+      ],
+    };
+  };
+
+  const parseComparisonData = (data: any) => {
+    if (!data) return { labels: [], datasets: [] };
+  
+    const labels = Object.keys(data).map((key) => key); // Dates
+    const ticker1Data = Object.values(data).map((entry: any) => entry.META); // Replace "META" dynamically
+    const ticker2Data = Object.values(data).map((entry: any) => entry.AAPL); // Replace "AAPL" dynamically
+  
+    return {
+      labels,
+      datasets: [
+        {
+          label: "META Returns",
+          data: ticker1Data,
+          borderColor: "#4C78A8",
+          backgroundColor: "rgba(76, 120, 168, 0.1)",
+          borderWidth: 2,
+          tension: 0.4,
+        },
+        {
+          label: "AAPL Returns",
+          data: ticker2Data,
+          borderColor: "#F58518",
+          backgroundColor: "rgba(245, 133, 24, 0.1)",
+          borderWidth: 2,
+          tension: 0.4,
+        },
+      ],
+    };
+  };
+
+  if (isFetching) {
+    return <div className="text-center text-gray-500">Loading metrics...</div>;
+  }
+
+  if (!metrics) {
+    return <div className="text-center text-gray-500">No metrics available.</div>;
+  }
+
   return (
-    <div className="container mx-auto p-4 grid grid-cols-1 lg:grid-cols-2 gap-4">
-      <Card className="w-full">
-        <CardHeader>
-          <h2 className="text-xl font-bold mb-4">Strategy Manager</h2>
-        </CardHeader>
-        <CardContent>
-          <StrategyManager onSubmit={handleStrategySubmission} />
-        </CardContent>
-      </Card>
+    <div className="container mx-auto p-4">
+      {/* Page Title */}
+      <h1 className="text-3xl font-bold text-center mb-8">Strategy Dashboard</h1>
 
-      <Card className="w-full">
-        <CardHeader>
-          <h2 className="text-xl font-bold mb-4">Metrics</h2>
-        </CardHeader>
-        <CardContent>
-          {isStrategySubmitted && metrics.length > 0 ? (
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              {metrics.map((metric, index) => {
-                // Categorize metrics
-                const performanceMetrics = {
-                  CAGR: "Compounded Annual Growth Rate",
-                  Annualized_Returns: "Annualized Returns",
-                  Sharpe_Ratio: "Sharpe Ratio",
-                  Sortino_Ratio: "Sortino Ratio",
-                  Profit_Factor: "Profit Factor",
-                  Win_Rate: "Win Rate",
-                  Max_Drawdown: "Max Drawdown",
-                };
+      {/* Implied Volatility Section */}
+      <div className="bg-white shadow rounded-lg p-6 mb-8">
+        <h2 className="text-xl font-bold mb-4">Implied Volatility</h2>
+        <Line
+          data={parseImpliedVolatilityData(metrics.implied_volatility)}
+          options={{
+            responsive: true,
+            plugins: {
+              legend: {
+                display: true,
+                position: "top",
+              },
+              title: {
+                display: true,
+                text: "Implied Volatility Over Time",
+                color: "#333333",
+                font: {
+                  size: 16,
+                  weight: "bold",
+                },
+              },
+            },
+            scales: {
+              x: {
+                title: {
+                  display: true,
+                  text: "Date",
+                  color: "#333333",
+                  font: {
+                    size: 14,
+                    weight: "bold",
+                  },
+                },
+              },
+              y: {
+                title: {
+                  display: true,
+                  text: "Implied Volatility (%)",
+                  color: "#333333",
+                  font: {
+                    size: 14,
+                    weight: "bold",
+                  },
+                },
+              },
+            },
+          }}
+        />
+      </div>
 
-                const riskMetrics = {
-                  Portfolio_Volatility: "Portfolio Volatility",
-                  Beta: "Beta",
-                  Value_at_Risk: "Value at Risk",
-                  Conditional_Value_at_Risk: "Tail Risk (CVaR)",
-                  Leverage: "Leverage",
-                };
-
-                const categorizedPerformanceMetrics = Object.entries(metric)
-                  .filter(([key]) => key in performanceMetrics)
-                  .map(([key, value]) => ({
-                    label: performanceMetrics[key],
-                    value,
-                  }));
-
-                const categorizedRiskMetrics = Object.entries(metric)
-                  .filter(([key]) => key in riskMetrics)
-                  .map(([key, value]) => ({
-                    label: riskMetrics[key],
-                    value,
-                  }));
-
-                return (
-                  <Card key={index} className="w-full">
-                    <CardHeader>
-                      <h2 className="text-lg font-bold">{metric.strategy} Metrics</h2>
-                    </CardHeader>
-                    <CardContent>
-                      {/* Performance Metrics */}
-                      <h3 className="text-md font-semibold mb-2">Performance Metrics</h3>
-                      <ul className="mb-4">
-                        {categorizedPerformanceMetrics.map(({ label, value }, idx) => (
-                          <li key={idx}>
-                            <strong>{label}:</strong> {value.toFixed(2)}
-                          </li>
-                        ))}
-                      </ul>
-
-                      {/* Risk Metrics */}
-                      <h3 className="text-md font-semibold mb-2">Risk Metrics</h3>
-                      <ul>
-                        {categorizedRiskMetrics.map(({ label, value }, idx) => (
-                          <li key={idx}>
-                            <strong>{label}:</strong> {value.toFixed(2)}
-                          </li>
-                        ))}
-                      </ul>
-                    </CardContent>
-                  </Card>
-                );
-              })}
-            </div>
-          ) : (
-            <div>No metrics available yet. Please run a strategy.</div>
-          )}
-        </CardContent>
-      </Card>;
-
-
-      <Card className="w-full col-span-2">
-        <CardHeader>
-          <h2 className="text-xl font-bold mb-4">Final Positions</h2>
-        </CardHeader>
-        <CardContent>
-          {isStrategySubmitted && positions ? (
-            <PositionsSummary positions={positions} />
-          ) : (
-            <div>No positions available yet. Please run a strategy.</div>
-          )}
-        </CardContent>
-      </Card>
+      {/* Key Performance Metrics Section */}
+      <div className="bg-white shadow rounded-lg p-6">
+        <h2 className="text-xl font-bold mb-4">Key Performance Metrics</h2>
+        <ul>
+          {Object.entries(metrics)
+            .filter(([key, value]) => typeof value === "number")
+            .map(([key, value]) => (
+              <li key={key} className="mb-2">
+                <strong>{formatTitle(key)}:</strong> {value.toFixed(2)}
+              </li>
+            ))}
+        </ul>
+      </div>
     </div>
   );
 }
+
