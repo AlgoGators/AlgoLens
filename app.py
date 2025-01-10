@@ -3,18 +3,62 @@ from flask_cors import CORS
 import quantstats as qs
 import pandas as pd
 import numpy as np
+from quantstats.stats import omega, greeks as qs_greeks
+
+def calculate_extended_metrics(returns, benchmark, rf=0.0, periods=252):
+    """
+    Calculates additional metrics including delta, gamma, theta, and omega.
+    Uses the existing `greeks` function for alpha and beta.
+    """
+    # Use quantstats' greeks function for alpha and beta
+    greeks = qs_greeks(returns, benchmark)
+
+    # Delta: Proportional to beta
+    delta = greeks["beta"]
+
+    # Gamma: Sensitivity of delta to changes in benchmark
+    gamma = (
+        np.cov(returns.diff(), benchmark.diff())[0, 1] / np.var(benchmark.diff())
+        if len(returns) > 1
+        else np.nan
+    )
+
+    # Theta: Sensitivity of returns to time decay (approximation)
+    theta = returns.mean() * -1 * periods
+
+    # Omega: Using the provided quantstats function
+    omega_ratio = omega(returns, rf=rf, required_return=0.0, periods=periods)
+
+    # Combine results
+    metrics = pd.Series(
+        {
+            "beta": greeks["beta"],
+            "alpha": greeks["alpha"],
+            "delta": delta,
+            "gamma": gamma,
+            "theta": theta,
+            "omega": omega_ratio,
+        }
+    ).fillna(0)
+
+    return metrics
 
 app = Flask(__name__)
 CORS(app)
 
 functions_list = [
-    'adjusted_sortino', 'avg_loss', 'avg_return', 'avg_win', 'best', 'cagr', 'calmar', 'common_sense_ratio',
-    'conditional_value_at_risk', 'consecutive_losses', 'consecutive_wins', 'cvar', 'drawdown_details',
-    'expected_return', 'expected_shortfall', 'gain_to_pain_ratio', 'geometric_mean', 'ghpr', 'implied_volatility',
-    'information_ratio', 'kelly_criterion', 'kurtosis', 'max_drawdown', 'monthly_returns', 'omega', 'payoff_ratio',
-    'profit_factor', 'profit_ratio', 'recovery_factor', 'risk_return_ratio', 'sharpe', 'skew', 'sortino',
-    'value_at_risk', 'var', 'volatility', 'win_loss_ratio', 'win_rate'
-]
+        'adjusted_sortino', 'autocorr_penalty', 'avg_loss', 'avg_return', 'avg_win', 'best', 'cagr', 'calmar',
+        'common_sense_ratio', 'comp', 'compsum', 'conditional_value_at_risk', 'consecutive_losses',
+        'consecutive_wins', 'cpc_index', 'cvar', 'distribution', 'drawdown_details', 'expected_return',
+        'expected_shortfall', 'exposure', 'gain_to_pain_ratio', 'geometric_mean', 'ghpr', 'greeks',
+        'information_ratio', 'kelly_criterion', 'kurtosis', 'max_drawdown', 'monthly_returns',
+        'omega', 'outlier_loss_ratio', 'outlier_win_ratio', 'outliers', 'payoff_ratio', 'pct_rank',
+        'probabilistic_adjusted_sortino_ratio', 'probabilistic_ratio', 'probabilistic_sharpe_ratio',
+        'probabilistic_sortino_ratio', 'profit_factor', 'profit_ratio', 'r_squared', 'rar', 'recovery_factor',
+        'risk_of_ruin', 'risk_return_ratio', 'ror', 'serenity_index', 'sharpe', 'skew', 'smart_sharpe', 'smart_sortino', 'sortino',
+        'tail_ratio', 'treynor_ratio', 'ulcer_index', 'ulcer_performance_index', 'upi',
+        'value_at_risk', 'var', 'volatility', 'win_loss_ratio', 'win_rate', 'worst'
+    ]
 
 # Helper function to convert non-serializable types
 def make_serializable(data):
@@ -46,24 +90,93 @@ def make_serializable(data):
 @app.route('/api/quantstats', methods=['POST'])
 def get_quantstats_metrics():
     try:
-        # Static ticker for now (e.g., META)
         ticker = "META"
+        sp500_ticker = "SPY"
 
-        # Fetch daily returns for the static ticker
+        # Fetch stock and S&P 500 data
         stock = qs.utils.download_returns(ticker)
-        print(f"Downloaded returns for static ticker {ticker}: {stock.head()}")  # Debug log
+        sp500 = qs.utils.download_returns(sp500_ticker)
 
-        results = {}
+        # Align the data to include full S&P 500 history
+        full_history = pd.DataFrame({"SP500": sp500, ticker: stock}).fillna(0)
+
+        # Calculate cumulative returns
+        full_history["SP500_Cumulative"] = (1 + full_history["SP500"]).cumprod()
+        full_history["Stock_Cumulative"] = (1 + full_history[ticker]).cumprod()
+
+        # Calculate percentage change vs. S&P 500
+        full_history["Pct_Change_VS_SP500"] = (
+            full_history["Stock_Cumulative"] - full_history["SP500_Cumulative"]
+        )
+
+        # Rolling Metrics
+        rolling_window = 30  # 30-day rolling window
+        rolling_sharpe = qs.stats.rolling_sharpe(stock, rolling_window)
+        rolling_sortino = qs.stats.rolling_sortino(stock, rolling_window)
+        rolling_volatility = stock.rolling(rolling_window).std() * np.sqrt(252)  # Annualized
+
+        # Calculate distributions with serialized dates
+        distribution = {
+            "daily": {
+                "dates": [date.strftime('%Y-%m-%d') for date in stock.index],
+                "values": stock.tolist(),
+            },
+            "weekly": {
+                "dates": [date.strftime('%Y-%m-%d') for date in stock.resample("W").mean().index],
+                "values": stock.resample("W").mean().tolist(),
+            },
+            "monthly": {
+                "dates": [date.strftime('%Y-%m-%d') for date in stock.resample("M").mean().index],
+                "values": stock.resample("M").mean().tolist(),
+            },
+            "quarterly": {
+                "dates": [date.strftime('%Y-%m-%d') for date in stock.resample("Q").mean().index],
+                "values": stock.resample("Q").mean().tolist(),
+            },
+            "yearly": {
+                "dates": [date.strftime('%Y-%m-%d') for date in stock.resample("A").mean().index],
+                "values": stock.resample("A").mean().tolist(),
+            },
+        }
+
+        # Prepare initial response with charts
+        results = {
+            "stock_price": make_serializable(full_history["Stock_Cumulative"]),
+            "sp500_cumulative": make_serializable(full_history["SP500_Cumulative"]),
+            "percentage_change_vs_sp500": make_serializable(
+                full_history["Pct_Change_VS_SP500"]
+            ),
+            "implied_volatility": make_serializable(
+                qs.stats.implied_volatility(full_history[ticker])
+            ),
+            "rolling_sharpe": make_serializable(rolling_sharpe),
+            "rolling_sortino": make_serializable(rolling_sortino),
+            "rolling_volatility": make_serializable(rolling_volatility),
+            "distribution": distribution,
+        }
+
+        # Add calculated metrics to the results
         for func_name in functions_list:
             try:
                 func = getattr(qs.stats, func_name)
-                if callable(func):
+
+                # Handle functions requiring additional arguments
+                if func_name in ["information_ratio", "r_squared", 'treynor_ratio']:
+                    result = func(stock, sp500)
+                else:
                     result = func(stock)
-                    results[func_name] = make_serializable(result)
-                    if isinstance(results[func_name], dict):
-                        print(func_name)
+
+                results[func_name] = make_serializable(result)
+
             except Exception as e:
                 results[func_name] = f"Error in {func_name}: {e}"
+
+        # Calculate extended metrics (including omega and additional Greeks)
+        try:
+            extended_metrics = calculate_extended_metrics(stock, sp500)
+            results.update(extended_metrics.to_dict())
+        except Exception as e:
+            results["extended_metrics_error"] = f"Error in calculating extended metrics: {e}"
 
         return jsonify(results), 200
 
@@ -71,6 +184,7 @@ def get_quantstats_metrics():
         error_message = {"error": str(e)}
         print("Error in /api/quantstats:", error_message)
         return jsonify(error_message), 500
+
 
 
 if __name__ == '__main__':
