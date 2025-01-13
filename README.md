@@ -30,6 +30,7 @@ python app.py
 ```
 
 The application will be available at `http://localhost:3000` and Flask will run on `http://localhost:5000`
+Go to `http://localhost:3000/dashboard` to look at the real-time dashboard
 
 ## Project Structure
 
@@ -73,7 +74,7 @@ src/
 
 ## Contributing
 
-1. Create a feature branch
+1. Clone the Master branch
 2. Make your changes
 3. Submit a pull request
 
