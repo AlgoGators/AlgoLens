@@ -74,22 +74,35 @@ export default function DashboardPage() {
     <div className="container mx-auto p-4 flex flex-row space-x-6">
       {/* Charts Section */}
       <div className="w-2/3 space-y-6">
-        <Chart
-          data={parseChartData(metrics.stock_price, "Stock Cumulative Returns", "#FF5733")}
-          title="Stock Cumulative Returns"
-        />
-        <Chart
-          data={parseChartData(metrics.sp500_cumulative, "S&P 500 Cumulative Returns", "#2CA02C")}
-          title="S&P 500 Cumulative Returns"
-        />
-        <Chart
-          data={parseChartData(metrics.percentage_change_vs_sp500, "Percentage Change vs. S&P 500", "#9467BD")}
-          title="Percentage Change vs. S&P 500"
-        />
-        <Chart
-          data={parseChartData(metrics.implied_volatility, "Implied Volatility", "#4C78A8")}
-          title="Implied Volatility"
-        />
+      <Chart
+        data={parseChartData(metrics.stock_price, "Stock Cumulative Returns", "#1f77b4")} // Blue
+        title="Stock Cumulative Returns"
+      />
+      <Chart
+        data={parseChartData(metrics.sp500_cumulative, "S&P 500 Cumulative Returns", "#ff7f0e")} // Orange
+        title="S&P 500 Cumulative Returns"
+      />
+      <Chart
+        data={parseChartData(metrics.percentage_change_vs_sp500, "Percentage Change vs. S&P 500", "#2ca02c")} // Green
+        title="Percentage Change vs. S&P 500"
+      />
+      <Chart
+        data={parseChartData(metrics.implied_volatility, "Implied Volatility", "#d62728")} // Red
+        title="Implied Volatility"
+      />
+      <Chart
+        data={parseChartData(metrics.rolling_volatility, "Rolling Volatility", "#9467bd")} // Purple
+        title="Rolling Volatility"
+      />
+      <Chart
+        data={parseChartData(metrics.rolling_sharpe, "Rolling Sharpe", "#8c564b")} // Brown
+        title="Rolling Sharpe"
+      />
+      <Chart
+        data={parseChartData(metrics.rolling_sortino, "Rolling Sortino", "#e377c2")} // Pink
+        title="Rolling Sortino"
+      />
+
       </div>
 
       {/* Metrics Section */}

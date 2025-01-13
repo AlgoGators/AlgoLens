@@ -28,16 +28,31 @@ export default function Metrics({ metrics }: { metrics: any }) {
     const greeks = {};
     const unclassified = {};
 
+    const redundantMetrics = [
+        "extended_metrics_error", 
+        "outliers", 
+        "rolling_sharpe", 
+        "rolling_sortino", 
+        "rolling_volatility", 
+        "implied_volatility",
+        "sp500_cumulative", 
+        "percentage_change_vs_sp500",
+        "stock_price",
+        "greeks" // for now
+    ]
+
     for (const key in metrics) {
-      if (riskMetrics.includes(key)) {
-        risk[key] = metrics[key];
-      } else if (performanceMetrics.includes(key)) {
-        performance[key] = metrics[key];
-      } else if (greeksMetrics.includes(key)) {
-        greeks[key] = metrics[key];
-      } else {
-        unclassified[key] = metrics[key];
-      }
+        if (riskMetrics.includes(key)) {
+            risk[key] = metrics[key];
+        } else if (performanceMetrics.includes(key)) {
+            performance[key] = metrics[key];
+        } else if (greeksMetrics.includes(key)) {
+            greeks[key] = metrics[key];
+        } else {
+            if (!redundantMetrics.includes(key)) {
+                unclassified[key] = metrics[key];
+            }
+        }
     }
 
     return { risk, performance, greeks, unclassified };

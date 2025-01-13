@@ -5,35 +5,46 @@ import pandas as pd
 import numpy as np
 from quantstats.stats import omega, greeks as qs_greeks
 
+app = Flask(__name__)
+CORS(app)
+
 def calculate_extended_metrics(returns, benchmark, rf=0.0, periods=252):
     """
     Calculates additional metrics including delta, gamma, theta, and omega.
     Uses the existing `greeks` function for alpha and beta.
     """
-    # Use quantstats' greeks function for alpha and beta
-    greeks = qs_greeks(returns, benchmark)
+    try:
+        # Use quantstats' greeks function for alpha and beta
+        greeks = qs_greeks(returns, benchmark)
+        delta = greeks.get("beta", np.nan)
+        alpha = greeks.get("alpha", np.nan)
+    except Exception as e:
+        print("Error in qs_greeks:", e)
+        delta = np.nan
+        alpha = np.nan
 
-    # Delta: Proportional to beta
-    delta = greeks["beta"]
-
-    # Gamma: Sensitivity of delta to changes in benchmark
+    # Gamma
     gamma = (
         np.cov(returns.diff(), benchmark.diff())[0, 1] / np.var(benchmark.diff())
         if len(returns) > 1
         else np.nan
     )
 
-    # Theta: Sensitivity of returns to time decay (approximation)
+    # Theta
     theta = returns.mean() * -1 * periods
 
-    # Omega: Using the provided quantstats function
-    omega_ratio = omega(returns, rf=rf, required_return=0.0, periods=periods)
+    # Omega
+    try:
+        omega_ratio = omega(returns, rf=rf, required_return=0.0, periods=periods)
+    except Exception as e:
+        print("Error in omega:", e)
+        omega_ratio = np.nan
 
     # Combine results
     metrics = pd.Series(
         {
-            "beta": greeks["beta"],
-            "alpha": greeks["alpha"],
+            "beta": delta,
+            "alpha": alpha,
             "delta": delta,
             "gamma": gamma,
             "theta": theta,
@@ -43,20 +54,16 @@ def calculate_extended_metrics(returns, benchmark, rf=0.0, periods=252):
 
     return metrics
 
-app = Flask(__name__)
-CORS(app)
 
 functions_list = [
-        'adjusted_sortino', 'autocorr_penalty', 'avg_loss', 'avg_return', 'avg_win', 'best', 'cagr', 'calmar',
-        'common_sense_ratio', 'comp', 'compsum', 'conditional_value_at_risk', 'consecutive_losses',
-        'consecutive_wins', 'cpc_index', 'cvar', 'distribution', 'drawdown_details', 'expected_return',
+        'adjusted_sortino', 'avg_loss', 'avg_return', 'avg_win', 'best', 'cagr', 'calmar',
+        'common_sense_ratio', 'comp', 'conditional_value_at_risk', 'consecutive_losses',
+        'consecutive_wins', 'cpc_index', 'cvar', 'distribution', 'expected_return',
         'expected_shortfall', 'exposure', 'gain_to_pain_ratio', 'geometric_mean', 'ghpr', 'greeks',
-        'information_ratio', 'kelly_criterion', 'kurtosis', 'max_drawdown', 'monthly_returns',
-        'omega', 'outlier_loss_ratio', 'outlier_win_ratio', 'outliers', 'payoff_ratio', 'pct_rank',
-        'probabilistic_adjusted_sortino_ratio', 'probabilistic_ratio', 'probabilistic_sharpe_ratio',
-        'probabilistic_sortino_ratio', 'profit_factor', 'profit_ratio', 'r_squared', 'rar', 'recovery_factor',
-        'risk_of_ruin', 'risk_return_ratio', 'ror', 'serenity_index', 'sharpe', 'skew', 'smart_sharpe', 'smart_sortino', 'sortino',
-        'tail_ratio', 'treynor_ratio', 'ulcer_index', 'ulcer_performance_index', 'upi',
+        'information_ratio', 'kelly_criterion', 'kurtosis', 'max_drawdown',
+        'omega', 'outlier_loss_ratio', 'outlier_win_ratio', 'outliers', 'payoff_ratio',
+        'probabilistic_adjusted_sortino_ratio', 'probabilistic_ratio', 'probabilistic_sharpe_ratio', 'risk_of_ruin', 'risk_return_ratio', 'ror', 'serenity_index', 'sharpe', 'skew', 'smart_sharpe', 'smart_sortino', 'sortino',
+        'tail_ratio', 'ulcer_index', 'ulcer_performance_index', 'upi',
         'value_at_risk', 'var', 'volatility', 'win_loss_ratio', 'win_rate', 'worst'
     ]
 
@@ -126,19 +133,18 @@ def get_quantstats_metrics():
                 "values": stock.resample("W").mean().tolist(),
             },
             "monthly": {
-                "dates": [date.strftime('%Y-%m-%d') for date in stock.resample("M").mean().index],
-                "values": stock.resample("M").mean().tolist(),
+                "dates": [date.strftime('%Y-%m-%d') for date in stock.resample("ME").mean().index],
+                "values": stock.resample("ME").mean().tolist(),
             },
             "quarterly": {
-                "dates": [date.strftime('%Y-%m-%d') for date in stock.resample("Q").mean().index],
-                "values": stock.resample("Q").mean().tolist(),
+                "dates": [date.strftime('%Y-%m-%d') for date in stock.resample("QE").mean().index],
+                "values": stock.resample("QE").mean().tolist(),
             },
             "yearly": {
-                "dates": [date.strftime('%Y-%m-%d') for date in stock.resample("A").mean().index],
-                "values": stock.resample("A").mean().tolist(),
+                "dates": [date.strftime('%Y-%m-%d') for date in stock.resample("YE").mean().index],
+                "values": stock.resample("YE").mean().tolist(),
             },
         }
-
         # Prepare initial response with charts
         results = {
             "stock_price": make_serializable(full_history["Stock_Cumulative"]),
@@ -161,7 +167,7 @@ def get_quantstats_metrics():
                 func = getattr(qs.stats, func_name)
 
                 # Handle functions requiring additional arguments
-                if func_name in ["information_ratio", "r_squared", 'treynor_ratio']:
+                if func_name in ["information_ratio", "r_squared"]:
                     result = func(stock, sp500)
                 else:
                     result = func(stock)
@@ -170,10 +176,11 @@ def get_quantstats_metrics():
 
             except Exception as e:
                 results[func_name] = f"Error in {func_name}: {e}"
-
+        print(stock.head())
         # Calculate extended metrics (including omega and additional Greeks)
         try:
             extended_metrics = calculate_extended_metrics(stock, sp500)
+            print(extended_metrics)
             results.update(extended_metrics.to_dict())
         except Exception as e:
             results["extended_metrics_error"] = f"Error in calculating extended metrics: {e}"
