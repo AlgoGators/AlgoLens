@@ -1,9 +1,10 @@
 from flask import Flask, jsonify
+from functools import wraps
 from flask_cors import CORS
 import quantstats as qs
 import pandas as pd
 import numpy as np
-from quantstats.stats import omega, greeks as qs_greeks
+from main import algo
 
 app = Flask(__name__)
 CORS(app)
@@ -15,7 +16,7 @@ def calculate_extended_metrics(returns, benchmark, rf=0.0, periods=252):
     """
     try:
         # Use quantstats' greeks function for alpha and beta
-        greeks = qs_greeks(returns, benchmark)
+        greeks = qs.stats.greeks(returns, benchmark)
         delta = greeks.get("beta", np.nan)
         alpha = greeks.get("alpha", np.nan)
     except Exception as e:
@@ -35,7 +36,7 @@ def calculate_extended_metrics(returns, benchmark, rf=0.0, periods=252):
 
     # Omega
     try:
-        omega_ratio = omega(returns, rf=rf, required_return=0.0, periods=periods)
+        omega_ratio = qs.stats.omega(returns, rf=rf, required_return=0.0, periods=periods)
     except Exception as e:
         print("Error in omega:", e)
         omega_ratio = np.nan
@@ -56,16 +57,17 @@ def calculate_extended_metrics(returns, benchmark, rf=0.0, periods=252):
 
 
 functions_list = [
-        'adjusted_sortino', 'avg_loss', 'avg_return', 'avg_win', 'best', 'cagr', 'calmar',
-        'common_sense_ratio', 'comp', 'conditional_value_at_risk', 'consecutive_losses',
-        'consecutive_wins', 'cpc_index', 'cvar', 'distribution', 'expected_return',
-        'expected_shortfall', 'exposure', 'gain_to_pain_ratio', 'geometric_mean', 'ghpr', 'greeks',
-        'information_ratio', 'kelly_criterion', 'kurtosis', 'max_drawdown',
-        'omega', 'outlier_loss_ratio', 'outlier_win_ratio', 'outliers', 'payoff_ratio',
-        'probabilistic_adjusted_sortino_ratio', 'probabilistic_ratio', 'probabilistic_sharpe_ratio', 'risk_of_ruin', 'risk_return_ratio', 'ror', 'serenity_index', 'sharpe', 'skew', 'smart_sharpe', 'smart_sortino', 'sortino',
-        'tail_ratio', 'ulcer_index', 'ulcer_performance_index', 'upi',
-        'value_at_risk', 'var', 'volatility', 'win_loss_ratio', 'win_rate', 'worst'
-    ]
+    "adjusted_sortino", "avg_loss", "avg_return", "avg_win", "best", "cagr", "calmar",
+    "common_sense_ratio", "comp", "conditional_value_at_risk", "consecutive_losses",
+    "consecutive_wins", "cpc_index", "cvar", "distribution", "expected_return",
+    "expected_shortfall", "exposure", "gain_to_pain_ratio", "geometric_mean", "ghpr", "greeks",
+    "information_ratio", "kelly_criterion", "kurtosis", "max_drawdown", "omega",
+    "outlier_loss_ratio", "outlier_win_ratio", "outliers", "payoff_ratio",
+    "probabilistic_adjusted_sortino_ratio", "probabilistic_ratio", "probabilistic_sharpe_ratio",
+    "risk_of_ruin", "risk_return_ratio", "ror", "serenity_index", "sharpe", "skew", "smart_sharpe",
+    "smart_sortino", "sortino", "tail_ratio", "ulcer_index", "ulcer_performance_index", "upi",
+    "value_at_risk", "var", "volatility", "win_loss_ratio", "win_rate", "worst",
+]
 
 # Helper function to convert non-serializable types
 def make_serializable(data):
@@ -94,18 +96,54 @@ def make_serializable(data):
     else:
         return data  # Return data as is if already serializable
 
+def cache_result(func):
+    """
+    Wrapper to cache the result of the given function.
+    """
+    cached_result = None
+
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        nonlocal cached_result
+        if cached_result is None:
+            print("Running the function and caching the result...")
+            cached_result = func(*args, **kwargs)
+        else:
+            print("Returning cached result...")
+        return cached_result
+
+    return wrapper
+
 @app.route('/api/quantstats', methods=['POST'])
-def get_quantstats_metrics():
+def algo_scope():
     try:
-        ticker = "META"
+        ticker = "Strategy"
         sp500_ticker = "SPY"
 
-        # Fetch stock and S&P 500 data
-        stock = qs.utils.download_returns(ticker)
+        # Call the wrapper with the loaded function
+        stock = algo()
+
+        if stock is None:
+            return jsonify({"error": "Failed to fetch stock data"}), 500
+            
+        if isinstance(stock, pd.DataFrame):
+            # Convert the DataFrame to a Series if possible
+            if stock.shape[1] == 1:  # Single-column DataFrame
+                stock = stock.squeeze(axis=1)
+            elif stock.shape[0] == 1:  # Single-row DataFrame
+                stock = stock.squeeze(axis=0)
+            else:
+                print("Stock DataFrame cannot be converted to Series because it has multiple rows and columns.")
+
+        print(stock)
+        print(type(stock))
         sp500 = qs.utils.download_returns(sp500_ticker)
+        print(sp500)
+        print(type(sp500))
 
         # Align the data to include full S&P 500 history
-        full_history = pd.DataFrame({"SP500": sp500, ticker: stock}).fillna(0)
+        full_history = pd.DataFrame({"SP500": sp500, ticker: stock})
+        full_history = full_history.loc[stock.index].dropna()
 
         # Calculate cumulative returns
         full_history["SP500_Cumulative"] = (1 + full_history["SP500"]).cumprod()
@@ -186,13 +224,14 @@ def get_quantstats_metrics():
             results["extended_metrics_error"] = f"Error in calculating extended metrics: {e}"
 
         return jsonify(results), 200
-
+    
+    except ImportError as e:
+        print(f"Error importing user function: {e}")
+        return {"error": "Failed to load user function"}, 500
     except Exception as e:
         error_message = {"error": str(e)}
         print("Error in /api/quantstats:", error_message)
         return jsonify(error_message), 500
-
-
 
 if __name__ == '__main__':
     app.run(port=5000, debug=True)
