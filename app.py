@@ -4,7 +4,7 @@ from flask_cors import CORS
 import quantstats as qs
 import pandas as pd
 import numpy as np
-from main import algo
+from main import algo_lens
 
 app = Flask(__name__)
 CORS(app)
@@ -55,20 +55,6 @@ def calculate_extended_metrics(returns, benchmark, rf=0.0, periods=252):
 
     return metrics
 
-
-functions_list = [
-    "adjusted_sortino", "avg_loss", "avg_return", "avg_win", "best", "cagr", "calmar",
-    "common_sense_ratio", "comp", "conditional_value_at_risk", "consecutive_losses",
-    "consecutive_wins", "cpc_index", "cvar", "distribution", "expected_return",
-    "expected_shortfall", "exposure", "gain_to_pain_ratio", "geometric_mean", "ghpr", "greeks",
-    "information_ratio", "kelly_criterion", "kurtosis", "max_drawdown", "omega",
-    "outlier_loss_ratio", "outlier_win_ratio", "outliers", "payoff_ratio",
-    "probabilistic_adjusted_sortino_ratio", "probabilistic_ratio", "probabilistic_sharpe_ratio",
-    "risk_of_ruin", "risk_return_ratio", "ror", "serenity_index", "sharpe", "skew", "smart_sharpe",
-    "smart_sortino", "sortino", "tail_ratio", "ulcer_index", "ulcer_performance_index", "upi",
-    "value_at_risk", "var", "volatility", "win_loss_ratio", "win_rate", "worst",
-]
-
 # Helper function to convert non-serializable types
 def make_serializable(data):
     if isinstance(data, (np.int64, np.int32)):  # Handle NumPy integers
@@ -96,132 +82,167 @@ def make_serializable(data):
     else:
         return data  # Return data as is if already serializable
 
-def cache_result(func):
-    """
-    Wrapper to cache the result of the given function.
-    """
-    cached_result = None
+def quant_stats(strategy_name : str, strategy : pd.Series, benchmark_name : str, benchmark : pd.Series) -> dict:
+    """Utilizes the quantstats library and other processing to return the results dictionary
 
-    @wraps(func)
-    def wrapper(*args, **kwargs):
-        nonlocal cached_result
-        if cached_result is None:
-            print("Running the function and caching the result...")
-            cached_result = func(*args, **kwargs)
-        else:
-            print("Returning cached result...")
-        return cached_result
+    Parameters
+    ----------
+    strategy_name : str
+        The name of the over-arching strategy behind the positions obtained from the system
+    strategy : pd.Series
+        The positions of the strategy
+    benchmark_name : str
+        The name of the benchmark used to find performance metrics
+    benchmark : pd.Series
+        The positions of the benchmark
+        
 
-    return wrapper
+    Returns
+    -------
+    dict
+        The processed data
+    """
+    # Align the data to include full S&P 500 history
+    full_history = pd.DataFrame({benchmark_name: benchmark, strategy_name: strategy})
+    full_history = full_history.loc[strategy.index].dropna()
+    
+    strategy = full_history[strategy_name]
+    benchmark = full_history[benchmark_name]
+
+    # Calculate cumulative returns
+    full_history[benchmark_name+"_Cumulative"] = (1 + full_history[benchmark_name]).cumprod()
+    full_history["Stock_Cumulative"] = (1 + full_history[strategy_name]).cumprod()
+
+    # Calculate percentage change vs. S&P 500
+    full_history["Pct_Change_VS_"+benchmark_name] = (
+        full_history["Stock_Cumulative"] - full_history[benchmark_name+"_Cumulative"]
+    )
+
+    # Rolling Metrics
+    rolling_window = 30  # 30-day rolling window
+    rolling_sharpe = qs.stats.rolling_sharpe(strategy, rolling_window)
+    rolling_sortino = qs.stats.rolling_sortino(strategy, rolling_window)
+    rolling_volatility = strategy.rolling(rolling_window).std() * np.sqrt(252)  # Annualized
+
+    # Calculate distributions with serialized dates
+    distribution = {
+        "daily": {
+            "dates": [date.strftime('%Y-%m-%d') for date in strategy.index],
+            "values": strategy.tolist(),
+        },
+        "weekly": {
+            "dates": [date.strftime('%Y-%m-%d') for date in strategy.resample("W").mean().index],
+            "values": strategy.resample("W").mean().tolist(),
+        },
+        "monthly": {
+            "dates": [date.strftime('%Y-%m-%d') for date in strategy.resample("ME").mean().index],
+            "values": strategy.resample("ME").mean().tolist(),
+        },
+        "quarterly": {
+            "dates": [date.strftime('%Y-%m-%d') for date in strategy.resample("QE").mean().index],
+            "values": strategy.resample("QE").mean().tolist(),
+        },
+        "yearly": {
+            "dates": [date.strftime('%Y-%m-%d') for date in strategy.resample("YE").mean().index],
+            "values": strategy.resample("YE").mean().tolist(),
+        },
+    }
+    # Prepare initial response with charts
+    results = {
+        "stock_price": make_serializable(full_history["Stock_Cumulative"]),
+        benchmark_name+"_cumulative": make_serializable(full_history[benchmark_name+"_Cumulative"]),
+        "percentage_change_vs_"+benchmark_name: make_serializable(
+            full_history["Pct_Change_VS_"+benchmark_name]
+        ),
+        "implied_volatility": make_serializable(
+            qs.stats.implied_volatility(full_history[strategy_name])
+        ),
+        "rolling_sharpe": make_serializable(rolling_sharpe),
+        "rolling_sortino": make_serializable(rolling_sortino),
+        "rolling_volatility": make_serializable(rolling_volatility),
+        "distribution": distribution,
+    }
+    functions_list = [
+        "adjusted_sortino", "avg_loss", "avg_return", "avg_win", "best", "cagr", "calmar",
+        "common_sense_ratio", "comp", "conditional_value_at_risk", "consecutive_losses",
+        "consecutive_wins", "cpc_index", "cvar", "expected_return",
+        "expected_shortfall", "exposure", "gain_to_pain_ratio", "geometric_mean", "ghpr", "greeks",
+        "information_ratio", "kelly_criterion", "kurtosis", "max_drawdown", "omega",
+        "outlier_loss_ratio", "outlier_win_ratio", "outliers", "payoff_ratio",
+        "probabilistic_adjusted_sortino_ratio", "probabilistic_ratio", "probabilistic_sharpe_ratio",
+        "risk_of_ruin", "risk_return_ratio", "ror", "serenity_index", "sharpe", "skew", "smart_sharpe",
+        "smart_sortino", "sortino", "tail_ratio", "ulcer_index", "ulcer_performance_index", "upi",
+        "value_at_risk", "var", "volatility", "win_loss_ratio", "win_rate", "worst",
+    ]
+    
+    # Add calculated metrics to the results
+    for func_name in functions_list:
+        try:
+            func = getattr(qs.stats, func_name)
+
+            # Handle functions requiring additional arguments
+            if func_name in ["information_ratio", "r_squared"]:
+                result = func(strategy, benchmark)
+            else:
+                result = func(strategy)
+
+            results[func_name] = make_serializable(result)
+
+        except Exception as e:
+            results[func_name] = f"Error in {func_name}: {e}"
+
+    # Calculate extended metrics (including omega and additional Greeks)
+    extended_metrics = calculate_extended_metrics(strategy, benchmark)
+
+    results.update(extended_metrics.to_dict())
+
+    return results
 
 @app.route('/api/quantstats', methods=['POST'])
 def algo_scope():
+    """Calls algo() function from the system to obtain portfolio-level positions
+    and provide processed data to front-end
+
+    Returns
+    -------
+    results : dict
+        Jsonified dictionary of processed data
+    """
     try:
-        ticker = "Strategy"
-        sp500_ticker = "SPY"
+        strategy_name = "Mean Reversion"
+        benchmark_name = "SPY"
 
         # Call the wrapper with the loaded function
-        stock = algo()
+        strategy = algo_lens()
 
-        if stock is None:
-            return jsonify({"error": "Failed to fetch stock data"}), 500
-            
-        if isinstance(stock, pd.DataFrame):
+        # Validate that the strategy data is not None
+        if strategy is None:
+            return jsonify({"error": "Failed to fetch strategy data. No data returned from 'algo()'."}), 500
+
+        # Validate that the strategy data is a DataFrame or Series
+        if not isinstance(strategy, (pd.DataFrame, pd.Series)):
+            return jsonify({"error": f"Unexpected data type for strategy: {type(strategy)}. Expected DataFrame or Series."}), 500
+
+        # Handle DataFrame with specific conditions
+        if isinstance(strategy, pd.DataFrame):
+            if strategy.empty:
+                return jsonify({"error": "Strategy data is empty."}), 500
+
             # Convert the DataFrame to a Series if possible
-            if stock.shape[1] == 1:  # Single-column DataFrame
-                stock = stock.squeeze(axis=1)
-            elif stock.shape[0] == 1:  # Single-row DataFrame
-                stock = stock.squeeze(axis=0)
+            if strategy.shape[1] == 1:  # Single-column DataFrame
+                strategy = strategy.squeeze(axis=1)
+            elif strategy.shape[0] == 1:  # Single-row DataFrame
+                strategy = strategy.squeeze(axis=0)
             else:
-                print("Stock DataFrame cannot be converted to Series because it has multiple rows and columns.")
+                return jsonify({
+                    "error": (
+                        "Strategy DataFrame cannot be converted to Series. "
+                        f"DataFrame shape: {strategy.shape}. Ensure the data is one-dimensional."
+                    )
+                }), 500
 
-        print(stock)
-        print(type(stock))
-        sp500 = qs.utils.download_returns(sp500_ticker)
-        print(sp500)
-        print(type(sp500))
-
-        # Align the data to include full S&P 500 history
-        full_history = pd.DataFrame({"SP500": sp500, ticker: stock})
-        full_history = full_history.loc[stock.index].dropna()
-
-        # Calculate cumulative returns
-        full_history["SP500_Cumulative"] = (1 + full_history["SP500"]).cumprod()
-        full_history["Stock_Cumulative"] = (1 + full_history[ticker]).cumprod()
-
-        # Calculate percentage change vs. S&P 500
-        full_history["Pct_Change_VS_SP500"] = (
-            full_history["Stock_Cumulative"] - full_history["SP500_Cumulative"]
-        )
-
-        # Rolling Metrics
-        rolling_window = 30  # 30-day rolling window
-        rolling_sharpe = qs.stats.rolling_sharpe(stock, rolling_window)
-        rolling_sortino = qs.stats.rolling_sortino(stock, rolling_window)
-        rolling_volatility = stock.rolling(rolling_window).std() * np.sqrt(252)  # Annualized
-
-        # Calculate distributions with serialized dates
-        distribution = {
-            "daily": {
-                "dates": [date.strftime('%Y-%m-%d') for date in stock.index],
-                "values": stock.tolist(),
-            },
-            "weekly": {
-                "dates": [date.strftime('%Y-%m-%d') for date in stock.resample("W").mean().index],
-                "values": stock.resample("W").mean().tolist(),
-            },
-            "monthly": {
-                "dates": [date.strftime('%Y-%m-%d') for date in stock.resample("ME").mean().index],
-                "values": stock.resample("ME").mean().tolist(),
-            },
-            "quarterly": {
-                "dates": [date.strftime('%Y-%m-%d') for date in stock.resample("QE").mean().index],
-                "values": stock.resample("QE").mean().tolist(),
-            },
-            "yearly": {
-                "dates": [date.strftime('%Y-%m-%d') for date in stock.resample("YE").mean().index],
-                "values": stock.resample("YE").mean().tolist(),
-            },
-        }
-        # Prepare initial response with charts
-        results = {
-            "stock_price": make_serializable(full_history["Stock_Cumulative"]),
-            "sp500_cumulative": make_serializable(full_history["SP500_Cumulative"]),
-            "percentage_change_vs_sp500": make_serializable(
-                full_history["Pct_Change_VS_SP500"]
-            ),
-            "implied_volatility": make_serializable(
-                qs.stats.implied_volatility(full_history[ticker])
-            ),
-            "rolling_sharpe": make_serializable(rolling_sharpe),
-            "rolling_sortino": make_serializable(rolling_sortino),
-            "rolling_volatility": make_serializable(rolling_volatility),
-            "distribution": distribution,
-        }
-
-        # Add calculated metrics to the results
-        for func_name in functions_list:
-            try:
-                func = getattr(qs.stats, func_name)
-
-                # Handle functions requiring additional arguments
-                if func_name in ["information_ratio", "r_squared"]:
-                    result = func(stock, sp500)
-                else:
-                    result = func(stock)
-
-                results[func_name] = make_serializable(result)
-
-            except Exception as e:
-                results[func_name] = f"Error in {func_name}: {e}"
-        print(stock.head())
-        # Calculate extended metrics (including omega and additional Greeks)
-        try:
-            extended_metrics = calculate_extended_metrics(stock, sp500)
-            print(extended_metrics)
-            results.update(extended_metrics.to_dict())
-        except Exception as e:
-            results["extended_metrics_error"] = f"Error in calculating extended metrics: {e}"
+        benchmark = qs.utils.download_returns(benchmark_name)
+        results = quant_stats(strategy_name, strategy, benchmark_name, benchmark)
 
         return jsonify(results), 200
     
@@ -233,5 +254,39 @@ def algo_scope():
         print("Error in /api/quantstats:", error_message)
         return jsonify(error_message), 500
 
-if __name__ == '__main__':
-    app.run(port=5000, debug=True)
+import subprocess
+import os
+
+def start_flask_server():
+    app.run(host="127.0.0.1", port=5000, debug=True)
+
+def start_npm_server():
+    # Navigate to the directory where npm should run
+    npm_directory = r"C:\Users\domdd\Documents\GitHub\MyTrades\AlgoLens"
+    os.chdir(npm_directory)
+
+    # Start the npm server using npm.cmd for Windows
+    process = subprocess.Popen(
+        ["npm.cmd", "run", "dev"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True  # Ensures text output for logs
+    )
+
+    # Continuously read output to avoid blocking
+    for line in process.stdout:
+        print(f"NPM: {line.strip()}")  # Log npm output
+    for error in process.stderr:
+        print(f"NPM Error: {error.strip()}")
+
+if __name__ == "__main__":
+    try:
+        # Start NPM server in a subprocess
+        print("Starting NPM server...")
+        #start_npm_server()
+        
+        # Start Flask server
+        print("Starting Flask server...")
+        start_flask_server()
+    except KeyboardInterrupt:
+        print("\nShutting down both servers.")

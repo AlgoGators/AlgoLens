@@ -35,10 +35,11 @@ export default function Metrics({ metrics }: { metrics: any }) {
         "rolling_sortino", 
         "rolling_volatility", 
         "implied_volatility",
-        "sp500_cumulative", 
-        "percentage_change_vs_sp500",
+        "SPY_cumulative", 
+        "distribution",
+        "percentage_change_vs_SPY",
         "stock_price",
-        "greeks" // for now
+        "greeks", // for now
     ]
 
     for (const key in metrics) {
@@ -51,6 +52,7 @@ export default function Metrics({ metrics }: { metrics: any }) {
         } else {
             if (!redundantMetrics.includes(key)) {
                 unclassified[key] = metrics[key];
+                console.log(key);
             }
         }
     }

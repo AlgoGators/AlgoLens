@@ -79,11 +79,11 @@ export default function DashboardPage() {
           title="Stock Cumulative Returns"
         />
         <Chart
-          data={parseChartData(metrics.sp500_cumulative, "S&P 500 Cumulative Returns", "#ff7f0e")}
+          data={parseChartData(metrics.SPY_cumulative, "S&P 500 Cumulative Returns", "#ff7f0e")}
           title="S&P 500 Cumulative Returns"
         />
         <Chart
-          data={parseChartData(metrics.percentage_change_vs_sp500, "Percentage Change vs. S&P 500", "#2ca02c")}
+          data={parseChartData(metrics.percentage_change_vs_SPY, "Percentage Change vs. S&P 500", "#2ca02c")}
           title="Percentage Change vs. S&P 500"
         />
         <Chart
