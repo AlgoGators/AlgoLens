@@ -43,6 +43,7 @@ AlgoLens accesses the return value of a function and passes it to app.py for pro
 In order to integrate AlgoLens to your backtesting module, clone this repository and import the AlgoLens decorator (e.g from AlgoLens.app import Algolens -- may change depending on your file structure). 
 
 For example:
+```bash
 from AlgoLens.app import AlgoLens
 
 @AlgoLens
@@ -53,7 +54,7 @@ def backtest_function():
     ...
     ...
     ...
-
+```
 Upon refreshing the application, AlgoLens will parse your files for functions decorated with @AlgoLens fetch the respective function.
 
 ## Project Structure
