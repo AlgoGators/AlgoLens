@@ -22,15 +22,39 @@ cd algo-lens
 npm install
 ```
 
-3. Start the development server:
+3. Start the npm server:
 
 ```bash
+cd AlgoLens
 npm run dev
-python app.py
+```
+
+4. Start the flask server as a module:
+
+```bash
+python -m AlgoLens.app
 ```
 
 The application will be available at `http://localhost:3000` and Flask will run on `http://localhost:5000`
-Go to `http://localhost:3000/dashboard` to look at the real-time dashboard
+
+## How to use
+AlgoLens accesses the return value of a function and passes it to app.py for processing and then to DashboardContent.tsx for presentation.
+
+In order to integrate AlgoLens to your backtesting module, clone this repository and import the AlgoLens decorator (e.g from AlgoLens.app import Algolens -- may change depending on your file structure). 
+
+For example:
+from AlgoLens.app import AlgoLens
+
+@AlgoLens
+def backtest_function():
+    '''
+    This function must return a pd.Series with 1 column named 'Date' and another column named 'Value' with the percentage returns of the strategy.
+    '''
+    ...
+    ...
+    ...
+
+Upon refreshing the application, AlgoLens will parse your files for functions decorated with @AlgoLens fetch the respective function.
 
 ## Project Structure
 

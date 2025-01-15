@@ -1,10 +1,10 @@
 from flask import Flask, jsonify
-from functools import wraps
 from flask_cors import CORS
 import quantstats as qs
 import pandas as pd
 import numpy as np
-from main import algo_lens
+import os
+from .decorator_registry import AlgoLens, decorated_functions, discover_decorated_functions
 
 app = Flask(__name__)
 CORS(app)
@@ -209,11 +209,20 @@ def algo_scope():
         Jsonified dictionary of processed data
     """
     try:
+        
         strategy_name = "Mean Reversion"
         benchmark_name = "SPY"
 
+        # Discover decorated functions from the directory above
+        base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+        discover_decorated_functions(base_dir)
+
+        functions = []
+        for key, value in decorated_functions.items():
+            functions.append(key)
+
         # Call the wrapper with the loaded function
-        strategy = algo_lens()
+        strategy = decorated_functions[functions[0]]() 
 
         # Validate that the strategy data is not None
         if strategy is None:
@@ -254,39 +263,9 @@ def algo_scope():
         print("Error in /api/quantstats:", error_message)
         return jsonify(error_message), 500
 
-import subprocess
-import os
-
-def start_flask_server():
-    app.run(host="127.0.0.1", port=5000, debug=True)
-
-def start_npm_server():
-    # Navigate to the directory where npm should run
-    npm_directory = r"C:\Users\domdd\Documents\GitHub\MyTrades\AlgoLens"
-    os.chdir(npm_directory)
-
-    # Start the npm server using npm.cmd for Windows
-    process = subprocess.Popen(
-        ["npm.cmd", "run", "dev"],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True  # Ensures text output for logs
-    )
-
-    # Continuously read output to avoid blocking
-    for line in process.stdout:
-        print(f"NPM: {line.strip()}")  # Log npm output
-    for error in process.stderr:
-        print(f"NPM Error: {error.strip()}")
-
 if __name__ == "__main__":
     try:
-        # Start NPM server in a subprocess
-        print("Starting NPM server...")
-        #start_npm_server()
-        
-        # Start Flask server
-        print("Starting Flask server...")
-        start_flask_server()
+        app.run(host="127.0.0.1", port=5000, debug=True)
+
     except KeyboardInterrupt:
-        print("\nShutting down both servers.")
+        print("\nShutting down server.")
