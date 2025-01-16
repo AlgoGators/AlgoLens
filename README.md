@@ -22,17 +22,17 @@ cd algo-lens
 npm install
 ```
 
-3. Start the npm server:
+3. Start the flask server as a module (from the directory just above AlgoLens):
+
+```bash
+python -m AlgoLens.app
+```
+
+4. Start the npm server (from inside the AlgoLens directory):
 
 ```bash
 cd AlgoLens
 npm run dev
-```
-
-4. Start the flask server as a module:
-
-```bash
-python -m AlgoLens.app
 ```
 
 The application will be available at `http://localhost:3000` and Flask will run on `http://localhost:5000`
