@@ -12,23 +12,41 @@ A web application for displaying algorithmic trading portfolio information and m
 1. Clone the repository:
 
 ```bash
-git clone https://github.com/AlgoGators/AlgoLens.git algo-lens
-cd algo-lens
+git clone https://github.com/AlgoGators/AlgoLens.git
+cd AlgoLens
 ```
 
-2. Install dependencies:
+2. Install npm dependencies:
 
 ```bash
 npm install
 ```
 
-3. Start the flask server as a module (from the directory just above AlgoLens):
+3. Install python dependencies (create a virtual environment):
+
+Mac
+```bash
+python3 -m venv venv
+source venv/bin/activate
+```
+
+Windows
+```bash
+python -m venv venv
+venv\Scripts\activate
+```
+
+```bash
+pip install -r requirements.txt
+```
+
+4. Start the flask server as a module (from the directory just above AlgoLens):
 
 ```bash
 python -m AlgoLens.app
 ```
 
-4. Start the npm server (from inside the AlgoLens directory):
+5. Start the npm server (from inside the AlgoLens directory):
 
 ```bash
 cd AlgoLens
