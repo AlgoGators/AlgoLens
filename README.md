@@ -17,7 +17,7 @@ git clone https://github.com/AlgoGators/AlgoLens.git
 
 2. Install python dependencies:
 
-Create a virtual environment if one has not already been created/
+Create a virtual environment if one has not already been created  
 Mac
 ```bash
 python3 -m venv venv
