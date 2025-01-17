@@ -13,17 +13,11 @@ A web application for displaying algorithmic trading portfolio information and m
 
 ```bash
 git clone https://github.com/AlgoGators/AlgoLens.git
-cd AlgoLens
 ```
 
-2. Install npm dependencies:
+2. Install python dependencies:
 
-```bash
-npm install
-```
-
-3. Install python dependencies (create a virtual environment):
-
+Create a virtual environment if one has not already been created
 Mac
 ```bash
 python3 -m venv venv
@@ -36,8 +30,11 @@ python -m venv venv
 venv\Scripts\activate
 ```
 
+Please note: 
+You are pulling the req.txt file from AlgoLens in order to download
+it to your main directory -- hence the '.\AlgoLens\' which is not typical.
 ```bash
-pip install -r requirements.txt
+pip install -r .\AlgoLens\requirements.txt
 ```
 
 4. Start the flask server as a module (from the directory just above AlgoLens):
@@ -46,10 +43,18 @@ pip install -r requirements.txt
 python -m AlgoLens.app
 ```
 
-5. Start the npm server (from inside the AlgoLens directory):
+3. Install npm dependencies:
 
 ```bash
 cd AlgoLens
+npm install
+```
+
+
+5. Start the npm server (from inside the AlgoLens directory):
+
+In another terminal:
+```bash
 npm run dev
 ```
 
@@ -61,7 +66,7 @@ AlgoLens accesses the return value of a function and passes it to app.py for pro
 In order to integrate AlgoLens to your backtesting module, clone this repository and import the AlgoLens decorator (e.g from AlgoLens.app import Algolens -- may change depending on your file structure). 
 
 For example:
-```bash
+```python
 from AlgoLens.app import AlgoLens
 
 @AlgoLens
