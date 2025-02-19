@@ -221,11 +221,8 @@ def algo_scope():
         for key, value in decorated_functions.items():
             functions.append(key)
 
-        print(functions)
         # Call the wrapper with the loaded function
         strategy = decorated_functions[functions[0]]() 
-
-        #strategy = qs.utils.download_returns("NVDA")
 
         # Validate that the strategy data is not None
         if strategy is None:
@@ -253,15 +250,7 @@ def algo_scope():
                     )
                 }), 500
 
-        # Create synthetic daily returns (for example, normally distributed around 0.1% daily return)
-        returns = np.random.normal(loc=0.001, scale=0.02, size=50)
-        dates = pd.date_range(end=pd.Timestamp.today(), periods=50, freq='B')
-        # Build the DataFrame
-        benchmark = pd.DataFrame(data={'Benchmark_Return': returns}, index=dates)
-        benchmark.index.name = 'Date'
-        benchmark = benchmark['Benchmark_Return']
-
-        #benchmark = qs.utils.download_returns(benchmark_name)
+        benchmark = qs.utils.download_returns(benchmark_name)
         results = quant_stats(strategy_name, strategy, benchmark_name, benchmark)
 
         return jsonify(results), 200
