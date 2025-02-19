@@ -46,12 +46,11 @@ python -m AlgoLens.app
 3. Install npm dependencies:
 
 ```bash
-cd AlgoLens
+cd AlgoLens/frontend
 npm install
 ```
 
-
-5. Start the npm server (from inside the AlgoLens directory):
+5. Start the npm server (from inside the AlgoLens/frontend/ directory):
 
 In another terminal:
 ```bash
