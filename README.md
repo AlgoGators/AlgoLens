@@ -13,6 +13,7 @@ A web application for displaying algorithmic trading portfolio information and m
 
 E.g
 
+```
 Your_Project/
 ├── AlgoLens/
 │   ├── backend/
@@ -20,7 +21,7 @@ Your_Project/
 │   ├── ... 
 │   └── app.py
 └── Your_system.py  # Contains the function decorated with @AlgoLens
-
+```
 
 ## Getting Started
 
