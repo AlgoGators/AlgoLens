@@ -55,7 +55,7 @@ pip install -r .\AlgoLens\requirements.txt
 4. Start the flask server as a module (from the directory just above AlgoLens):
 
 ```bash
-python -m AlgoLens.app
+python AlgoLens/app.py
 ```
 
 3. Install npm dependencies:
