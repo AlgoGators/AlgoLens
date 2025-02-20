@@ -13,13 +13,13 @@ A web application for displaying algorithmic trading portfolio information and m
 
 E.g
 
-Your_Project
-|_ AlgoLens
-    |_ backend
-    |_ frontend
-    |...
-    |_ app.py
-|_ Your_system.py  <-- Includes a function decorated with @AlgoLens
+Your_Project/
+├── AlgoLens/
+│   ├── backend/
+│   ├── frontend/
+│   ├── ... 
+│   └── app.py
+└── Your_system.py  # Contains the function decorated with @AlgoLens
 
 
 ## Getting Started
