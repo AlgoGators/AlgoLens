@@ -13,7 +13,7 @@ interface PortfolioValuationProps {
   totalReturn: number;
 }
 
-const DECIMAL_PLACES = 2;
+const DECIMAL_PLACES = 3;
 const CURRENCY = "USD";
 
 const formatCurrency = (value: number) =>

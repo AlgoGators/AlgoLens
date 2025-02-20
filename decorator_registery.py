@@ -46,4 +46,3 @@ def AlgoLens(func):
         print(f"Executing {func.__name__}...")
         return func(*args, **kwargs)
     return wrapper
-
