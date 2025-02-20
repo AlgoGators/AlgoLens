@@ -2,3 +2,8 @@ flask
 flask-cors
 IPython
 quantstats
+
+sqlalchemy
+dotenv
+psycopg2-binary
+openpyxl

@@ -7,6 +7,21 @@ A web application for displaying algorithmic trading portfolio information and m
 - Node.js (LTS version recommended, v20.10.0)
 - npm (comes with Node.js)
 
+## Note
+
+- AlgoLens expects you to decorate a function with @AlgoLens in the same directory as the AlgoLens module
+
+E.g
+
+Your_Project
+|_ AlgoLens
+    |_ backend
+    |_ frontend
+    |...
+    |_ app.py
+|_ Your_system.py  <-- Includes a function decorated with @AlgoLens
+
+
 ## Getting Started
 
 1. Clone the repository:
@@ -32,7 +47,7 @@ venv\Scripts\activate
 
 Please note: 
 You are pulling the req.txt file from AlgoLens in order to download
-it to your main directory -- hence the '.\AlgoLens\' which is not typical.
+it to your main directory.
 ```bash
 pip install -r .\AlgoLens\requirements.txt
 ```
@@ -72,7 +87,7 @@ from AlgoLens.app import AlgoLens
 def backtest_function():
     '''
     This function must return a pd.Series with 1 column named 'Date' and
-    another column named 'Value' with the percentage returns of the strategy.
+    another column named 'Value' with the PRICE values of the strategy.
     '''
     ...
     ...

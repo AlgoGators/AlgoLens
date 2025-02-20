@@ -4,7 +4,13 @@ import quantstats as qs
 import pandas as pd
 import numpy as np
 import os
-from .decorator_registry import AlgoLens, decorated_functions, discover_decorated_functions
+import math
+import importlib
+import inspect
+
+from decorator_registery import discover_decorated_functions, decorated_functions
+
+from backend.data_access import DataAccess
 
 app = Flask(__name__)
 CORS(app)
@@ -102,7 +108,10 @@ def quant_stats(strategy_name : str, strategy : pd.Series, benchmark_name : str,
     dict
         The processed data
     """
-    # Align the data to include full S&P 500 history
+    strategy = strategy.pct_change().dropna()
+    benchmark = benchmark.pct_change().dropna()
+    
+    # Align the data to include full benchmark history
     full_history = pd.DataFrame({benchmark_name: benchmark, strategy_name: strategy})
     full_history = full_history.loc[strategy.index].dropna()
     
@@ -213,8 +222,11 @@ def algo_scope():
         strategy_name = "Mean Reversion"
         benchmark_name = "SPY"
 
-        # Discover decorated functions from the directory above
+        # Determine the base directory (this assumes your script is one level down from the project root)
         base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+        print("Base directory:", base_dir)
+
+        # Discover decorated functions from the project
         discover_decorated_functions(base_dir)
 
         functions = []
@@ -224,34 +236,59 @@ def algo_scope():
         # Call the wrapper with the loaded function
         strategy = decorated_functions[functions[0]]() 
 
-        # Validate that the strategy data is not None
-        if strategy is None:
-            return jsonify({"error": "Failed to fetch strategy data. No data returned from 'algo()'."}), 500
+        data = DataAccess()
 
-        # Validate that the strategy data is a DataFrame or Series
-        if not isinstance(strategy, (pd.DataFrame, pd.Series)):
-            return jsonify({"error": f"Unexpected data type for strategy: {type(strategy)}. Expected DataFrame or Series."}), 500
+        # Load and inspect the benchmark data
+        benchmark = pd.read_excel('backend/SG Trend Index.xlsx', skiprows=6)
 
-        # Handle DataFrame with specific conditions
-        if isinstance(strategy, pd.DataFrame):
-            if strategy.empty:
-                return jsonify({"error": "Strategy data is empty."}), 500
+        # Clean up column names
+        benchmark.columns = [col.strip() for col in benchmark.columns]
+        
+        # Rename
+        benchmark.rename(columns={'PX_LAST': 'close'}, inplace=True)
+        benchmark.rename(columns={'date': 'Date'}, inplace=True)
+        #print("Benchmark columns:", benchmark.columns)
 
-            # Convert the DataFrame to a Series if possible
-            if strategy.shape[1] == 1:  # Single-column DataFrame
-                strategy = strategy.squeeze(axis=1)
-            elif strategy.shape[0] == 1:  # Single-row DataFrame
-                strategy = strategy.squeeze(axis=0)
-            else:
-                return jsonify({
-                    "error": (
-                        "Strategy DataFrame cannot be converted to Series. "
-                        f"DataFrame shape: {strategy.shape}. Ensure the data is one-dimensional."
-                    )
-                }), 500
+        # Now set 'Date' as the index
+        benchmark['Date'] = pd.to_datetime(benchmark['Date'])
+        benchmark.set_index('Date', inplace=True)
+        benchmark = benchmark.squeeze()  # Convert to Series if possible
 
-        benchmark = qs.utils.download_returns(benchmark_name)
+        # Load strategy data and set the index to 'time'
+        strategy_df = pd.DataFrame(
+            data.get_ohlcv_data('2017-06-07', '2024-12-19', ['UB.c.0']),
+            columns=['time', 'open', 'high', 'low', 'close', 'volume', 'symbol']
+        )
+        
+        strategy_df['time'] = pd.to_datetime(strategy_df['time'])
+        strategy_df.rename(columns={'time': 'Date'}, inplace=True)
+        strategy_df.set_index('Date', inplace=True)
+
+        # Remove any timezone information from the index
+        strategy_df.index = strategy_df.index.tz_localize(None)
+
+        # Select the 'close' column as the strategy series
+        strategy = strategy_df['close']
+
+
+        strategy = strategy.sort_index(ascending=True)
+        benchmark = benchmark.sort_index(ascending=True)
+
+        print(strategy.isna().sum().sum())
+        print(benchmark.isna().sum().sum())
+
+        # Align both series on their common dates
+        common_dates = strategy.index.intersection(benchmark.index)
+        strategy = strategy.loc[common_dates]
+        benchmark = benchmark.loc[common_dates]
+
+        # Now call quant_stats with the aligned close data
         results = quant_stats(strategy_name, strategy, benchmark_name, benchmark)
+
+        results = replace_infinity_with_neg_one(results)
+        results = replace_nan_and_inf(results)
+
+        #print(results)
 
         return jsonify(results), 200
     
@@ -262,6 +299,52 @@ def algo_scope():
         error_message = {"error": str(e)}
         print("Error in /api/quantstats:", error_message)
         return jsonify(error_message), 500
+
+def replace_infinity_with_neg_one(obj):
+    """
+    Recursively walks through a data structure (dict, list, float, etc.)
+    and replaces any infinite value with -1.
+    """
+    if isinstance(obj, dict):
+        # Recurse for each key-value pair in a dictionary
+        return {
+            key: replace_infinity_with_neg_one(value) 
+            for key, value in obj.items()
+        }
+
+    elif isinstance(obj, list):
+        # Recurse for each element in a list
+        return [
+            replace_infinity_with_neg_one(item) 
+            for item in obj
+        ]
+
+    elif isinstance(obj, (float, np.float64)):
+        # Check if the float is infinite
+        if math.isinf(obj):
+            return -1
+        return obj
+
+    # For anything else (int, string, etc.), just return as is
+    return obj
+
+def replace_nan_and_inf(obj):
+    """
+    Recursively replace NaN and Inf values in a nested structure
+    (dict, list, float, etc.) with None.
+    """
+    if isinstance(obj, dict):
+        return {k: replace_nan_and_inf(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [replace_nan_and_inf(item) for item in obj]
+    elif isinstance(obj, float) or isinstance(obj, np.floating):
+        # Check for NaN or Inf
+        if math.isnan(obj) or math.isinf(obj):
+            return None  # or any other placeholder like -1
+        return float(obj)
+    else:
+        # Return the object if it’s not a dict, list, or float
+        return obj
 
 if __name__ == "__main__":
     try:
