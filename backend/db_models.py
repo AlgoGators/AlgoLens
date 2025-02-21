@@ -3,7 +3,7 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.engine.base import Engine
 from sqlalchemy.orm.session import Session
-from typing import Dict, Any, Optional
+from typing import Optional
 from dotenv import load_dotenv
 import os
 

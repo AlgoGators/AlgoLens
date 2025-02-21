@@ -98,15 +98,15 @@ def discover_decorated_functions(base_dir):
         
         for file in files:
             if file.endswith(".py") and not file.startswith("__"):
-                print(f"Processing file: {file}")
+                #print(f"Processing file: {file}")
                 # Build module path relative to base_dir.
                 module_path = os.path.relpath(os.path.join(root, file), start=base_dir)
                 module_name, _ = os.path.splitext(module_path.replace(os.sep, "."))
-                print(f"Attempting to import module: {module_name}")
+                #print(f"Attempting to import module: {module_name}")
                 
                 try:
                     module = importlib.import_module(module_name)
-                    print(f"Module '{module_name}' imported successfully.")
+                    #print(f"Module '{module_name}' imported successfully.")
                     
                     # Look for decorated functions in the module.
                     for attr_name in dir(module):
@@ -117,7 +117,8 @@ def discover_decorated_functions(base_dir):
                             discovered_functions[attr_name] = attr
                             
                 except Exception as e:
-                    print(f"Error importing {module_name}: {e}")
+                    pass
+                    #print(f"Error importing {module_name}: {e}")
                     
     return discovered_functions
 
