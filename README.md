@@ -9,7 +9,7 @@ A web application for displaying algorithmic trading portfolio information and m
 
 ## Note
 
-- AlgoLens expects you to decorate a function with @AlgoLens in the same directory as the AlgoLens module.
+- AlgoLens expects you to decorate a function with @AlgoLens in the same directory as the AlgoLens module or deeper. Decorated functions that are in a higher directory will not be identified!
 
 E.g
 
@@ -20,7 +20,9 @@ Your_Project/
 │   ├── frontend/
 │   ├── ... 
 │   └── app.py
-└── Your_system.py  # Contains the function decorated with @AlgoLens
+├── example_system.py          # This works because it's in the same directory as AlgoLens
+└── your_system_folder/
+    └── another_example.py     # This also works because it exists in a deeper directory
 ```
 
 ## Getting Started
@@ -46,19 +48,19 @@ python -m venv venv
 venv\Scripts\activate
 ```
 
-This installs the requirements.txt and makes "algolens start" and alias for "python ./AlgoLens/backend/app.py"
+This installs the requirements.txt and makes "algolens start" an alias for "python ./AlgoLens/backend/app.py"
 ```bash
 cd AlgoLens
 pip install -e .
 ```
 
-4. Start the flask server from inside the AlgoLens/ file:
+3. Start the flask server from inside the AlgoLens/ file:
 
 ```bash
 algolens start
 ```
 
-3. Install npm dependencies:
+4. Install npm dependencies:
 
 ```bash
 cd AlgoLens/frontend
@@ -100,14 +102,32 @@ Please contact the contributors of this repository for more assistance.
 ## Project Structure
 
 ```
-src/
-├── app/                    # Next.js app directory
-│   ├── dashboard/         # Dashboard page
-│   └── login/            # Login page
-├── components/           # React components
-│   ├── auth/            # Authentication components
-│   └── ui/              # UI components (shadcn/ui)
-└── lib/                 # Utility functions
+AlgoLens
+├── backend/
+│   ├── __init__.py
+│   ├── app.py                # Flask app (backend connection to next.js)
+│   ├── data_access.py        # Database API
+|   └── ...                   # Function decorator  
+├── frontend/
+│   ├── public/
+│   ├── src/
+│   │   ├── app/
+│   │   │   ├── dashboard/    # Dashboard page
+│   │   │   └── login/        # Login page
+│   │   ├── components/
+│   │   │   ├── auth/         # Authentication components
+│   │   │   └── ui/           # UI components (shadcn/ui)
+│   │   └── lib/              # Utility functions
+│   ├── package.json          # Typescript and json config files
+│   └── ...
+├── .gitignore
+├── LICENSE
+├── README.md
+├── cli.py                    # Creates command alias for algolens
+├── setup.py                  # Handles pip install and sets up cli.py
+├── requirements.txt
+└── ...
+
 ```
 
 ## Available Scripts
