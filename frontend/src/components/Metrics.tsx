@@ -70,7 +70,7 @@ export default function Metrics({ metrics }: { metrics: any }) {
       .replace(/^([a-z])/i, (char) => char.toUpperCase()); // Ensure the first letter is always capitalized.
 
     if (typeof value === "number") {
-      return `${formattedKey}: ${value.toFixed(2)}`;
+      return `${formattedKey}: ${value.toFixed(3)}`;
     }
 
     return `${formattedKey}: ${value ?? "N/A"}`; // Fallback to "N/A" if value is null or undefined

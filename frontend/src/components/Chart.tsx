@@ -23,11 +23,11 @@ const Chart: React.FC<ChartProps> = ({ data, options, title }) => {
           responsive: true,
           plugins: {
             legend: {
-              display: true,
+              display: false,
               position: "top",
             },
             title: {
-              display: true,
+              display: false,
               text: title,
               color: "#333333",
               font: {
