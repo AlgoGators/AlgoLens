@@ -88,8 +88,8 @@ from AlgoLens import AlgoLens
 @AlgoLens
 def backtest_function():
     '''
-    This function must return a pd.Series with 1 column named 'Date' and
-    another column named 'Value' with the PRICE values of the strategy.
+    This function must return a pd.Series with 1 column named 'time' and
+    another column named 'close' with the PRICE values of the strategy.
     '''
     ...
     ...
