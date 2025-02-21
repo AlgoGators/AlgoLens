@@ -46,3 +46,4 @@ sp500_stock_data.db
 # Caching
 __pycache__/
 __pycache__
+cached_functions.json

@@ -3,10 +3,9 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.engine import Engine
 from sqlalchemy import create_engine
 from sqlalchemy.exc import SQLAlchemyError
-from .db_models import get_engine, OHLCV
+from db_models import get_engine, OHLCV
 import pandas as pd
 import logging
-
 
 class DataAccess:
     """

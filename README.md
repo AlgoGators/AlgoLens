@@ -9,7 +9,7 @@ A web application for displaying algorithmic trading portfolio information and m
 
 ## Note
 
-- AlgoLens expects you to decorate a function with @AlgoLens in the same directory as the AlgoLens module
+- AlgoLens expects you to decorate a function with @AlgoLens in the same directory as the AlgoLens module.
 
 E.g
 
@@ -82,7 +82,7 @@ In order to integrate AlgoLens to your backtesting module, clone this repository
 
 For example:
 ```python
-from AlgoLens.app import AlgoLens
+from AlgoLens import AlgoLens
 
 @AlgoLens
 def backtest_function():
@@ -95,6 +95,8 @@ def backtest_function():
     ...
 ```
 Upon refreshing the application, AlgoLens will parse your files for functions decorated with @AlgoLens fetch the respective function.
+
+Please contact the contributors of this repository for more assistance.
 
 ## Project Structure
 
