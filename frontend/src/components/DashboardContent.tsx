@@ -53,7 +53,7 @@ export default function DashboardPage() {
           label,
           data: values,
           borderColor: color,
-          backgroundColor: `${color}33`,
+          backgroundColor: `${color}`,
           borderWidth: 2,
           tension: 0.4,
           pointRadius: 0,
@@ -75,31 +75,31 @@ export default function DashboardPage() {
       {/* Charts Section */}
       <div className="w-2/3 space-y-6">
         <Chart
-          data={parseChartData(metrics.stock_price, "Stock Cumulative Returns", "#1f77b4")}
+          data={parseChartData(metrics.stock_price, "Stock Cumulative Returns", "#ff5c00")}
           title="Stock Cumulative Returns"
         />
         <Chart
-          data={parseChartData(metrics.SPY_cumulative, "S&P 500 Cumulative Returns", "#ff7f0e")}
+          data={parseChartData(metrics.SPY_cumulative, "S&P 500 Cumulative Returns", "#ff5c00")}
           title="S&P 500 Cumulative Returns"
         />
         <Chart
-          data={parseChartData(metrics.percentage_change_vs_SPY, "Percentage Change vs. S&P 500", "#2ca02c")}
+          data={parseChartData(metrics.percentage_change_vs_SPY, "Percentage Change vs. S&P 500", "#ff5c00")}
           title="Percentage Change vs. S&P 500"
         />
         <Chart
-          data={parseChartData(metrics.implied_volatility, "Implied Volatility", "#d62728")}
+          data={parseChartData(metrics.implied_volatility, "Implied Volatility", "#ff5c00")}
           title="Implied Volatility"
         />
         <Chart
-          data={parseChartData(metrics.rolling_volatility, "Rolling Volatility", "#9467bd")}
+          data={parseChartData(metrics.rolling_volatility, "Rolling Volatility", "#ff5c00")}
           title="Rolling Volatility"
         />
         <Chart
-          data={parseChartData(metrics.rolling_sharpe, "Rolling Sharpe", "#8c564b")}
+          data={parseChartData(metrics.rolling_sharpe, "Rolling Sharpe", "#ff5c00")}
           title="Rolling Sharpe"
         />
         <Chart
-          data={parseChartData(metrics.rolling_sortino, "Rolling Sortino", "#e377c2")}
+          data={parseChartData(metrics.rolling_sortino, "Rolling Sortino", "#ff5c00")}
           title="Rolling Sortino"
         />
       </div>

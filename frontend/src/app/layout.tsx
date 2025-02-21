@@ -1,14 +1,19 @@
 "use client";
-
 import "./globals.css";
+import localFont from "next/font/local";
 
-export default function RootLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+const aileron = localFont({
+  src: [
+    { path: "/fonts/Aileron-Regular.otf", weight: "400" },
+    { path: "/fonts/Aileron-Bold.otf", weight: "700" },
+  ],
+  display: "swap",
+  variable: "--font-aileron",
+});
+
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="en" className={aileron.variable}>
       <head>
         <meta charSet="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />

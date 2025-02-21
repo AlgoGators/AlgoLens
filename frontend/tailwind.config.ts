@@ -87,8 +87,25 @@ export default {
   		animation: {
   			'accordion-down': 'accordion-down 0.2s ease-out',
   			'accordion-up': 'accordion-up 0.2s ease-out'
-  		}
+  		},
+
   	}
   },
   plugins: [require("tailwindcss-animate")],
 } satisfies Config;
+
+/** @type {import('tailwindcss').Config} */
+module.exports = {
+	content: [
+	  "./src/**/*.{js,ts,jsx,tsx,mdx}", // Make sure these paths match your files
+	],
+	theme: {
+	  extend: {
+		fontFamily: {
+		  aileron: ["var(--font-aileron)", "sans-serif"], 
+		  //  ^ generates .font-aileron
+		},
+	  },
+	},
+	plugins: [],
+  };
