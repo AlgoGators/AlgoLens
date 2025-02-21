@@ -11,7 +11,7 @@ from AlgoLens.backend.app import app
 
 def main():
     if len(sys.argv) > 1 and sys.argv[1] == "start":
-        app.run(debug=True, use_reloader=False)
+        app.run(debug=True)
     else:
         print("Usage: algolens start")
 

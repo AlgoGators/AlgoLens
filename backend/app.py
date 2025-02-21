@@ -8,8 +8,6 @@ import math
 
 from .decorator_registery import discover_decorated_functions
 
-from .data_access import DataAccess
-
 app = Flask(__name__)
 CORS(app)
 
@@ -225,16 +223,11 @@ def algo_scope():
         print("Base directory:", base_dir)
 
         # Discover decorated functions from the project.
-        functions = discover_decorated_functions(base_dir)
-        print("Discovered functions:", list(functions.keys()))
-        
-        # Call the first discovered function.
-        #print(functions)
-        if functions:
-            func = list(functions.values())[0]
-            strategy = func()
+        func = discover_decorated_functions(base_dir)
 
-        data = DataAccess()
+        strategy = func()
+        print('test')
+
         sg_trend_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), 'SG Trend Index.xlsx'))
 
         # Load and inspect the benchmark data
@@ -252,23 +245,6 @@ def algo_scope():
         benchmark['Date'] = pd.to_datetime(benchmark['Date'])
         benchmark.set_index('Date', inplace=True)
         benchmark = benchmark.squeeze()  # Convert to Series if possible
-
-        # Load strategy data and set the index to 'time'
-        strategy_df = pd.DataFrame(
-            data.get_ohlcv_data('2017-06-07', '2024-12-19', ['UB.c.0']),
-            columns=['time', 'open', 'high', 'low', 'close', 'volume', 'symbol']
-        )
-        
-        strategy_df['time'] = pd.to_datetime(strategy_df['time'])
-        strategy_df.rename(columns={'time': 'Date'}, inplace=True)
-        strategy_df.set_index('Date', inplace=True)
-
-        # Remove any timezone information from the index
-        strategy_df.index = strategy_df.index.tz_localize(None)
-
-        # Select the 'close' column as the strategy series
-        strategy = strategy_df['close']
-
 
         strategy = strategy.sort_index(ascending=True)
         benchmark = benchmark.sort_index(ascending=True)
