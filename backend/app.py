@@ -8,9 +8,9 @@ import math
 import importlib
 import inspect
 
-from decorator_registery import discover_decorated_functions, decorated_functions
+from decorator_registery import discover_decorated_functions
 
-from backend.data_access import DataAccess
+from data_access import DataAccess
 
 app = Flask(__name__)
 CORS(app)
@@ -223,23 +223,23 @@ def algo_scope():
         benchmark_name = "SPY"
 
         # Determine the base directory (this assumes your script is one level down from the project root)
-        base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+        base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
         print("Base directory:", base_dir)
 
-        # Discover decorated functions from the project
-        discover_decorated_functions(base_dir)
-
-        functions = []
-        for key, value in decorated_functions.items():
-            functions.append(key)
-
-        # Call the wrapper with the loaded function
-        strategy = decorated_functions[functions[0]]() 
+        # Discover decorated functions from the project.
+        functions = discover_decorated_functions(base_dir)
+        print("Discovered functions:", list(functions.keys()))
+        
+        # Call the first discovered function.
+        #print(functions)
+        if functions:
+            func = list(functions.values())[0]
+            strategy = func()
 
         data = DataAccess()
 
         # Load and inspect the benchmark data
-        benchmark = pd.read_excel('backend/SG Trend Index.xlsx', skiprows=6)
+        benchmark = pd.read_excel('AlgoLens/backend/SG Trend Index.xlsx', skiprows=6)
 
         # Clean up column names
         benchmark.columns = [col.strip() for col in benchmark.columns]
@@ -273,9 +273,6 @@ def algo_scope():
 
         strategy = strategy.sort_index(ascending=True)
         benchmark = benchmark.sort_index(ascending=True)
-
-        print(strategy.isna().sum().sum())
-        print(benchmark.isna().sum().sum())
 
         # Align both series on their common dates
         common_dates = strategy.index.intersection(benchmark.index)
