@@ -46,17 +46,16 @@ python -m venv venv
 venv\Scripts\activate
 ```
 
-Please note: 
-You are pulling the req.txt file from AlgoLens in order to download
-it to your main directory.
+This installs the requirements.txt and makes "algolens start" and alias for "python ./AlgoLens/backend/app.py"
 ```bash
-pip install -r .\AlgoLens\requirements.txt
+cd AlgoLens
+pip install -e .
 ```
 
-4. Start the flask server as a module (from the directory just above AlgoLens):
+4. Start the flask server from inside the AlgoLens/ file:
 
 ```bash
-python AlgoLens/app.py
+algolens start
 ```
 
 3. Install npm dependencies:
@@ -66,7 +65,7 @@ cd AlgoLens/frontend
 npm install
 ```
 
-5. Start the npm server (from inside the AlgoLens/frontend/ directory):
+5. Start the npm server from inside the AlgoLens/frontend/ file:
 
 In another terminal:
 ```bash

@@ -5,12 +5,10 @@ import pandas as pd
 import numpy as np
 import os
 import math
-import importlib
-import inspect
 
-from decorator_registery import discover_decorated_functions
+from .decorator_registery import discover_decorated_functions
 
-from data_access import DataAccess
+from .data_access import DataAccess
 
 app = Flask(__name__)
 CORS(app)
@@ -237,9 +235,10 @@ def algo_scope():
             strategy = func()
 
         data = DataAccess()
+        sg_trend_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), 'SG Trend Index.xlsx'))
 
         # Load and inspect the benchmark data
-        benchmark = pd.read_excel('AlgoLens/backend/SG Trend Index.xlsx', skiprows=6)
+        benchmark = pd.read_excel(sg_trend_dir, skiprows=6)
 
         # Clean up column names
         benchmark.columns = [col.strip() for col in benchmark.columns]
@@ -345,7 +344,7 @@ def replace_nan_and_inf(obj):
 
 if __name__ == "__main__":
     try:
-        app.run(host="127.0.0.1", port=5000, debug=True)
+        app.run(debug=True, use_reloader=False)
 
     except KeyboardInterrupt:
         print("\nShutting down server.")
