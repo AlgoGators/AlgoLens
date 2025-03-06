@@ -29,32 +29,32 @@ export default function Metrics({ metrics }: { metrics: any }) {
     const unclassified = {};
 
     const redundantMetrics = [
-        "extended_metrics_error", 
-        "outliers", 
-        "rolling_sharpe", 
-        "rolling_sortino", 
-        "rolling_volatility", 
-        "implied_volatility",
-        "SPY_cumulative", 
-        "distribution",
-        "percentage_change_vs_SPY",
-        "stock_price",
-        "greeks", // for now
-    ]
+      "extended_metrics_error",
+      "outliers",
+      "rolling_sharpe",
+      "rolling_sortino",
+      "rolling_volatility",
+      "implied_volatility",
+      "SPY_cumulative",
+      "distribution",
+      "percentage_change_vs_SPY",
+      "stock_price",
+      "greeks", // for now
+    ];
 
     for (const key in metrics) {
-        if (riskMetrics.includes(key)) {
-            risk[key] = metrics[key];
-        } else if (performanceMetrics.includes(key)) {
-            performance[key] = metrics[key];
-        } else if (greeksMetrics.includes(key)) {
-            greeks[key] = metrics[key];
-        } else {
-            if (!redundantMetrics.includes(key)) {
-                unclassified[key] = metrics[key];
-                console.log(key);
-            }
+      if (riskMetrics.includes(key)) {
+        risk[key] = metrics[key];
+      } else if (performanceMetrics.includes(key)) {
+        performance[key] = metrics[key];
+      } else if (greeksMetrics.includes(key)) {
+        greeks[key] = metrics[key];
+      } else {
+        if (!redundantMetrics.includes(key)) {
+          unclassified[key] = metrics[key];
+          console.log(key);
         }
+      }
     }
 
     return { risk, performance, greeks, unclassified };
@@ -76,51 +76,25 @@ export default function Metrics({ metrics }: { metrics: any }) {
     return `${formattedKey}: ${value ?? "N/A"}`; // Fallback to "N/A" if value is null or undefined
   };
 
+  const renderSection = (title: string, data: any) => (
+    <div>
+      <h2 className="text-xl font-bold mb-4">{title}</h2>
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+        {Object.entries(data).map(([key, value]) => (
+          <div key={key} className="bg-white shadow rounded-lg p-4">
+            {renderMetric(key, value)}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+
   return (
     <div className="space-y-6">
-      {Object.keys(risk).length > 0 && (
-        <div>
-          <h2 className="text-xl font-bold mb-4">Risk Metrics</h2>
-          <ul>
-            {Object.entries(risk).map(([key, value]) => (
-              <li key={key} className="mb-2">{renderMetric(key, value)}</li>
-            ))}
-          </ul>
-        </div>
-      )}
-
-      {Object.keys(performance).length > 0 && (
-        <div>
-          <h2 className="text-xl font-bold mb-4">Performance Metrics</h2>
-          <ul>
-            {Object.entries(performance).map(([key, value]) => (
-              <li key={key} className="mb-2">{renderMetric(key, value)}</li>
-            ))}
-          </ul>
-        </div>
-      )}
-
-      {Object.keys(greeks).length > 0 && (
-        <div>
-          <h2 className="text-xl font-bold mb-4">Greeks</h2>
-          <ul>
-            {Object.entries(greeks).map(([key, value]) => (
-              <li key={key} className="mb-2">{renderMetric(key, value)}</li>
-            ))}
-          </ul>
-        </div>
-      )}
-
-      {Object.keys(unclassified).length > 0 && (
-        <div>
-          <h2 className="text-xl font-bold mb-4">Other Metrics</h2>
-          <ul>
-            {Object.entries(unclassified).map(([key, value]) => (
-              <li key={key} className="mb-2">{renderMetric(key, value)}</li>
-            ))}
-          </ul>
-        </div>
-      )}
+      {Object.keys(risk).length > 0 && renderSection("Risk Metrics", risk)}
+      {Object.keys(performance).length > 0 && renderSection("Performance Metrics", performance)}
+      {Object.keys(greeks).length > 0 && renderSection("Greeks", greeks)}
+      {Object.keys(unclassified).length > 0 && renderSection("Other Metrics", unclassified)}
     </div>
   );
 }

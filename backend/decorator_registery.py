@@ -33,31 +33,33 @@ def discover_decorated_functions(base_dir):
         
         for file in files:
             if file.endswith(".py") and not file.startswith("__"):
-                print(f"Processing file: {file}")
+                #print(f"Processing file: {file}")
                 # Build module path relative to base_dir.
                 module_path = os.path.relpath(os.path.join(root, file), start=base_dir)
                 module_name, _ = os.path.splitext(module_path.replace(os.sep, "."))
-                print(f"Attempting to import module: {module_name}")
+                #print(f"Attempting to import module: {module_name}")
                 
                 try:
                     module = importlib.import_module(module_name)
-                    print(f"Module '{module_name}' imported successfully.")
+                    #print(f"Module '{module_name}' imported successfully.")
                     
                     # Print file contents of the imported module
                     if hasattr(module, '__file__') and module.__file__:
                         try:
                             with open(module.__file__, 'r') as f:
                                 contents = f.read()
-                                print(f"Contents of {module.__file__}:")
-                                print(contents)
+                                #print(f"Contents of {module.__file__}:")
+                                #print(contents)
                         except Exception as file_error:
-                            print(f"Error reading file {module.__file__}: {file_error}")
+                            pass
+                            #print(f"Error reading file {module.__file__}: {file_error}")
                     else:
-                        print("Module does not have a __file__ attribute.")
+                        pass
+                        #print("Module does not have a __file__ attribute.")
                     
                     # Use inspect to get all functions defined in the module.
                     functions = inspect.getmembers(module, inspect.isfunction)
-                    print(functions)
+                    #print(functions)
                     for func_name, func in functions:
                         is_decorated = getattr(func, "_algo_lens_decorated", False)
                         print(f"Found function: {func_name} (decorated: {is_decorated})")

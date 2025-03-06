@@ -1,4 +1,4 @@
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request
 from flask_cors import CORS
 import quantstats as qs
 import pandas as pd
@@ -205,28 +205,52 @@ def quant_stats(strategy_name : str, strategy : pd.Series, benchmark_name : str,
 
 @app.route('/api/quantstats', methods=['POST'])
 def algo_scope():
-    """Calls algo() function from the system to obtain portfolio-level positions
-    and provide processed data to front-end
-
+    """
+    Calls algo() function from the system to obtain portfolio-level positions
+    and provide processed data to front-end.
+    
     Returns
     -------
     results : dict
-        Jsonified dictionary of processed data
+        Jsonified dictionary of processed data filtered by the selected category.
     """
     try:
-        
+        # Read the JSON payload from the request.
+        req_data = request.get_json()
+        # The 'category' parameter should be passed from the client (defaulting to 'portfolio')
+        category = req_data.get("category", "portfolio")
+        print("Selected category:", category)
+
         strategy_name = "Mean Reversion"
         benchmark_name = "SPY"
 
-        # Determine the base directory (this assumes your script is one level down from the project root)
+        # Determine the base directory (assumes this file is one level down from the project root)
         base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
         print("Base directory:", base_dir)
 
-        # Discover decorated functions from the project.
+        # Discover the decorated functions from the project.
         func = discover_decorated_functions(base_dir)
-
+        # Execute the function to get the strategy data
         strategy = func()
-        print('test')
+
+        # Filter the strategy data based on the selected category.
+        if category == "portfolio":
+            portfolio_df = strategy.get("portfolio")
+            if portfolio_df is None or "portfolio" not in portfolio_df.columns:
+                raise ValueError("Portfolio data not found.")
+            # Extract only the 'portfolio' column (as a 1D Series)
+            strategy_filtered = portfolio_df["portfolio"]
+        else:
+            # For categories like 'futures', 'stocks', or 'options'
+            strategy_filtered = strategy.get("group_dataframes", {}).get(category)
+        
+        if strategy_filtered is None:
+            raise ValueError(f"No data available for category '{category}'.")
+
+        print(strategy_filtered)
+
+        strategy = strategy_filtered
+        # Return as JSON. Convert the Series to a dictionary
 
         sg_trend_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), 'SG Trend Index.xlsx'))
 
