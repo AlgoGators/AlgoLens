@@ -5,8 +5,11 @@ import pandas as pd
 import numpy as np
 import os
 import math
+import io
+import contextlib
+from system import system_lmao
 
-from .decorator_registery import discover_decorated_functions
+from decorator_registery import discover_decorated_functions
 
 app = Flask(__name__)
 CORS(app)
@@ -203,6 +206,31 @@ def quant_stats(strategy_name : str, strategy : pd.Series, benchmark_name : str,
 
     return results
 
+@app.route('/api/glassfactory', methods=['POST'])
+def glass_factory():
+    """
+    Executes Python code passed in the JSON payload and returns its output.
+    Expected JSON format:
+      { "code": "print('Hello, World!')" }
+    """
+    try:
+        data = request.get_json()
+        if not data or "code" not in data:
+            return jsonify({"error": "No code provided"}), 400
+        
+        code = data["code"]
+
+        # Prepare to capture stdout.
+        output = io.StringIO()
+        # Execute the code in a restricted namespace (empty globals)
+        with contextlib.redirect_stdout(output):
+            exec(code, {})
+
+        result = output.getvalue()
+        return jsonify({"result": result})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 @app.route('/api/quantstats', methods=['POST'])
 def algo_scope():
     """
@@ -225,13 +253,14 @@ def algo_scope():
         benchmark_name = "SPY"
 
         # Determine the base directory (assumes this file is one level down from the project root)
-        base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-        print("Base directory:", base_dir)
+        #base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+        #print("Base directory:", base_dir)
 
         # Discover the decorated functions from the project.
-        func = discover_decorated_functions(base_dir)
+        #func = discover_decorated_functions(base_dir)
         # Execute the function to get the strategy data
-        strategy = func()
+        strategy = system_lmao()
+        
 
         # Filter the strategy data based on the selected category.
         if category == "portfolio":

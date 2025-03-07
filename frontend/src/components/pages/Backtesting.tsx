@@ -5,6 +5,9 @@ import Chart from "../Chart";
 import Metrics from "../Metrics";
 import SettingsDropdown from "../SettingsDropdown";
 import { Button } from "@/components/ui/button";
+import { Menubar, MenubarMenu, MenubarTrigger } from "@/components/ui/menubar";
+import Link from "next/link";
+import Image from "next/image";
 
 export default function Backtesting() {
   const defaultPreferences = {
@@ -18,11 +21,13 @@ export default function Backtesting() {
     metrics: true,
   };
 
-  // New state to track the selected category.
   const [selectedCategory, setSelectedCategory] = useState("portfolio");
   const [metrics, setMetrics] = useState<any>(null);
   const [isFetching, setIsFetching] = useState(true);
   const [preferences, setPreferences] = useState(defaultPreferences);
+  const [dateRange, setDateRange] = useState<number[]>([0, 0]);
+  const [minDate, setMinDate] = useState<number>(0);
+  const [maxDate, setMaxDate] = useState<number>(0);
 
   const fetchMetrics = async (
     prefs = preferences,
@@ -30,7 +35,6 @@ export default function Backtesting() {
   ) => {
     setIsFetching(true);
     try {
-      // POST the preferences and the selected category to the backend
       const response = await fetch("http://localhost:5000/api/quantstats", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -54,18 +58,52 @@ export default function Backtesting() {
   };
 
   useEffect(() => {
-    // Initial fetch with default preferences and "portfolio" category.
     fetchMetrics();
   }, []);
 
+  // Compute the date range for portfolio category,
+  // filtering out any keys that are not valid date strings.
+  useEffect(() => {
+    if (metrics && selectedCategory === "portfolio") {
+      const keys = Object.keys(metrics);
+      console.log("Keys in metrics:", keys);
+      
+      let timestamps: number[] = [];
+      if (keys.length > 0) {
+        // Check if keys are numeric (e.g., "1672531200000") 
+        if (keys.every((key) => !isNaN(Number(key)))) {
+          timestamps = keys.map((key) => Number(key));
+        } else {
+          timestamps = keys
+            .map((key) => new Date(key).getTime())
+            .filter((t) => !isNaN(t));
+        }
+      }
+      
+      if (timestamps.length > 0) {
+        const computedMin = Math.min(...timestamps);
+        const computedMax = Math.max(...timestamps);
+        setMinDate(computedMin);
+        setMaxDate(computedMax);
+        setDateRange([computedMin, computedMax]);
+      } else {
+        console.warn("No valid date keys found in metrics for portfolio category.");
+      }
+    }
+  }, [metrics, selectedCategory]);
+  
+
+  // Filter invalid timestamps in the chart data.
   const parseChartData = (data: any, label: string, color: string) => {
     if (!data) return { labels: [], datasets: [] };
 
-    const labels = Object.keys(data).map((timestamp) =>
+    const validTimestamps = Object.keys(data).filter(
+      (timestamp) => !isNaN(new Date(timestamp).getTime())
+    );
+    const labels = validTimestamps.map((timestamp) =>
       new Date(timestamp).toISOString().split("T")[0]
     );
-
-    const values = Object.values(data);
+    const values = validTimestamps.map((timestamp) => data[timestamp]);
 
     return {
       labels,
@@ -91,7 +129,6 @@ export default function Backtesting() {
     await fetchMetrics(preferences, selectedCategory);
   };
 
-  // Handler for when a category button is clicked.
   const handleCategoryChange = async (newCategory: string) => {
     setSelectedCategory(newCategory);
     await fetchMetrics(preferences, newCategory);
@@ -107,14 +144,33 @@ export default function Backtesting() {
 
   return (
     <div className="relative">
-      {/* Settings Dropdown */}
+      <Menubar className="h-20 px-4 bg-background shadow-sm">
+        <MenubarMenu className="flex items-center space-x-4">
+          <MenubarTrigger asChild>
+            <Link href="/">
+              <Image
+                src="/images/AlgoLogo.png"
+                alt="AlgoLogo"
+                width={60}
+                height={60}
+                loading="eager"
+              />
+            </Link>
+          </MenubarTrigger>
+          <span className="text-3xl font-bold">Backtesting</span>
+        </MenubarMenu>
+      </Menubar>
+
       <SettingsDropdown
         preferences={preferences}
         updatePreference={updatePreference}
         handleSubmitPreferences={handleSubmitPreferences}
+        minDate={minDate}
+        maxDate={maxDate}
+        dateRange={dateRange}
+        setDateRange={setDateRange}
       />
 
-      {/* Four centered navigation buttons */}
       <div className="flex justify-center space-x-4 pt-4">
         <Button
           onClick={() => handleCategoryChange("portfolio")}
@@ -158,83 +214,88 @@ export default function Backtesting() {
         </Button>
       </div>
 
-      {/* Main Content */}
       <div className="pt-16">
-        {/* Charts Section */}
-        <div className="grid grid-cols-2 gap-6">
-          {preferences.stock_price && (
-            <Chart
-              data={parseChartData(
-                metrics.stock_price,
-                "Stock Cumulative Returns",
-                "#ff5c00"
+        {selectedCategory === "portfolio" ? (
+          <Chart
+            data={parseChartData(metrics, "Portfolio", "#ff5c00")}
+            title="Portfolio"
+          />
+        ) : (
+          <div className="grid grid-cols-2 gap-6">
+            {preferences.stock_price && metrics.stock_price && (
+              <Chart
+                data={parseChartData(
+                  metrics.stock_price,
+                  "Stock Cumulative Returns",
+                  "#ff5c00"
+                )}
+                title="Stock Cumulative Returns"
+              />
+            )}
+            {preferences.SPY_cumulative && metrics.SPY_cumulative && (
+              <Chart
+                data={parseChartData(
+                  metrics.SPY_cumulative,
+                  "S&P 500 Cumulative Returns",
+                  "#ff5c00"
+                )}
+                title="S&P 500 Cumulative Returns"
+              />
+            )}
+            {preferences.percentage_change_vs_SPY &&
+              metrics.percentage_change_vs_SPY && (
+                <Chart
+                  data={parseChartData(
+                    metrics.percentage_change_vs_SPY,
+                    "Percentage Change vs. S&P 500",
+                    "#ff5c00"
+                  )}
+                  title="Percentage Change vs. S&P 500"
+                />
               )}
-              title="Stock Cumulative Returns"
-            />
-          )}
-          {preferences.SPY_cumulative && (
-            <Chart
-              data={parseChartData(
-                metrics.SPY_cumulative,
-                "S&P 500 Cumulative Returns",
-                "#ff5c00"
-              )}
-              title="S&P 500 Cumulative Returns"
-            />
-          )}
-          {preferences.percentage_change_vs_SPY && (
-            <Chart
-              data={parseChartData(
-                metrics.percentage_change_vs_SPY,
-                "Percentage Change vs. S&P 500",
-                "#ff5c00"
-              )}
-              title="Percentage Change vs. S&P 500"
-            />
-          )}
-          {preferences.implied_volatility && (
-            <Chart
-              data={parseChartData(
-                metrics.implied_volatility,
-                "Implied Volatility",
-                "#ff5c00"
-              )}
-              title="Implied Volatility"
-            />
-          )}
-          {preferences.rolling_volatility && (
-            <Chart
-              data={parseChartData(
-                metrics.rolling_volatility,
-                "Rolling Volatility",
-                "#ff5c00"
-              )}
-              title="Rolling Volatility"
-            />
-          )}
-          {preferences.rolling_sharpe && (
-            <Chart
-              data={parseChartData(
-                metrics.rolling_sharpe,
-                "Rolling Sharpe",
-                "#ff5c00"
-              )}
-              title="Rolling Sharpe"
-            />
-          )}
-          {preferences.rolling_sortino && (
-            <Chart
-              data={parseChartData(
-                metrics.rolling_sortino,
-                "Rolling Sortino",
-                "#ff5c00"
-              )}
-              title="Rolling Sortino"
-            />
-          )}
-        </div>
+            {preferences.implied_volatility && metrics.implied_volatility && (
+              <Chart
+                data={parseChartData(
+                  metrics.implied_volatility,
+                  "Implied Volatility",
+                  "#ff5c00"
+                )}
+                title="Implied Volatility"
+              />
+            )}
+            {preferences.rolling_volatility && metrics.rolling_volatility && (
+              <Chart
+                data={parseChartData(
+                  metrics.rolling_volatility,
+                  "Rolling Volatility",
+                  "#ff5c00"
+                )}
+                title="Rolling Volatility"
+              />
+            )}
+            {preferences.rolling_sharpe && metrics.rolling_sharpe && (
+              <Chart
+                data={parseChartData(
+                  metrics.rolling_sharpe,
+                  "Rolling Sharpe",
+                  "#ff5c00"
+                )}
+                title="Rolling Sharpe"
+              />
+            )}
+            {preferences.rolling_sortino && metrics.rolling_sortino && (
+              <Chart
+                data={parseChartData(
+                  metrics.rolling_sortino,
+                  "Rolling Sortino",
+                  "#ff5c00"
+                )}
+                title="Rolling Sortino"
+              />
+            )}
+          </div>
+        )}
 
-        {/* Metrics Section */}
         {preferences.metrics && (
           <div className="mt-6 bg-white shadow rounded-lg p-6">
             <Metrics metrics={metrics} />

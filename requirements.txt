@@ -2,6 +2,7 @@ flask
 flask-cors
 IPython
 quantstats
+pandas
 
 sqlalchemy
 dotenv

@@ -2,7 +2,7 @@ from typing import List, Dict, Optional, Any, Type, Tuple
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError
-from .db_models import get_engine, OHLCV
+from db_models import get_engine, OHLCV
 import pandas as pd
 import logging
 
@@ -186,7 +186,6 @@ class DataAccess:
                 session.rollback()
                 self.logger.error(f"Error deleting data: {e}")
                 raise
-
 
 if __name__ == "__main__":
     data = DataAccess()
