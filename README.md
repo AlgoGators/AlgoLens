@@ -2,28 +2,38 @@
 
 A web application for displaying algorithmic trading portfolio information and metrics.
 
+For backtesters:
+    AlgoLens reads the most recent backtesting entries from the database. These backtesting results are pulled to provide metrics and charts as performance metrics. You may customize additional metrics and charts yourself if you wish and request for them to be manually added.
+
 ## Prerequisites
 
 - Node.js (LTS version recommended, v20.10.0)
 - npm (comes with Node.js)
 
-## Note
+## To-Do
 
-- AlgoLens expects you to decorate a function with @AlgoLens in the same directory as the AlgoLens module or deeper. Decorated functions that are in a higher directory will not be identified!
+Portfolio:
+- Portfolio-level charts/metrics
+- Asset-level charts/metrics
+- Customizable charts/metrics  --> GlassFactory
+- Time-machine (user can observe held positions at certain moments in time)
 
-E.g
+Backtesting:
+- ✔️ Portfolio-level charts/metrics
+- ✔️ Strategy-level charts/metrics
+- Customizable charts/metrics  --> GlassFactory
+- Time-machine (user can observe backtesting results at certain intervals of time)
 
-```
-Your_Project/
-├── AlgoLens/
-│   ├── backend/
-│   ├── frontend/
-│   ├── ... 
-│   └── app.py
-├── example_system.py          # This works because it's in the same directory as AlgoLens
-└── your_system_folder/
-    └── another_example.py     # This also works because it exists in a deeper directory
-```
+GlassFactory:
+- Customizable charts/metrics
+    - ✔️ User can run code
+        - ✔️ Set up IDE with error warnings
+        - ✔️ Access to a basic terminal for outputs
+    - User can manipulate data
+    - User can make and see charts/metrics
+    - User can save code
+    - User can use saved code as an additional feature for portfolio/backtesting
+    - User can request for their code to be implemented
 
 ## Getting Started
 
@@ -48,23 +58,30 @@ python -m venv venv
 venv\Scripts\activate
 ```
 
-This installs the requirements.txt and makes "algolens start" an alias for "python ./AlgoLens/backend/app.py"
 ```bash
 cd AlgoLens
-pip install -e .
+pip install -r requirements.txt
 ```
 
-3. Start the flask server from inside the AlgoLens/ file:
-
+3. Start the flask server from inside the AlgoLens/backend/ file:
+Mac
 ```bash
-algolens start
+cd backend
+python3 app.py
 ```
 
-4. Install npm dependencies:
+Mac
+```bash
+cd backend
+python app.py
+```
+
+4. Install npm dependencies from inside AlgoLens/frontend/ file:
 
 ```bash
-cd AlgoLens/frontend
+cd frontend
 npm install
+npm fund
 ```
 
 5. Start the npm server from inside the AlgoLens/frontend/ file:
@@ -73,31 +90,6 @@ In another terminal:
 ```bash
 npm run dev
 ```
-
-The application will be available at `http://localhost:3000` and Flask will run on `http://localhost:5000`
-
-## How to use
-AlgoLens accesses the return value of a function and passes it to app.py for processing and then to DashboardContent.tsx for presentation.
-
-In order to integrate AlgoLens to your backtesting module, clone this repository and import the AlgoLens decorator (e.g from AlgoLens.app import Algolens -- may change depending on your file structure). 
-
-For example:
-```python
-from AlgoLens import AlgoLens
-
-@AlgoLens
-def backtest_function():
-    '''
-    This function must return a pd.Series with 1 column named 'time' and
-    another column named 'close' with the PRICE values of the strategy.
-    '''
-    ...
-    ...
-    ...
-```
-Upon refreshing the application, AlgoLens will parse your files for functions decorated with @AlgoLens fetch the respective function.
-
-Please contact the contributors of this repository for more assistance.
 
 ## Project Structure
 
@@ -123,8 +115,6 @@ AlgoLens
 ├── .gitignore
 ├── LICENSE
 ├── README.md
-├── cli.py                    # Creates command alias for algolens
-├── setup.py                  # Handles pip install and sets up cli.py
 ├── requirements.txt
 └── ...
 
@@ -156,12 +146,6 @@ AlgoLens
 - Component library documentation can be found in the shadcn/ui docs
 - Tailwind CSS is used for styling
 - Components are built using TypeScript for type safety
-
-## Contributing
-
-1. Clone the Master branch
-2. Make your changes
-3. Submit a pull request
 
 ## License
 
