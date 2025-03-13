@@ -1,6 +1,7 @@
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 import pandas as pd
+import numpy as np
 import os
 import io
 import contextlib
@@ -31,13 +32,33 @@ def glass_factory():
         
         code = data["code"]
 
-        # Prepare to capture stdout.
+        # Create a dictionary for local variables
+        local_vars = {}
+        
+        # Create a dictionary with available modules and functions
+        global_vars = {
+            'pd': pd,
+            'np': np,
+            'system_lmao': system_lmao,
+            'quant_stats': quant_stats,
+            # Add any other modules or functions you want to make available
+        }
+
+        # Prepare to capture stdout
         output = io.StringIO()
+        
         with contextlib.redirect_stdout(output):
-            exec(code, {})
+            exec(code, global_vars, local_vars)
 
         result = output.getvalue()
-        return jsonify({"result": result})
+        response_data = {"result": result}
+        
+        # Check if chart_data was created in the code execution
+        if 'chart_data' in local_vars:
+            # Add chart data to response
+            response_data['chart_data'] = local_vars['chart_data']
+            
+        return jsonify(response_data)
     except Exception as e:
         logging.error("Error in /api/glassfactory: %s", traceback.format_exc())
         return jsonify({"error": str(e)}), 500

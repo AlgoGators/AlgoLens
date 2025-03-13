@@ -29,8 +29,8 @@ GlassFactory:
     - ✔️ User can run code
         - ✔️ Set up IDE with error warnings
         - ✔️ Access to a basic terminal for outputs
-    - User can manipulate data
-    - User can make and see charts/metrics
+    - ✔️ User can manipulate data
+    - ✔️ User can make and see charts/metrics
     - User can save code
     - User can use saved code as an additional feature for portfolio/backtesting
     - User can request for their code to be implemented
