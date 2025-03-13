@@ -5,10 +5,19 @@ import numpy as np
 import os
 import io
 import contextlib
+import warnings
 
-from system import system_lmao
+from system import system
 from quant import quant_stats
 from data_munging import replace_nan_and_inf, replace_infinity_with_neg_one
+
+# Suppress specific warnings that occur in QuantStats calculations
+warnings.filterwarnings("ignore", category=RuntimeWarning, message="Mean of empty slice")
+warnings.filterwarnings("ignore", category=RuntimeWarning, message="invalid value encountered in scalar divide")
+warnings.filterwarnings("ignore", category=RuntimeWarning, message="Degrees of freedom <= 0 for slice")
+warnings.filterwarnings("ignore", category=RuntimeWarning, message="divide by zero encountered")
+warnings.filterwarnings("ignore", category=RuntimeWarning, message="invalid value encountered in multiply")
+warnings.filterwarnings("ignore", category=RuntimeWarning, message="invalid value encountered in divide")
 
 app = Flask(__name__)
 CORS(app)
@@ -39,7 +48,7 @@ def glass_factory():
         global_vars = {
             'pd': pd,
             'np': np,
-            'system_lmao': system_lmao,
+            'system': system,
             'quant_stats': quant_stats,
             # Add any other modules or functions you want to make available
         }
@@ -84,8 +93,9 @@ def algo_scope():
         strategy_name = "Mean Reversion"
         benchmark_name = "Index"
 
-        # Get the grouped dataframes from system_lmao
-        strategy_groups = system_lmao()
+        # Get the grouped dataframes from system
+        strategy_groups = system()
+        print(strategy_groups)
 
         # Extract the appropriate series based on category.
         if category == "portfolio":
@@ -101,18 +111,18 @@ def algo_scope():
         if strategy_filtered is None:
             raise ValueError(f"No data available for category '{category}'.")
 
-        # ----- Apply date range filtering BEFORE processing -----
-        # Apply date range filtering BEFORE processing
-        if date_range and isinstance(date_range, list) and len(date_range) == 2:
-            start = pd.to_datetime(date_range[0], unit='ms')
-            end = pd.to_datetime(date_range[1], unit='ms')
-            # Filter the raw strategy data
-            strategy_filtered = strategy_filtered.loc[(strategy_filtered.index >= start) & (strategy_filtered.index <= end)]
-
+        print(f"Strategy data shape before processing: {strategy_filtered.shape}")
+        print(f"Date range: {strategy_filtered.index.min()} to {strategy_filtered.index.max()}")
 
         # Process the strategy series: convert to numeric, drop NAs, and compute percentage change.
         strategy_processed = pd.to_numeric(strategy_filtered, errors='coerce')
         strategy_processed = strategy_processed.dropna().pct_change().dropna()
+        
+        print(f"Strategy data shape after processing: {strategy_processed.shape}")
+
+        # Check if we have enough data to proceed
+        if len(strategy_processed) < 2:
+            return jsonify({"error": "Insufficient strategy data for analysis"}), 400
 
         # ----- Load benchmark data -----
         sg_trend_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), 'SG Trend Index.xlsx'))
@@ -123,10 +133,15 @@ def algo_scope():
         benchmark.set_index('Date', inplace=True)
         benchmark = benchmark.squeeze()
 
-        # ----- Apply date range filtering to benchmark as well -----
-        if date_range and isinstance(date_range, list) and len(date_range) == 2:
-            # Reuse start and end defined above
-            benchmark = benchmark.loc[(benchmark.index >= start) & (benchmark.index <= end)]
+        # Process benchmark data - no date filtering here either
+        benchmark = pd.to_numeric(benchmark, errors='coerce')
+        benchmark = benchmark.pct_change().dropna()
+        
+        print(f"Benchmark data shape after processing: {benchmark.shape}")
+
+        # Check if we have enough benchmark data
+        if len(benchmark) < 2:
+            return jsonify({"error": "Insufficient benchmark data for analysis"}), 400
 
         # Ensure both series are sorted.
         strategy_processed = strategy_processed.sort_index(ascending=True)
@@ -134,11 +149,23 @@ def algo_scope():
 
         # Align both series on their common dates.
         common_dates = strategy_processed.index.intersection(benchmark.index)
+        print(f"Number of common dates: {len(common_dates)}")
+        
+        # Check if we have enough common dates
+        if len(common_dates) < 2:
+            return jsonify({"error": "Insufficient overlapping data between strategy and benchmark"}), 400
+            
         strategy_processed = strategy_processed.loc[common_dates]
         benchmark = benchmark.loc[common_dates]
+        
+        print(f"Final data shapes - Strategy: {strategy_processed.shape}, Benchmark: {benchmark.shape}")
 
-        # Run quant_stats calculations.
-        results = quant_stats(strategy_name, strategy_processed, benchmark_name, benchmark)
+        # Run quant_stats calculations with warning suppression
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", category=RuntimeWarning)
+            results = quant_stats(strategy_name, strategy_processed, benchmark_name, benchmark)
+            
+        # Post-process results to handle any remaining NaN or infinity values
         results = replace_infinity_with_neg_one(results)
         results = replace_nan_and_inf(results)
 
