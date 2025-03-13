@@ -2,7 +2,6 @@ from data_access import DataAccess
 import pandas as pd
 
 def system_lmao():
-    
     data = DataAccess()
 
     # Define the symbols by group.
@@ -38,7 +37,6 @@ def system_lmao():
         # Pivot so that each symbol is a separate column.
         pivot = df.pivot_table(values='close', index=df.index, columns='symbol')
         # Average across the symbols for equal weighting.
-        # Squeeze the result in case it's a one-column DataFrame to ensure it's 1D.
         group_avg = pivot.mean(axis=1).squeeze()
         portfolio_series[group] = group_avg
 
@@ -46,10 +44,8 @@ def system_lmao():
     portfolio_df = pd.DataFrame(portfolio_series)
     # Create an overall portfolio column that is the equal-weighted average of the groups.
     portfolio_df['portfolio'] = portfolio_df.mean(axis=1)
+    
+    # Add the overall portfolio as another entry in the group_dataframes dictionary.
+    group_dataframes['portfolio'] = portfolio_df['portfolio']
 
-    return {'group_dataframes': group_dataframes, 'portfolio': portfolio_df}
-
-result = system_lmao()
-print(result)
-if hasattr(system_lmao, "__wrapped__"):
-    print("Wrapped function:", system_lmao.__wrapped__)
+    return group_dataframes
