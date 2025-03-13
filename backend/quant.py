@@ -38,7 +38,6 @@ def quant_stats(strategy_name : str, strategy : pd.Series, benchmark_name : str,
     full_history[benchmark_name+"_Cumulative"] = (1 + full_history[benchmark_name]).cumprod()
     full_history["Stock_Cumulative"] = (1 + full_history[strategy_name]).cumprod()
 
-    # Calculate percentage change vs. S&P 500
     full_history["Pct_Change_VS_"+benchmark_name] = (
         full_history["Stock_Cumulative"] - full_history[benchmark_name+"_Cumulative"]
     )

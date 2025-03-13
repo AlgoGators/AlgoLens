@@ -52,7 +52,6 @@ export default function Metrics({ metrics }: { metrics: any }) {
       } else {
         if (!redundantMetrics.includes(key)) {
           unclassified[key] = metrics[key];
-          console.log(key);
         }
       }
     }

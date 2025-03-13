@@ -12,6 +12,11 @@ from data_munging import replace_nan_and_inf, replace_infinity_with_neg_one
 app = Flask(__name__)
 CORS(app)
 
+import traceback
+import logging
+
+logging.basicConfig(level=logging.ERROR)
+
 @app.route('/api/glassfactory', methods=['POST'])
 def glass_factory():
     """
@@ -28,20 +33,19 @@ def glass_factory():
 
         # Prepare to capture stdout.
         output = io.StringIO()
-        # Execute the code in a restricted namespace (empty globals)
         with contextlib.redirect_stdout(output):
             exec(code, {})
 
         result = output.getvalue()
         return jsonify({"result": result})
     except Exception as e:
+        logging.error("Error in /api/glassfactory: %s", traceback.format_exc())
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/quantstats', methods=['POST'])
 def algo_scope():
     """
-    Calls algo() function from the system to obtain portfolio-level positions
-    and provide processed data to front-end.
+    Calls system_lmao() to obtain portfolio-level positions and provide processed data to front-end.
     
     Returns
     -------
@@ -49,91 +53,85 @@ def algo_scope():
         Jsonified dictionary of processed data filtered by the selected category.
     """
     try:
-        # Read the JSON payload from the request.
         req_data = request.get_json()
-        # The 'category' parameter should be passed from the client (defaulting to 'portfolio')
+        # Get category (default "portfolio")
         category = req_data.get("category", "portfolio")
+        # Get the date range filter as [start, end] timestamps (milliseconds)
+        date_range = req_data.get("dateRange", None)
         print("Selected category:", category)
 
         strategy_name = "Mean Reversion"
-        benchmark_name = "SPY"
+        benchmark_name = "Index"
 
-        # Determine the base directory (assumes this file is one level down from the project root)
-        #base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-        #print("Base directory:", base_dir)
+        # Get the grouped dataframes from system_lmao
+        strategy_groups = system_lmao()
 
-        # Discover the decorated functions from the project.
-        #func = discover_decorated_functions(base_dir)
-        # Execute the function to get the strategy data
-        strategy = system_lmao()
-        
-
-        # Filter the strategy data based on the selected category.
+        # Extract the appropriate series based on category.
         if category == "portfolio":
-            portfolio_df = strategy.get("portfolio")
-            if portfolio_df is None or "portfolio" not in portfolio_df.columns:
-                raise ValueError("Portfolio data not found.")
-            # Extract only the 'portfolio' column (as a 1D Series)
-            strategy_filtered = portfolio_df["portfolio"]
+            strategy_filtered = strategy_groups.get("portfolio")
         else:
-            # For categories like 'futures', 'stocks', or 'options'
-            strategy_filtered = strategy.get("group_dataframes", {}).get(category)
-        
+            group_df = strategy_groups.get(category)
+            if group_df is None:
+                raise ValueError(f"No data available for category '{category}'.")
+            # Pivot to get a series of average closes.
+            pivot = group_df.pivot_table(values='close', index=group_df.index, columns='symbol')
+            strategy_filtered = pivot.mean(axis=1).squeeze()
+
         if strategy_filtered is None:
             raise ValueError(f"No data available for category '{category}'.")
 
-        print(strategy_filtered)
+        # ----- Apply date range filtering BEFORE processing -----
+        # Apply date range filtering BEFORE processing
+        if date_range and isinstance(date_range, list) and len(date_range) == 2:
+            start = pd.to_datetime(date_range[0], unit='ms')
+            end = pd.to_datetime(date_range[1], unit='ms')
+            # Filter the raw strategy data
+            strategy_filtered = strategy_filtered.loc[(strategy_filtered.index >= start) & (strategy_filtered.index <= end)]
 
-        strategy = strategy_filtered
-        # Return as JSON. Convert the Series to a dictionary
 
+        # Process the strategy series: convert to numeric, drop NAs, and compute percentage change.
+        strategy_processed = pd.to_numeric(strategy_filtered, errors='coerce')
+        strategy_processed = strategy_processed.dropna().pct_change().dropna()
+
+        # ----- Load benchmark data -----
         sg_trend_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), 'SG Trend Index.xlsx'))
-
-        # Load and inspect the benchmark data
         benchmark = pd.read_excel(sg_trend_dir, skiprows=6)
-
-        # Clean up column names
         benchmark.columns = [col.strip() for col in benchmark.columns]
-        
-        # Rename
-        benchmark.rename(columns={'PX_LAST': 'close'}, inplace=True)
-        benchmark.rename(columns={'date': 'Date'}, inplace=True)
-        #print("Benchmark columns:", benchmark.columns)
-
-        # Now set 'Date' as the index
+        benchmark.rename(columns={'PX_LAST': 'close', 'date': 'Date'}, inplace=True)
         benchmark['Date'] = pd.to_datetime(benchmark['Date'])
         benchmark.set_index('Date', inplace=True)
-        benchmark = benchmark.squeeze()  # Convert to Series if possible
+        benchmark = benchmark.squeeze()
 
-        strategy = strategy.sort_index(ascending=True)
+        # ----- Apply date range filtering to benchmark as well -----
+        if date_range and isinstance(date_range, list) and len(date_range) == 2:
+            # Reuse start and end defined above
+            benchmark = benchmark.loc[(benchmark.index >= start) & (benchmark.index <= end)]
+
+        # Ensure both series are sorted.
+        strategy_processed = strategy_processed.sort_index(ascending=True)
         benchmark = benchmark.sort_index(ascending=True)
 
-        # Align both series on their common dates
-        common_dates = strategy.index.intersection(benchmark.index)
-        strategy = strategy.loc[common_dates]
+        # Align both series on their common dates.
+        common_dates = strategy_processed.index.intersection(benchmark.index)
+        strategy_processed = strategy_processed.loc[common_dates]
         benchmark = benchmark.loc[common_dates]
 
-        # Now call quant_stats with the aligned close data
-        results = quant_stats(strategy_name, strategy, benchmark_name, benchmark)
-
+        # Run quant_stats calculations.
+        results = quant_stats(strategy_name, strategy_processed, benchmark_name, benchmark)
         results = replace_infinity_with_neg_one(results)
         results = replace_nan_and_inf(results)
 
-        #print(results)
-
         return jsonify(results), 200
-    
+
     except ImportError as e:
         print(f"Error importing user function: {e}")
-        return {"error": "Failed to load user function"}, 500
+        return jsonify({"error": "Failed to load user function"}), 500
     except Exception as e:
-        error_message = {"error": str(e)}
-        print("Error in /api/quantstats:", error_message)
-        return jsonify(error_message), 500
+        logging.error("Error in /api/quantstats: %s", traceback.format_exc())
+        return jsonify({"error": str(e)}), 500
 
 if __name__ == "__main__":
     try:
         app.run(debug=True, use_reloader=False)
-
     except KeyboardInterrupt:
         print("\nShutting down server.")
