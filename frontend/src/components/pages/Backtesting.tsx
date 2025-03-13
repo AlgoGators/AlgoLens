@@ -173,7 +173,7 @@ export default function Backtesting() {
           borderColor: color,
           backgroundColor: color,
           borderWidth: 2,
-          tension: 0.4,
+          tension: 0,
           pointRadius: 0,
         },
       ],

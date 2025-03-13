@@ -1,7 +1,7 @@
 from data_access import DataAccess
 import pandas as pd
 
-def system_lmao():
+def system():
     data = DataAccess()
 
     # Define the symbols by group.
