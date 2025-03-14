@@ -64,14 +64,14 @@ cd AlgoLens
 pip install -r requirements.txt
 ```
 
-3. Start the flask server from inside the AlgoLens/backend/ file:
+3. Start the flask server from inside the AlgoLens/backend/ file:  
 Mac
 ```bash
 cd backend
 python3 app.py
 ```
 
-Mac
+Windows
 ```bash
 cd backend
 python app.py
