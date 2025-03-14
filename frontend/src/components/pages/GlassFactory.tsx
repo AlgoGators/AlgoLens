@@ -4,10 +4,11 @@ import { useState, useEffect } from "react";
 import { Menubar, MenubarMenu, MenubarTrigger } from "@/components/ui/menubar";
 import Link from "next/link";
 import Image from "next/image";
-import Chart from "../Chart";
-import CodeMirror from '@uiw/react-codemirror';
-import { python } from '@codemirror/lang-python';
-import { vscodeDark } from '@uiw/codemirror-theme-vscode';
+import CodeEditor from "@/components/glassfactory/CodeEditor";
+import ChartDisplay from "@/components/glassfactory/ChartDisplay";
+import DebugPanel from "@/components/glassfactory/DebugPanel";
+import SavedChartsList from "@/components/glassfactory/SavedChartsList";
+import ServerMetricsList from "@/components/glassfactory/ServerMetricsList";
 
 // Example code template
 const EXAMPLE_CODE = `# Available modules and functions:
@@ -51,10 +52,6 @@ print(f"Created chart with {len(dates)} data points")
 print(f"Date range: {dates[0]} to {dates[-1]}")
 `;
 
-// Allowed imports and functions - used for validation
-const ALLOWED_IMPORTS = ['pandas', 'numpy', 'pd', 'np'];
-const ALLOWED_FUNCTIONS = ['system', 'quant_stats'];
-
 export default function GlassFactory() {
   const [pythonCode, setPythonCode] = useState(EXAMPLE_CODE);
   const [response, setResponse] = useState("");
@@ -65,61 +62,82 @@ export default function GlassFactory() {
   const [savedCharts, setSavedCharts] = useState([]);
   const [errorMessage, setErrorMessage] = useState("");
   const [codeErrors, setCodeErrors] = useState([]);
+  const [description, setDescription] = useState("");
+  const [serverMetrics, setServerMetrics] = useState([]);
+  const [isLoading, setIsLoading] = useState(false);
 
-  // Load saved charts on component mount
+  // Load saved charts on component mount and fetch server metrics
   useEffect(() => {
+    loadSavedChartsFromStorage();
+    fetchServerMetrics();
+  }, []);
+
+  const loadSavedChartsFromStorage = () => {
     const storedCharts = localStorage.getItem("glassfactory_charts");
     if (storedCharts) {
       try {
-        setSavedCharts(JSON.parse(storedCharts));
+        const charts = JSON.parse(storedCharts);
+        setSavedCharts(charts);
+        addDebugMessage("Info", `Loaded ${charts.length} saved charts from localStorage`);
+        
+        // If there are saved charts, load the most recent one
+        if (charts.length > 0) {
+          const mostRecent = charts[charts.length - 1];
+          setPythonCode(mostRecent.code);
+          setChartData(mostRecent.data);
+          setChartTitle(mostRecent.title);
+          setDescription(mostRecent.description || "");
+          addDebugMessage("Info", `Automatically loaded most recent chart: ${mostRecent.title}`);
+          
+          // Check if this chart has a server filepath
+          if (mostRecent.filepath) {
+            addDebugMessage("Info", `This chart is also saved on server at: ${mostRecent.filepath}`);
+          }
+        }
       } catch (e) {
         addDebugMessage("Error", `Failed to load saved charts: ${e.message}`);
       }
+    } else {
+      addDebugMessage("Info", "No saved charts found in localStorage");
     }
-  }, []);
+  };
 
-  // Validate code for security issues
-  useEffect(() => {
-    validateCode(pythonCode);
-  }, [pythonCode]);
+  const fetchServerMetrics = async () => {
+    try {
+      setIsLoading(true);
+      const response = await fetch("http://localhost:5000/api/custom-metrics");
+      const metrics = await response.json();
+      setServerMetrics(metrics);
+      addDebugMessage("Info", `Found ${metrics.length} custom metrics on server`);
+      
+      // Cross-reference with local storage
+      verifyLocalAndServerMetrics(metrics);
+    } catch (err) {
+      addDebugMessage("Error", `Failed to fetch server metrics: ${err.message}`);
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
-  const validateCode = (code) => {
-    const errors = [];
-    
-    // Check for unauthorized imports
-    const importRegex = /^\s*import\s+([^\s]+)|^\s*from\s+([^\s]+)\s+import/gm;
-    let match;
-    while ((match = importRegex.exec(code)) !== null) {
-      const importName = match[1] || match[2];
-      if (!ALLOWED_IMPORTS.includes(importName)) {
-        errors.push({
-          line: code.substring(0, match.index).split('\n').length - 1,
-          message: `Unauthorized import: ${importName}. Only pandas and numpy are allowed.`,
-          severity: 'error'
-        });
+  const verifyLocalAndServerMetrics = (metrics) => {
+    const storedCharts = localStorage.getItem("glassfactory_charts");
+    if (storedCharts) {
+      const localCharts = JSON.parse(storedCharts);
+      const serverFilenames = metrics.map(m => m.filename);
+      const localChartFilenames = localCharts
+        .filter(chart => chart.filepath)
+        .map(chart => chart.filepath.split('/').pop());
+      
+      const missingFiles = localChartFilenames.filter(filename => 
+        !serverFilenames.includes(filename)
+      );
+      
+      if (missingFiles.length > 0) {
+        addDebugMessage("Warning", `${missingFiles.length} charts are missing on server but exist locally`);
+      } else if (localChartFilenames.length > 0) {
+        addDebugMessage("Success", "All local charts are properly saved on server");
       }
     }
-    
-    // Check for potentially dangerous functions
-    const dangerousFunctions = [
-      'eval', 'exec', 'compile', 'open', 'file', '__import__', 
-      'globals', 'locals', 'getattr', 'setattr', 'delattr', 
-      'os', 'sys', 'subprocess', 'shutil'
-    ];
-    
-    dangerousFunctions.forEach(func => {
-      const funcRegex = new RegExp(`\\b${func}\\s*\\(`, 'g');
-      let funcMatch;
-      while ((funcMatch = funcRegex.exec(code)) !== null) {
-        errors.push({
-          line: code.substring(0, funcMatch.index).split('\n').length - 1,
-          message: `Unauthorized function: ${func}() is not allowed for security reasons.`,
-          severity: 'error'
-        });
-      }
-    });
-    
-    setCodeErrors(errors);
   };
 
   const addDebugMessage = (type, message) => {
@@ -141,7 +159,6 @@ export default function GlassFactory() {
     setResponse("");
     setChartData(null);
     setErrorMessage("");
-    setDebugOutput([]);
     
     addDebugMessage("Info", "Executing code...");
     
@@ -181,7 +198,7 @@ export default function GlassFactory() {
     }
   };
 
-  const saveChart = () => {
+  const saveChart = async () => {
     if (!chartData) {
       setErrorMessage("No valid chart data to save");
       addDebugMessage("Error", "No valid chart data to save");
@@ -192,31 +209,118 @@ export default function GlassFactory() {
       title: chartTitle,
       code: pythonCode,
       data: chartData,
+      description: description,
       createdAt: new Date().toISOString()
     };
 
-    const updatedCharts = [...savedCharts, newChart];
-    setSavedCharts(updatedCharts);
-    localStorage.setItem("glassfactory_charts", JSON.stringify(updatedCharts));
-    addDebugMessage("Success", `Chart "${chartTitle}" saved successfully`);
-    setErrorMessage("");
+    try {
+      // Save to server
+      const res = await fetch("http://localhost:5000/api/custom-metrics", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          name: chartTitle,
+          description: description,
+          code: pythonCode
+        }),
+      });
+      
+      const data = await res.json();
+      
+      if (data.success) {
+        // Update local storage with server filepath
+        newChart.filepath = data.filepath;
+        
+        const updatedCharts = [...savedCharts, newChart];
+        setSavedCharts(updatedCharts);
+        localStorage.setItem("glassfactory_charts", JSON.stringify(updatedCharts));
+        
+        addDebugMessage("Success", `Chart "${chartTitle}" saved successfully to server at ${data.filepath}`);
+        setErrorMessage("");
+        
+        // Refresh server metrics list
+        fetchServerMetrics();
+      } else {
+        throw new Error(data.error || "Failed to save to server");
+      }
+    } catch (err) {
+      addDebugMessage("Warning", `Saved locally but failed to save to server: ${err.message}`);
+      
+      // Still save locally even if server save fails
+      const updatedCharts = [...savedCharts, newChart];
+      setSavedCharts(updatedCharts);
+      localStorage.setItem("glassfactory_charts", JSON.stringify(updatedCharts));
+    }
   };
 
   const loadChart = (chart) => {
     setPythonCode(chart.code);
     setChartData(chart.data);
     setChartTitle(chart.title);
+    setDescription(chart.description || "");
     addDebugMessage("Info", `Loaded chart: ${chart.title}`);
   };
 
-  const deleteChart = (index, e) => {
+  const deleteChart = async (index, e) => {
     e.stopPropagation();
     const chartToDelete = savedCharts[index];
+    
+    // If chart has a filepath, try to delete from server
+    if (chartToDelete.filepath) {
+      try {
+        const filename = chartToDelete.filepath.split('/').pop();
+        const res = await fetch(`http://localhost:5000/api/custom-metrics/${filename}`, {
+          method: "DELETE",
+        });
+        
+        if (res.ok) {
+          addDebugMessage("Success", `Deleted chart from server: ${chartToDelete.title}`);
+          // Refresh server metrics list
+          fetchServerMetrics();
+        } else {
+          addDebugMessage("Warning", `Failed to delete from server, but will remove from local storage`);
+        }
+      } catch (err) {
+        addDebugMessage("Warning", `Error deleting from server: ${err.message}`);
+      }
+    }
+    
+    // Remove from local storage regardless of server result
     const updatedCharts = [...savedCharts];
     updatedCharts.splice(index, 1);
     setSavedCharts(updatedCharts);
     localStorage.setItem("glassfactory_charts", JSON.stringify(updatedCharts));
-    addDebugMessage("Info", `Deleted chart: ${chartToDelete.title}`);
+    addDebugMessage("Info", `Deleted chart from local storage: ${chartToDelete.title}`);
+  };
+
+  const loadServerMetric = async (filename) => {
+    try {
+      const res = await fetch(`http://localhost:5000/api/custom-metrics/${filename}`);
+      const data = await res.json();
+      
+      if (data.code) {
+        setPythonCode(data.code);
+        setChartTitle(filename.replace('.py', ''));
+        addDebugMessage("Info", `Loaded code from server: ${filename}`);
+        
+        // Try to extract description from code comments
+        const descriptionMatch = data.code.match(/# Description: (.*)/);
+        if (descriptionMatch && descriptionMatch[1]) {
+          setDescription(descriptionMatch[1]);
+        } else {
+          setDescription("");
+        }
+        
+        // Run the code automatically
+        handleSubmit(new Event('submit'));
+      } else {
+        addDebugMessage("Error", `Failed to load code: ${data.error || "Unknown error"}`);
+      }
+    } catch (err) {
+      addDebugMessage("Error", `Error loading metric from server: ${err.message}`);
+    }
   };
 
   return (
@@ -238,208 +342,55 @@ export default function GlassFactory() {
           <span className="text-3xl font-bold">Glass Factory</span>
         </MenubarMenu>
       </Menubar>
-
+      
       {/* Main Content */}
       <div className="flex flex-grow">
         {/* Left Pane: Python Code Editor and Saved Charts */}
         <div className="w-1/2 p-4 border-r border-gray-300 flex flex-col">
           <h1 className="text-2xl font-bold mb-4">Python Code</h1>
-          <form onSubmit={handleSubmit} className="flex flex-col flex-grow">
-            <div className="flex-grow relative">
-              <CodeMirror
-                value={pythonCode}
-                height="100%"
-                theme={vscodeDark}
-                extensions={[python()]}
-                onChange={(value) => setPythonCode(value)}
-                className="border border-gray-300 rounded"
-              />
-              {codeErrors.length > 0 && (
-                <div className="absolute top-2 right-2 bg-red-100 border border-red-300 text-red-700 px-2 py-1 rounded text-xs">
-                  {codeErrors.length} security {codeErrors.length === 1 ? 'error' : 'errors'}
-                </div>
-              )}
-            </div>
-            <div className="mt-4 flex space-x-4">
-              <button
-                type="submit"
-                className={`px-4 py-2 text-white rounded ${codeErrors.length > 0 ? 'bg-red-600' : 'bg-blue-600'}`}
-                disabled={isSubmitting || codeErrors.length > 0}
-              >
-                {isSubmitting ? "Running..." : codeErrors.length > 0 ? "Fix Errors to Run" : "Run Code"}
-              </button>
-              
-              {chartData && (
-                <div className="flex-1 flex space-x-2">
-                  <input
-                    type="text"
-                    placeholder="Chart title"
-                    className="flex-1 px-2 border border-gray-300 rounded"
-                    value={chartTitle}
-                    onChange={(e) => setChartTitle(e.target.value)}
-                  />
-                  <button
-                    type="button"
-                    onClick={saveChart}
-                    className="px-4 py-2 bg-green-600 text-white rounded"
-                  >
-                    Save Chart
-                  </button>
-                </div>
-              )}
-            </div>
-          </form>
           
-          {/* Saved Charts Section */}
-          {savedCharts.length > 0 && (
-            <div className="mt-4">
-              <h2 className="text-xl font-bold mb-2">Saved Charts</h2>
-              <div className="border border-gray-300 rounded p-2 max-h-60 overflow-y-auto">
-                {savedCharts.map((chart, index) => (
-                  <div 
-                    key={index} 
-                    className="p-2 hover:bg-gray-100 cursor-pointer flex justify-between items-center border-b last:border-b-0"
-                  >
-                    <span 
-                      className="flex-1"
-                      onClick={() => loadChart(chart)}
-                    >
-                      {chart.title}
-                    </span>
-                    <div className="flex space-x-2">
-                      <span className="text-xs text-gray-500">
-                        {new Date(chart.createdAt).toLocaleDateString()}
-                      </span>
-                      <button 
-                        onClick={(e) => deleteChart(index, e)}
-                        className="text-red-500 text-xs"
-                      >
-                        Delete
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
+          <CodeEditor 
+            pythonCode={pythonCode}
+            setPythonCode={setPythonCode}
+            codeErrors={codeErrors}
+            setCodeErrors={setCodeErrors}
+            handleSubmit={handleSubmit}
+            isSubmitting={isSubmitting}
+            chartData={chartData}
+            chartTitle={chartTitle}
+            setChartTitle={setChartTitle}
+            description={description}
+            setDescription={setDescription}
+            saveChart={saveChart}
+          />
+          
+          <div className="mt-4 grid grid-cols-1 gap-4">
+            <SavedChartsList 
+              savedCharts={savedCharts}
+              loadChart={loadChart}
+              deleteChart={deleteChart}
+            />
+            
+            <ServerMetricsList 
+              serverMetrics={serverMetrics}
+              isLoading={isLoading}
+              loadServerMetric={loadServerMetric}
+            />
+          </div>
         </div>
         
-        {/* Right Pane: Output, Chart Preview, and Debug Console */}
+        {/* Right Pane: Chart Display and Debug Output */}
         <div className="w-1/2 p-4 flex flex-col">
-          {errorMessage && (
-            <div className="mb-4 p-2 bg-red-100 border border-red-300 text-red-700 rounded">
-              {errorMessage}
-            </div>
-          )}
+          <ChartDisplay 
+            chartData={chartData}
+            chartTitle={chartTitle}
+            errorMessage={errorMessage}
+          />
           
-          {codeErrors.length > 0 && (
-            <div className="mb-4">
-              <h2 className="text-xl font-bold mb-2 text-red-600">Security Errors</h2>
-              <div className="border border-red-300 rounded bg-red-50 p-2 max-h-40 overflow-y-auto">
-                {codeErrors.map((error, index) => (
-                  <div key={index} className="mb-1 text-red-700">
-                    <strong>Line {error.line + 1}:</strong> {error.message}
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-          
-          {chartData ? (
-            <div className="flex-grow flex flex-col">
-              <h1 className="text-2xl font-bold mb-4">Chart Preview</h1>
-              <div className="flex-grow border border-gray-300 rounded p-4">
-                <Chart 
-                  data={chartData}
-                  title={chartTitle}
-                />
-              </div>
-              
-              {/* Debug Console below chart */}
-              <div className="mt-4">
-                <h2 className="text-xl font-bold mb-2">Debug Console</h2>
-                <div className="border border-gray-300 rounded bg-gray-100 p-2 h-40 overflow-y-auto font-mono text-sm">
-                  {debugOutput.map((item, index) => (
-                    <div key={index} className={`mb-1 ${
-                      item.type === 'Error' ? 'text-red-600' : 
-                      item.type === 'Warning' ? 'text-amber-600' : 
-                      item.type === 'Success' ? 'text-green-600' : 
-                      'text-gray-800'
-                    }`}>
-                      <span className="text-gray-500">[{item.timestamp}]</span> <strong>{item.type}:</strong> {item.message}
-                    </div>
-                  ))}
-                  {debugOutput.length === 0 && (
-                    <div className="text-gray-500 italic">No output yet. Run your code to see results here.</div>
-                  )}
-                </div>
-              </div>
-            </div>
-          ) : (
-            <div className="flex-grow flex flex-col">
-              <h1 className="text-2xl font-bold mb-4">Console Output</h1>
-              <div className="flex-grow p-2 border border-gray-300 rounded bg-gray-100 overflow-auto whitespace-pre-wrap font-mono">
-                {response || "No output yet. Run your code to see results here."}
-              </div>
-              
-              {/* Debug Console */}
-              <div className="mt-4">
-                <h2 className="text-xl font-bold mb-2">Debug Console</h2>
-                <div className="border border-gray-300 rounded bg-gray-100 p-2 h-40 overflow-y-auto font-mono text-sm">
-                  {debugOutput.map((item, index) => (
-                    <div key={index} className={`mb-1 ${
-                      item.type === 'Error' ? 'text-red-600' : 
-                      item.type === 'Warning' ? 'text-amber-600' : 
-                      item.type === 'Success' ? 'text-green-600' : 
-                      'text-gray-800'
-                    }`}>
-                      <span className="text-gray-500">[{item.timestamp}]</span> <strong>{item.type}:</strong> {item.message}
-                    </div>
-                  ))}
-                  {debugOutput.length === 0 && (
-                    <div className="text-gray-500 italic">No output yet. Run your code to see results here.</div>
-                  )}
-                </div>
-              </div>
-              
-              {/* Available Resources Section */}
-              <div className="mt-4">
-                <h2 className="text-xl font-bold mb-2">Available Resources</h2>
-                <div className="border border-gray-300 rounded bg-gray-50 p-3">
-                  <h3 className="font-bold mb-1">Modules:</h3>
-                  <ul className="list-disc pl-5 mb-2">
-                    <li>pandas (as pd)</li>
-                    <li>numpy (as np)</li>
-                  </ul>
-                  
-                  <h3 className="font-bold mb-1">Functions:</h3>
-                  <ul className="list-disc pl-5 mb-2">
-                    <li><code className="bg-gray-200 px-1 rounded">system()</code> - Returns strategy groups data</li>
-                    <li><code className="bg-gray-200 px-1 rounded">quant_stats(strategy_name, strategy_data, benchmark_name, benchmark_data)</code> - Calculate quantitative statistics</li>
-                  </ul>
-                  
-                  <h3 className="font-bold mb-1">Required Output:</h3>
-                  <p>To create a chart, define a <code className="bg-gray-200 px-1 rounded">chart_data</code> variable with the following structure:</p>
-                  <pre className="bg-gray-200 p-2 rounded text-xs mt-1">
-{`chart_data = {
-    "labels": ["2023-01-01", "2023-01-02", ...],  # Date labels
-    "datasets": [
-        {
-            "label": "My Chart Title",
-            "data": [1.2, 1.3, ...],              # Values to plot
-            "borderColor": "#ff5c00",             # Line color
-            "backgroundColor": "#ff5c00",         # Fill color
-            "borderWidth": 2,
-            "tension": 0.4,
-            "pointRadius": 0,
-        }
-    ]
-}`}
-                  </pre>
-                </div>
-              </div>
-            </div>
-          )}
+          <DebugPanel 
+            response={response}
+            debugOutput={debugOutput}
+          />
         </div>
       </div>
     </div>
