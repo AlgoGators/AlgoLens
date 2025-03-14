@@ -36,6 +36,33 @@ export default function Backtesting() {
   const [maxDate, setMaxDate] = useState<number>(0);
   // Add a key to force chart re-renders
   const [chartKey, setChartKey] = useState(0);
+  
+  const [_availableCustomMetrics, setAvailableCustomMetrics] = useState<Array<{
+    filename: string;
+    name: string;
+    description: string;
+    created_at: string;
+  }>>([]);
+  const [selectedCustomMetrics, setSelectedCustomMetrics] = useState<string[]>([]);
+
+  // Add this to your component
+  useEffect(() => {
+    async function fetchCustomMetrics() {
+      try {
+        const response = await fetch("http://localhost:5000/api/custom-metrics");
+        if (response.ok) {
+          const metrics = await response.json();
+          setAvailableCustomMetrics(metrics);
+        }
+      } catch (error) {
+        console.error("Failed to fetch custom metrics", error);
+      }
+    }
+    
+    fetchCustomMetrics();
+  }, []);
+
+
 
   // On mount, load stored preferences and dateRange from localStorage.
   useEffect(() => {
@@ -66,13 +93,16 @@ export default function Backtesting() {
     setIsFetching(true);
     try {
       console.log("Fetching with date range:", range);
+      console.log("Selected custom metrics:", selectedCustomMetrics);
+      
       const response = await fetch("http://localhost:5000/api/quantstats", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
           preferences: prefs, 
           category: category, 
-          dateRange: range 
+          dateRange: range,
+          customMetrics: selectedCustomMetrics
         }),
       });
   
@@ -92,7 +122,8 @@ export default function Backtesting() {
     } finally {
       setIsFetching(false);
     }
-  }, [preferences, selectedCategory, dateRange]);
+  }, [preferences, selectedCategory, dateRange, selectedCustomMetrics]); // Add selectedCustomMetrics to dependency array
+  
   
   // Do an initial fetch on mount.
   useEffect(() => {
@@ -152,6 +183,7 @@ export default function Backtesting() {
     await fetchMetrics(preferences, newCategory, dateRange);
   };
 
+
   // Helper: parse chart data.
   const parseChartData = (data: any, label: string, color: string) => {
     if (!data) return { labels: [], datasets: [] };
@@ -187,6 +219,8 @@ export default function Backtesting() {
   if (!metrics) {
     return <div className="text-center text-gray-500">No metrics available.</div>;
   }
+  console.log("these are the metrics");
+  console.log(metrics.charts);
 
   return (
     <div className="relative">
@@ -224,6 +258,8 @@ export default function Backtesting() {
         maxDate={maxDate}
         dateRange={dateRange}
         setDateRange={setDateRange}
+        selectedCustomMetrics={selectedCustomMetrics}
+        setSelectedCustomMetrics={setSelectedCustomMetrics}
       />
 
       <div className="flex justify-center space-x-4 pt-4">
@@ -328,10 +364,39 @@ export default function Backtesting() {
             <Chart
               data={parseChartData(metrics.rolling_sortino, "Rolling Sortino", "#ff5c00")}
               title="Rolling Sortino"
+              key={`rsortino-${chartKey}`}
             />
           )}
         </div>
 
+        {/* Custom Charts Section */}
+        {metrics?.charts && Object.keys(metrics.charts).length > 0 && (
+        <div className="mt-6">
+          <h2 className="text-xl font-bold mb-4">Custom Metrics</h2>
+          <div className="grid grid-cols-2 gap-6">
+            {Object.entries(metrics.charts).map(([chartName, chartData]) => {
+              // Skip rendering charts with error objects
+              if (chartData && typeof chartData === 'object' && 'error' in chartData) {
+                return (
+                  <div key={`error-${chartName}-${chartKey}`} className="bg-red-50 p-4 rounded-md">
+                    <h3 className="text-lg font-semibold text-red-700">{chartName} - Error</h3>
+                    <p className="text-red-600">{chartData.error}</p>
+                  </div>
+                );
+              }
+              
+              return (
+                <Chart
+                  key={`custom-${chartName}-${chartKey}`}
+                  data={chartData}
+                  title={chartName}
+                />
+              );
+            })}
+          </div>
+        </div>
+      )}
+        
         {preferences.metrics && (
           <div className="mt-6 bg-white shadow rounded-lg p-6">
             <Metrics metrics={metrics} />
