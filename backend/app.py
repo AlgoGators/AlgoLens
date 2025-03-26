@@ -2,11 +2,13 @@ from flask import Flask, jsonify, request
 from flask_cors import CORS
 import pandas as pd
 import os
+import csv
 import warnings
 import logging
 
 from system import system
 from quant import quant_stats
+from data_access import DataAccess
 from data_munging import replace_nan_and_inf, replace_infinity_with_neg_one
 from glass_factory import (save_code_to_file, 
                            import_custom_metric,
@@ -40,6 +42,73 @@ CORS(app)
 CUSTOM_CODE_DIR = os.path.join(os.getcwd(), "custom_metrics")
 os.makedirs(CUSTOM_CODE_DIR, exist_ok=True)
 logger.info(f"Custom metrics directory: {CUSTOM_CODE_DIR}")
+
+@app.route("/metadata", methods=["GET"])
+def write_metadata():
+    # Query contract metadata from the database using the DataAccess layer
+    data = DataAccess()
+    metadata_list = data.get_contract_metadata()
+    
+    app.logger.info(f"Fetched {len(metadata_list)} metadata records.")
+    
+    # Mapping of model property names to CSV header names
+    header_mapping = [
+        ("databento_symbol", "Databento Symbol"),
+        ("ib_symbol", "IB Symbol"),
+        ("name", "Name"),
+        ("exchange", "Exchange"),
+        ("intraday_initial_margin", "Intraday Initial Margin"),
+        ("intraday_maintenance_margin", "Intraday Maintenance Margin"),
+        ("overnight_initial_margin", "Overnight Initial Margin"),
+        ("overnight_maintenance_margin", "Overnight Maintenance Margin"),
+        ("asset_type", "Asset Type"),
+        ("sector", "Sector"),
+        ("contract_size", "Contract Size"),
+        ("units", "Units"),
+        ("minimum_price_fluctuation", "Minimum Price Fluctuation"),
+        ("tick_size", "Tick Size"),
+        ("settlement_type", "Settlement Type"),
+        ("trading_hours", "Trading Hours (EST)"),
+        ("data_provider", "Data Provider"),
+        ("dataset", "Dataset"),
+        ("newest_month_additions", "Newest Month Additions"),
+        ("contract_months", "Contract Months"),
+        ("time_of_expiry", "Time of Expiry")
+    ]
+    
+    # Extract CSV header names
+    csv_headers = [header for _, header in header_mapping]
+    
+    # Determine the project root directory.
+    # Since app.py is in root/backend/app.py, the project root is one directory up.
+    backend_dir = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.dirname(backend_dir)
+    
+    # Build the target folder path for frontend/public
+    target_folder = os.path.join(project_root, "frontend", "public")
+    os.makedirs(target_folder, exist_ok=True)
+    file_path = os.path.join(target_folder, "metadata.csv")
+    
+    app.logger.info(f"Writing CSV to: {file_path}")
+    
+    # Write metadata into metadata.csv (leaving the base CSV unchanged)
+    try:
+        with open(file_path, "w", newline="", encoding="utf-8") as csvfile:
+            writer = csv.DictWriter(csvfile, fieldnames=csv_headers)
+            writer.writeheader()
+            for record in metadata_list:
+                # Map the record's keys (from the model) to CSV header names
+                csv_row = {csv_header: record.get(model_field, "") for model_field, csv_header in header_mapping}
+                writer.writerow(csv_row)
+        if os.path.exists(file_path):
+            app.logger.info("CSV file written successfully.")
+        else:
+            app.logger.error("CSV file was not written!")
+    except Exception as e:
+        app.logger.error(f"Error writing CSV: {e}")
+    
+    # Return the absolute file path in the response for debugging
+    return jsonify({"status": "CSV written successfully", "file": file_path})
 
 @app.route('/api/custom-metrics/<filename>', methods=['GET'])
 def get_custom_metric(filename):

@@ -35,9 +35,9 @@ export default function Metrics({ metrics }: { metrics: any }) {
       "rolling_sortino",
       "rolling_volatility",
       "implied_volatility",
-      "SPY_cumulative",
+      "Index_cumulative",
       "distribution",
-      "percentage_change_vs_SPY",
+      "percentage_change_vs_Index",
       "stock_price",
       "greeks", // for now
     ];
