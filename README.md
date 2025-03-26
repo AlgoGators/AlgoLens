@@ -2,7 +2,7 @@
 
 A web application for displaying algorithmic trading portfolio information and metrics.
 
-For backtesters:
+For backtesters:  
     AlgoLens reads the most recent backtesting entries from the database. These backtesting results are pulled to provide metrics and charts as performance metrics. You may customize additional metrics and charts yourself if you wish and request for them to be manually added.
 
 ## Prerequisites
@@ -30,9 +30,10 @@ GlassFactory:
         - ✔️ Set up IDE with error warnings
         - ✔️ Access to a basic terminal for outputs
     - ✔️ User can manipulate data
-    - ✔️ User can make and see charts/metrics
-    - User can save code
-    - User can use saved code as an additional feature for portfolio/backtesting
+    - ✔️ User can make and see charts/metrics when creating them
+    - ✔️ User can save code
+    - ✔️ User can use saved code as an additional feature for portfolio/backtesting
+    - User can see customized charts displayed
     - User can request for their code to be implemented
 
 ## Getting Started
@@ -63,14 +64,14 @@ cd AlgoLens
 pip install -r requirements.txt
 ```
 
-3. Start the flask server from inside the AlgoLens/backend/ file:
+3. Start the flask server from inside the AlgoLens/backend/ file:  
 Mac
 ```bash
 cd backend
 python3 app.py
 ```
 
-Mac
+Windows
 ```bash
 cd backend
 python app.py
