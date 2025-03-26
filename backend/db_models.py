@@ -34,6 +34,31 @@ class OHLCV(Base):
     close: Column = Column(Float, nullable=False)
     volume: Column = Column(Integer, nullable=False)
 
+class ContractMetadata(Base):
+    __tablename__ = "contract_metadata"
+    __table_args__ = {"schema": "metadata"}
+
+    databento_symbol = Column("Databento Symbol", String, primary_key=True, nullable=False)
+    ib_symbol = Column("IB Symbol", String, nullable=False)
+    name = Column("Name", String, nullable=False)
+    exchange = Column("Exchange", String, nullable=False)
+    intraday_initial_margin = Column("Intraday Initial Margin", String, nullable=False)
+    intraday_maintenance_margin = Column("Intraday Maintenance Margin", String, nullable=False)
+    overnight_initial_margin = Column("Overnight Initial Margin", String, nullable=False)
+    overnight_maintenance_margin = Column("Overnight Maintenance Margin", String, nullable=False)
+    asset_type = Column("Asset Type", String, nullable=False)
+    sector = Column("Sector", String, nullable=False)
+    contract_size = Column("Contract Size", String, nullable=False)
+    units = Column("Units", String, nullable=False)
+    minimum_price_fluctuation = Column("Minimum Price Fluctuation", String, nullable=False)
+    tick_size = Column("Tick Size", String, nullable=False)
+    settlement_type = Column("Settlement Type", String, nullable=False)
+    trading_hours = Column("Trading Hours (EST)", String, nullable=False)
+    data_provider = Column("Data Provider", String, nullable=False)
+    dataset = Column("Dataset", String, nullable=False)
+    newest_month_additions = Column("Newest Month Additions", String, nullable=False)
+    contract_months = Column("Contract Months", String, nullable=False)
+    time_of_expiry = Column("Time of Expiry", String, nullable=False)
 
 def get_engine() -> Engine:
     """

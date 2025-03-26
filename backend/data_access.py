@@ -2,7 +2,7 @@ from typing import List, Dict, Optional, Any, Type, Tuple
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError
-from db_models import get_engine, OHLCV
+from db_models import get_engine, OHLCV, ContractMetadata
 import pandas as pd
 import logging
 
@@ -187,6 +187,26 @@ class DataAccess:
                 self.logger.error(f"Error deleting data: {e}")
                 raise
 
+    def get_contract_metadata(self, symbol: Optional[str] = None) -> List[Dict[str, Any]]:
+        """
+        Retrieves contract metadata from the metadata.contract_metadata table.
+
+        Args:
+            symbol (Optional[str]): If provided, filters by the given databento symbol.
+
+        Returns:
+            List[Dict[str, Any]]: A list of contract metadata records.
+        """
+        with self.Session() as session:
+            query = session.query(ContractMetadata)
+            if symbol:
+                query = query.filter(ContractMetadata.databento_symbol == symbol)
+            data = query.all()
+            result = [record.__dict__ for record in data]
+            for record in result:
+                record.pop("_sa_instance_state", None)
+            return result
+        
 if __name__ == "__main__":
     data = DataAccess()
 

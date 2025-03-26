@@ -17,6 +17,12 @@ export default function MenuPage() {
       >
         Backtesting
       </Link>
+      <Link
+        href="/metadata"
+        className="px-8 py-4 bg-green-500 text-white rounded-lg text-2xl font-bold"
+      >
+        Metadata
+      </Link>
     </div>
   );
 }
