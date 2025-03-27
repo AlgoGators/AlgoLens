@@ -47,6 +47,7 @@ git clone https://github.com/AlgoGators/AlgoLens.git
 2. Install python dependencies:
 
 Create a virtual environment if one has not already been created  
+
 Mac
 ```bash
 python3 -m venv venv
@@ -65,6 +66,7 @@ pip install -r requirements.txt
 ```
 
 3. Start the flask server from inside the AlgoLens/backend/ file:  
+
 Mac
 ```bash
 cd backend
