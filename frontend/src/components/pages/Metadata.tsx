@@ -2,6 +2,9 @@
 
 import React, { useEffect, useState } from "react";
 import Papa from "papaparse";
+import { Menubar, MenubarMenu, MenubarTrigger } from "@/components/ui/menubar";
+import Link from "next/link";
+import Image from "next/image";
 
 interface ContractMeta {
   "Databento Symbol": string;
@@ -72,8 +75,24 @@ const Metadata: React.FC = () => {
   );
 
   return (
-    <div className="p-4">
-      <h1 className="text-2xl font-bold mb-4">Contract Metadata</h1>
+    <div className="flex flex-col h-screen">
+      {/* Header */}
+      <Menubar className="h-20 px-4 bg-background shadow-sm">
+            <MenubarMenu className="flex items-center space-x-4">
+              <MenubarTrigger asChild>
+                <Link href="/">
+                  <Image
+                    src="/images/AlgoLogo.png"
+                    alt="AlgoLogo"
+                    width={60}
+                    height={60}
+                    loading="eager"
+                  />
+                </Link>
+              </MenubarTrigger>
+              <span className="text-3xl font-bold">Glass Factory</span>
+            </MenubarMenu>
+          </Menubar>
       <div className="mb-4">
         <input
           type="text"
