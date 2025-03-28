@@ -1,10 +1,13 @@
-from sqlalchemy import create_engine, Column, String, Float, Integer, DateTime
+from sqlalchemy import create_engine, Column, String, Float, Integer, DateTime, Enum as PgEnum
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.engine.base import Engine
 from sqlalchemy.orm.session import Session
+from sqlalchemy.sql import func
 from typing import Optional
 from dotenv import load_dotenv
+from werkzeug.security import generate_password_hash, check_password_hash
+from uuid import uuid4
 import os
 
 # Base class for SQLAlchemy models
@@ -116,3 +119,42 @@ def get_session(engine: Engine) -> Session:
     """
     SessionFactory = sessionmaker(bind=engine)
     return SessionFactory()
+
+class User(Base):
+    """
+    SQLAlchemy model representing users for authentication and account management.
+
+    Attributes:
+        id (int): Primary key, unique user identifier.
+        email (str): User's email address (unique).
+        password_hash (str): Hashed password for authentication.
+        created_at (datetime): Timestamp of account creation.
+        role (string): Role Based Access Control (public, general member, team lead, exec board)
+    """
+    __tablename__ = "users"
+    __table_args__ = {"schema": "auth"}
+
+    id = Column(Integer, primary_key=True, default = str(uuid4()))
+    email = Column(String(120), unique=True, nullable=False)
+    password_hash = Column(String(128), nullable=False)
+    created_at = Column(DateTime, server_default=func.now())
+    role = Column(
+        PgEnum(
+            'general_member',
+            'team_lead',
+            'exec_board',
+            name = 'user_role',
+            create_type = False
+        ),
+        nullable=False,
+        default='general_member'
+    )
+
+    def set_password(self, password: str):
+        self.password_hash = generate_password_hash(password)
+
+    def check_password(self, password: str) -> bool:
+        return check_password_hash(self.password_hash, password)
+    
+    def __repr__(self):
+        return f"<User {self.email}({self.role})"

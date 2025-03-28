@@ -8,3 +8,5 @@ sqlalchemy
 dotenv
 psycopg2-binary
 openpyxl
+
+flask-jwt-extended
