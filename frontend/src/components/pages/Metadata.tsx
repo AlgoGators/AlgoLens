@@ -40,7 +40,7 @@ const Metadata: React.FC = () => {
       try {
         // 1. Call the Flask endpoint to ensure the CSV file is written.
         // Adjust the URL as needed.
-        await fetch("http://localhost:5000/metadata");
+        await fetch("http://127.0.0.1:5000/metadata");
 
         // 2. After the CSV is written, fetch it from the public folder.
         const response = await fetch("/metadata.csv");

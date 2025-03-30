@@ -333,6 +333,7 @@ def algo_scope():
 
         # Get the grouped dataframes from system
         strategy_groups = system()
+        print(strategy_groups)
 
         # Extract the appropriate series based on category.
         if category == "portfolio":
