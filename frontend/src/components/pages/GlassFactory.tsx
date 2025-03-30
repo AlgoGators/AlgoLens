@@ -105,7 +105,7 @@ export default function GlassFactory() {
   const fetchServerMetrics = async () => {
     try {
       setIsLoading(true);
-      const response = await fetch("http://localhost:5000/api/custom-metrics");
+      const response = await fetch("http://127.0.0.1:5000/api/custom-metrics");
       const metrics = await response.json();
       setServerMetrics(metrics);
       addDebugMessage("Info", `Found ${metrics.length} custom metrics on server`);
@@ -163,7 +163,7 @@ export default function GlassFactory() {
     addDebugMessage("Info", "Executing code...");
     
     try {
-      const res = await fetch("http://localhost:5000/api/glassfactory", {
+      const res = await fetch("http://127.0.0.1:5000/api/glassfactory", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -215,7 +215,7 @@ export default function GlassFactory() {
 
     try {
       // Save to server
-      const res = await fetch("http://localhost:5000/api/custom-metrics", {
+      const res = await fetch("http://127.0.0.1:5000/api/custom-metrics", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -271,7 +271,7 @@ export default function GlassFactory() {
     if (chartToDelete.filepath) {
       try {
         const filename = chartToDelete.filepath.split('/').pop();
-        const res = await fetch(`http://localhost:5000/api/custom-metrics/${filename}`, {
+        const res = await fetch(`http://127.0.0.1:5000/api/custom-metrics/${filename}`, {
           method: "DELETE",
         });
         
@@ -297,7 +297,7 @@ export default function GlassFactory() {
 
   const loadServerMetric = async (filename) => {
     try {
-      const res = await fetch(`http://localhost:5000/api/custom-metrics/${filename}`);
+      const res = await fetch(`http://127.0.0.1:5000/api/custom-metrics/${filename}`);
       const data = await res.json();
       
       if (data.code) {

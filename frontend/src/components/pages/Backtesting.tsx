@@ -49,7 +49,7 @@ export default function Backtesting() {
   useEffect(() => {
     async function fetchCustomMetrics() {
       try {
-        const response = await fetch("http://localhost:5000/api/custom-metrics");
+        const response = await fetch("http://127.0.0.1:5000/api/custom-metrics");
         if (response.ok) {
           const metrics = await response.json();
           setAvailableCustomMetrics(metrics);
@@ -95,7 +95,7 @@ export default function Backtesting() {
       console.log("Fetching with date range:", range);
       console.log("Selected custom metrics:", selectedCustomMetrics);
       
-      const response = await fetch("http://localhost:5000/api/quantstats", {
+      const response = await fetch("http://127.0.0.1:5000/api/quantstats", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
