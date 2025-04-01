@@ -1,0 +1,23 @@
+version: '3.8'
+
+services:
+  backend:
+    image: dominickdupuy/algolens-backend:latest
+    ports:
+      - "5000:5000"
+    environment:
+      - DATABENTO_API_KEY=db-7MLnkmd4uLXbsy6MshdB9jRjivG8
+      - DB_HOST=3.140.200.228
+      - DB_PORT=5432
+      - DB_USER=postgres
+      - DB_PASSWORD=algogators
+      - DB_NAME=algo_data 
+    restart: unless-stopped
+
+  frontend:
+    image: dominickdupuy/algolens-frontend:latest
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    restart: unless-stopped
