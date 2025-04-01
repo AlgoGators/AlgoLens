@@ -78,8 +78,11 @@ export default function GlassFactory() {
       try {
         const charts = JSON.parse(storedCharts);
         setSavedCharts(charts);
-        addDebugMessage("Info", `Loaded ${charts.length} saved charts from localStorage`);
-        
+        addDebugMessage(
+          "Info",
+          `Loaded ${charts.length} saved charts from localStorage`
+        );
+
         // If there are saved charts, load the most recent one
         if (charts.length > 0) {
           const mostRecent = charts[charts.length - 1];
@@ -87,11 +90,17 @@ export default function GlassFactory() {
           setChartData(mostRecent.data);
           setChartTitle(mostRecent.title);
           setDescription(mostRecent.description || "");
-          addDebugMessage("Info", `Automatically loaded most recent chart: ${mostRecent.title}`);
-          
+          addDebugMessage(
+            "Info",
+            `Automatically loaded most recent chart: ${mostRecent.title}`
+          );
+
           // Check if this chart has a server filepath
           if (mostRecent.filepath) {
-            addDebugMessage("Info", `This chart is also saved on server at: ${mostRecent.filepath}`);
+            addDebugMessage(
+              "Info",
+              `This chart is also saved on server at: ${mostRecent.filepath}`
+            );
           }
         }
       } catch (e) {
@@ -105,15 +114,21 @@ export default function GlassFactory() {
   const fetchServerMetrics = async () => {
     try {
       setIsLoading(true);
-      const response = await fetch("http://localhost:5000/api/custom-metrics");
+      const response = await fetch("http://127.0.0.1:5000/api/custom-metrics");
       const metrics = await response.json();
       setServerMetrics(metrics);
-      addDebugMessage("Info", `Found ${metrics.length} custom metrics on server`);
-      
+      addDebugMessage(
+        "Info",
+        `Found ${metrics.length} custom metrics on server`
+      );
+
       // Cross-reference with local storage
       verifyLocalAndServerMetrics(metrics);
     } catch (err) {
-      addDebugMessage("Error", `Failed to fetch server metrics: ${err.message}`);
+      addDebugMessage(
+        "Error",
+        `Failed to fetch server metrics: ${err.message}`
+      );
     } finally {
       setIsLoading(false);
     }
@@ -123,56 +138,65 @@ export default function GlassFactory() {
     const storedCharts = localStorage.getItem("glassfactory_charts");
     if (storedCharts) {
       const localCharts = JSON.parse(storedCharts);
-      const serverFilenames = metrics.map(m => m.filename);
+      const serverFilenames = metrics.map((m) => m.filename);
       const localChartFilenames = localCharts
-        .filter(chart => chart.filepath)
-        .map(chart => chart.filepath.split('/').pop());
-      
-      const missingFiles = localChartFilenames.filter(filename => 
-        !serverFilenames.includes(filename)
+        .filter((chart) => chart.filepath)
+        .map((chart) => chart.filepath.split("/").pop());
+
+      const missingFiles = localChartFilenames.filter(
+        (filename) => !serverFilenames.includes(filename)
       );
-      
+
       if (missingFiles.length > 0) {
-        addDebugMessage("Warning", `${missingFiles.length} charts are missing on server but exist locally`);
+        addDebugMessage(
+          "Warning",
+          `${missingFiles.length} charts are missing on server but exist locally`
+        );
       } else if (localChartFilenames.length > 0) {
-        addDebugMessage("Success", "All local charts are properly saved on server");
+        addDebugMessage(
+          "Success",
+          "All local charts are properly saved on server"
+        );
       }
     }
   };
 
   const addDebugMessage = (type, message) => {
     const timestamp = new Date().toLocaleTimeString();
-    setDebugOutput(prev => [...prev, { type, message, timestamp }]);
+    setDebugOutput((prev) => [...prev, { type, message, timestamp }]);
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    
+
     // Don't submit if there are security errors
     if (codeErrors.length > 0) {
       setErrorMessage("Please fix all security errors before running code.");
-      addDebugMessage("Error", "Code contains security violations. Execution blocked.");
+      addDebugMessage(
+        "Error",
+        "Code contains security violations. Execution blocked."
+      );
       return;
     }
-    
+
     setIsSubmitting(true);
     setResponse("");
     setChartData(null);
     setErrorMessage("");
-    
+
     addDebugMessage("Info", "Executing code...");
-    
+
     try {
-      const res = await fetch("http://localhost:5000/api/glassfactory", {
+      const res = await fetch("http://127.0.0.1:5000/api/glassfactory", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({ code: pythonCode }),
       });
-      
+
       const data = await res.json();
-      
+
       if (data.error) {
         setErrorMessage(data.error);
         addDebugMessage("Error", data.error);
@@ -180,13 +204,16 @@ export default function GlassFactory() {
       } else if (data.result) {
         setResponse(data.result);
         addDebugMessage("Output", data.result);
-        
+
         // Try to parse chart data from the response
         if (data.chart_data) {
           setChartData(data.chart_data);
           addDebugMessage("Success", "Chart data successfully created");
         } else {
-          addDebugMessage("Warning", "No chart_data object found in your code. Create a chart_data dictionary to visualize data.");
+          addDebugMessage(
+            "Warning",
+            "No chart_data object found in your code. Create a chart_data dictionary to visualize data."
+          );
         }
       }
     } catch (err) {
@@ -210,12 +237,12 @@ export default function GlassFactory() {
       code: pythonCode,
       data: chartData,
       description: description,
-      createdAt: new Date().toISOString()
+      createdAt: new Date().toISOString(),
     };
 
     try {
       // Save to server
-      const res = await fetch("http://localhost:5000/api/custom-metrics", {
+      const res = await fetch("http://127.0.0.1:5000/api/custom-metrics", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -223,35 +250,47 @@ export default function GlassFactory() {
         body: JSON.stringify({
           name: chartTitle,
           description: description,
-          code: pythonCode
+          code: pythonCode,
         }),
       });
-      
+
       const data = await res.json();
-      
+
       if (data.success) {
         // Update local storage with server filepath
         newChart.filepath = data.filepath;
-        
+
         const updatedCharts = [...savedCharts, newChart];
         setSavedCharts(updatedCharts);
-        localStorage.setItem("glassfactory_charts", JSON.stringify(updatedCharts));
-        
-        addDebugMessage("Success", `Chart "${chartTitle}" saved successfully to server at ${data.filepath}`);
+        localStorage.setItem(
+          "glassfactory_charts",
+          JSON.stringify(updatedCharts)
+        );
+
+        addDebugMessage(
+          "Success",
+          `Chart "${chartTitle}" saved successfully to server at ${data.filepath}`
+        );
         setErrorMessage("");
-        
+
         // Refresh server metrics list
         fetchServerMetrics();
       } else {
         throw new Error(data.error || "Failed to save to server");
       }
     } catch (err) {
-      addDebugMessage("Warning", `Saved locally but failed to save to server: ${err.message}`);
-      
+      addDebugMessage(
+        "Warning",
+        `Saved locally but failed to save to server: ${err.message}`
+      );
+
       // Still save locally even if server save fails
       const updatedCharts = [...savedCharts, newChart];
       setSavedCharts(updatedCharts);
-      localStorage.setItem("glassfactory_charts", JSON.stringify(updatedCharts));
+      localStorage.setItem(
+        "glassfactory_charts",
+        JSON.stringify(updatedCharts)
+      );
     }
   };
 
@@ -266,45 +305,62 @@ export default function GlassFactory() {
   const deleteChart = async (index, e) => {
     e.stopPropagation();
     const chartToDelete = savedCharts[index];
-    
+
     // If chart has a filepath, try to delete from server
     if (chartToDelete.filepath) {
       try {
-        const filename = chartToDelete.filepath.split('/').pop();
-        const res = await fetch(`http://localhost:5000/api/custom-metrics/${filename}`, {
-          method: "DELETE",
-        });
-        
+        const filename = chartToDelete.filepath.split("/").pop();
+        const res = await fetch(
+          `http://127.0.0.1:5000/api/custom-metrics/${filename}`,
+          {
+            method: "DELETE",
+          }
+        );
+
         if (res.ok) {
-          addDebugMessage("Success", `Deleted chart from server: ${chartToDelete.title}`);
+          addDebugMessage(
+            "Success",
+            `Deleted chart from server: ${chartToDelete.title}`
+          );
           // Refresh server metrics list
           fetchServerMetrics();
         } else {
-          addDebugMessage("Warning", `Failed to delete from server, but will remove from local storage`);
+          addDebugMessage(
+            "Warning",
+            `Failed to delete from server, but will remove from local storage`
+          );
         }
       } catch (err) {
-        addDebugMessage("Warning", `Error deleting from server: ${err.message}`);
+        addDebugMessage(
+          "Warning",
+          `Error deleting from server: ${err.message}`
+        );
       }
     }
-    
+
     // Remove from local storage regardless of server result
     const updatedCharts = [...savedCharts];
     updatedCharts.splice(index, 1);
     setSavedCharts(updatedCharts);
     localStorage.setItem("glassfactory_charts", JSON.stringify(updatedCharts));
-    addDebugMessage("Info", `Deleted chart from local storage: ${chartToDelete.title}`);
+    addDebugMessage(
+      "Info",
+      `Deleted chart from local storage: ${chartToDelete.title}`
+    );
   };
 
   const loadServerMetric = async (filename) => {
     try {
-      const res = await fetch(`http://localhost:5000/api/custom-metrics/${filename}`);
+      const res = await fetch(
+        `http://127.0.0.1:5000/api/custom-metrics/${filename}`
+      );
       const data = await res.json();
-      
+
       if (data.code) {
         setPythonCode(data.code);
-        setChartTitle(filename.replace('.py', ''));
+        setChartTitle(filename.replace(".py", ""));
         addDebugMessage("Info", `Loaded code from server: ${filename}`);
-        
+
         // Try to extract description from code comments
         const descriptionMatch = data.code.match(/# Description: (.*)/);
         if (descriptionMatch && descriptionMatch[1]) {
@@ -312,14 +368,20 @@ export default function GlassFactory() {
         } else {
           setDescription("");
         }
-        
+
         // Run the code automatically
-        handleSubmit(new Event('submit'));
+        handleSubmit(new Event("submit"));
       } else {
-        addDebugMessage("Error", `Failed to load code: ${data.error || "Unknown error"}`);
+        addDebugMessage(
+          "Error",
+          `Failed to load code: ${data.error || "Unknown error"}`
+        );
       }
     } catch (err) {
-      addDebugMessage("Error", `Error loading metric from server: ${err.message}`);
+      addDebugMessage(
+        "Error",
+        `Error loading metric from server: ${err.message}`
+      );
     }
   };
 
@@ -342,14 +404,14 @@ export default function GlassFactory() {
           <span className="text-3xl font-bold">Glass Factory</span>
         </MenubarMenu>
       </Menubar>
-      
+
       {/* Main Content */}
       <div className="flex flex-grow">
         {/* Left Pane: Python Code Editor and Saved Charts */}
         <div className="w-1/2 p-4 border-r border-gray-300 flex flex-col">
           <h1 className="text-2xl font-bold mb-4">Python Code</h1>
-          
-          <CodeEditor 
+
+          <CodeEditor
             pythonCode={pythonCode}
             setPythonCode={setPythonCode}
             codeErrors={codeErrors}
@@ -363,34 +425,31 @@ export default function GlassFactory() {
             setDescription={setDescription}
             saveChart={saveChart}
           />
-          
+
           <div className="mt-4 grid grid-cols-1 gap-4">
-            <SavedChartsList 
+            <SavedChartsList
               savedCharts={savedCharts}
               loadChart={loadChart}
               deleteChart={deleteChart}
             />
-            
-            <ServerMetricsList 
+
+            <ServerMetricsList
               serverMetrics={serverMetrics}
               isLoading={isLoading}
               loadServerMetric={loadServerMetric}
             />
           </div>
         </div>
-        
+
         {/* Right Pane: Chart Display and Debug Output */}
         <div className="w-1/2 p-4 flex flex-col">
-          <ChartDisplay 
+          <ChartDisplay
             chartData={chartData}
             chartTitle={chartTitle}
             errorMessage={errorMessage}
           />
-          
-          <DebugPanel 
-            response={response}
-            debugOutput={debugOutput}
-          />
+
+          <DebugPanel response={response} debugOutput={debugOutput} />
         </div>
       </div>
     </div>

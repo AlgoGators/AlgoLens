@@ -5,6 +5,7 @@ import os
 import csv
 import warnings
 import logging
+from flask_jwt_extended import JWTManager
 
 from system import system
 from quant import quant_stats
@@ -15,6 +16,8 @@ from glass_factory import (save_code_to_file,
                            get_all_custom_metrics, 
                            load_custom_code, 
                            execute_custom_code)
+
+from auth import auth_bp
 
 # Set up logging
 logging.basicConfig(
@@ -38,10 +41,16 @@ warnings.filterwarnings("ignore", category=RuntimeWarning, message="invalid valu
 app = Flask(__name__)
 CORS(app)
 
+app.config["JWT_SECRET_KEY"] = os.getenv("JWT_SECRET_KEY")
+
+jwt = JWTManager(app)
+
 # Directory to store custom code files
 CUSTOM_CODE_DIR = os.path.join(os.getcwd(), "custom_metrics")
 os.makedirs(CUSTOM_CODE_DIR, exist_ok=True)
 logger.info(f"Custom metrics directory: {CUSTOM_CODE_DIR}")
+
+app.register_blueprint(auth_bp, url_prefix="/auth")
 
 @app.route("/metadata", methods=["GET"])
 def write_metadata():
