@@ -45,6 +45,12 @@ export default function MenuPage() {
         >
           Metadata
         </Link>
+        <Link
+          href="/glassfactory"
+          className="px-8 py-4 bg-orange-500 text-white rounded-lg text-2xl font-bold"
+        >
+          GlassFactory
+        </Link>
       </div>
     </>
   );
