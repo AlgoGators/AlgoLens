@@ -13,4 +13,4 @@ RUN npm audit fix
 COPY frontend/ ./
 
 # Command to start development server
-CMD ["npm", "run", "dev"]
+CMD ["npm", "start"]

@@ -463,6 +463,6 @@ def algo_scope():
 if __name__ == "__main__":
     logger.info("Starting Flask application")
     try:
-        app.run(debug=True, use_reloader=False)
+        app.run(host="0.0.0.0", port=5000, debug=True, use_reloader=False)
     except KeyboardInterrupt:
         logger.info("Shutting down server.")
