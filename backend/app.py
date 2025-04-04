@@ -460,6 +460,14 @@ def algo_scope():
         logger.error(f"Error in /api/quantstats: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
+@app.route('/')
+def index():
+    # This prints to the server console
+    print("Hello from Flask!")
+    
+    # This returns a response to the client (e.g., curl)
+    return "Hello, this is the response from Flask!"
+
 if __name__ == "__main__":
     logger.info("Starting Flask application")
     try:
