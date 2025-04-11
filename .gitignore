@@ -52,3 +52,9 @@ __pycache__
 frontend/public/metadata.csv
 
 .vscode
+node_modules
+
+# amplify
+.amplify
+amplify_outputs*
+amplifyconfiguration*
