@@ -9,6 +9,7 @@
     "start": "next start -H 0.0.0.0",
     "lint": "next lint"
   },
+  "homepage": "{https://main.d3ct8kb39b4wey.amplifyapp.com}/#/",
   "dependencies": {
     "@codemirror/lang-python": "^6.1.7",
     "@hookform/resolvers": "^3.9.1",
