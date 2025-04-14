@@ -16,14 +16,6 @@ import {
 import { Settings } from "lucide-react";
 import { Slider } from "@/components/ui/slider";
 
-const toggleCustomMetric = (metricId: string) => {
-  if (selectedCustomMetrics.includes(metricId)) {
-    setSelectedCustomMetrics(selectedCustomMetrics.filter(id => id !== metricId));
-  } else {
-    setSelectedCustomMetrics([...selectedCustomMetrics, metricId]);
-  }
-};
-
 // Helper: convert a timestamp to "YYYY-MM-DD" (or empty if invalid)
 const formatDate = (time: number): string => {
   const d = new Date(time);
@@ -53,7 +45,12 @@ export default function SettingsDropdown({
   selectedCustomMetrics,
   setSelectedCustomMetrics,
 }: SettingsDropdownProps) {
-  const [availableCustomMetrics, setAvailableCustomMetrics] = useState<Array<{id: string, name: string}>>([]);
+  const [availableCustomMetrics, setAvailableCustomMetrics] = useState<Array<{
+    filename: string;
+    name: string;
+    description: string;
+    created_at: string;
+  }>>([]);
 
   // Fetch available custom metrics when component mounts
   useEffect(() => {
@@ -96,8 +93,6 @@ export default function SettingsDropdown({
     }
   };
 
-  console.log(availableCustomMetrics);
-
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -126,7 +121,7 @@ export default function SettingsDropdown({
             Stock Cumulative Returns
           </DropdownMenuCheckboxItem>
           <DropdownMenuCheckboxItem
-            checked={preferences.SPY_cumulative}
+            checked={preferences.Index_cumulative}
             onCheckedChange={(checked) =>
               updatePreference("Index_cumulative", Boolean(checked))
             }
@@ -134,7 +129,7 @@ export default function SettingsDropdown({
             Index Cumulative Returns
           </DropdownMenuCheckboxItem>
           <DropdownMenuCheckboxItem
-            checked={preferences.percentage_change_vs_SPY}
+            checked={preferences.percentage_change_vs_Index}
             onCheckedChange={(checked) =>
               updatePreference("percentage_change_vs_Index", Boolean(checked))
             }
