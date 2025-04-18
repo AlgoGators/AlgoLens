@@ -323,17 +323,20 @@ def algo_scope():
         category = req_data.get("category", "portfolio")
         # Get custom metrics to run (if any)
         custom_metrics = req_data.get("customMetrics", [])
+        # Get date range (if any)
+        date_range = req_data.get("dateRange", [0, 0])
         
         logger.info(f"Running quantstats for category: {category}")
         if custom_metrics:
             logger.info(f"With custom metrics: {custom_metrics}")
+        if date_range and date_range[0] != 0 and date_range[1] != 0:
+            logger.info(f"With date range: {date_range}")
 
         strategy_name = "Mean Reversion"
         benchmark_name = "Index"
 
         # Get the grouped dataframes from system
         strategy_groups = system()
-        print(strategy_groups)
 
         # Extract the appropriate series based on category.
         if category == "portfolio":
@@ -351,6 +354,22 @@ def algo_scope():
 
         logger.info(f"Strategy data shape before processing: {strategy_filtered.shape}")
         logger.info(f"Date range: {strategy_filtered.index.min()} to {strategy_filtered.index.max()}")
+
+        # Apply date filtering if date range is provided
+        if date_range and date_range[0] != 0 and date_range[1] != 0:
+            start_date = pd.to_datetime(date_range[0], unit='ms')
+            end_date = pd.to_datetime(date_range[1], unit='ms')
+            logger.info(f"Filtering data from {start_date} to {end_date}")
+            
+            # Ensure the index is datetime
+            if not isinstance(strategy_filtered.index, pd.DatetimeIndex):
+                strategy_filtered.index = pd.to_datetime(strategy_filtered.index)
+                
+            # Filter by date range
+            mask = (strategy_filtered.index >= start_date) & (strategy_filtered.index <= end_date)
+            strategy_filtered = strategy_filtered[mask]
+            
+            logger.info(f"Strategy data shape after date filtering: {strategy_filtered.shape}")
 
         # Process the strategy series: convert to numeric, drop NAs, and compute percentage change.
         strategy_processed = pd.to_numeric(strategy_filtered, errors='coerce')
@@ -371,7 +390,22 @@ def algo_scope():
         benchmark.set_index('Date', inplace=True)
         benchmark = benchmark.squeeze()
 
-        # Process benchmark data - no date filtering here either
+        # Apply date filtering to benchmark data as well
+        if date_range and date_range[0] != 0 and date_range[1] != 0:
+            start_date = pd.to_datetime(date_range[0], unit='ms')
+            end_date = pd.to_datetime(date_range[1], unit='ms')
+            
+            # Ensure the index is datetime
+            if not isinstance(benchmark.index, pd.DatetimeIndex):
+                benchmark.index = pd.to_datetime(benchmark.index)
+                
+            # Filter by date range
+            mask = (benchmark.index >= start_date) & (benchmark.index <= end_date)
+            benchmark = benchmark[mask]
+            
+            logger.info(f"Benchmark data shape after date filtering: {benchmark.shape}")
+
+        # Process benchmark data
         benchmark = pd.to_numeric(benchmark, errors='coerce')
         benchmark = benchmark.pct_change().dropna()
         
@@ -471,6 +505,6 @@ def index():
 if __name__ == "__main__":
     logger.info("Starting Flask application")
     try:
-        app.run(host="0.0.0.0", port=5000, debug=True, use_reloader=False)
+        app.run(host="127.0.0.1", port=5000, debug=True, use_reloader=False)
     except KeyboardInterrupt:
         logger.info("Shutting down server.")
