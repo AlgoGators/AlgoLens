@@ -135,9 +135,19 @@ class User(Base):
     __table_args__ = {"schema": "auth"}
 
     id = Column(Integer, primary_key=True, autoincrement=True)
+    first_name = Column(String(120), nullable=False)
+    last_name = Column(String(120), nullable=False)
     email = Column(String(120), unique=True, nullable=False)
     password_hash = Column(String(128), nullable=False)
     created_at = Column(DateTime, server_default=func.now())
+    team=Column(PgEnum(
+        'Systems',
+        'Data',
+        'Investment Relations',
+        'Macro',
+        'Executive'
+    ), 
+    nullable=False)
     role = Column(
         PgEnum(
             'general_member',

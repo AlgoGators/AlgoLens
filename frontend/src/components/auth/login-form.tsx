@@ -1,45 +1,91 @@
+"use client";
+
+import { useState } from "react";
+import Image from "next/image";
+import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import {
-	Card,
-	CardContent,
-	CardDescription,
-	CardFooter,
-	CardHeader,
-	CardTitle,
-} from "@/components/ui/card";
-import { Label } from "@/components/ui/label";
+import { useLogin } from "@/hooks/useLogin";
+import { Alert, AlertTitle, AlertDescription } from "@/components/ui/alert";
 
-export const LoginForm = () => {
-	return (
-		<Card className="w-full max-w-lg">
-			<CardHeader>
-				<CardTitle>Login In</CardTitle>
-				<CardDescription>
-					Please enter your credentials to login
-				</CardDescription>
-			</CardHeader>
-			<CardContent>
-				<form>
-					<div className="grid w-full items-center gap-4">
-						<div className="flex flex-col space-y-1.5">
-							<Label htmlFor="username">Username</Label>
-							<Input id="name" placeholder="Enter username" />
-						</div>
-						<div className="flex flex-col space-y-1.5">
-							<Label htmlFor="password">Password</Label>
-							<Input
-								id="password"
-								type="password"
-								placeholder="Enter password"
-							/>
-						</div>
-					</div>
-				</form>
-			</CardContent>
-			<CardFooter className="flex justify-end">
-				<Button type="submit">Login</Button>
-			</CardFooter>
-		</Card>
-	);
-};
+export function LoginForm() {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const { login, isLoading, error } = useLogin();
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    await login(email, password);
+  };
+
+  return (
+    <div className="bg-gray-50 shadow-2xl rounded-xl px-10 py-12 w-full max-w-sm font-sans">
+      <div className="flex justify-center mb-6">
+        <Image
+          src="/images/AlgoLogo.png"
+          alt="Algo Logo"
+          width={60}
+          height={60}
+          priority
+        />
+      </div>
+
+      <h2 className="text-2xl font-bold text-center mb-6 text-[#000000] tracking-tight">
+        Sign in to AlgoLens
+      </h2>
+
+      <form onSubmit={handleSubmit} className="space-y-4">
+        {error && (
+          <Alert
+            variant="destructive"
+            className="bg-red-100 text-red-800 border-red-400"
+          >
+            <AlertTitle>Error</AlertTitle>
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
+        <Input
+          type="email"
+          placeholder="Email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          required
+        />
+        <div className="space-y-1">
+          <Input
+            type={showPassword ? "text" : "password"}
+            placeholder="Password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            required
+          />
+          <div className="flex items-center justify-between text-sm">
+            <label className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={showPassword}
+                onChange={(e) => setShowPassword(e.target.checked)}
+              />
+              Show Password
+            </label>
+            <Link
+              href="/reset-password-email"
+              className="text-[#ff5c02] hover:underline"
+            >
+              Forgot password?
+            </Link>
+          </div>
+        </div>
+
+        <Button
+          type="submit"
+          className="w-full bg-[#ff5c02] hover:bg-[#e55302] text-white font-medium"
+          disabled={isLoading}
+        >
+          {isLoading ? "Signing in..." : "Sign In"}
+        </Button>
+      </form>
+    </div>
+  );
+}

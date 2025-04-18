@@ -1,6 +1,7 @@
 "use client";
 import "./globals.css";
 import localFont from "next/font/local";
+import { AuthContextProvider } from "@/context/AuthContext"; // ✅ adjust path if needed
 
 const aileron = localFont({
   src: [
@@ -11,7 +12,11 @@ const aileron = localFont({
   variable: "--font-aileron",
 });
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   return (
     <html lang="en" className={aileron.variable}>
       <head>
@@ -21,7 +26,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <title>AlgoLens</title>
       </head>
       <body className="min-h-screen bg-gray-100 text-gray-900">
-        <div className="container mx-auto p-4">{children}</div>
+        <AuthContextProvider>
+          <div className="container mx-auto p-4">{children}</div>
+        </AuthContextProvider>
       </body>
     </html>
   );

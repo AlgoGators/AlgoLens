@@ -1,7 +1,7 @@
 from sqlalchemy.orm import Session
 from db_models import User
 from typing import Optional
-from werkzeug.security import generate_password_hash, check_password_hash
+from flask import jsonify
 
 def get_user_by_email(db: Session, email:str) -> Optional[User]:
     """
@@ -15,11 +15,11 @@ def get_user_by_id(db: Session, user_id: int) -> Optional[User]:
     """
     return db.query(User).filter_by(id=user_id).first()
 
-def create_user(db: Session, email: str, password: str, role: str="general_member"):
+def create_user(db: Session, email: str, password: str, first_name: str, last_name: str, team: str, role: str="general_member"):
     """
     Create a new user and store the hashed password.
     """
-    user = User(email=email, role=role)
+    user = User(email=email, role=role, first_name=first_name, last_name=last_name, team=team)
     user.set_password(password)
     db.add(user)
     db.commit()
@@ -35,13 +35,17 @@ def check_user_password(db:Session, email: str, password:str):
         return True
     return False
 
-def update_user_role(db: Session, user_id: int, password: Optional[str] = None, role:Optional[str] = None) -> Optional[User]:
+def update_user(db: Session, user_id: int, password: Optional[str] = None, role:Optional[str] = None, first_name:Optional[str]=None, last_name:Optional[str]=None) -> Optional[User]:
     """
     Update a user's mutable fields. Email, ID, and created_at cannot be changed.
     """
     user = get_user_by_id(db, user_id)
     if not user:
         return None
+    if first_name:
+        user.first_name = first_name
+    if last_name:
+        user.last_name = last_name
     if password:
         user.set_password(password)
     if role:
@@ -62,3 +66,10 @@ def delete_user(db: Session, user_id: int) -> bool:
         db.commit()
         return True
     return False
+
+def get_all_users(db: Session):
+    """
+    Get all users from the database and return them. 
+    """
+    users = db.query(User).all()
+    return users

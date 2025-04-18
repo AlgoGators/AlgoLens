@@ -17,7 +17,8 @@ from glass_factory import (save_code_to_file,
                            load_custom_code, 
                            execute_custom_code)
 
-from auth import auth_bp
+from routes.auth import auth_bp
+from routes.user import user_bp
 
 # Set up logging
 logging.basicConfig(
@@ -51,6 +52,7 @@ os.makedirs(CUSTOM_CODE_DIR, exist_ok=True)
 logger.info(f"Custom metrics directory: {CUSTOM_CODE_DIR}")
 
 app.register_blueprint(auth_bp, url_prefix="/auth")
+app.register_blueprint(user_bp, url_prefix="/users")
 
 @app.route("/metadata", methods=["GET"])
 def write_metadata():
