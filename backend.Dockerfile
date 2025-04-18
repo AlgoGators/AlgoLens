@@ -13,10 +13,7 @@ ENV PATH="/opt/venv/bin:$PATH"
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy backend files only
-COPY backend/ /app/backend/
-
-# Set working directory to backend
-WORKDIR /app/backend
+COPY backend/ ./
 
 # Command to run the application
 CMD ["python", "app.py"]
