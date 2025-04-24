@@ -15,6 +15,7 @@ type User = {
   first_name: string;
   last_name: string;
   team: string;
+  force_password_change: boolean;
 };
 
 type State = {
@@ -26,7 +27,7 @@ type Action =
   | { type: "LOGIN"; payload: User }
   | { type: "LOGOUT" }
   | { type: "AUTH_READY" }
-  | { type: "UPDATE_USER" };
+  | { type: "UPDATE_USER"; payload: User };
 
 export const AuthContext = createContext<
   | { user: User | null; dispatch: Dispatch<Action>; isAuthReady: boolean }
@@ -40,6 +41,8 @@ const authReducer = (state: State, action: Action): State => {
       return { ...state, user: null };
     case "AUTH_READY":
       return { ...state, isAuthReady: true };
+    case "UPDATE_USER":
+      return { ...state, user: action.payload };
     default:
       return state;
   }

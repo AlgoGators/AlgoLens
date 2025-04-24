@@ -40,7 +40,11 @@ const Metadata: React.FC = () => {
       try {
         // 1. Call the Flask endpoint to ensure the CSV file is written.
         // Adjust the URL as needed.
-        await fetch("http://127.0.0.1:5000/metadata");
+        await fetch("http://127.0.0.1:5000/metadata", {
+          headers: {
+            Authorization: `Bearer ${localStorage.getItem("access_token")}}`,
+          },
+        });
 
         // 2. After the CSV is written, fetch it from the public folder.
         const response = await fetch("/metadata.csv");
@@ -76,24 +80,7 @@ const Metadata: React.FC = () => {
   );
 
   return (
-    <div className="flex flex-col h-screen">
-      {/* Header */}
-      <Menubar className="h-20 px-4 bg-background shadow-sm">
-        <MenubarMenu className="flex items-center space-x-4">
-          <MenubarTrigger asChild>
-            <Link href="/">
-              <Image
-                src="/images/AlgoLogo.png"
-                alt="AlgoLogo"
-                width={60}
-                height={60}
-                loading="eager"
-              />
-            </Link>
-          </MenubarTrigger>
-          <span className="text-3xl font-bold">Glass Factory</span>
-        </MenubarMenu>
-      </Menubar>
+    <div className="flex flex-col h-screen pt-3">
       <div className="mb-4">
         <input
           type="text"

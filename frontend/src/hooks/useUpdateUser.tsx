@@ -11,22 +11,20 @@ export const useUpdateUser = () => {
     password?: string,
     role?: string,
     first_name?: string,
-    last_name?: string
-  ) => {
+    last_name?: string,
+    isSelfUpdate: boolean = false
+  ): Promise<boolean> => {
     setStatus("loading");
     setError(null);
     const userData: any = {};
-    if (password !== undefined) {
-      userData.password = password;
-    }
     if (role !== undefined) {
       userData.role = role;
     }
     if (first_name !== undefined) {
-      userData.password = first_name;
+      userData.first_name = first_name;
     }
     if (last_name !== undefined) {
-      userData.password = last_name;
+      userData.last_name = last_name;
     }
     const access_token = localStorage.getItem("access_token");
     try {
@@ -39,14 +37,17 @@ export const useUpdateUser = () => {
         body: JSON.stringify(userData),
       });
       if (!response.ok) {
-        console.log(response);
-        throw new Error("Failed to update user");
+        const errorData = await response.json();
+        throw new Error(errorData.msg || "Failed to update user");
       }
-      const user = await response.json();
-      const updated_user = user;
-      console.log(updated_user);
-      localStorage.setItem("user", updated_user);
+      const { user } = await response.json();
+
+      if (isSelfUpdate) {
+        localStorage.setItem("user", JSON.stringify(user));
+      }
+
       setStatus("success");
+      return true;
     } catch (err) {
       setStatus("error");
       if (err instanceof Error) {
@@ -54,6 +55,7 @@ export const useUpdateUser = () => {
       } else {
         setError("An unknown error occurred");
       }
+      return false;
     }
   };
 

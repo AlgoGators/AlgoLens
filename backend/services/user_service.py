@@ -73,3 +73,21 @@ def get_all_users(db: Session):
     """
     users = db.query(User).all()
     return users
+
+def update_password(db: Session, user_id: int, old_password: str, new_password: str):
+    """
+    Update the password in the database if the old password matches.
+    """
+    # Get the user from the database
+    user = get_user_by_id(db, user_id)
+    if not user:
+        return None
+    
+    if not user.check_password(old_password):
+        return None
+    
+    user.set_password(new_password)
+    db.commit()
+    db.refresh(user)
+
+    return user

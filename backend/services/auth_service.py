@@ -1,6 +1,9 @@
 from flask import jsonify
 from flask_jwt_extended import create_access_token
 from sqlalchemy.exc import IntegrityError
+from datetime import timedelta
+from utils.auth_utils import validate_password
+
 
 from services.user_service import create_user, get_user_by_email
 
@@ -28,6 +31,11 @@ def handle_register(db, data):
 
     if role not in valid_roles:
         return jsonify({"msg": f"Invalid role '{role}'"}), 400
+    
+    # Validate password
+    is_valid, error_message = validate_password(password)
+    if not is_valid:
+        return jsonify({"msg": error_message}), 400
 
     try:
         user = create_user(
@@ -62,15 +70,18 @@ def handle_login(db, data):
     
     if not user.check_password(password):
         return jsonify({"msg": "Incorrect password"}), 401
-    
-    print(user)
 
     access_token = create_access_token(
         identity=str(user.id),
         additional_claims={
             "email": user.email,
-            "role": user.role
-        }
+            "role": user.role,
+            "force_password_change": user.force_password_change
+        },
+        expires_delta=timedelta(hours=12)
     )
 
-    return jsonify(access_token=access_token), 200
+    return jsonify({
+        "access_token": access_token,
+        "force_password_change": user.force_password_change
+    }), 200

@@ -5,7 +5,7 @@ import os
 import csv
 import warnings
 import logging
-from flask_jwt_extended import JWTManager
+from flask_jwt_extended import JWTManager, jwt_required
 
 from system import system
 from quant import quant_stats
@@ -19,6 +19,8 @@ from glass_factory import (save_code_to_file,
 
 from routes.auth import auth_bp
 from routes.user import user_bp
+
+
 
 # Set up logging
 logging.basicConfig(
@@ -51,10 +53,13 @@ CUSTOM_CODE_DIR = os.path.join(os.getcwd(), "custom_metrics")
 os.makedirs(CUSTOM_CODE_DIR, exist_ok=True)
 logger.info(f"Custom metrics directory: {CUSTOM_CODE_DIR}")
 
+# Any requests for auth or users are sent to those respective files
+# in the routes folder
 app.register_blueprint(auth_bp, url_prefix="/auth")
 app.register_blueprint(user_bp, url_prefix="/users")
 
 @app.route("/metadata", methods=["GET"])
+@jwt_required()
 def write_metadata():
     # Query contract metadata from the database using the DataAccess layer
     data = DataAccess()
@@ -122,6 +127,7 @@ def write_metadata():
     return jsonify({"status": "CSV written successfully", "file": file_path})
 
 @app.route('/api/custom-metrics/<filename>', methods=['GET'])
+@jwt_required()
 def get_custom_metric(filename):
     """
     Get a specific custom metric by filename.
@@ -152,6 +158,7 @@ def get_custom_metric(filename):
     })
 
 @app.route('/api/run-single-metric', methods=['POST'])
+@jwt_required()
 def run_single_metric():
     """
     Run a single custom metric and return the result.
@@ -192,6 +199,7 @@ def run_single_metric():
     return jsonify(result)
 
 @app.route('/api/run-custom-metrics', methods=['POST'])
+@jwt_required()
 def run_custom_metrics():
     """
     Run selected custom metrics on provided data.
@@ -241,6 +249,7 @@ def run_custom_metrics():
     return jsonify(results)
 
 @app.route('/api/custom-metrics', methods=['GET', 'POST'])
+@jwt_required()
 def custom_metrics():
     if request.method == 'GET':
         metrics = get_all_custom_metrics()
@@ -268,6 +277,7 @@ def custom_metrics():
             }), 500
 
 @app.route('/api/glassfactory', methods=['POST'])
+@jwt_required()
 def glass_factory():
     """
     Executes Python code passed in the JSON payload and returns its output.
@@ -319,6 +329,7 @@ def glass_factory():
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/quantstats', methods=['POST'])
+@jwt_required()
 def algo_scope():
     """
     Calls system() to obtain portfolio-level positions and provide processed data to front-end.

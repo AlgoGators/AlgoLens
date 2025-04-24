@@ -54,7 +54,12 @@ export default function Backtesting() {
     async function fetchCustomMetrics() {
       try {
         const response = await fetch(
-          "http://127.0.0.1:5000/api/custom-metrics"
+          "http://127.0.0.1:5000/api/custom-metrics",
+          {
+            headers: {
+              Authorization: `Bearer ${localStorage.getItem("access_token")}`,
+            },
+          }
         );
         if (response.ok) {
           const metrics = await response.json();
@@ -102,7 +107,10 @@ export default function Backtesting() {
 
         const response = await fetch("http://127.0.0.1:5000/api/quantstats", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${localStorage.getItem("access_token")}`,
+          },
           body: JSON.stringify({
             preferences: prefs,
             category: category,
@@ -233,23 +241,6 @@ export default function Backtesting() {
 
   return (
     <div className="relative">
-      <Menubar className="h-20 px-4 bg-background shadow-sm">
-        <MenubarMenu className="flex items-center space-x-4">
-          <MenubarTrigger asChild>
-            <Link href="/">
-              <Image
-                src="/images/AlgoLogo.png"
-                alt="AlgoLogo"
-                width={60}
-                height={60}
-                loading="eager"
-              />
-            </Link>
-          </MenubarTrigger>
-          <span className="text-3xl font-bold">Backtesting</span>
-        </MenubarMenu>
-      </Menubar>
-
       {isFetching && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white p-6 rounded-lg shadow-lg">
@@ -258,7 +249,6 @@ export default function Backtesting() {
           </div>
         </div>
       )}
-
       <SettingsDropdown
         preferences={preferences}
         updatePreference={updatePreference}
@@ -270,7 +260,6 @@ export default function Backtesting() {
         selectedCustomMetrics={selectedCustomMetrics}
         setSelectedCustomMetrics={setSelectedCustomMetrics}
       />
-
       <div className="flex justify-center space-x-4 pt-4">
         <Button
           type="button" // Explicitly set type to button

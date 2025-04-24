@@ -114,7 +114,11 @@ export default function GlassFactory() {
   const fetchServerMetrics = async () => {
     try {
       setIsLoading(true);
-      const response = await fetch("http://127.0.0.1:5000/api/custom-metrics");
+      const response = await fetch("http://127.0.0.1:5000/api/custom-metrics", {
+        headers: {
+          Authorization: `Bearer ${localStorage.getItem("access_token")}`,
+        },
+      });
       const metrics = await response.json();
       setServerMetrics(metrics);
       addDebugMessage(
@@ -191,6 +195,7 @@ export default function GlassFactory() {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          Authorization: `Bearer ${localStorage.getItem("access_token")}}`,
         },
         body: JSON.stringify({ code: pythonCode }),
       });
@@ -246,6 +251,7 @@ export default function GlassFactory() {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          Authorization: `Bearer ${localStorage.getItem("access_token")}}`,
         },
         body: JSON.stringify({
           name: chartTitle,
@@ -314,6 +320,9 @@ export default function GlassFactory() {
           `http://127.0.0.1:5000/api/custom-metrics/${filename}`,
           {
             method: "DELETE",
+            headers: {
+              Authorization: `Bearer ${localStorage.getItem("access_token")}}`,
+            },
           }
         );
 
@@ -352,7 +361,12 @@ export default function GlassFactory() {
   const loadServerMetric = async (filename) => {
     try {
       const res = await fetch(
-        `http://127.0.0.1:5000/api/custom-metrics/${filename}`
+        `http://127.0.0.1:5000/api/custom-metrics/${filename}`,
+        {
+          headers: {
+            Authorization: `Bearer ${localStorage.getItem("access_token")}}`,
+          },
+        }
       );
       const data = await res.json();
 
@@ -387,24 +401,6 @@ export default function GlassFactory() {
 
   return (
     <div className="flex flex-col h-screen">
-      {/* Header */}
-      <Menubar className="h-20 px-4 bg-background shadow-sm">
-        <MenubarMenu className="flex items-center space-x-4">
-          <MenubarTrigger asChild>
-            <Link href="/">
-              <Image
-                src="/images/AlgoLogo.png"
-                alt="AlgoLogo"
-                width={60}
-                height={60}
-                loading="eager"
-              />
-            </Link>
-          </MenubarTrigger>
-          <span className="text-3xl font-bold">Glass Factory</span>
-        </MenubarMenu>
-      </Menubar>
-
       {/* Main Content */}
       <div className="flex flex-grow">
         {/* Left Pane: Python Code Editor and Saved Charts */}

@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine, Column, String, Float, Integer, DateTime, Enum as PgEnum
+from sqlalchemy import create_engine, Column, String, Float, Integer, DateTime, Enum as PgEnum, Boolean
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.engine.base import Engine
@@ -159,6 +159,7 @@ class User(Base):
         nullable=False,
         default='general_member'
     )
+    force_password_change = Column(Boolean, default=True)
 
     def set_password(self, password: str):
         self.password_hash = generate_password_hash(password)

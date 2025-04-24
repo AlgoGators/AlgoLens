@@ -18,7 +18,9 @@ import { Slider } from "@/components/ui/slider";
 
 const toggleCustomMetric = (metricId: string) => {
   if (selectedCustomMetrics.includes(metricId)) {
-    setSelectedCustomMetrics(selectedCustomMetrics.filter(id => id !== metricId));
+    setSelectedCustomMetrics(
+      selectedCustomMetrics.filter((id) => id !== metricId)
+    );
   } else {
     setSelectedCustomMetrics([...selectedCustomMetrics, metricId]);
   }
@@ -53,13 +55,17 @@ export default function SettingsDropdown({
   selectedCustomMetrics,
   setSelectedCustomMetrics,
 }: SettingsDropdownProps) {
-  const [availableCustomMetrics, setAvailableCustomMetrics] = useState<Array<{id: string, name: string}>>([]);
+  const [availableCustomMetrics, setAvailableCustomMetrics] = useState<
+    Array<{ id: string; name: string }>
+  >([]);
 
   // Fetch available custom metrics when component mounts
   useEffect(() => {
     async function fetchCustomMetrics() {
       try {
-        const response = await fetch("http://localhost:5000/api/custom-metrics");
+        const response = await fetch(
+          "http://127.0.0.1:5000/api/custom-metrics"
+        );
         if (response.ok) {
           const metrics = await response.json();
           setAvailableCustomMetrics(metrics);
@@ -68,7 +74,7 @@ export default function SettingsDropdown({
         console.error("Failed to fetch custom metrics", error);
       }
     }
-    
+
     fetchCustomMetrics();
   }, []);
 
@@ -90,7 +96,9 @@ export default function SettingsDropdown({
 
   const toggleCustomMetric = (metricId: string) => {
     if (selectedCustomMetrics.includes(metricId)) {
-      setSelectedCustomMetrics(selectedCustomMetrics.filter(id => id !== metricId));
+      setSelectedCustomMetrics(
+        selectedCustomMetrics.filter((id) => id !== metricId)
+      );
     } else {
       setSelectedCustomMetrics([...selectedCustomMetrics, metricId]);
     }
@@ -101,9 +109,9 @@ export default function SettingsDropdown({
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <button 
+        <button
           type="button" // Explicitly set type to button to prevent form submission
-          className="fixed top-4 left-4 z-50 w-10 h-10 flex items-center justify-center bg-gray-200 rounded-full"
+          className="fixed top-24 left-4 z-50 w-10 h-10 flex items-center justify-center bg-gray-200 rounded-full"
         >
           <Settings className="w-6 h-6" />
         </button>
@@ -184,7 +192,7 @@ export default function SettingsDropdown({
         </DropdownMenuGroup>
 
         <DropdownMenuSeparator />
-        
+
         {/* Custom Metrics Section */}
         <DropdownMenuLabel>Custom Metrics</DropdownMenuLabel>
         <DropdownMenuGroup>
@@ -203,17 +211,14 @@ export default function SettingsDropdown({
             </Link>
           </DropdownMenuItem>
         </DropdownMenuGroup>
-        
+
         <DropdownMenuSeparator />
 
         {/* Date Filter Section */}
         <DropdownMenuLabel>Date Filter</DropdownMenuLabel>
         <div className="mt-2">
           {/* Range Slider with explicit prevention of form submission */}
-          <div 
-            onClick={(e) => e.stopPropagation()} 
-            className="px-2"
-          >
+          <div onClick={(e) => e.stopPropagation()} className="px-2">
             <Slider
               value={dateRange}
               onValueChange={setDateRange}
@@ -245,8 +250,8 @@ export default function SettingsDropdown({
 
         <DropdownMenuSeparator />
         <DropdownMenuItem asChild>
-          <button 
-            type="button" 
+          <button
+            type="button"
             onClick={(e) => {
               e.preventDefault();
               e.stopPropagation();

@@ -4,34 +4,112 @@ import { useEffect, useState } from "react";
 import Image from "next/image";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { Alert, AlertTitle, AlertDescription } from "@/components/ui/alert";
 import { Pencil } from "lucide-react";
 import { useAuthContext } from "@/hooks/useAuthContext";
 import { useUpdateUser } from "@/hooks/useUpdateUser";
+import Link from "next/link";
+import { useChangePassword } from "@/hooks/useChangePassword";
+import { useRouter } from "next/navigation";
 
 export default function ProfilePage() {
   const { user, dispatch } = useAuthContext();
   const [isEditing, setIsEditing] = useState(false);
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
-  const [password, setPassword] = useState("");
+  const [oldPassword, setOldPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const {
+    status: pwdStatus,
+    error: pwdError,
+    changePassword,
+  } = useChangePassword();
   const { status, error, updateUser } = useUpdateUser();
+  const router = useRouter();
 
   useEffect(() => {
     setFirstName(user?.first_name || "");
     setLastName(user?.last_name || "");
+    if (user?.force_password_change) {
+      setIsEditing(true);
+    }
   }, [user]);
+
+  if (!user) {
+    return (
+      <p className="text-center mt-10">
+        Access denied. Please{" "}
+        <Link href="/" className="text-blue-600 underline">
+          login
+        </Link>
+      </p>
+    );
+  }
 
   const handleSave = async () => {
     if (!user) return;
 
-    await updateUser(user.id, password, user.role, firstName, lastName);
+    let hasChanges = false;
+    let hasErrors = false;
 
-    if (status === "success") {
-      dispatch({
-        type: "UPDATE_USER",
-        payload: { ...user, first_name: firstName, last_name: lastName },
-      });
+    // Only attempt password change if both fields are filled
+    if (oldPassword && newPassword) {
+      const success = await changePassword(user.id, oldPassword, newPassword);
+      if (!success) {
+        hasErrors = true;
+      } else {
+        hasChanges = true;
+        // Clear password fields after successful change
+        setOldPassword("");
+        setNewPassword("");
+      }
+    }
+
+    // Only update names if they've actually changed
+    const nameChanges = {
+      first_name: firstName !== user.first_name ? firstName : undefined,
+      last_name: lastName !== user.last_name ? lastName : undefined,
+    };
+
+    // Only make the API call if there are actual changes
+    if (nameChanges.first_name || nameChanges.last_name) {
+      const success = await updateUser(
+        user.id,
+        undefined, // no password here
+        undefined, // no role update allowed here
+        nameChanges.first_name,
+        nameChanges.last_name
+      );
+
+      if (success) {
+        dispatch({
+          type: "UPDATE_USER",
+          payload: {
+            ...user,
+            first_name: nameChanges.first_name || user.first_name,
+            last_name: nameChanges.last_name || user.last_name,
+          },
+        });
+        hasChanges = true;
+      } else {
+        hasErrors = true;
+      }
+    }
+
+    // Only close the edit mode if we had changes AND no errors
+    if (hasChanges && !hasErrors) {
       setIsEditing(false);
+      setOldPassword("");
+      setNewPassword("");
+      // If this was a forced password change, we can now navigate away
+      if (user.force_password_change) {
+        router.push("/dashboard");
+      }
+    } else if (!hasChanges) {
+      // If nothing changed, just close the edit mode
+      setIsEditing(false);
+      setOldPassword("");
+      setNewPassword("");
     }
   };
 
@@ -49,6 +127,16 @@ export default function ProfilePage() {
           My Profile
         </h2>
       </div>
+
+      {user?.force_password_change && (
+        <Alert className="mb-4 bg-yellow-50 border-yellow-200">
+          <AlertTitle>Password Change Required</AlertTitle>
+          <AlertDescription>
+            You must change your password before continuing to use the
+            application.
+          </AlertDescription>
+        </Alert>
+      )}
 
       <form className="space-y-4">
         <div className="flex gap-2 items-center">
@@ -74,9 +162,16 @@ export default function ProfilePage() {
         </div>
         <Input
           type="password"
-          placeholder="Password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
+          placeholder="Old Password"
+          value={oldPassword}
+          onChange={(e) => setOldPassword(e.target.value)}
+          disabled={!isEditing}
+        />
+        <Input
+          type="password"
+          placeholder="New Password"
+          value={newPassword}
+          onChange={(e) => setNewPassword(e.target.value)}
           disabled={!isEditing}
         />
         <Input type="email" value={user?.email || ""} disabled />
@@ -88,10 +183,12 @@ export default function ProfilePage() {
             <Button
               type="button"
               className="bg-[#ff5c02] text-white"
-              //onClick={}
-              disabled={status === "loading"}
+              onClick={handleSave}
+              disabled={status === "loading" || pwdStatus === "loading"}
             >
-              {status === "loading" ? "Saving..." : "Save"}
+              {status === "loading" || pwdStatus === "loading"
+                ? "Saving..."
+                : "Save"}
             </Button>
             <Button
               type="button"
@@ -99,6 +196,8 @@ export default function ProfilePage() {
               onClick={() => {
                 setFirstName(user?.first_name || "");
                 setLastName(user?.last_name || "");
+                setOldPassword("");
+                setNewPassword("");
                 setIsEditing(false);
               }}
               disabled={status === "loading"}
@@ -107,7 +206,24 @@ export default function ProfilePage() {
             </Button>
           </div>
         )}
-        {status === "error" && <p className="text-red-500">{error}</p>}
+        {pwdStatus === "error" && (
+          <Alert
+            variant="destructive"
+            className="bg-red-100 text-red-800 border-red-400"
+          >
+            <AlertTitle>Error</AlertTitle>
+            <AlertDescription>{pwdError}</AlertDescription>
+          </Alert>
+        )}
+        {status === "error" && (
+          <Alert
+            variant="destructive"
+            className="bg-red-100 text-red-800 border-red-400"
+          >
+            <AlertTitle>Error</AlertTitle>
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
       </form>
     </div>
   );

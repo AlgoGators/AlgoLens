@@ -31,6 +31,7 @@ export const useLogin = () => {
       const token = data.access_token;
       const decoded = JSON.parse(atob(token.split(".")[1]));
       const userId = decoded.sub;
+      const force_password_change = data.force_password_change;
 
       // Step 2: Get full user details using the ID
       const userRes = await fetch(`http://127.0.0.1:5000/users/${userId}`, {
@@ -45,11 +46,23 @@ export const useLogin = () => {
         throw new Error(userData.msg || "Failed to fetch user details");
       }
 
+      // Add force_password_change to user data
+      const userWithForceChange = {
+        ...userData.user,
+        force_password_change,
+      };
+
       // Step 3: Save and dispatch full user info
-      localStorage.setItem("user", JSON.stringify(userData.user));
+      localStorage.setItem("user", JSON.stringify(userWithForceChange));
       localStorage.setItem("access_token", token);
-      dispatch({ type: "LOGIN", payload: userData.user });
-      router.push("/");
+      dispatch({ type: "LOGIN", payload: userWithForceChange });
+
+      // Redirect based on force_password_change
+      if (force_password_change) {
+        router.push("/profile");
+      } else {
+        router.push("/dashboard");
+      }
     } catch (err: any) {
       setError(err.message);
     } finally {

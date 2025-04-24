@@ -10,3 +10,4 @@ psycopg2-binary
 openpyxl
 
 flask-jwt-extended
+password-validator
