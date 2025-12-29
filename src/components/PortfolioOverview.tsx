@@ -1,0 +1,136 @@
+import React, { useState } from 'react';
+import { TrendingUp, TrendingDown, Beaker } from 'lucide-react';
+import { LineChart, Line, XAxis, YAxis, ResponsiveContainer, Tooltip } from 'recharts';
+import type { PortfolioData } from '../data/portfolioData';
+import { useTheme } from '../contexts/ThemeContext';
+
+interface PortfolioOverviewProps {
+  data: PortfolioData;
+  onBuilderClick: () => void;
+}
+
+export function PortfolioOverview({ data, onBuilderClick }: PortfolioOverviewProps) {
+  const [selectedPeriod, setSelectedPeriod] = useState('1M');
+  const { theme } = useTheme();
+  const isPositive = data.totalReturn >= 0;
+  
+  const periods = ['1D', '1W', '1M', '3M', '1Y', 'ALL'];
+
+  return (
+    <div className="mb-8">
+      {/* Strategy Builder CTA */}
+      <button
+        onClick={onBuilderClick}
+        className={`w-full mb-6 p-4 rounded-lg border-2 border-dashed transition-all text-left ${
+          theme === 'dark'
+            ? 'border-gray-800 hover:border-orange-500 hover:bg-orange-950'
+            : 'border-gray-300 hover:border-orange-500 hover:bg-orange-50'
+        }`}
+      >
+        <div className="flex items-center gap-3">
+          <div className={`p-3 rounded-full ${
+            theme === 'dark' ? 'bg-gray-900' : 'bg-gray-100'
+          }`}>
+            <Beaker className="w-6 h-6 text-orange-500" />
+          </div>
+          <div className="flex-1">
+            <div className="text-lg mb-1">Test Strategy Combinations</div>
+            <div className={`text-sm ${
+              theme === 'dark' ? 'text-gray-400' : 'text-gray-500'
+            }`}>
+              Build custom portfolios and analyze combined performance
+            </div>
+          </div>
+          <div className="text-orange-500">→</div>
+        </div>
+      </button>
+
+      <div className="mb-4">
+        <h2 className={`text-sm uppercase tracking-wider mb-2 ${
+          theme === 'dark' ? 'text-gray-400' : 'text-gray-500'
+        }`}>
+          Fund Performance
+        </h2>
+      </div>
+
+      <div className="mb-6">
+        <div className="text-4xl md:text-5xl mb-2">
+          ${data.totalValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+        </div>
+        <div className={`flex items-center gap-2 text-lg ${isPositive ? 'text-orange-500' : 'text-red-500'}`}>
+          {isPositive ? <TrendingUp className="w-5 h-5" /> : <TrendingDown className="w-5 h-5" />}
+          <span>
+            ${Math.abs(data.totalReturn).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ({isPositive ? '+' : ''}{data.totalReturnPercent.toFixed(2)}%) Today
+          </span>
+        </div>
+      </div>
+
+      <div className="mb-4">
+        <ResponsiveContainer width="100%" height={300}>
+          <LineChart data={data.historicalData}>
+            <defs>
+              <linearGradient id="lineGradient" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor={isPositive ? "#f97316" : "#ef4444"} stopOpacity={theme === 'dark' ? 0.2 : 0.1} />
+                <stop offset="100%" stopColor={isPositive ? "#f97316" : "#ef4444"} stopOpacity={0} />
+              </linearGradient>
+            </defs>
+            <XAxis 
+              dataKey="date" 
+              hide
+            />
+            <YAxis 
+              hide
+              domain={['dataMin - 1000', 'dataMax + 1000']}
+            />
+            <Tooltip 
+              contentStyle={{ 
+                backgroundColor: theme === 'dark' ? '#1f2937' : '#fff', 
+                border: theme === 'dark' ? '1px solid #374151' : '1px solid #e5e7eb',
+                borderRadius: '8px',
+                boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)',
+                color: theme === 'dark' ? '#fff' : '#000'
+              }}
+              formatter={(value: number) => [`$${value.toLocaleString('en-US', { minimumFractionDigits: 2 })}`, 'Fund Value']}
+              labelFormatter={(label) => new Date(label).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+            />
+            <Line 
+              type="monotone" 
+              dataKey="value" 
+              stroke={isPositive ? "#f97316" : "#ef4444"}
+              strokeWidth={2}
+              dot={false}
+              fill="url(#lineGradient)"
+            />
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
+
+      <div className={`flex items-center justify-between mb-8 border-b ${
+        theme === 'dark' ? 'border-gray-800' : 'border-gray-200'
+      }`}>
+        {periods.map((period) => (
+          <button
+            key={period}
+            onClick={() => setSelectedPeriod(period)}
+            className={`px-3 py-3 text-sm transition-colors relative ${
+              selectedPeriod === period 
+                ? 'text-orange-500' 
+                : theme === 'dark' 
+                  ? 'text-gray-400 hover:text-white' 
+                  : 'text-gray-500 hover:text-gray-900'
+            }`}
+          >
+            {period}
+            {selectedPeriod === period && (
+              <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-orange-500" />
+            )}
+          </button>
+        ))}
+      </div>
+
+      <div className="flex items-center justify-between mb-6">
+        <h2 className="text-xl">Investment Strategies</h2>
+      </div>
+    </div>
+  );
+}
