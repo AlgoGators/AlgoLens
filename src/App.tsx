@@ -1,18 +1,39 @@
 import React, { useState } from 'react';
 import { LoginView } from './components/LoginView';
+import { RegisterView } from './components/RegisterView';
 import { Dashboard } from './components/Dashboard';
 import { ThemeProvider } from './contexts/ThemeContext';
+import { AuthProvider, useAuth } from './contexts/AuthContext';
+
+function AppContent() {
+  const { user, logout, isLoading } = useAuth();
+  const [showRegister, setShowRegister] = useState(false);
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-lg">Loading...</div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return showRegister ? (
+      <RegisterView onBackToLogin={() => setShowRegister(false)} />
+    ) : (
+      <LoginView onNavigateToRegister={() => setShowRegister(true)} />
+    );
+  }
+
+  return <Dashboard onLogout={logout} />;
+}
 
 export default function App() {
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
-
   return (
     <ThemeProvider>
-      {!isLoggedIn ? (
-        <LoginView onLogin={() => setIsLoggedIn(true)} />
-      ) : (
-        <Dashboard onLogout={() => setIsLoggedIn(false)} />
-      )}
+      <AuthProvider>
+        <AppContent />
+      </AuthProvider>
     </ThemeProvider>
   );
 }

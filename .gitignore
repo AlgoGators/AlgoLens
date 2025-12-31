@@ -1,2 +1,8 @@
-node_modules
 .claude
+
+node_modules
+config.json
+
+# Backend
+__pycache__
+venv
