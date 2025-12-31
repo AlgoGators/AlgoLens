@@ -50,7 +50,7 @@ export function LoginView({ onNavigateToRegister }: LoginViewProps) {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               className="w-full bg-white border-b-2 border-gray-300 px-0 py-3 text-black focus:outline-none focus:border-orange-500 transition-colors placeholder:text-gray-400"
-              placeholder="Student email"
+              placeholder="Email"
               required
               disabled={isLoading}
             />
