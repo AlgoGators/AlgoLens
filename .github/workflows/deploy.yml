@@ -24,6 +24,16 @@ jobs:
             echo "Pulling latest code..."
             git pull origin main
 
+            echo "Creating backend .env file from secrets..."
+            cat > backend/.env << EOF
+            DB_HOST=${{ secrets.DB_HOST }}
+            DB_PORT=${{ secrets.DB_PORT }}
+            DB_USER=${{ secrets.DB_USER }}
+            DB_PASSWORD=${{ secrets.DB_PASSWORD }}
+            DB_NAME=${{ secrets.DB_NAME }}
+            JWT_SECRET_KEY=${{ secrets.JWT_SECRET_KEY }}
+            EOF
+
             echo "Installing frontend dependencies..."
             npm ci
 
@@ -35,10 +45,10 @@ jobs:
             pip3 install -r requirements.txt
             cd ..
 
-            echo "Restarting backend service..."
-            sudo systemctl restart algolens-backend
+            echo "Restarting backend service (if exists)..."
+            sudo systemctl restart algolens-backend || echo "Backend service not set up yet"
 
-            echo "Restarting frontend service..."
-            sudo systemctl restart algolens
+            echo "Restarting frontend service (if exists)..."
+            sudo systemctl restart algolens || echo "Frontend service not set up yet"
 
-            echo "Deployment complete ✅"
+            echo "Deployment complete!"

@@ -1,7 +1,7 @@
 .claude
 
 node_modules
-config.json
+.env
 
 # Backend
 __pycache__
