@@ -8,8 +8,22 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+# Determine environment
+ENV = os.getenv('FLASK_ENV', 'production')
+DEBUG = os.getenv('FLASK_DEBUG', 'False').lower() == 'true'
+
 app = Flask(__name__)
-CORS(app)
+
+# Configure CORS securely
+if ENV == 'production':
+    CORS(
+        app,
+        supports_credentials=True,
+        resources={r"/*": {"origins": os.getenv("CORS_ORIGINS", "*").split(",")}}
+    )
+else:
+    # Development: allow everything
+    CORS(app, supports_credentials=True)
 
 # Configure logging
 if not app.debug:
@@ -60,4 +74,6 @@ from routes.auth import auth_bp
 app.register_blueprint(auth_bp, url_prefix='/auth')
 
 if __name__ == '__main__':
-    app.run(debug=True, port=5000, host='0.0.0.0')
+    # NEVER use debug=True in production - it exposes remote code execution vulnerability
+    port = int(os.getenv('PORT', 5000))
+    app.run(debug=DEBUG, port=port, host='0.0.0.0')
