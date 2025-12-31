@@ -404,9 +404,7 @@ export const portfolioData: PortfolioData = {
           percentOfTotal: 13.54
         }
       ],
-      historicalData: generateHistoricalData(25000, 32380.00, 90),
-      managers: ['Bob Brown'],
-      lastUpdate: '2023-09-20'
+      historicalData: generateHistoricalData(25000, 32380.00, 90)
     }
   ],
   historicalData: generateHistoricalData(100000, 127845.32, 90)
