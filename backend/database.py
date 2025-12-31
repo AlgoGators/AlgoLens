@@ -1,22 +1,17 @@
 import psycopg2
 from psycopg2.extras import RealDictCursor
-import json
 import os
+from dotenv import load_dotenv
 
-def get_db_config():
-    config_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'config.json')
-    with open(config_path, 'r') as f:
-        config = json.load(f)
-    return config['database']
+load_dotenv()
 
 def get_db_connection():
-    db_config = get_db_config()
     conn = psycopg2.connect(
-        host=db_config['host'],
-        port=db_config['port'],
-        user=db_config['username'],
-        password=db_config['password'],
-        dbname=db_config['name'],
+        host=os.getenv('DB_HOST'),
+        port=os.getenv('DB_PORT', '5432'),
+        user=os.getenv('DB_USER'),
+        password=os.getenv('DB_PASSWORD'),
+        dbname=os.getenv('DB_NAME'),
         cursor_factory=RealDictCursor
     )
     return conn

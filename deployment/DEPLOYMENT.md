@@ -41,20 +41,29 @@ pip3 install -r requirements.txt
 cd ..
 ```
 
-### 4. Configure config.json
+### 4. Configure Environment Variables
 
-Make sure your `config.json` file exists in the root directory with your database credentials:
+Create a `.env` file in the `backend` directory:
 
-```json
-{
-  "database": {
-    "host": "13.58.153.216",
-    "port": "5432",
-    "username": "postgres",
-    "password": "algogators",
-    "name": "algo_data"
-  }
-}
+```bash
+cd /home/ec2-user/AlgoLens/backend
+nano .env
+```
+
+Add your configuration:
+
+```env
+DB_HOST=13.58.153.216
+DB_PORT=5432
+DB_USER=postgres
+DB_PASSWORD=algogators
+DB_NAME=algo_data
+JWT_SECRET_KEY=your-super-secret-jwt-key-change-this
+```
+
+**Important**: Generate a secure random JWT secret key. You can use:
+```bash
+python3 -c "import secrets; print(secrets.token_hex(32))"
 ```
 
 ### 5. Set Up Systemd Services
