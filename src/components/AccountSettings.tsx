@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { ArrowLeft, ChevronRight, User, Mail, Phone, MapPin, Briefcase, Calendar } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
+import { useAuth } from '../contexts/AuthContext';
 
 interface AccountSettingsProps {
   onBack: () => void;
@@ -8,14 +9,19 @@ interface AccountSettingsProps {
 
 export function AccountSettings({ onBack }: AccountSettingsProps) {
   const { theme } = useTheme();
+  const { user } = useAuth();
+
+  const fullName = user?.first_name && user?.last_name
+    ? `${user.first_name} ${user.last_name}`
+    : 'Not set';
 
   const accountInfo = [
-    { icon: User, label: 'Full Name', value: 'John Doe', action: 'Edit' },
-    { icon: Mail, label: 'Email', value: 'john.doe@example.com', action: 'Change' },
-    { icon: Phone, label: 'Phone Number', value: '+1 (555) 123-4567', action: 'Update' },
-    { icon: MapPin, label: 'Address', value: '123 Main St, San Francisco, CA', action: 'Update' },
-    { icon: Calendar, label: 'Date of Birth', value: 'January 15, 1990', action: 'Edit' },
-    { icon: Briefcase, label: 'Employment Status', value: 'Employed', action: 'Update' },
+    { icon: User, label: 'Full Name', value: fullName, action: 'Edit' },
+    { icon: Mail, label: 'Email', value: user?.email || 'Not set', action: 'Change' },
+    { icon: Phone, label: 'Phone Number', value: 'Not set', action: 'Update' },
+    { icon: MapPin, label: 'Address', value: 'Not set', action: 'Update' },
+    { icon: Calendar, label: 'Date of Birth', value: 'Not set', action: 'Edit' },
+    { icon: Briefcase, label: 'Role', value: user?.role || 'Not set', action: 'View' },
   ];
 
   return (

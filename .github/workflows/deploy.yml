@@ -24,13 +24,21 @@ jobs:
             echo "Pulling latest code..."
             git pull origin main
 
-            echo "Installing dependencies (if needed)..."
+            echo "Installing frontend dependencies..."
             npm ci
 
             echo "Building frontend..."
             npm run build
 
-            echo "Restarting service..."
+            echo "Installing backend dependencies..."
+            cd backend
+            pip3 install -r requirements.txt
+            cd ..
+
+            echo "Restarting backend service..."
+            sudo systemctl restart algolens-backend
+
+            echo "Restarting frontend service..."
             sudo systemctl restart algolens
 
             echo "Deployment complete ✅"

@@ -1,0 +1,5 @@
+Flask==3.0.0
+Flask-Cors==4.0.0
+Flask-JWT-Extended==4.6.0
+psycopg2-binary==2.9.9
+Werkzeug==3.0.1

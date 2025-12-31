@@ -1,17 +1,30 @@
 import React, { useState } from 'react';
 import logo from '../assets/logo.png';
+import { useAuth } from '../contexts/AuthContext';
 
 interface LoginViewProps {
-  onLogin: () => void;
+  onNavigateToRegister?: () => void;
 }
 
-export function LoginView({ onLogin }: LoginViewProps) {
+export function LoginView({ onNavigateToRegister }: LoginViewProps) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const { login } = useAuth();
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    onLogin();
+    setError('');
+    setIsLoading(true);
+
+    try {
+      await login(email, password);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Login failed');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -24,6 +37,12 @@ export function LoginView({ onLogin }: LoginViewProps) {
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
+          {error && (
+            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">
+              {error}
+            </div>
+          )}
+
           <div>
             <input
               id="email"
@@ -33,6 +52,7 @@ export function LoginView({ onLogin }: LoginViewProps) {
               className="w-full bg-white border-b-2 border-gray-300 px-0 py-3 text-black focus:outline-none focus:border-orange-500 transition-colors placeholder:text-gray-400"
               placeholder="Student email"
               required
+              disabled={isLoading}
             />
           </div>
 
@@ -45,14 +65,16 @@ export function LoginView({ onLogin }: LoginViewProps) {
               className="w-full bg-white border-b-2 border-gray-300 px-0 py-3 text-black focus:outline-none focus:border-orange-500 transition-colors placeholder:text-gray-400"
               placeholder="Password"
               required
+              disabled={isLoading}
             />
           </div>
 
           <button
             type="submit"
-            className="w-full bg-orange-500 text-white rounded-full py-4 hover:bg-orange-600 transition-colors mt-8"
+            className="w-full bg-orange-500 text-white rounded-full py-4 hover:bg-orange-600 transition-colors mt-8 disabled:opacity-50 disabled:cursor-not-allowed"
+            disabled={isLoading}
           >
-            Access Fund Dashboard
+            {isLoading ? 'Logging in...' : 'Access Fund Dashboard'}
           </button>
         </form>
 
@@ -65,7 +87,10 @@ export function LoginView({ onLogin }: LoginViewProps) {
         <div className="mt-8 pt-8 border-t border-gray-200 text-center">
           <p className="text-gray-500 text-sm">
             Not a member yet?{' '}
-            <button className="text-orange-500 hover:text-orange-600">
+            <button
+              onClick={onNavigateToRegister}
+              className="text-orange-500 hover:text-orange-600"
+            >
               Join the fund
             </button>
           </p>

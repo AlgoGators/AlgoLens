@@ -1,6 +1,7 @@
 import React from 'react';
 import { X, Moon, Sun, LogOut, ChevronRight } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
+import { useAuth } from '../contexts/AuthContext';
 import logo from '../assets/logo.png';
 
 interface ProfileScreenProps {
@@ -11,6 +12,7 @@ interface ProfileScreenProps {
 
 export function ProfileScreen({ onClose, onLogout, onNavigate }: ProfileScreenProps) {
   const { theme, toggleTheme } = useTheme();
+  const { user } = useAuth();
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-end md:items-center justify-center">
@@ -35,15 +37,15 @@ export function ProfileScreen({ onClose, onLogout, onNavigate }: ProfileScreenPr
         {/* Profile Info */}
         <div className="p-6">
           <div className="flex items-center gap-4 mb-6">
-            <div className={`w-16 h-16 rounded-full flex items-center justify-center ${
-              theme === 'dark' ? 'bg-gray-900' : 'bg-gray-100'
-            }`}>
-              <img src={logo} alt="ALGO" className="w-10 h-10" />
-            </div>
+            
             <div>
-              <h3 className="text-xl mb-1">John Doe</h3>
+              <h3 className="text-xl mb-1">
+                {user?.first_name && user?.last_name
+                  ? `${user.first_name} ${user.last_name}`
+                  : user?.email || 'User'}
+              </h3>
               <p className={theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}>
-                john.doe@example.com
+                {user?.email || 'No email'}
               </p>
             </div>
           </div>
