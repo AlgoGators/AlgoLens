@@ -1,4 +1,4 @@
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, current_app
 from flask_jwt_extended import create_access_token
 from werkzeug.security import check_password_hash, generate_password_hash
 from database import execute_query
@@ -7,41 +7,61 @@ auth_bp = Blueprint('auth', __name__)
 
 @auth_bp.route('/login', methods=['POST'])
 def login():
-    data = request.get_json()
+    current_app.logger.info('Login attempt started')
 
-    if not data or not data.get('email') or not data.get('password'):
-        return jsonify({'error': 'Email and password are required'}), 400
+    try:
+        data = request.get_json()
 
-    email = data['email']
-    password = data['password']
+        if not data or not data.get('email') or not data.get('password'):
+            current_app.logger.warning('Login failed: Missing email or password')
+            return jsonify({'error': 'Email and password are required'}), 400
 
-    query = 'SELECT * FROM auth.users WHERE email = %s'
-    user = execute_query(query, (email,), fetch_one=True)
+        email = data['email']
+        password = data['password']
 
-    if not user:
-        return jsonify({'error': 'Invalid email or password'}), 401
+        current_app.logger.info(f'Login attempt for email: {email}')
 
-    if not check_password_hash(user['password'], password):
-        return jsonify({'error': 'Invalid email or password'}), 401
+        query = 'SELECT * FROM auth.users WHERE email = %s'
+        current_app.logger.debug(f'Executing query: {query} with email: {email}')
 
-    access_token = create_access_token(
-        identity=user['id'],
-        additional_claims={
-            'email': user['email'],
-            'role': user.get('role', 'general_member')
-        }
-    )
+        user = execute_query(query, (email,), fetch_one=True)
 
-    return jsonify({
-        'token': access_token,
-        'user': {
-            'id': user['id'],
-            'email': user['email'],
-            'first_name': user.get('first_name'),
-            'last_name': user.get('last_name'),
-            'role': user.get('role', 'general_member')
-        }
-    }), 200
+        if not user:
+            current_app.logger.warning(f'Login failed: User not found for email: {email}')
+            return jsonify({'error': 'Invalid email or password'}), 401
+
+        current_app.logger.debug(f'User found: {user.get("id")} - {email}')
+
+        if not check_password_hash(user['password'], password):
+            current_app.logger.warning(f'Login failed: Invalid password for email: {email}')
+            return jsonify({'error': 'Invalid email or password'}), 401
+
+        current_app.logger.info(f'Password verified for email: {email}')
+
+        access_token = create_access_token(
+            identity=user['id'],
+            additional_claims={
+                'email': user['email'],
+                'role': user.get('role', 'general_member')
+            }
+        )
+
+        current_app.logger.info(f'Login successful for email: {email}, role: {user.get("role", "general_member")}')
+
+        return jsonify({
+            'token': access_token,
+            'user': {
+                'id': user['id'],
+                'email': user['email'],
+                'first_name': user.get('first_name'),
+                'last_name': user.get('last_name'),
+                'role': user.get('role', 'general_member')
+            }
+        }), 200
+
+    except Exception as e:
+        current_app.logger.error(f'Login error: {str(e)}', exc_info=True)
+        return jsonify({'error': 'An internal error occurred during login'}), 500
 
 @auth_bp.route('/verify', methods=['GET'])
 def verify():
