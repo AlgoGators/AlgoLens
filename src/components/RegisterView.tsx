@@ -6,6 +6,9 @@ interface RegisterViewProps {
   onBackToLogin: () => void;
 }
 
+// Get API URL from environment variable or default to localhost
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+
 export function RegisterView({ onBackToLogin }: RegisterViewProps) {
   const [step, setStep] = useState<'email' | 'details'>('email');
   const [email, setEmail] = useState('');
@@ -23,7 +26,7 @@ export function RegisterView({ onBackToLogin }: RegisterViewProps) {
     setIsLoading(true);
 
     try {
-      const response = await fetch('http://localhost:5000/auth/check-email', {
+      const response = await fetch(`${API_URL}/auth/check-email`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

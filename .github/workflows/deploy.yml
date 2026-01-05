@@ -32,6 +32,10 @@ jobs:
             DB_PASSWORD=${{ secrets.DB_PASSWORD }}
             DB_NAME=${{ secrets.DB_NAME }}
             JWT_SECRET_KEY=${{ secrets.JWT_SECRET_KEY }}
+            FLASK_ENV=production
+            FLASK_DEBUG=False
+            PORT=5000
+            CORS_ORIGINS=https://algolens.algogators.com,http://localhost:5173,http://localhost:3000
             EOF
 
             echo "Installing frontend dependencies..."
