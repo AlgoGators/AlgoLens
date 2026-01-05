@@ -38,6 +38,11 @@ jobs:
             CORS_ORIGINS=https://algolens.algogators.com,http://localhost:5173,http://localhost:3000
             EOF
 
+            echo "Creating frontend .env file..."
+            cat > .env << EOF
+            VITE_API_URL=https://algolens.algogators.com
+            EOF
+
             echo "Installing frontend dependencies..."
             npm ci
 
