@@ -65,7 +65,7 @@ jobs:
             WantedBy=multi-user.target
             BACKEND_EOF
 
-            # Create/update frontend service (externally accessible on 0.0.0.0)
+            # Create/update frontend service (localhost only, proxied by Nginx)
             sudo tee /etc/systemd/system/algolens.service > /dev/null << 'FRONTEND_EOF'
             [Unit]
             Description=AlgoLens Frontend
@@ -75,7 +75,7 @@ jobs:
             Type=simple
             User=ec2-user
             WorkingDirectory=/home/ec2-user/AlgoLens
-            ExecStart=/usr/bin/npx serve -s build -l tcp://0.0.0.0:3000
+            ExecStart=/usr/bin/npx serve -s build -l tcp://127.0.0.1:3000
             Restart=always
             RestartSec=10
 
@@ -83,13 +83,28 @@ jobs:
             WantedBy=multi-user.target
             FRONTEND_EOF
 
+            echo "Installing Nginx if not present..."
+            sudo yum install -y nginx
+
+            echo "Configuring Nginx..."
+            sudo cp nginx.conf /etc/nginx/conf.d/algolens.conf
+
+            echo "Testing Nginx configuration..."
+            sudo nginx -t
+
             echo "Enabling and restarting services..."
             sudo systemctl daemon-reload
             sudo systemctl enable algolens-backend
             sudo systemctl enable algolens
+            sudo systemctl enable nginx
             sudo systemctl restart algolens-backend
             sudo systemctl restart algolens
 
+            # Only restart nginx if config is valid
+            if sudo nginx -t 2>/dev/null; then
+                sudo systemctl restart nginx
+            fi
+
             echo "Deployment complete!"
-            echo "Frontend: http://${{ secrets.EC2_HOST }}:3000"
-            echo "Backend: http://${{ secrets.EC2_HOST }}:5000"
+            echo "Frontend: https://algolens.algogators.com"
+            echo "Backend: http://localhost:5000"
