@@ -1,8 +1,13 @@
 .claude
+.vscode
 
-node_modules
 .env
+
+# Frontend
+node_modules
+build
 
 # Backend
 __pycache__
 venv
+
