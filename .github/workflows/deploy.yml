@@ -45,10 +45,51 @@ jobs:
             pip3 install -r requirements.txt
             cd ..
 
-            echo "Restarting backend service (if exists)..."
-            sudo systemctl restart algolens-backend || echo "Backend service not set up yet"
+            echo "Configuring systemd services..."
 
-            echo "Restarting frontend service (if exists)..."
-            sudo systemctl restart algolens || echo "Frontend service not set up yet"
+            # Create/update backend service
+            sudo tee /etc/systemd/system/algolens-backend.service > /dev/null << 'BACKEND_EOF'
+            [Unit]
+            Description=AlgoLens Backend API
+            After=network.target
+
+            [Service]
+            Type=simple
+            User=ec2-user
+            WorkingDirectory=/home/ec2-user/AlgoLens/backend
+            ExecStart=/usr/bin/python3 /home/ec2-user/AlgoLens/backend/app.py
+            Restart=always
+            RestartSec=10
+
+            [Install]
+            WantedBy=multi-user.target
+            BACKEND_EOF
+
+            # Create/update frontend service (externally accessible on 0.0.0.0)
+            sudo tee /etc/systemd/system/algolens.service > /dev/null << 'FRONTEND_EOF'
+            [Unit]
+            Description=AlgoLens Frontend
+            After=network.target
+
+            [Service]
+            Type=simple
+            User=ec2-user
+            WorkingDirectory=/home/ec2-user/AlgoLens
+            ExecStart=/usr/bin/npx serve -s build -l tcp://0.0.0.0:3000
+            Restart=always
+            RestartSec=10
+
+            [Install]
+            WantedBy=multi-user.target
+            FRONTEND_EOF
+
+            echo "Enabling and restarting services..."
+            sudo systemctl daemon-reload
+            sudo systemctl enable algolens-backend
+            sudo systemctl enable algolens
+            sudo systemctl restart algolens-backend
+            sudo systemctl restart algolens
 
             echo "Deployment complete!"
+            echo "Frontend: http://${{ secrets.EC2_HOST }}:3000"
+            echo "Backend: http://${{ secrets.EC2_HOST }}:5000"
