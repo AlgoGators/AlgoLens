@@ -52,7 +52,9 @@ sudo nginx -t && sudo systemctl restart nginx
 
 echo ""
 echo "Step 4: Obtaining SSL certificate..."
-sudo certbot --nginx -d algolens.algogators.com --non-interactive --agree-tos --email [email protected] --redirect
+echo "Enter your email address for Let's Encrypt notifications:"
+read -p "Email: " email_address
+sudo certbot --nginx -d algolens.algogators.com --non-interactive --agree-tos --email "$email_address" --redirect
 
 echo ""
 echo "Step 5: Restoring full Nginx configuration..."
