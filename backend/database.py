@@ -1,11 +1,17 @@
 import psycopg2
+import logging
 from psycopg2.extras import RealDictCursor
 import os
 from dotenv import load_dotenv
+from pathlib import Path
 
-load_dotenv()
+ENV_PATH = Path(__file__).resolve().parent / '.env'
+load_dotenv(dotenv_path=ENV_PATH)
+
+logger = logging.getLogger(__name__)
 
 def get_db_connection():
+    logger.info('Connecting to DB host=%s name=%s user=%s', os.getenv('DB_HOST'), os.getenv('DB_NAME'), os.getenv('DB_USER'))
     conn = psycopg2.connect(
         host=os.getenv('DB_HOST'),
         port=os.getenv('DB_PORT', '5432'),
