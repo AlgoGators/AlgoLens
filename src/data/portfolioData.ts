@@ -91,23 +91,23 @@ export interface PortfolioData {
 const generateHistoricalData = (startValue: number, endValue: number, days: number): HistoricalDataPoint[] => {
   const data: HistoricalDataPoint[] = [];
   const today = new Date();
-  
+
   for (let i = days; i >= 0; i--) {
     const date = new Date(today);
     date.setDate(date.getDate() - i);
-    
+
     // Add some randomness but trend towards end value
     const progress = (days - i) / days;
     const baseValue = startValue + (endValue - startValue) * progress;
     const variance = baseValue * 0.05; // 5% variance
     const value = baseValue + (Math.random() - 0.5) * variance;
-    
+
     data.push({
       date: date.toISOString().split('T')[0],
       value: Math.round(value * 100) / 100
     });
   }
-  
+
   return data;
 };
 
@@ -407,5 +407,5 @@ export const portfolioData: PortfolioData = {
       historicalData: generateHistoricalData(25000, 32380.00, 90)
     }
   ],
-  historicalData: generateHistoricalData(100000, 127845.32, 90)
+  historicalData: generateHistoricalData(100000, 127845.32, 365)
 };
