@@ -5,8 +5,10 @@ import os
 import logging
 from logging.handlers import RotatingFileHandler
 from dotenv import load_dotenv
+from pathlib import Path
 
-load_dotenv()
+ENV_PATH = Path(__file__).resolve().parent / '.env'
+load_dotenv(dotenv_path=ENV_PATH)
 
 # Determine environment
 ENV = os.getenv('FLASK_ENV', 'production')
@@ -71,7 +73,10 @@ app.config['JWT_ACCESS_TOKEN_EXPIRES'] = 43200
 jwt = JWTManager(app)
 
 from routes.auth import auth_bp
+from routes.portfolio import portfolio_bp
+
 app.register_blueprint(auth_bp, url_prefix='/auth')
+app.register_blueprint(portfolio_bp, url_prefix='/portfolio')
 
 if __name__ == '__main__':
     # NEVER use debug=True in production - it exposes remote code execution vulnerability

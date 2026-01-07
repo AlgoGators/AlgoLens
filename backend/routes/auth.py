@@ -39,7 +39,7 @@ def login():
         current_app.logger.info(f'Password verified for email: {email}')
 
         access_token = create_access_token(
-            identity=user['id'],
+            identity=str(user['id']),
             additional_claims={
                 'email': user['email'],
                 'role': user.get('role', 'general_member')
@@ -151,7 +151,7 @@ def register():
             conn.commit()
 
             access_token = create_access_token(
-                identity=updated_user['id'],
+                identity=str(updated_user['id']),
                 additional_claims={
                     'email': updated_user['email'],
                     'role': updated_user.get('role', 'general_member')
