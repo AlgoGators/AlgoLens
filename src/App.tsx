@@ -17,15 +17,15 @@ function AppContent() {
     );
   }
 
-  if (!user) {
-    return showRegister ? (
-      <RegisterView onBackToLogin={() => setShowRegister(false)} />
-    ) : (
-      <LoginView onNavigateToRegister={() => setShowRegister(true)} />
-    );
+  if (user) {
+    return <Dashboard onLogout={logout} />;
   }
 
-  return <Dashboard onLogout={logout} />;
+  return showRegister ? (
+    <RegisterView onBackToLogin={() => setShowRegister(false)} />
+  ) : (
+    <LoginView onNavigateToRegister={() => setShowRegister(true)} />
+  );
 }
 
 export default function App() {

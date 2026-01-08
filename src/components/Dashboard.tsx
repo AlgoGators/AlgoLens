@@ -51,7 +51,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
   }, []);
 
   // Check if portfolio has any positions
-  const hasPositions = portfolioData?.strategies.length &&
+  const hasPositions = portfolioData?.strategies && portfolioData.strategies.length > 0 &&
     portfolioData.strategies.some(s => s.positions.length > 0);
 
   const handleTabChange = (tab: string) => {
@@ -78,9 +78,8 @@ export function Dashboard({ onLogout }: DashboardProps) {
   };
 
   return (
-    <div className={`min-h-screen pb-20 md:pb-0 ${
-      theme === 'dark' ? 'bg-black text-white' : 'bg-white text-black'
-    }`}>
+    <div className={`min-h-screen pb-20 md:pb-0 ${theme === 'dark' ? 'bg-black text-white' : 'bg-white text-black'
+      }`}>
       {activeTab !== 'news' && (
         <Header
           onProfileClick={() => {
@@ -90,6 +89,11 @@ export function Dashboard({ onLogout }: DashboardProps) {
           onBuilderClick={() => {
             setShowBuilder(true);
             setActiveTab('builder');
+          }}
+          onHomeClick={() => {
+            setShowBuilder(false);
+            setActiveTab('portfolio');
+            setSelectedStrategy(null);
           }}
         />
       )}
@@ -158,9 +162,8 @@ export function Dashboard({ onLogout }: DashboardProps) {
 
       {settingsScreen === 'account' && (
         <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-end md:items-center justify-center">
-          <div className={`w-full md:w-[500px] h-full md:h-[80vh] md:rounded-2xl overflow-hidden ${
-            theme === 'dark' ? 'bg-black text-white' : 'bg-white text-black'
-          }`}>
+          <div className={`w-full md:w-[500px] h-full md:h-[80vh] md:rounded-2xl overflow-hidden ${theme === 'dark' ? 'bg-black text-white' : 'bg-white text-black'
+            }`}>
             <AccountSettings onBack={() => setSettingsScreen('profile')} />
           </div>
         </div>
@@ -168,9 +171,8 @@ export function Dashboard({ onLogout }: DashboardProps) {
 
       {settingsScreen === 'privacy' && (
         <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-end md:items-center justify-center">
-          <div className={`w-full md:w-[500px] h-full md:h-[80vh] md:rounded-2xl overflow-hidden ${
-            theme === 'dark' ? 'bg-black text-white' : 'bg-white text-black'
-          }`}>
+          <div className={`w-full md:w-[500px] h-full md:h-[80vh] md:rounded-2xl overflow-hidden ${theme === 'dark' ? 'bg-black text-white' : 'bg-white text-black'
+            }`}>
             <PrivacySettings onBack={() => setSettingsScreen('profile')} />
           </div>
         </div>

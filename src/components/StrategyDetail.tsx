@@ -23,13 +23,13 @@ export function StrategyDetail({ strategy, onBack }: StrategyDetailProps) {
     <div>
       <button
         onClick={onBack}
-        className={`flex items-center gap-2 mb-6 transition-colors ${
-          theme === 'dark' 
-            ? 'text-gray-300 hover:text-white' 
-            : 'text-gray-700 hover:text-black'
-        }`}
+        className={`flex items-center gap-2 mb-6 px-4 py-2 rounded-lg transition-colors ${theme === 'dark'
+          ? 'text-gray-300 hover:text-white hover:bg-gray-900'
+          : 'text-gray-700 hover:text-black hover:bg-gray-100'
+          }`}
       >
         <ArrowLeft className="w-5 h-5" />
+        <span>Back to Strategies</span>
       </button>
 
       <div className="mb-6">
@@ -39,9 +39,8 @@ export function StrategyDetail({ strategy, onBack }: StrategyDetailProps) {
             <p className={theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}>
               {strategy.description}
             </p>
-            <div className={`text-sm mt-2 ${
-              theme === 'dark' ? 'text-gray-400' : 'text-gray-500'
-            }`}>
+            <div className={`text-sm mt-2 ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'
+              }`}>
               Managed by {strategy.managers.join(' & ')} • {strategy.lastUpdate}
             </div>
           </div>
@@ -69,17 +68,17 @@ export function StrategyDetail({ strategy, onBack }: StrategyDetailProps) {
                 <stop offset="100%" stopColor={isPositive ? "#f97316" : "#ef4444"} stopOpacity={0} />
               </linearGradient>
             </defs>
-            <XAxis 
-              dataKey="date" 
+            <XAxis
+              dataKey="date"
               hide
             />
-            <YAxis 
+            <YAxis
               hide
               domain={['dataMin - 500', 'dataMax + 500']}
             />
-            <Tooltip 
-              contentStyle={{ 
-                backgroundColor: theme === 'dark' ? '#1f2937' : '#fff', 
+            <Tooltip
+              contentStyle={{
+                backgroundColor: theme === 'dark' ? '#1f2937' : '#fff',
                 border: theme === 'dark' ? '1px solid #374151' : '1px solid #e5e7eb',
                 borderRadius: '8px',
                 boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)',
@@ -88,9 +87,9 @@ export function StrategyDetail({ strategy, onBack }: StrategyDetailProps) {
               formatter={(value: number) => [`$${value.toLocaleString('en-US', { minimumFractionDigits: 2 })}`, 'Value']}
               labelFormatter={(label) => new Date(label).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
             />
-            <Line 
-              type="monotone" 
-              dataKey="value" 
+            <Line
+              type="monotone"
+              dataKey="value"
               stroke={isPositive ? "#f97316" : "#ef4444"}
               strokeWidth={2}
               dot={false}
@@ -100,20 +99,18 @@ export function StrategyDetail({ strategy, onBack }: StrategyDetailProps) {
         </ResponsiveContainer>
       </div>
 
-      <div className={`flex items-center justify-between mb-8 border-b ${
-        theme === 'dark' ? 'border-gray-800' : 'border-gray-200'
-      }`}>
+      <div className={`flex items-center justify-between mb-8 border-b ${theme === 'dark' ? 'border-gray-800' : 'border-gray-200'
+        }`}>
         {periods.map((period) => (
           <button
             key={period}
             onClick={() => setSelectedPeriod(period)}
-            className={`px-3 py-3 text-sm transition-colors relative ${
-              selectedPeriod === period 
-                ? 'text-orange-500' 
-                : theme === 'dark' 
-                  ? 'text-gray-400 hover:text-white' 
-                  : 'text-gray-500 hover:text-gray-900'
-            }`}
+            className={`px-3 py-3 text-sm transition-colors relative ${selectedPeriod === period
+              ? 'text-orange-500'
+              : theme === 'dark'
+                ? 'text-gray-400 hover:text-white'
+                : 'text-gray-500 hover:text-gray-900'
+              }`}
           >
             {period}
             {selectedPeriod === period && (
@@ -124,53 +121,62 @@ export function StrategyDetail({ strategy, onBack }: StrategyDetailProps) {
       </div>
 
       {/* Tab Navigation */}
-      <div className={`flex items-center gap-4 mb-6 border-b ${
-        theme === 'dark' ? 'border-gray-800' : 'border-gray-200'
-      }`}>
-        <button
-          onClick={() => setSelectedTab('positions')}
-          className={`pb-3 px-1 transition-colors relative ${
-            selectedTab === 'positions'
+      <div className={`flex items-center justify-between mb-6 border-b ${theme === 'dark' ? 'border-gray-800' : 'border-gray-200'
+        }`}>
+        <div className="flex items-center gap-4">
+          <button
+            onClick={() => setSelectedTab('positions')}
+            className={`pb-3 px-1 transition-colors relative ${selectedTab === 'positions'
               ? 'text-orange-500'
               : theme === 'dark'
                 ? 'text-gray-400 hover:text-white'
                 : 'text-gray-500 hover:text-gray-900'
-          }`}
-        >
-          Positions
-          {selectedTab === 'positions' && (
-            <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-orange-500" />
-          )}
-        </button>
-        <button
-          onClick={() => setSelectedTab('analysis')}
-          className={`pb-3 px-1 transition-colors relative ${
-            selectedTab === 'analysis'
+              }`}
+          >
+            Positions
+            {selectedTab === 'positions' && (
+              <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-orange-500" />
+            )}
+          </button>
+          <button
+            onClick={() => setSelectedTab('analysis')}
+            className={`pb-3 px-1 transition-colors relative ${selectedTab === 'analysis'
               ? 'text-orange-500'
               : theme === 'dark'
                 ? 'text-gray-400 hover:text-white'
                 : 'text-gray-500 hover:text-gray-900'
-          }`}
-        >
-          Financial Analysis
-          {selectedTab === 'analysis' && (
-            <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-orange-500" />
-          )}
-        </button>
-        <button
-          onClick={() => setSelectedTab('activity')}
-          className={`pb-3 px-1 transition-colors relative ${
-            selectedTab === 'activity'
+              }`}
+          >
+            Financial Analysis
+            {selectedTab === 'analysis' && (
+              <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-orange-500" />
+            )}
+          </button>
+          <button
+            onClick={() => setSelectedTab('activity')}
+            className={`pb-3 px-1 transition-colors relative ${selectedTab === 'activity'
               ? 'text-orange-500'
               : theme === 'dark'
                 ? 'text-gray-400 hover:text-white'
                 : 'text-gray-500 hover:text-gray-900'
-          }`}
+              }`}
+          >
+            Trading Activity
+            {selectedTab === 'activity' && (
+              <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-orange-500" />
+            )}
+          </button>
+        </div>
+
+        <button
+          onClick={onBack}
+          className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors ${theme === 'dark'
+              ? 'text-gray-300 hover:text-white hover:bg-gray-900'
+              : 'text-gray-700 hover:text-black hover:bg-gray-100'
+            }`}
         >
-          Trading Activity
-          {selectedTab === 'activity' && (
-            <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-orange-500" />
-          )}
+          <ArrowLeft className="w-5 h-5" />
+          <span>Back to Strategies</span>
         </button>
       </div>
 
@@ -184,8 +190,8 @@ export function StrategyDetail({ strategy, onBack }: StrategyDetailProps) {
       )}
 
       {selectedTab === 'activity' && (
-        <TradingActivity 
-          executions={strategy.executions} 
+        <TradingActivity
+          executions={strategy.executions}
           finalizedPositions={strategy.finalizedPositions}
         />
       )}
