@@ -40,11 +40,15 @@ export function StrategyBuilder({ strategies, onClose }: StrategyBuilderProps) {
   };
 
   const toggleStrategy = (id: string) => {
-    setSelectedStrategies(prev =>
-      prev.includes(id)
+    setSelectedStrategies(prev => {
+      // Prevent deselecting if it's the last selected strategy
+      if (prev.includes(id) && prev.length === 1) {
+        return prev;
+      }
+      return prev.includes(id)
         ? prev.filter(s => s !== id)
-        : [...prev, id]
-    );
+        : [...prev, id];
+    });
   };
 
   const selectAll = () => {
@@ -55,7 +59,10 @@ export function StrategyBuilder({ strategies, onClose }: StrategyBuilderProps) {
   };
 
   const clearAll = () => {
-    setSelectedStrategies([]);
+    // Keep at least the first strategy selected
+    if (strategies.length > 0) {
+      setSelectedStrategies([strategies[0].id]);
+    }
   };
 
   const filteredStrategies = strategies.filter(s =>
