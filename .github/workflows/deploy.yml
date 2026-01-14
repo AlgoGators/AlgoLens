@@ -2,8 +2,8 @@ name: Deploy AlgoLens
 
 on:
   push:
-    tags:
-      - '*-prod'
+    branches:
+      - main
 
 jobs:
   deploy:

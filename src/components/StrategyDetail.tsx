@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { ArrowLeft, TrendingUp, TrendingDown } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, ResponsiveContainer, Tooltip } from 'recharts';
 import type { Strategy } from '../data/portfolioData';
@@ -18,6 +18,41 @@ export function StrategyDetail({ strategy, onBack }: StrategyDetailProps) {
   const { theme } = useTheme();
   const isPositive = strategy.return >= 0;
   const periods = ['1D', '1W', '1M', '3M', '1Y', 'ALL'];
+
+  // Filter data based on selected period
+  const filteredData = useMemo(() => {
+    const now = new Date();
+    let daysToShow: number;
+
+    switch (selectedPeriod) {
+      case '1D':
+        daysToShow = 1;
+        break;
+      case '1W':
+        daysToShow = 7;
+        break;
+      case '1M':
+        daysToShow = 30;
+        break;
+      case '3M':
+        daysToShow = 90;
+        break;
+      case '1Y':
+        daysToShow = 365;
+        break;
+      case 'ALL':
+      default:
+        return strategy.historicalData;
+    }
+
+    const cutoffDate = new Date(now);
+    cutoffDate.setDate(cutoffDate.getDate() - daysToShow);
+
+    return strategy.historicalData.filter(point => {
+      const pointDate = new Date(point.date);
+      return pointDate >= cutoffDate;
+    });
+  }, [selectedPeriod, strategy.historicalData]);
 
   return (
     <div>
@@ -61,7 +96,7 @@ export function StrategyDetail({ strategy, onBack }: StrategyDetailProps) {
 
       <div className="mb-4">
         <ResponsiveContainer width="100%" height={300}>
-          <LineChart data={strategy.historicalData}>
+          <LineChart data={filteredData}>
             <defs>
               <linearGradient id="stratLineGradient" x1="0" y1="0" x2="0" y2="1">
                 <stop offset="0%" stopColor={isPositive ? "#f97316" : "#ef4444"} stopOpacity={theme === 'dark' ? 0.2 : 0.1} />

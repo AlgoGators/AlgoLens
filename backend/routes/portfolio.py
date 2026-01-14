@@ -8,14 +8,14 @@ portfolio_bp = Blueprint('portfolio', __name__)
 @portfolio_bp.route('/strategy/<strategy_id>', methods=['GET'])
 @jwt_required()
 def get_strategy(strategy_id):
-    """Fetch strategy data - real DB data for trendfollowing, mock for others"""
+    """Fetch strategy data - only trendfollowing is supported"""
     try:
         current_app.logger.info(f'Fetching strategy: {strategy_id}')
 
         if strategy_id == 'trendfollowing':
             return get_live_trend_following_strategy()
         else:
-            return get_mock_strategy(strategy_id)
+            return jsonify({'error': 'Strategy not found'}), 404
 
     except Exception as e:
         current_app.logger.error(f'Error fetching strategy {strategy_id}: {str(e)}', exc_info=True)
@@ -58,14 +58,18 @@ def get_live_trend_following_strategy():
             equity_curve = cursor.fetchall()
             current_app.logger.info(f'[TREND] Found {len(equity_curve)} equity curve points')
             
-            # 3. Get current positions
+            # 3. Get current positions (latest entry per symbol, sorted by notional)
             current_app.logger.info('[TREND] Fetching positions...')
             cursor.execute("""
-                SELECT symbol, quantity, average_price,
-                       daily_unrealized_pnl, daily_realized_pnl
-                FROM trading.positions
-                WHERE strategy_id = 'LIVE_TREND_FOLLOWING'
-                AND quantity != 0
+                SELECT * FROM (
+                    SELECT DISTINCT ON (symbol)
+                           symbol, quantity, average_price,
+                           daily_unrealized_pnl, daily_realized_pnl
+                    FROM trading.positions
+                    WHERE strategy_id = 'LIVE_TREND_FOLLOWING'
+                    AND quantity != 0
+                    ORDER BY symbol, updated_at DESC
+                ) AS latest_positions
                 ORDER BY ABS(quantity * average_price) DESC
             """)
             positions = cursor.fetchall()
@@ -210,93 +214,6 @@ def get_live_trend_following_strategy():
         current_app.logger.info('[TREND] Database connection closed')
 
 
-def get_mock_strategy(strategy_id):
-    """Return mock data for non-database strategies"""
-    mock_strategies = {
-        'dividend': {
-            'id': 'dividend',
-            'name': 'Dividend Strategy',
-            'description': 'Stable dividend-paying blue chip stocks',
-            'invested': 35000,
-            'currentValue': 41234.87,
-            'returnPercent': 17.81
-        },
-        'value': {
-            'id': 'value',
-            'name': 'Value Strategy',
-            'description': 'Undervalued companies with strong fundamentals',
-            'invested': 25000,
-            'currentValue': 32380.00,
-            'returnPercent': 29.52
-        },
-        'growth': {
-            'id': 'growth',
-            'name': 'Growth Strategy',
-            'description': 'High-growth tech and innovative companies',
-            'invested': 40000,
-            'currentValue': 54230.45,
-            'returnPercent': 35.58
-        }
-    }
-
-    if strategy_id not in mock_strategies:
-        return jsonify({'error': 'Strategy not found'}), 404
-
-    mock = mock_strategies[strategy_id]
-
-    # Generate mock historical data
-    from datetime import timedelta
-    historical_data = []
-    today = datetime.now()
-    for i in range(90, -1, -1):
-        date = today - timedelta(days=i)
-        progress = (90 - i) / 90
-        value = mock['invested'] + (mock['currentValue'] - mock['invested']) * progress
-        historical_data.append({
-            'date': date.isoformat(),
-            'value': round(value, 2)
-        })
-
-    return jsonify({
-        **mock,
-        'return': mock['currentValue'] - mock['invested'],
-        'positions': [],
-        'historicalData': historical_data,
-        'bestDay': 2.5,
-        'worstDay': -1.8,
-        'executions': [],
-        'finalizedPositions': [],
-        'managers': ['Mock Manager'],
-        'lastUpdate': datetime.now().isoformat(),
-        'metrics': {
-            'volatility': 12.0,
-            'sharpeRatio': 1.5,
-            'maxDrawdown': -10.0,
-            'winRate': 65.0,
-            'totalTrades': 0,
-            'avgWin': 0,
-            'avgLoss': 0,
-            'profitFactor': 2.0,
-            'dailyReturn': 0.5,
-            'cumulativeReturn': mock['returnPercent'],
-            'annualizedReturn': mock['returnPercent'] * 1.2,
-            'grossLeverage': 1.0,
-            'netLeverage': 1.0,
-            'portfolioLeverage': 1.0,
-            'marginPosted': mock['currentValue'] * 0.2,
-            'equityToMarginRatio': 5.0,
-            'marginCushion': 80.0,
-            'totalNotional': mock['currentValue'],
-            'unrealizedPnL': 0,
-            'realizedPnL': mock['currentValue'] - mock['invested'],
-            'totalCommissions': 500.0,
-            'netPnL': mock['currentValue'] - mock['invested'] - 500,
-            'cashAvailable': mock['currentValue'] * 0.1,
-            'currentPortfolioValue': mock['currentValue']
-        }
-    }), 200
-
-
 @portfolio_bp.route('/strategies', methods=['GET'])
 @jwt_required()
 def get_all_strategies():
@@ -331,37 +248,6 @@ def get_all_strategies():
                     })
         finally:
             conn.close()
-
-        # Add mock strategies
-        strategies.extend([
-            {
-                'id': 'dividend',
-                'name': 'Dividend Strategy',
-                'currentValue': 41234.87,
-                'returnPercent': 17.81,
-                'volatility': 8.45,
-                'sharpeRatio': 2.15,
-                'annualizedReturn': 21.45
-            },
-            {
-                'id': 'value',
-                'name': 'Value Strategy',
-                'currentValue': 32380.00,
-                'returnPercent': 29.52,
-                'volatility': 12.34,
-                'sharpeRatio': 2.05,
-                'annualizedReturn': 35.80
-            },
-            {
-                'id': 'growth',
-                'name': 'Growth Strategy',
-                'currentValue': 54230.45,
-                'returnPercent': 35.58,
-                'volatility': 17.97,
-                'sharpeRatio': 1.85,
-                'annualizedReturn': 42.15
-            }
-        ])
 
         return jsonify({'strategies': strategies}), 200
 
