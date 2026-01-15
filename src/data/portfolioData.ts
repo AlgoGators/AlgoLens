@@ -17,6 +17,7 @@ export interface Execution {
   price: number;
   notional: number;
   commission: number;
+  date?: string;
 }
 
 export interface FinalizedPosition {

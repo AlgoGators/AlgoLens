@@ -34,16 +34,36 @@ export function Dashboard({ onLogout }: DashboardProps) {
   // Fetch portfolio data on mount
   useEffect(() => {
     const fetchPortfolioData = async () => {
+      console.log('[Dashboard] === Starting fetchPortfolioData ===');
+      console.log('[Dashboard] Current URL:', window.location.href);
+      console.log('[Dashboard] Token exists:', !!localStorage.getItem('token'));
+
       try {
         setIsLoading(true);
         setError(null);
         const data = await PortfolioApiService.getPortfolioData();
+        console.log('[Dashboard] Portfolio data received successfully:', data);
         setPortfolioData(data);
       } catch (err) {
-        console.error('Error fetching portfolio data:', err);
-        setError('Failed to load portfolio data. Please try again.');
+        const errorMessage = err instanceof Error ? err.message : String(err);
+        console.error('[Dashboard] === ERROR FETCHING PORTFOLIO ===');
+        console.error('[Dashboard] Error:', err);
+        console.error('[Dashboard] Error details:', {
+          message: errorMessage,
+          type: err instanceof Error ? err.constructor.name : typeof err,
+          stack: err instanceof Error ? err.stack : 'N/A',
+        });
+
+        // Provide debugging hint
+        console.error('[Dashboard] DEBUG TIP: Run this in browser console:');
+        console.error('  import("./services/portfolioApi").then(m => m.PortfolioApiService.testConnectivity())');
+        console.error('  Or open Network tab and look for failed requests');
+
+        // Include the actual error message for debugging
+        setError(`Failed to load portfolio data: ${errorMessage}`);
       } finally {
         setIsLoading(false);
+        console.log('[Dashboard] fetchPortfolioData complete');
       }
     };
 
@@ -109,14 +129,38 @@ export function Dashboard({ onLogout }: DashboardProps) {
             </div>
           ) : error ? (
             <div className="flex items-center justify-center min-h-[400px]">
-              <div className="text-center">
-                <p className="text-red-600 mb-4">{error}</p>
-                <button
-                  onClick={() => window.location.reload()}
-                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-                >
-                  Retry
-                </button>
+              <div className="text-center max-w-lg">
+                <div className="mb-4 p-4 bg-red-100 dark:bg-red-900/30 rounded-lg">
+                  <p className="text-red-600 dark:text-red-400 text-sm font-mono break-words text-left max-h-40 overflow-auto">
+                    {error}
+                  </p>
+                </div>
+                <div className={`text-sm mb-4 text-left p-3 rounded ${theme === 'dark' ? 'bg-gray-800 text-gray-300' : 'bg-gray-100 text-gray-700'}`}>
+                  <p className="font-semibold mb-2">Debug Steps:</p>
+                  <ol className="list-decimal list-inside space-y-1 text-xs">
+                    <li>Open browser DevTools (F12)</li>
+                    <li>Check Console tab for detailed error logs</li>
+                    <li>Check Network tab for failed API requests</li>
+                    <li>Look for CORS or connection errors</li>
+                  </ol>
+                </div>
+                <div className="flex gap-2 justify-center">
+                  <button
+                    onClick={() => window.location.reload()}
+                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                  >
+                    Retry
+                  </button>
+                  <button
+                    onClick={() => {
+                      console.log('[Dashboard] Running connectivity test...');
+                      PortfolioApiService.testConnectivity();
+                    }}
+                    className={`px-4 py-2 rounded-lg ${theme === 'dark' ? 'bg-gray-700 text-white hover:bg-gray-600' : 'bg-gray-200 text-gray-800 hover:bg-gray-300'}`}
+                  >
+                    Run Debug Test
+                  </button>
+                </div>
               </div>
             </div>
           ) : !portfolioData || !hasPositions ? (

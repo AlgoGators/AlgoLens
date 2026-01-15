@@ -17,7 +17,7 @@ export function StrategyDetail({ strategy, onBack }: StrategyDetailProps) {
   const [selectedTab, setSelectedTab] = useState<'positions' | 'analysis' | 'activity'>('positions');
   const { theme } = useTheme();
   const isPositive = strategy.return >= 0;
-  const periods = ['1D', '1W', '1M', '3M', '1Y', 'ALL'];
+  const periods = ['1W', '1M', '3M', '1Y', 'ALL'];
 
   // Filter data based on selected period
   const filteredData = useMemo(() => {
@@ -25,9 +25,6 @@ export function StrategyDetail({ strategy, onBack }: StrategyDetailProps) {
     let daysToShow: number;
 
     switch (selectedPeriod) {
-      case '1D':
-        daysToShow = 1;
-        break;
       case '1W':
         daysToShow = 7;
         break;
@@ -53,6 +50,18 @@ export function StrategyDetail({ strategy, onBack }: StrategyDetailProps) {
       return pointDate >= cutoffDate;
     });
   }, [selectedPeriod, strategy.historicalData]);
+
+  // Calculate period-specific return
+  const periodReturn = useMemo(() => {
+    if (filteredData.length < 2) return { value: 0, percent: 0 };
+    const startValue = filteredData[0].value;
+    const endValue = filteredData[filteredData.length - 1].value;
+    const returnValue = endValue - startValue;
+    const returnPercent = startValue > 0 ? (returnValue / startValue) * 100 : 0;
+    return { value: returnValue, percent: returnPercent };
+  }, [filteredData]);
+
+  const periodLabel = selectedPeriod === 'ALL' ? 'All Time' : selectedPeriod;
 
   return (
     <div>
@@ -86,10 +95,10 @@ export function StrategyDetail({ strategy, onBack }: StrategyDetailProps) {
         <div className="text-3xl md:text-4xl mb-2">
           ${strategy.currentValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
         </div>
-        <div className={`flex items-center gap-2 text-lg ${isPositive ? 'text-orange-500' : 'text-red-500'}`}>
-          {isPositive ? <TrendingUp className="w-5 h-5" /> : <TrendingDown className="w-5 h-5" />}
+        <div className={`flex items-center gap-2 text-lg ${periodReturn.value >= 0 ? 'text-orange-500' : 'text-red-500'}`}>
+          {periodReturn.value >= 0 ? <TrendingUp className="w-5 h-5" /> : <TrendingDown className="w-5 h-5" />}
           <span>
-            ${Math.abs(strategy.return).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ({isPositive ? '+' : ''}{strategy.returnPercent.toFixed(2)}%) Today
+            ${Math.abs(periodReturn.value).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ({periodReturn.percent >= 0 ? '+' : ''}{periodReturn.percent.toFixed(2)}%) {periodLabel}
           </span>
         </div>
       </div>
@@ -99,8 +108,8 @@ export function StrategyDetail({ strategy, onBack }: StrategyDetailProps) {
           <LineChart data={filteredData}>
             <defs>
               <linearGradient id="stratLineGradient" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor={isPositive ? "#f97316" : "#ef4444"} stopOpacity={theme === 'dark' ? 0.2 : 0.1} />
-                <stop offset="100%" stopColor={isPositive ? "#f97316" : "#ef4444"} stopOpacity={0} />
+                <stop offset="0%" stopColor={periodReturn.value >= 0 ? "#f97316" : "#ef4444"} stopOpacity={theme === 'dark' ? 0.2 : 0.1} />
+                <stop offset="100%" stopColor={periodReturn.value >= 0 ? "#f97316" : "#ef4444"} stopOpacity={0} />
               </linearGradient>
             </defs>
             <XAxis
@@ -123,9 +132,9 @@ export function StrategyDetail({ strategy, onBack }: StrategyDetailProps) {
               labelFormatter={(label) => new Date(label).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
             />
             <Line
-              type="monotone"
+              type="linear"
               dataKey="value"
-              stroke={isPositive ? "#f97316" : "#ef4444"}
+              stroke={periodReturn.value >= 0 ? "#f97316" : "#ef4444"}
               strokeWidth={2}
               dot={false}
               fill="url(#stratLineGradient)"

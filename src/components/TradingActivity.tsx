@@ -27,11 +27,12 @@ export function TradingActivity({ executions, finalizedPositions }: TradingActiv
           theme === 'dark' ? 'border-gray-800' : 'border-gray-200'
         }`}>
           {/* Header */}
-          <div className={`grid grid-cols-6 gap-4 p-4 text-sm border-b ${
-            theme === 'dark' 
-              ? 'bg-gray-900 border-gray-800 text-gray-400' 
+          <div className={`grid grid-cols-7 gap-4 p-4 text-sm border-b ${
+            theme === 'dark'
+              ? 'bg-gray-900 border-gray-800 text-gray-400'
               : 'bg-gray-50 border-gray-200 text-gray-500'
           }`}>
+            <div>Date</div>
             <div>Symbol</div>
             <div>Side</div>
             <div className="text-right">Quantity</div>
@@ -44,21 +45,26 @@ export function TradingActivity({ executions, finalizedPositions }: TradingActiv
           {executions.map((execution, index) => (
             <div
               key={`${execution.symbol}-${index}`}
-              className={`grid grid-cols-6 gap-4 p-4 transition-colors ${
+              className={`grid grid-cols-7 gap-4 p-4 transition-colors ${
                 theme === 'dark' ? 'hover:bg-gray-900' : 'hover:bg-gray-50'
               } ${
-                index !== executions.length - 1 
-                  ? theme === 'dark' 
-                    ? 'border-b border-gray-800' 
-                    : 'border-b border-gray-200' 
+                index !== executions.length - 1
+                  ? theme === 'dark'
+                    ? 'border-b border-gray-800'
+                    : 'border-b border-gray-200'
                   : ''
               }`}
             >
+              <div className={`text-sm ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>
+                {execution.date
+                  ? new Date(execution.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+                  : '-'}
+              </div>
               <div>{execution.symbol}</div>
               <div>
                 <span className={`px-2 py-1 rounded text-xs ${
-                  execution.side === 'BUY' 
-                    ? 'bg-orange-500 bg-opacity-20 text-orange-500' 
+                  execution.side === 'BUY'
+                    ? 'bg-orange-500 bg-opacity-20 text-orange-500'
                     : 'bg-red-500 bg-opacity-20 text-red-500'
                 }`}>
                   {execution.side}
@@ -78,12 +84,12 @@ export function TradingActivity({ executions, finalizedPositions }: TradingActiv
           ))}
 
           {/* Summary */}
-          <div className={`grid grid-cols-6 gap-4 p-4 border-t ${
-            theme === 'dark' 
-              ? 'bg-gray-900 border-gray-800' 
+          <div className={`grid grid-cols-7 gap-4 p-4 border-t ${
+            theme === 'dark'
+              ? 'bg-gray-900 border-gray-800'
               : 'bg-gray-50 border-gray-200'
           }`}>
-            <div className="col-span-4">Trades: {executions.length}</div>
+            <div className="col-span-5">Trades: {executions.length}</div>
             <div className="text-right">
               <div className={`text-sm ${
                 theme === 'dark' ? 'text-gray-400' : 'text-gray-500'

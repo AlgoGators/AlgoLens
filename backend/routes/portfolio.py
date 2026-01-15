@@ -87,6 +87,20 @@ def get_live_trend_following_strategy():
             executions = cursor.fetchall()
             current_app.logger.info(f'[TREND] Found {len(executions)} executions')
 
+            # 5. Get yesterday's positions for finalized positions comparison
+            current_app.logger.info('[TREND] Fetching yesterday\'s positions...')
+            cursor.execute("""
+                SELECT DISTINCT ON (symbol)
+                       symbol, quantity, average_price,
+                       daily_unrealized_pnl, daily_realized_pnl, updated_at
+                FROM trading.positions
+                WHERE strategy_id = 'LIVE_TREND_FOLLOWING'
+                AND updated_at::date = (CURRENT_DATE - INTERVAL '1 day')::date
+                ORDER BY symbol, updated_at DESC
+            """)
+            yesterday_positions = cursor.fetchall()
+            current_app.logger.info(f'[TREND] Found {len(yesterday_positions)} yesterday positions')
+
             # Calculate values
             current_app.logger.info('[TREND] Calculating values...')
             initial_equity = float(equity_curve[0]['equity']) if equity_curve else 500000
@@ -98,9 +112,11 @@ def get_live_trend_following_strategy():
 
             current_value = float(latest['current_portfolio_value'])
             total_return = current_value - initial_equity
-            return_percent = float(latest['total_cumulative_return']) * 100
+            # Calculate return percent from actual values, not database
+            return_percent = (total_return / initial_equity * 100) if initial_equity > 0 else 0
 
             current_app.logger.info(f'[TREND] Current value: {current_value}, Return: {return_percent}%')
+            current_app.logger.info(f'[TREND] Total return (P&L): ${total_return}')
 
             # Transform positions
             current_app.logger.info('[TREND] Transforming positions...')
@@ -127,29 +143,87 @@ def get_live_trend_following_strategy():
                     'value': float(point['equity'])
                 })
 
-            # Calculate best/worst day
+            # Calculate best/worst day and daily returns for win rate
             daily_returns = []
+            daily_pnl = []  # Track actual P&L for win rate calculation
             for i in range(1, len(historical_data)):
                 prev_val = historical_data[i-1]['value']
                 curr_val = historical_data[i]['value']
                 if prev_val > 0:
                     daily_return = ((curr_val - prev_val) / prev_val) * 100
                     daily_returns.append(daily_return)
+                    daily_pnl.append(curr_val - prev_val)
 
             best_day = max(daily_returns) if daily_returns else 0
             worst_day = min(daily_returns) if daily_returns else 0
 
-            # Transform executions
+            # Calculate max drawdown from equity curve
+            max_drawdown = 0
+            peak = historical_data[0]['value'] if historical_data else 0
+            for point in historical_data:
+                if point['value'] > peak:
+                    peak = point['value']
+                drawdown = ((peak - point['value']) / peak) * 100 if peak > 0 else 0
+                if drawdown > max_drawdown:
+                    max_drawdown = drawdown
+
+            # Calculate win rate from daily returns (% of profitable days)
+            winning_days = [pnl for pnl in daily_pnl if pnl > 0]
+            losing_days = [pnl for pnl in daily_pnl if pnl < 0]
+            total_days = len(daily_pnl)
+            win_rate = (len(winning_days) / total_days * 100) if total_days > 0 else 0
+
+            # Calculate average win and average loss
+            avg_win = sum(winning_days) / len(winning_days) if winning_days else 0
+            avg_loss = abs(sum(losing_days) / len(losing_days)) if losing_days else 0
+
+            # Calculate profit factor (gross profit / gross loss)
+            gross_profit = sum(winning_days) if winning_days else 0
+            gross_loss = abs(sum(losing_days)) if losing_days else 0
+            profit_factor = (gross_profit / gross_loss) if gross_loss > 0 else 0
+
+            # Transform executions with dates
             transformed_executions = []
             for exec in executions:
+                exec_time = exec['execution_time']
                 transformed_executions.append({
                     'symbol': exec['symbol'],
                     'side': exec['side'],
                     'quantity': float(exec['quantity']),
                     'price': float(exec['price']),
                     'notional': float(exec['quantity']) * float(exec['price']),
-                    'commission': float(exec['commission'])
+                    'commission': float(exec['commission']),
+                    'date': exec_time.isoformat() if exec_time else None
                 })
+
+            # Transform yesterday's positions into finalized positions
+            # Compare with today's positions to show what changed
+            current_app.logger.info('[TREND] Transforming finalized positions...')
+            today_symbols = {pos['symbol'] for pos in positions}
+            yesterday_symbols = {pos['symbol'] for pos in yesterday_positions}
+
+            transformed_finalized = []
+            for ypos in yesterday_positions:
+                symbol = ypos['symbol']
+                yesterday_qty = float(ypos['quantity'])
+                yesterday_price = float(ypos['average_price'])
+
+                # Find today's position for this symbol (if exists)
+                today_pos = next((p for p in positions if p['symbol'] == symbol), None)
+                today_qty = float(today_pos['quantity']) if today_pos else 0
+                today_price = float(today_pos['average_price']) if today_pos else yesterday_price
+
+                # Calculate realized P&L from position change
+                qty_change = today_qty - yesterday_qty
+                if qty_change != 0:  # Position changed
+                    realized_pnl = float(ypos['daily_realized_pnl']) if ypos['daily_realized_pnl'] else 0
+                    transformed_finalized.append({
+                        'symbol': symbol.replace('.v.0', ''),
+                        'quantity': yesterday_qty,
+                        'entryPrice': yesterday_price,
+                        'exitPrice': today_price,
+                        'realizedPnL': realized_pnl
+                    })
 
             # Calculate Sharpe ratio
             ann_return = float(latest['total_annualized_return'])
@@ -172,18 +246,18 @@ def get_live_trend_following_strategy():
                 'bestDay': best_day,
                 'worstDay': worst_day,
                 'executions': transformed_executions,
-                'finalizedPositions': [],
+                'finalizedPositions': transformed_finalized,
                 'managers': ['AlgoLens System'],
                 'lastUpdate': latest['date'].isoformat(),
                 'metrics': {
                     'volatility': volatility,
                     'sharpeRatio': sharpe,
-                    'maxDrawdown': 0,
-                    'winRate': 0,
+                    'maxDrawdown': max_drawdown,
+                    'winRate': win_rate,
                     'totalTrades': len(transformed_executions),
-                    'avgWin': 0,
-                    'avgLoss': 0,
-                    'profitFactor': 0,
+                    'avgWin': avg_win,
+                    'avgLoss': avg_loss,
+                    'profitFactor': profit_factor,
                     'dailyReturn': float(latest['daily_return']) if latest['daily_return'] else 0,
                     'cumulativeReturn': return_percent,
                     'annualizedReturn': ann_return,
@@ -197,7 +271,7 @@ def get_live_trend_following_strategy():
                     'unrealizedPnL': float(latest['total_unrealized_pnl']),
                     'realizedPnL': float(latest['total_realized_pnl']),
                     'totalCommissions': float(latest['total_commissions']),
-                    'netPnL': float(latest['total_pnl']) - float(latest['total_commissions']),
+                    'netPnL': total_return,  # Use actual P&L: current_value - initial_equity
                     'cashAvailable': float(latest['cash_available']),
                     'currentPortfolioValue': current_value
                 }
@@ -218,13 +292,19 @@ def get_live_trend_following_strategy():
 @jwt_required()
 def get_all_strategies():
     """Get summary of all strategies"""
+    current_app.logger.info('[STRATEGIES] === /strategies endpoint called ===')
+
     try:
         strategies = []
 
         # Add real trendfollowing strategy
+        current_app.logger.info('[STRATEGIES] Attempting database connection...')
         conn = get_db_connection()
+        current_app.logger.info('[STRATEGIES] Database connection successful')
+
         try:
             with conn.cursor() as cursor:
+                current_app.logger.info('[STRATEGIES] Executing query for LIVE_TREND_FOLLOWING...')
                 cursor.execute("""
                     SELECT current_portfolio_value, total_annualized_return,
                            volatility, total_cumulative_return
@@ -234,23 +314,34 @@ def get_all_strategies():
                     LIMIT 1
                 """)
                 latest = cursor.fetchone()
+                current_app.logger.info(f'[STRATEGIES] Query result: {latest is not None}')
 
                 if latest:
+                    current_value = float(latest['current_portfolio_value'])
+                    initial_equity = 500000  # Known starting value
+                    actual_return_percent = ((current_value - initial_equity) / initial_equity * 100) if initial_equity > 0 else 0
+
+                    current_app.logger.info(f'[STRATEGIES] Found live_results data: portfolio_value={current_value}, calculated_return={actual_return_percent}%')
                     sharpe = (float(latest['total_annualized_return']) / float(latest['volatility'])) if float(latest['volatility']) > 0 else 0
                     strategies.append({
                         'id': 'trendfollowing',
                         'name': 'Trend Following',
-                        'currentValue': float(latest['current_portfolio_value']),
-                        'returnPercent': float(latest['total_cumulative_return']) * 100,
+                        'currentValue': current_value,
+                        'returnPercent': actual_return_percent,  # Use calculated value
                         'volatility': float(latest['volatility']),
                         'sharpeRatio': sharpe,
                         'annualizedReturn': float(latest['total_annualized_return'])
                     })
+                    current_app.logger.info(f'[STRATEGIES] Strategy added: trendfollowing')
+                else:
+                    current_app.logger.warning('[STRATEGIES] No live_results data found for LIVE_TREND_FOLLOWING')
         finally:
             conn.close()
+            current_app.logger.info('[STRATEGIES] Database connection closed')
 
+        current_app.logger.info(f'[STRATEGIES] Returning {len(strategies)} strategies')
         return jsonify({'strategies': strategies}), 200
 
     except Exception as e:
-        current_app.logger.error(f'Error fetching strategies: {str(e)}', exc_info=True)
-        return jsonify({'error': 'Failed to fetch strategies'}), 500
+        current_app.logger.error(f'[STRATEGIES] Error fetching strategies: {str(e)}', exc_info=True)
+        return jsonify({'error': f'Failed to fetch strategies: {str(e)}'}), 500
