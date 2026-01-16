@@ -144,6 +144,15 @@ export class PortfolioApiService {
       }
 
       if (!response.ok) {
+        // Handle 401 Unauthorized - token expired or invalid
+        if (response.status === 401) {
+          log('warn', 'Token expired or invalid - redirecting to login');
+          localStorage.removeItem('token');
+          localStorage.removeItem('user');
+          window.location.href = '/login';
+          throw new Error('Session expired. Please log in again.');
+        }
+
         // Try to get error body for more details
         let errorBody = '';
         try {
