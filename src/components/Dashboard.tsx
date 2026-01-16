@@ -102,6 +102,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
       }`}>
       {activeTab !== 'news' && (
         <Header
+          activeTab={activeTab}
           onProfileClick={() => {
             setSettingsScreen('profile');
             setActiveTab('profile');

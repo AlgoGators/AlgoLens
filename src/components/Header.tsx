@@ -7,9 +7,10 @@ interface HeaderProps {
   onProfileClick: () => void;
   onBuilderClick?: () => void;
   onHomeClick?: () => void;
+  activeTab?: 'portfolio' | 'builder' | 'news' | 'profile';
 }
 
-export function Header({ onProfileClick, onBuilderClick, onHomeClick }: HeaderProps) {
+export function Header({ onProfileClick, onBuilderClick, onHomeClick, activeTab = 'portfolio' }: HeaderProps) {
   const { theme } = useTheme();
   const [showNotification, setShowNotification] = useState(false);
   const [hasNewNotification, setHasNewNotification] = useState(false);
@@ -81,17 +82,25 @@ export function Header({ onProfileClick, onBuilderClick, onHomeClick }: HeaderPr
             <nav className="hidden md:flex items-center gap-6">
               <button
                 onClick={onHomeClick}
-                className={`transition-colors ${theme === 'dark'
-                  ? 'text-white hover:text-orange-500'
-                  : 'text-black hover:text-orange-500'
+                className={`transition-colors ${activeTab === 'portfolio'
+                  ? theme === 'dark'
+                    ? 'text-white font-semibold'
+                    : 'text-black font-semibold'
+                  : theme === 'dark'
+                    ? 'text-gray-400 hover:text-orange-500'
+                    : 'text-gray-500 hover:text-orange-500'
                   }`}>
                 Portfolio
               </button>
               <button
                 onClick={onBuilderClick}
-                className={`transition-colors ${theme === 'dark'
-                  ? 'text-gray-400 hover:text-orange-500'
-                  : 'text-gray-500 hover:text-orange-500'
+                className={`transition-colors ${activeTab === 'builder'
+                  ? theme === 'dark'
+                    ? 'text-white font-semibold'
+                    : 'text-black font-semibold'
+                  : theme === 'dark'
+                    ? 'text-gray-400 hover:text-orange-500'
+                    : 'text-gray-500 hover:text-orange-500'
                   }`}
               >
                 Strategy Builder

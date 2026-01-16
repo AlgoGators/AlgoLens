@@ -107,11 +107,10 @@ export function StrategyBuilder({ strategies, onClose }: StrategyBuilderProps) {
         strategies: [],
         assetAllocation: [],
         strategyAllocation: [],
-        sectorData: [],
         historicalPerformance: zeroHistorical,
         advancedMetrics: {
-          sortinoRatio: 0, informationRatio: 0, beta: 0, hhi: 0, correlationMatrix: [],
-          topHoldings: [], yieldOnCost: 0, totalDividendIncome: 0, weightedPE: 0, var95: 0
+          sortinoRatio: 0, informationRatio: 0, hhi: 0, correlationMatrix: [],
+          topHoldings: [], var95: 0
         }
       };
     }
@@ -159,15 +158,6 @@ export function StrategyBuilder({ strategies, onClose }: StrategyBuilderProps) {
       value: s.currentValue,
       percentage: (s.currentValue / totalValue) * 100
     }));
-
-    // Sector allocation (simulated based on strategy types)
-    const sectorData = [
-      { sector: 'Technology', value: totalValue * 0.35, percentage: 35 },
-      { sector: 'Healthcare', value: totalValue * 0.15, percentage: 15 },
-      { sector: 'Financials', value: totalValue * 0.20, percentage: 20 },
-      { sector: 'Consumer', value: totalValue * 0.18, percentage: 18 },
-      { sector: 'Industrial', value: totalValue * 0.12, percentage: 12 },
-    ];
 
     // Historical performance data (combined)
     const historicalPerformance: { date: string; return: number }[] = [];
@@ -244,7 +234,7 @@ export function StrategyBuilder({ strategies, onClose }: StrategyBuilderProps) {
 
       weightedMetrics.volatility += s.metrics.volatility * weight;
       weightedMetrics.sharpeRatio += s.metrics.sharpeRatio * weight;
-      weightedMetrics.maxDrawdown = Math.min(weightedMetrics.maxDrawdown, s.metrics.maxDrawdown);
+      weightedMetrics.maxDrawdown = Math.max(weightedMetrics.maxDrawdown, s.metrics.maxDrawdown);
       weightedMetrics.winRate += s.metrics.winRate * weight;
       weightedMetrics.totalTrades += s.metrics.totalTrades;
       weightedMetrics.avgWin += s.metrics.avgWin * weight;
@@ -290,9 +280,6 @@ export function StrategyBuilder({ strategies, onClose }: StrategyBuilderProps) {
     const trackingError = weightedMetrics.volatility * 0.7; // Simulated
     const informationRatio = trackingError > 0 ? excessReturn / trackingError : 0;
 
-    // Beta (market sensitivity)
-    const beta = 1.0 + (weightedMetrics.volatility - 15) * 0.03;
-
     // Herfindahl-Hirschman Index (concentration risk)
     const hhi = assetAllocation.reduce((sum, asset) =>
       sum + Math.pow(asset.percentage, 2), 0
@@ -307,19 +294,6 @@ export function StrategyBuilder({ strategies, onClose }: StrategyBuilderProps) {
         return 0.3 + Math.random() * 0.5;
       })
     );
-
-    // Income Metrics
-    const totalDividendIncome = selected.reduce((sum, s) => {
-      if (s.id === 'dividend') return sum + s.currentValue * 0.042; // 4.2% yield
-      return sum + s.currentValue * 0.015; // 1.5% average yield
-    }, 0);
-    const yieldOnCost = (totalDividendIncome / totalInvested) * 100;
-
-    // Weighted Average P/E Ratio
-    const weightedPE = assetAllocation.reduce((sum, asset) => {
-      const randomPE = 15 + Math.random() * 20; // Simulate P/E ratios
-      return sum + (randomPE * asset.percentage / 100);
-    }, 0);
 
     // Value at Risk (95% confidence, 1-day)
     const portfolioStdDev = (weightedMetrics.volatility / 100) * totalValue / Math.sqrt(252);
@@ -336,18 +310,13 @@ export function StrategyBuilder({ strategies, onClose }: StrategyBuilderProps) {
       strategies: selected,
       assetAllocation: pieData,
       strategyAllocation,
-      sectorData,
       historicalPerformance,
       advancedMetrics: {
         sortinoRatio,
         informationRatio,
-        beta,
         hhi,
         correlationMatrix,
         topHoldings,
-        yieldOnCost,
-        totalDividendIncome,
-        weightedPE,
         var95
       }
     };
@@ -536,13 +505,6 @@ export function StrategyBuilder({ strategies, onClose }: StrategyBuilderProps) {
 
             <div className={`p-3 border ${theme === 'dark' ? 'bg-gray-950 border-gray-800' : 'bg-gray-50 border-gray-200'
               }`}>
-              <div className={`text-xs mb-1 ${theme === 'dark' ? 'text-gray-500' : 'text-gray-400'}`}>BETA</div>
-              <div className="text-base">{combinedMetrics.advancedMetrics.beta.toFixed(2)}</div>
-              <div className={`text-xs ${theme === 'dark' ? 'text-gray-600' : 'text-gray-400'}`}>Market sens.</div>
-            </div>
-
-            <div className={`p-3 border ${theme === 'dark' ? 'bg-gray-950 border-gray-800' : 'bg-gray-50 border-gray-200'
-              }`}>
               <div className={`text-xs mb-1 ${theme === 'dark' ? 'text-gray-500' : 'text-gray-400'}`}>VAR (95%)</div>
               <div className="text-base text-red-500">${(combinedMetrics.advancedMetrics.var95 / 1000).toFixed(1)}k</div>
               <div className={`text-xs ${theme === 'dark' ? 'text-gray-600' : 'text-gray-400'}`}>1-day</div>
@@ -638,7 +600,7 @@ export function StrategyBuilder({ strategies, onClose }: StrategyBuilderProps) {
         </div>
 
         {/* Allocation Pie Charts - Compact */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 mb-4">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 mb-4">
           <div className={`p-4 border ${theme === 'dark' ? 'bg-gray-950 border-gray-800' : 'bg-gray-50 border-gray-200'
             }`}>
             <h3 className={`text-xs uppercase tracking-wider mb-3 ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'
@@ -695,42 +657,6 @@ export function StrategyBuilder({ strategies, onClose }: StrategyBuilderProps) {
                 >
                   {combinedMetrics.strategyAllocation.map((entry, index) => (
                     <Cell key={`cell-${index}`} fill={STRATEGY_COLORS[index % STRATEGY_COLORS.length]} />
-                  ))}
-                </Pie>
-                <Tooltip
-                  contentStyle={{
-                    backgroundColor: theme === 'dark' ? '#1f2937' : '#fff',
-                    border: theme === 'dark' ? '1px solid #374151' : '1px solid #e5e7eb',
-                    fontSize: '14px',
-                    fontWeight: '600',
-                    color: theme === 'dark' ? '#fff' : '#000'
-                  }}
-                  formatter={(value: number) => [`$${(value / 1000).toFixed(0)}k`]}
-                />
-              </PieChart>
-            </ResponsiveContainer>
-          </div>
-
-          <div className={`p-4 border ${theme === 'dark' ? 'bg-gray-950 border-gray-800' : 'bg-gray-50 border-gray-200'
-            }`}>
-            <h3 className={`text-xs uppercase tracking-wider mb-3 ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'
-              }`}>
-              Sector Exposure
-            </h3>
-            <ResponsiveContainer width="100%" height={180}>
-              <PieChart>
-                <Pie
-                  data={combinedMetrics.sectorData}
-                  dataKey="value"
-                  nameKey="sector"
-                  cx="50%"
-                  cy="50%"
-                  outerRadius={70}
-                  label={({ percentage }) => `${percentage}%`}
-                  labelLine={false}
-                >
-                  {combinedMetrics.sectorData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={COLORS[index]} />
                   ))}
                 </Pie>
                 <Tooltip
@@ -862,27 +788,6 @@ export function StrategyBuilder({ strategies, onClose }: StrategyBuilderProps) {
                 </div>
               </div>
 
-              {/* Income Metrics */}
-              <div className="grid grid-cols-2 gap-3">
-                <div className={`p-2 border ${theme === 'dark' ? 'border-gray-800' : 'border-gray-200'
-                  }`}>
-                  <div className={`text-xs ${theme === 'dark' ? 'text-gray-500' : 'text-gray-400'}`}>
-                    YLD/COST
-                  </div>
-                  <div className="text-xl tabular-nums text-green-500">
-                    {combinedMetrics.advancedMetrics.yieldOnCost.toFixed(2)}%
-                  </div>
-                </div>
-                <div className={`p-2 border ${theme === 'dark' ? 'border-gray-800' : 'border-gray-200'
-                  }`}>
-                  <div className={`text-xs ${theme === 'dark' ? 'text-gray-500' : 'text-gray-400'}`}>
-                    AVG P/E
-                  </div>
-                  <div className="text-xl tabular-nums">
-                    {combinedMetrics.advancedMetrics.weightedPE.toFixed(1)}
-                  </div>
-                </div>
-              </div>
             </div>
           </div>
         </div>
