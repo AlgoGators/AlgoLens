@@ -1,13 +1,77 @@
-name: Deploy AlgoLens
+name: Build and Deploy AlgoLens
 
 on:
   push:
     branches:
       - main
 
+env:
+  REGISTRY: ghcr.io
+  FRONTEND_IMAGE: ghcr.io/algogators/algolens-frontend
+  BACKEND_IMAGE: ghcr.io/algogators/algolens-backend
+
 jobs:
+  build-frontend:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push frontend image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          platforms: linux/amd64
+          tags: |
+            ${{ env.FRONTEND_IMAGE }}:latest
+            ${{ env.FRONTEND_IMAGE }}:${{ github.sha }}
+          build-args: |
+            VITE_API_URL=https://algolens.algogators.com
+
+  build-backend:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push backend image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend
+          file: ./backend/Dockerfile
+          push: true
+          platforms: linux/amd64
+          tags: |
+            ${{ env.BACKEND_IMAGE }}:latest
+            ${{ env.BACKEND_IMAGE }}:${{ github.sha }}
+
   deploy:
     runs-on: ubuntu-latest
+    needs: [build-frontend, build-backend]
 
     steps:
       - name: Deploy to EC2
@@ -19,13 +83,10 @@ jobs:
           script: |
             set -e
 
-            cd /home/ec2-user/AlgoLens
+            cd /home/ec2-user/algolens-docker
 
-            echo "Pulling latest code..."
-            git pull origin main
-
-            echo "Creating backend .env file from secrets..."
-            cat > backend/.env << EOF
+            echo "Creating .env file from secrets..."
+            cat > .env << EOF
             DB_HOST=${{ secrets.DB_HOST }}
             DB_PORT=${{ secrets.DB_PORT }}
             DB_USER=${{ secrets.DB_USER }}
@@ -35,85 +96,28 @@ jobs:
             FLASK_ENV=production
             FLASK_DEBUG=False
             PORT=5000
-            CORS_ORIGINS=https://algolens.algogators.com,http://localhost:5173,http://localhost:3000
+            CORS_ORIGINS=https://algolens.algogators.com
             EOF
 
-            echo "Creating frontend .env file..."
-            cat > .env << EOF
-            VITE_API_URL=https://algolens.algogators.com
-            EOF
+            echo "Logging in to GHCR..."
+            echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u algogators --password-stdin
 
-            echo "Installing frontend dependencies..."
-            npm ci
+            echo "Pulling latest images..."
+            docker-compose -f docker-compose.prod.yml pull
 
-            echo "Building frontend..."
-            npm run build
+            echo "Stopping existing containers..."
+            docker-compose -f docker-compose.prod.yml down || true
 
-            echo "Installing backend dependencies..."
-            cd backend
-            pip3 install -r requirements.txt
-            cd ..
+            echo "Starting containers..."
+            docker-compose -f docker-compose.prod.yml up -d
 
-            echo "Configuring systemd services..."
+            echo "Cleaning up old images..."
+            docker image prune -f
 
-            # Create/update backend service
-            sudo tee /etc/systemd/system/algolens-backend.service > /dev/null << 'BACKEND_EOF'
-            [Unit]
-            Description=AlgoLens Backend API
-            After=network.target
-
-            [Service]
-            Type=simple
-            User=ec2-user
-            WorkingDirectory=/home/ec2-user/AlgoLens/backend
-            ExecStart=/usr/bin/python3 /home/ec2-user/AlgoLens/backend/app.py
-            Restart=always
-            RestartSec=10
-
-            [Install]
-            WantedBy=multi-user.target
-            BACKEND_EOF
-
-            # Create/update frontend service (localhost only, proxied by Nginx)
-            sudo tee /etc/systemd/system/algolens.service > /dev/null << 'FRONTEND_EOF'
-            [Unit]
-            Description=AlgoLens Frontend
-            After=network.target
-
-            [Service]
-            Type=simple
-            User=ec2-user
-            WorkingDirectory=/home/ec2-user/AlgoLens
-            ExecStart=/usr/bin/npx serve -s build -l tcp://127.0.0.1:3000
-            Restart=always
-            RestartSec=10
-
-            [Install]
-            WantedBy=multi-user.target
-            FRONTEND_EOF
-
-            echo "Installing Nginx if not present..."
-            sudo yum install -y nginx
-
-            echo "Configuring Nginx..."
-            sudo cp nginx.conf /etc/nginx/conf.d/algolens.conf
-
-            echo "Testing Nginx configuration..."
-            sudo nginx -t
-
-            echo "Enabling and restarting services..."
-            sudo systemctl daemon-reload
-            sudo systemctl enable algolens-backend
-            sudo systemctl enable algolens
-            sudo systemctl enable nginx
-            sudo systemctl restart algolens-backend
-            sudo systemctl restart algolens
-
-            # Only restart nginx if config is valid
-            if sudo nginx -t 2>/dev/null; then
-                sudo systemctl restart nginx
-            fi
+            echo "Checking container health..."
+            sleep 10
+            docker-compose -f docker-compose.prod.yml ps
 
             echo "Deployment complete!"
             echo "Frontend: https://algolens.algogators.com"
-            echo "Backend: http://localhost:5000"
+            echo "Backend API: https://algolens.algogators.com/api"
