@@ -99,9 +99,6 @@ jobs:
             CORS_ORIGINS=https://algolens.algogators.com
             EOF
 
-            echo "Logging in to GHCR..."
-            echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u algogators --password-stdin
-
             echo "Pulling latest images..."
             docker-compose -f docker-compose.prod.yml pull
 
