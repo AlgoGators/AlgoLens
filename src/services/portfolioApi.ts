@@ -144,13 +144,13 @@ export class PortfolioApiService {
       }
 
       if (!response.ok) {
-        // Handle 401 Unauthorized - token expired or invalid
-        if (response.status === 401) {
-          log('warn', 'Token expired or invalid - redirecting to login');
+        // Handle 401 Unauthorized or 422 JWT decode errors (e.g., old tokens with non-string subject)
+        if (response.status === 401 || response.status === 422) {
+          log('warn', `Token error (${response.status}) - clearing credentials and redirecting to login`);
           localStorage.removeItem('token');
           localStorage.removeItem('user');
           window.location.href = '/login';
-          throw new Error('Session expired. Please log in again.');
+          throw new Error('Session expired or invalid. Please log in again.');
         }
 
         // Try to get error body for more details
