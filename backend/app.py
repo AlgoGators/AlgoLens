@@ -88,9 +88,32 @@ def handle_preflight():
         app.logger.info('[CORS] Access-Control-Request-Headers: %s', request.headers.get('Access-Control-Request-Headers'))
 
 app.config['JWT_SECRET_KEY'] = os.getenv('JWT_SECRET_KEY', 'dev-secret-key-change-in-production')
-app.config['JWT_ACCESS_TOKEN_EXPIRES'] = 43200
+
+from datetime import timedelta
+app.config['JWT_ACCESS_TOKEN_EXPIRES'] = timedelta(seconds=43200)
 
 jwt = JWTManager(app)
+
+# Handle JWT decode errors (e.g., old tokens with non-string subject) as 401
+@jwt.invalid_token_loader
+def invalid_token_callback(error_string):
+    app.logger.warning(f'Invalid token: {error_string}')
+    return jsonify({'error': 'Invalid or expired token. Please log in again.', 'msg': error_string}), 401
+
+@jwt.expired_token_loader
+def expired_token_callback(jwt_header, jwt_payload):
+    app.logger.info('Expired token used')
+    return jsonify({'error': 'Token has expired. Please log in again.'}), 401
+
+@jwt.unauthorized_loader
+def missing_token_callback(error_string):
+    app.logger.warning(f'Missing token: {error_string}')
+    return jsonify({'error': 'Authorization token is required.'}), 401
+
+@jwt.token_verification_failed_loader
+def token_verification_failed_callback(jwt_header, jwt_payload):
+    app.logger.warning('Token verification failed')
+    return jsonify({'error': 'Token verification failed. Please log in again.'}), 401
 
 from routes.auth import auth_bp
 from routes.portfolio import portfolio_bp
