@@ -6,7 +6,7 @@ After=network.target
 Type=simple
 User=ec2-user
 WorkingDirectory=/home/ec2-user/AlgoLens
-ExecStart=/usr/bin/npm run preview -- --host 0.0.0.0 --port 3000
+ExecStart=/usr/bin/npx serve -s /home/ec2-user/AlgoLens/build -l 3000
 Restart=always
 RestartSec=10
 
