@@ -23,6 +23,9 @@ jobs:
           ssh-keygen -l -f /tmp/test_key || echo "INVALID KEY FORMAT"
           echo "--- TCP connectivity to port 22 ---"
           nc -zv ${{ secrets.EC2_HOST }} 22 2>&1 || echo "PORT 22 UNREACHABLE"
+          echo "--- Verbose SSH handshake ---"
+          ssh -vvv -o StrictHostKeyChecking=no -o BatchMode=yes -o ConnectTimeout=10 \
+            -i /tmp/test_key ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} echo "AUTH OK" 2>&1 || true
           rm /tmp/test_key
 
       - name: Deploy to EC2
