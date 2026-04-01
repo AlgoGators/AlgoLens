@@ -1,77 +1,13 @@
-name: Build and Deploy AlgoLens
+name: Deploy AlgoLens
 
 on:
   push:
     branches:
       - main
 
-env:
-  REGISTRY: ghcr.io
-  FRONTEND_IMAGE: ghcr.io/algogators/algolens-frontend
-  BACKEND_IMAGE: ghcr.io/algogators/algolens-backend
-
 jobs:
-  build-frontend:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Log in to Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build and push frontend image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: ./Dockerfile
-          push: true
-          platforms: linux/amd64
-          tags: |
-            ${{ env.FRONTEND_IMAGE }}:latest
-            ${{ env.FRONTEND_IMAGE }}:${{ github.sha }}
-          build-args: |
-            VITE_API_URL=https://algolens.algogators.com
-
-  build-backend:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Log in to Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build and push backend image
-        uses: docker/build-push-action@v5
-        with:
-          context: ./backend
-          file: ./backend/Dockerfile
-          push: true
-          platforms: linux/amd64
-          tags: |
-            ${{ env.BACKEND_IMAGE }}:latest
-            ${{ env.BACKEND_IMAGE }}:${{ github.sha }}
-
   deploy:
     runs-on: ubuntu-latest
-    needs: [build-frontend, build-backend]
 
     steps:
       - name: Deploy to EC2
@@ -83,38 +19,23 @@ jobs:
           script: |
             set -e
 
-            cd /home/ec2-user/algolens-docker
+            cd /home/ec2-user/AlgoLens
 
-            echo "Creating .env file from secrets..."
-            cat > .env << EOF
-            DB_HOST=${{ secrets.DB_HOST }}
-            DB_PORT=${{ secrets.DB_PORT }}
-            DB_USER=${{ secrets.DB_USER }}
-            DB_PASSWORD=${{ secrets.DB_PASSWORD }}
-            DB_NAME=${{ secrets.DB_NAME }}
-            JWT_SECRET_KEY=${{ secrets.JWT_SECRET_KEY }}
-            FLASK_ENV=production
-            FLASK_DEBUG=False
-            PORT=5000
-            CORS_ORIGINS=https://algolens.algogators.com
-            EOF
+            echo "Pulling latest code..."
+            git pull origin main
 
-            echo "Pulling latest images..."
-            docker-compose -f docker-compose.prod.yml pull
+            echo "Installing frontend dependencies..."
+            npm ci
 
-            echo "Stopping existing containers..."
-            docker-compose -f docker-compose.prod.yml down || true
+            echo "Building frontend..."
+            npm run build
 
-            echo "Starting containers..."
-            docker-compose -f docker-compose.prod.yml up -d
+            echo "Installing backend dependencies..."
+            pip3 install -r backend/requirements.txt --quiet
 
-            echo "Cleaning up old images..."
-            docker image prune -f
-
-            echo "Checking container health..."
-            sleep 10
-            docker-compose -f docker-compose.prod.yml ps
+            echo "Restarting services..."
+            sudo systemctl restart algolens-backend
+            sudo systemctl restart algolens
 
             echo "Deployment complete!"
-            echo "Frontend: https://algolens.algogators.com"
-            echo "Backend API: https://algolens.algogators.com/api"
+            echo "Site: https://algolens.algogators.com"
