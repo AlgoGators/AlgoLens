@@ -34,6 +34,14 @@ jobs:
             echo "Installing backend dependencies..."
             pip3 install -r backend/requirements.txt --quiet
 
+            echo "Updating service and nginx config..."
+            sudo cp deployment/algolens-backend.service /etc/systemd/system/
+            sudo cp deployment/algolens.service /etc/systemd/system/
+            sudo cp deployment/algolens.conf /etc/nginx/conf.d/algolens.conf
+            sudo systemctl daemon-reload
+            sudo nginx -t
+            sudo systemctl reload nginx
+
             echo "Restarting services..."
             sudo systemctl restart algolens-backend
             sudo systemctl restart algolens
