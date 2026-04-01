@@ -11,16 +11,13 @@ jobs:
 
     steps:
       - name: Deploy to EC2
-        env:
-          SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
-          EC2_HOST: ${{ secrets.EC2_HOST }}
-          EC2_USER: ${{ secrets.EC2_USER }}
-        run: |
-          echo "$SSH_KEY" > /tmp/deploy_key
-          chmod 600 /tmp/deploy_key
-
-          ssh -o StrictHostKeyChecking=no -o BatchMode=yes -o ConnectTimeout=15 \
-            -i /tmp/deploy_key $EC2_USER@$EC2_HOST << 'ENDSSH'
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          command_timeout: 30m
+          script: |
             set -e
 
             cd /home/ec2-user/AlgoLens
@@ -42,6 +39,4 @@ jobs:
             sudo systemctl restart algolens
 
             echo "Deployment complete!"
-          ENDSSH
-
-          rm /tmp/deploy_key
+            echo "Site: https://algolens.algogators.com"
