@@ -10,31 +10,17 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Validate SSH key and connectivity
-        run: |
-          echo "${{ secrets.EC2_SSH_KEY }}" > /tmp/test_key
-          chmod 600 /tmp/test_key
-          echo "--- Key header/footer ---"
-          head -1 /tmp/test_key
-          tail -1 /tmp/test_key
-          echo "--- Line count ---"
-          wc -l /tmp/test_key
-          echo "--- ssh-keygen validation ---"
-          ssh-keygen -l -f /tmp/test_key || echo "INVALID KEY FORMAT"
-          echo "--- TCP connectivity to port 22 ---"
-          nc -zv ${{ secrets.EC2_HOST }} 22 2>&1 || echo "PORT 22 UNREACHABLE"
-          echo "--- Verbose SSH handshake ---"
-          ssh -vvv -o StrictHostKeyChecking=no -o BatchMode=yes -o ConnectTimeout=10 \
-            -i /tmp/test_key ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} echo "AUTH OK" 2>&1 || true
-          rm /tmp/test_key
-
       - name: Deploy to EC2
-        uses: appleboy/ssh-action@v1
-        with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USER }}
-          key: ${{ secrets.EC2_SSH_KEY }}
-          script: |
+        env:
+          SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_USER: ${{ secrets.EC2_USER }}
+        run: |
+          echo "$SSH_KEY" > /tmp/deploy_key
+          chmod 600 /tmp/deploy_key
+
+          ssh -o StrictHostKeyChecking=no -o BatchMode=yes -o ConnectTimeout=15 \
+            -i /tmp/deploy_key $EC2_USER@$EC2_HOST << 'ENDSSH'
             set -e
 
             cd /home/ec2-user/AlgoLens
@@ -56,4 +42,6 @@ jobs:
             sudo systemctl restart algolens
 
             echo "Deployment complete!"
-            echo "Site: https://algolens.algogators.com"
+          ENDSSH
+
+          rm /tmp/deploy_key
