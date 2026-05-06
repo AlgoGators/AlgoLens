@@ -32,7 +32,7 @@ def login():
 
         current_app.logger.debug(f'User found: {user.get("id")} - {email}')
 
-        if not check_password_hash(user['password'], password):
+        if not check_password_hash(user['password_hash'], password):
             current_app.logger.warning(f'Login failed: Invalid password for email: {email}')
             return jsonify({'error': 'Invalid email or password'}), 401
 

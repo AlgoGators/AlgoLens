@@ -8,6 +8,7 @@ User=ec2-user
 WorkingDirectory=/home/ec2-user/AlgoLens/backend
 Environment="PATH=/usr/local/bin:/usr/bin:/bin"
 Environment="PORT=5001"
+EnvironmentFile=/home/ec2-user/AlgoLens/backend/.env
 ExecStart=/usr/bin/python3 /home/ec2-user/AlgoLens/backend/app.py
 Restart=always
 RestartSec=10

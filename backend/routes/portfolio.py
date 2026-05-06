@@ -79,7 +79,7 @@ def get_live_trend_following_strategy():
             current_app.logger.info('[TREND] Fetching executions...')
             cursor.execute("""
                 SELECT symbol, side, quantity, price,
-                       execution_time, commission
+                       execution_time, commissions_fees
                 FROM trading.executions
                 ORDER BY execution_time DESC
                 LIMIT 100
@@ -192,7 +192,7 @@ def get_live_trend_following_strategy():
                     'quantity': float(exec['quantity']),
                     'price': float(exec['price']),
                     'notional': float(exec['quantity']) * float(exec['price']),
-                    'commission': float(exec['commission']),
+                    'commission': float(exec['commissions_fees']),
                     'date': exec_time.isoformat() if exec_time else None
                 })
 
@@ -261,18 +261,18 @@ def get_live_trend_following_strategy():
                     'dailyReturn': float(latest['daily_return']) if latest['daily_return'] else 0,
                     'cumulativeReturn': return_percent,
                     'annualizedReturn': ann_return,
-                    'grossLeverage': float(latest['gross_leverage']),
-                    'netLeverage': float(latest['net_leverage']),
-                    'portfolioLeverage': float(latest['portfolio_leverage']),
-                    'marginPosted': float(latest['margin_posted']),
-                    'equityToMarginRatio': float(latest['equity_to_margin_ratio']),
-                    'marginCushion': float(latest['margin_cushion']),
-                    'totalNotional': float(latest['gross_notional']),
-                    'unrealizedPnL': float(latest['total_unrealized_pnl']),
-                    'realizedPnL': float(latest['total_realized_pnl']),
-                    'totalCommissions': float(latest['total_commissions']),
-                    'netPnL': total_return,  # Use actual P&L: current_value - initial_equity
-                    'cashAvailable': float(latest['cash_available']),
+                    'grossLeverage': float(latest['gross_leverage']) if latest['gross_leverage'] is not None else 0,
+                    'netLeverage': float(latest['net_leverage']) if latest['net_leverage'] is not None else 0,
+                    'portfolioLeverage': float(latest['portfolio_leverage']) if latest['portfolio_leverage'] is not None else 0,
+                    'marginPosted': float(latest['margin_posted']) if latest['margin_posted'] is not None else 0,
+                    'equityToMarginRatio': float(latest['equity_to_margin_ratio']) if latest['equity_to_margin_ratio'] is not None else 0,
+                    'marginCushion': float(latest['margin_cushion']) if latest['margin_cushion'] is not None else 0,
+                    'totalNotional': float(latest['gross_notional']) if latest['gross_notional'] is not None else 0,
+                    'unrealizedPnL': float(latest['total_unrealized_pnl']) if latest['total_unrealized_pnl'] is not None else 0,
+                    'realizedPnL': float(latest['total_realized_pnl']) if latest['total_realized_pnl'] is not None else 0,
+                    'totalCommissions': float(latest['total_transaction_costs']) if latest['total_transaction_costs'] is not None else 0,
+                    'netPnL': total_return,
+                    'cashAvailable': float(latest['cash_available']) if latest['cash_available'] is not None else 0,
                     'currentPortfolioValue': current_value
                 }
             }
