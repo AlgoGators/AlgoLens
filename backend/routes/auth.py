@@ -99,13 +99,13 @@ def check_email():
 
     email = data['email']
 
-    query = 'SELECT id, email, password FROM auth.users WHERE email = %s'
+    query = 'SELECT id, email, password_hash FROM auth.users WHERE email = %s'
     user = execute_query(query, (email,), fetch_one=True)
 
     if not user:
         return jsonify({'exists': False, 'message': 'Email not found. Contact an administrator to be added.'}), 404
 
-    has_password = user['password'] is not None and user['password'] != ''
+    has_password = user['password_hash'] is not None and user['password_hash'] != ''
 
     if has_password:
         return jsonify({'exists': True, 'registered': True, 'message': 'Account already registered. Please login.'}), 200
@@ -124,20 +124,20 @@ def register():
     first_name = data['first_name']
     last_name = data['last_name']
 
-    check_query = 'SELECT id, password FROM auth.users WHERE email = %s'
+    check_query = 'SELECT id, password_hash FROM auth.users WHERE email = %s'
     user = execute_query(check_query, (email,), fetch_one=True)
 
     if not user:
         return jsonify({'error': 'Email not authorized. Contact an administrator.'}), 403
 
-    if user['password'] and user['password'] != '':
+    if user['password_hash'] and user['password_hash'] != '':
         return jsonify({'error': 'Account already registered. Please login.'}), 400
 
     hashed_password = generate_password_hash(password)
 
     update_query = '''
         UPDATE auth.users
-        SET password = %s, first_name = %s, last_name = %s
+        SET password_hash = %s, first_name = %s, last_name = %s
         WHERE email = %s
         RETURNING id, email, first_name, last_name, role
     '''
