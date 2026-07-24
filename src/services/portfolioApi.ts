@@ -69,58 +69,42 @@ export class PortfolioApiService {
       log('error', 'Auth endpoint test FAILED (likely CORS issue):', e);
     }
 
-    // Test 3: Check with token
-    const token = localStorage.getItem('token');
-    if (token) {
-      try {
-        log('info', 'Test 3: Testing with auth token...');
-        const authTestUrl = `${API_BASE_URL}/portfolio/strategies`;
-        const response = await fetch(authTestUrl, {
-          method: 'GET',
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
-        log('info', `Authenticated request response: ${response.status} ${response.statusText}`);
-        if (response.ok) {
-          const data = await response.json();
-          log('info', 'Response data:', data);
-        } else {
-          const text = await response.text();
-          log('error', 'Error response body:', text);
-        }
-      } catch (e) {
-        log('error', 'Authenticated request FAILED:', e);
+    // Test 3: Check the authenticated request using the session cookie
+    try {
+      log('info', 'Test 3: Testing authenticated request with session cookie...');
+      const authTestUrl = `${API_BASE_URL}/portfolio/strategies`;
+      const response = await fetch(authTestUrl, {
+        method: 'GET',
+        credentials: 'include',
+      });
+      log('info', `Authenticated request response: ${response.status} ${response.statusText} (200 if logged in, 401 if not)`);
+      if (response.ok) {
+        const data = await response.json();
+        log('info', 'Response data:', data);
+      } else {
+        const text = await response.text();
+        log('error', 'Error response body:', text);
       }
-    } else {
-      log('warn', 'Test 3 skipped: No auth token found');
+    } catch (e) {
+      log('error', 'Authenticated request FAILED:', e);
     }
 
     log('info', '=== CONNECTIVITY TEST COMPLETE ===');
   }
 
-  private static getAuthToken(): string | null {
-    const token = localStorage.getItem('token');
-    log('info', `Auth token ${token ? 'found' : 'NOT FOUND'} (length: ${token?.length || 0})`);
-    return token;
-  }
-
   private static async fetchWithAuth(url: string): Promise<Response> {
     log('info', `fetchWithAuth called for URL: ${url}`);
 
-    const token = this.getAuthToken();
-
-    if (!token) {
-      log('error', 'No authentication token found in localStorage');
-      throw new Error('No authentication token found');
-    }
-
-    log('info', `Making fetch request to: ${url}`);
-    log('info', `Request headers: Authorization: Bearer ${token.substring(0, 20)}...`);
+    // Auth now travels in an httpOnly cookie, sent automatically by the browser
+    // when `credentials: 'include'` is set. There is no token for JS to read or
+    // attach; a missing/expired cookie simply comes back as 401 (handled below).
+    log('info', `Making credentialed fetch request to: ${url}`);
 
     try {
       const startTime = performance.now();
       const response = await fetch(url, {
+        credentials: 'include',
         headers: {
-          'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json',
         },
       });
@@ -144,11 +128,12 @@ export class PortfolioApiService {
       }
 
       if (!response.ok) {
-        // Handle 401 Unauthorized or 422 JWT decode errors (e.g., old tokens with non-string subject)
+        // Handle 401 Unauthorized or 422 JWT decode errors (e.g., expired/invalid cookie)
         if (response.status === 401 || response.status === 422) {
-          log('warn', `Token error (${response.status}) - clearing credentials and redirecting to login`);
-          localStorage.removeItem('token');
-          localStorage.removeItem('user');
+          log('warn', `Session error (${response.status}) - redirecting to login`);
+          // The cookie is httpOnly, so there is nothing for JS to clear; a full
+          // navigation re-runs AuthContext's /verify check, which will find no
+          // session and render the login view.
           window.location.href = '/login';
           throw new Error('Session expired or invalid. Please log in again.');
         }

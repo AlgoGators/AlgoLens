@@ -108,3 +108,70 @@ def test_production_boots_with_valid_config():
     env["CORS_ORIGINS"] = "https://algolens.example.com"
     result = _import_app(env)
     assert result.returncode == 0, result.stderr
+
+
+# --- httpOnly cookie auth transport ------------------------------------------
+
+
+def _fake_user():
+    return {
+        "id": 1,
+        "email": "user@example.com",
+        "password_hash": "irrelevant-because-check-is-stubbed",
+        "first_name": "A",
+        "last_name": "B",
+        "role": "general_member",
+    }
+
+
+def test_cookie_transport_configured():
+    import app as app_module
+
+    cfg = app_module.app.config
+    # Token travels in a cookie only (no Authorization header path), with CSRF on.
+    assert cfg["JWT_TOKEN_LOCATION"] == ["cookies"]
+    assert cfg["JWT_COOKIE_CSRF_PROTECT"] is True
+
+
+def test_login_sets_httponly_cookie_and_no_body_token(client, monkeypatch):
+    import routes.auth as auth_mod
+
+    monkeypatch.setattr(auth_mod, "execute_query", lambda *a, **k: _fake_user())
+    monkeypatch.setattr(auth_mod, "check_password_hash", lambda *a, **k: True)
+
+    resp = client.post(
+        "/auth/login",
+        json={"email": "user@example.com", "password": "a" * 12},
+    )
+    assert resp.status_code == 200
+
+    body = resp.get_json()
+    # The token must NOT be handed back in the body anymore.
+    assert "token" not in body, f"token leaked into body: {body}"
+    assert body["user"]["email"] == "user@example.com"
+
+    set_cookies = resp.headers.getlist("Set-Cookie")
+    # httpOnly access cookie is present so JS can never read the token...
+    access = [c for c in set_cookies if c.startswith("access_token_cookie=")]
+    assert access, f"expected access_token_cookie; got {set_cookies}"
+    assert "HttpOnly" in access[0], f"access cookie must be HttpOnly: {access[0]}"
+    # ...and a JS-readable CSRF companion cookie is present (deliberately NOT httpOnly).
+    csrf = [c for c in set_cookies if c.startswith("csrf_access_token=")]
+    assert csrf, f"expected csrf_access_token; got {set_cookies}"
+    assert "HttpOnly" not in csrf[0], "CSRF cookie must be readable by JS"
+
+
+def test_verify_requires_session(client):
+    # With no cookie, /verify is a clean 401 (unauthorized loader), not a 500.
+    resp = client.get("/auth/verify")
+    assert resp.status_code == 401
+
+
+def test_logout_clears_cookies(client):
+    resp = client.post("/auth/logout")
+    assert resp.status_code == 200
+    set_cookies = resp.headers.getlist("Set-Cookie")
+    # The access cookie is being cleared (unset_jwt_cookies emits a Set-Cookie for it).
+    assert any(c.startswith("access_token_cookie=") for c in set_cookies), (
+        f"logout should clear access_token_cookie; got {set_cookies}"
+    )
