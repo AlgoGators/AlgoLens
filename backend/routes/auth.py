@@ -1,5 +1,11 @@
 from flask import Blueprint, request, jsonify, current_app
-from flask_jwt_extended import create_access_token
+from flask_jwt_extended import (
+    create_access_token,
+    set_access_cookies,
+    unset_jwt_cookies,
+    jwt_required,
+    get_jwt_identity,
+)
 from werkzeug.security import check_password_hash, generate_password_hash
 from database import execute_query
 from extensions import limiter
@@ -68,40 +74,11 @@ def login():
             f"Login successful for email: {email}, role: {user.get('role', 'general_member')}"
         )
 
-        return jsonify(
-            {
-                "token": access_token,
-                "user": {
-                    "id": user["id"],
-                    "email": user["email"],
-                    "first_name": user.get("first_name"),
-                    "last_name": user.get("last_name"),
-                    "role": user.get("role", "general_member"),
-                },
-            }
-        ), 200
-
-    except Exception as e:
-        current_app.logger.error(f"Login error: {str(e)}", exc_info=True)
-        return jsonify({"error": "An internal error occurred during login"}), 500
-
-
-@auth_bp.route("/verify", methods=["GET"])
-def verify():
-    from flask_jwt_extended import jwt_required, get_jwt_identity, get_jwt
-
-    @jwt_required()
-    def verify_token():
-        current_user_id = get_jwt_identity()
-        claims = get_jwt()
-
-        query = "SELECT * FROM auth.users WHERE id = %s"
-        user = execute_query(query, (current_user_id,), fetch_one=True)
-
-        if not user:
-            return jsonify({"error": "User not found"}), 404
-
-        return jsonify(
+        # Deliver the token as an httpOnly cookie (plus the CSRF companion cookie).
+        # The token is intentionally NOT returned in the body -- putting it there
+        # would re-introduce the JS-readable token we are removing. The client reads
+        # its logged-in identity from the `user` object and, on reload, from /verify.
+        resp = jsonify(
             {
                 "user": {
                     "id": user["id"],
@@ -111,9 +88,54 @@ def verify():
                     "role": user.get("role", "general_member"),
                 }
             }
-        ), 200
+        )
+        set_access_cookies(resp, access_token)
+        return resp, 200
 
-    return verify_token()
+    except Exception as e:
+        current_app.logger.error(f"Login error: {str(e)}", exc_info=True)
+        return jsonify({"error": "An internal error occurred during login"}), 500
+
+
+@auth_bp.route("/verify", methods=["GET"])
+@jwt_required()
+def verify():
+    """Return the current user, authenticated via the httpOnly access cookie.
+
+    The SPA calls this on load to restore the session: because the token lives in an
+    httpOnly cookie the front-end JavaScript cannot read it, so it asks the server
+    who it is. A missing/expired cookie yields a 401 (handled by the JWT loaders),
+    which the client treats as "logged out" rather than an error.
+    """
+    current_user_id = get_jwt_identity()
+
+    query = "SELECT * FROM auth.users WHERE id = %s"
+    user = execute_query(query, (current_user_id,), fetch_one=True)
+
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+
+    return jsonify(
+        {
+            "user": {
+                "id": user["id"],
+                "email": user["email"],
+                "first_name": user.get("first_name"),
+                "last_name": user.get("last_name"),
+                "role": user.get("role", "general_member"),
+            }
+        }
+    ), 200
+
+
+@auth_bp.route("/logout", methods=["POST"])
+def logout():
+    """Clear the auth cookies. Safe to call without a valid session (idempotent);
+    the worst a forged cross-site call can do is log the user out, so no CSRF check
+    or jwt_required is imposed here."""
+    resp = jsonify({"message": "Logged out"})
+    unset_jwt_cookies(resp)
+    return resp, 200
 
 
 @auth_bp.route("/check-email", methods=["POST"])
@@ -223,17 +245,19 @@ def register():
                 },
             )
 
-            return jsonify(
+            # Same cookie-based delivery as /login (see the note there).
+            resp = jsonify(
                 {
-                    "token": access_token,
                     "user": {
                         "id": updated_user["id"],
                         "email": updated_user["email"],
                         "first_name": updated_user.get("first_name"),
                         "last_name": updated_user.get("last_name"),
                         "role": updated_user.get("role", "general_member"),
-                    },
+                    }
                 }
-            ), 201
+            )
+            set_access_cookies(resp, access_token)
+            return resp, 201
     finally:
         conn.close()

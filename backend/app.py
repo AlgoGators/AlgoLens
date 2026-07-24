@@ -156,6 +156,27 @@ from datetime import timedelta
 
 app.config["JWT_ACCESS_TOKEN_EXPIRES"] = timedelta(seconds=43200)
 
+# --- Token transport: httpOnly cookies instead of a JS-readable body token ---
+# The access token is delivered to the browser as an httpOnly cookie, so front-end
+# JavaScript can never read it. This removes the XSS token-theft vector that came
+# with storing the JWT in localStorage. Because the browser now sends the cookie
+# automatically, we enable double-submit CSRF protection: flask-jwt-extended also
+# sets a companion, NON-httpOnly `csrf_access_token` cookie whose value the client
+# must echo in the `X-CSRF-TOKEN` header on every state-changing (non-safe) request
+# to a protected route. GET/HEAD/OPTIONS are exempt, so the read-only portfolio
+# endpoints need no CSRF header.
+app.config["JWT_TOKEN_LOCATION"] = ["cookies"]
+# HTTPS-only in production; allow plain http on localhost during development.
+app.config["JWT_COOKIE_SECURE"] = IS_PRODUCTION
+# The SPA and the API are served from the same site (same registrable domain behind
+# nginx), so Lax both works and stops the cookie from riding cross-site requests.
+app.config["JWT_COOKIE_SAMESITE"] = "Lax"
+app.config["JWT_COOKIE_CSRF_PROTECT"] = True
+# Persist for the token's lifetime rather than dying when the tab closes, matching
+# the previous localStorage behaviour.
+app.config["JWT_SESSION_COOKIE"] = False
+app.config["JWT_ACCESS_COOKIE_PATH"] = "/"
+
 jwt = JWTManager(app)
 limiter.init_app(app)
 
