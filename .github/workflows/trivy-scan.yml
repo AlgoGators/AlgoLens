@@ -1,0 +1,58 @@
+name: Trivy Container Scan
+
+# Scans both Docker images (frontend + backend) for known vulnerabilities. This
+# is the one internet-facing, subscriber-facing repo among the 4 AlgoGators
+# repos (public login/JWT auth), making image scanning especially relevant here.
+#
+# Non-blocking for now (exit-code 0): this is the first scan of images that have
+# been running unscanned, so the baseline vulnerability count is unknown. Once
+# triaged, switch to exit-code 1 for CRITICAL to make it a hard gate.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - name: frontend
+            context: .
+            dockerfile: Dockerfile
+          - name: backend
+            context: ./backend
+            dockerfile: backend/Dockerfile
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build ${{ matrix.name }} image
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          push: false
+          load: true
+          tags: algolens-${{ matrix.name }}:scan
+
+      - name: Scan ${{ matrix.name }} image with Trivy
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: algolens-${{ matrix.name }}:scan
+          format: sarif
+          output: trivy-${{ matrix.name }}.sarif
+          severity: CRITICAL,HIGH
+          exit-code: "0"
+
+      - name: Upload ${{ matrix.name }} results to Security tab
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-${{ matrix.name }}.sarif
+          category: trivy-${{ matrix.name }}

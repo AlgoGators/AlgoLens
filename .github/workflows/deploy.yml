@@ -10,6 +10,10 @@ on:
     branches: [main]
   workflow_dispatch:
 
+permissions:
+  contents: read
+  issues: write
+
 jobs:
   deploy:
     runs-on: ubuntu-24.04
@@ -53,5 +57,63 @@ jobs:
             sudo systemctl restart algolens-backend
             sudo systemctl restart algolens
 
+            echo "Verifying backend health..."
+            # systemctl restart returns before the app has necessarily finished
+            # booting, so "the restart command succeeded" is not the same as "the
+            # app is actually serving requests" -- retry the internal health
+            # endpoint for up to 30s before declaring the deploy failed.
+            #
+            # Port 5001, not 5000: this script deploys via the systemd path
+            # (algolens-backend.service, PORT=5001), which is a DIFFERENT running
+            # instance from the docker-compose path (port 5000) that PR #10 fixed
+            # nginx to route to. ADR-000 DECISION-8 flags this systemd/Docker
+            # split-brain as an open architectural question -- until it's
+            # resolved, this check must match whatever THIS script actually starts.
+            healthy=0
+            for i in $(seq 1 10); do
+              if curl -sf http://localhost:5001/health > /dev/null; then
+                healthy=1
+                break
+              fi
+              sleep 3
+            done
+            if [ "$healthy" -ne 1 ]; then
+              echo "Backend did not report healthy after restart!" >&2
+              exit 1
+            fi
+
             echo "Deployment complete!"
             echo "Site: https://algolens.algogators.com"
+
+      - name: File an issue if the deploy failed
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const body = `Deploy AlgoLens failed (build/restart step, or the post-deploy health check did not pass). Run: ${runUrl}`;
+            const label = "deploy-failure";
+
+            const { data: open } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: "open",
+              labels: label,
+            });
+
+            if (open.length > 0) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: open[0].number,
+                body,
+              });
+            } else {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: "Deploy failed or post-deploy health check did not pass",
+                body,
+                labels: [label],
+              });
+            }
