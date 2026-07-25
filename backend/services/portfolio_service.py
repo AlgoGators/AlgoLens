@@ -24,48 +24,51 @@ _EQUITY_SNAP_TOLERANCE = 5000
 # --- data access -------------------------------------------------------------
 
 
-def _fetch_latest_live_results(cursor, strategy_type):
+def _fetch_latest_live_results(cursor, strategy_type, portfolio_id):
     cursor.execute(
         """
         SELECT * FROM trading.live_results
         WHERE config::jsonb->>'strategy_type' = %s
+        AND portfolio_id = %s
         ORDER BY date DESC
         LIMIT 1
         """,
-        (strategy_type,),
+        (strategy_type, portfolio_id),
     )
     return cursor.fetchone()
 
 
-def _fetch_summary_row(cursor, strategy_type):
+def _fetch_summary_row(cursor, strategy_type, portfolio_id):
     cursor.execute(
         """
         SELECT current_portfolio_value, total_annualized_return,
                volatility, total_cumulative_return
         FROM trading.live_results
         WHERE config::jsonb->>'strategy_type' = %s
+        AND portfolio_id = %s
         ORDER BY date DESC
         LIMIT 1
         """,
-        (strategy_type,),
+        (strategy_type, portfolio_id),
     )
     return cursor.fetchone()
 
 
-def _fetch_equity_curve(cursor, strategy_type):
+def _fetch_equity_curve(cursor, strategy_type, portfolio_id):
     cursor.execute(
         """
         SELECT timestamp, equity
         FROM trading.equity_curve
         WHERE strategy_id = %s
+        AND portfolio_id = %s
         ORDER BY timestamp ASC
         """,
-        (strategy_type,),
+        (strategy_type, portfolio_id),
     )
     return cursor.fetchall()
 
 
-def _fetch_current_positions(cursor, strategy_type):
+def _fetch_current_positions(cursor, strategy_type, portfolio_id):
     cursor.execute(
         """
         SELECT * FROM (
@@ -74,34 +77,39 @@ def _fetch_current_positions(cursor, strategy_type):
                    daily_unrealized_pnl, daily_realized_pnl
             FROM trading.positions
             WHERE strategy_id = %s
+            AND portfolio_id = %s
             AND quantity != 0
             ORDER BY symbol, updated_at DESC
         ) AS latest_positions
         ORDER BY ABS(quantity * average_price) DESC
         """,
-        (strategy_type,),
+        (strategy_type, portfolio_id),
     )
     return cursor.fetchall()
 
 
-def _fetch_recent_executions(cursor):
-    # NOTE: the executions table is not filtered by strategy here -- this preserves
-    # the original behaviour, which assumed all executions belong to the single
-    # live strategy. When a second live strategy is added this MUST be scoped by
-    # strategy (executions needs a strategy_id column / join) or it will mix trades.
+def _fetch_recent_executions(cursor, strategy_type, portfolio_id):
+    # trading.executions DOES carry strategy_id and portfolio_id (verified against
+    # the live schema), and holds rows for 3 strategy_ids across 3 portfolios.
+    # Selecting unfiltered -- as this previously did, on the assumption that every
+    # execution belonged to the one live strategy -- reported other portfolios'
+    # trades. See AlgoGators/AlgoLens#29.
     cursor.execute(
         """
         SELECT symbol, side, quantity, price,
                execution_time, commissions_fees
         FROM trading.executions
+        WHERE strategy_id = %s
+        AND portfolio_id = %s
         ORDER BY execution_time DESC
         LIMIT 100
-        """
+        """,
+        (strategy_type, portfolio_id),
     )
     return cursor.fetchall()
 
 
-def _fetch_yesterday_positions(cursor, strategy_type):
+def _fetch_yesterday_positions(cursor, strategy_type, portfolio_id):
     cursor.execute(
         """
         SELECT DISTINCT ON (symbol)
@@ -109,10 +117,11 @@ def _fetch_yesterday_positions(cursor, strategy_type):
                daily_unrealized_pnl, daily_realized_pnl, updated_at
         FROM trading.positions
         WHERE strategy_id = %s
+        AND portfolio_id = %s
         AND updated_at::date = (CURRENT_DATE - INTERVAL '1 day')::date
         ORDER BY symbol, updated_at DESC
         """,
-        (strategy_type,),
+        (strategy_type, portfolio_id),
     )
     return cursor.fetchall()
 
@@ -265,20 +274,23 @@ def get_strategy_detail(cfg):
     """Build the full strategy detail payload for a registry config, or None if the
     strategy has no live_results yet."""
     strategy_type = cfg["strategy_type"]
+    portfolio_id = cfg["portfolio_id"]
     base_equity = cfg["initial_equity"]
 
     conn = get_db_connection()
     try:
         with conn.cursor() as cursor:
-            latest = _fetch_latest_live_results(cursor, strategy_type)
+            latest = _fetch_latest_live_results(cursor, strategy_type, portfolio_id)
             if not latest:
                 logger.warning("[PORTFOLIO] No live_results for %s", strategy_type)
                 return None
 
-            equity_curve = _fetch_equity_curve(cursor, strategy_type)
-            positions = _fetch_current_positions(cursor, strategy_type)
-            executions = _fetch_recent_executions(cursor)
-            yesterday_positions = _fetch_yesterday_positions(cursor, strategy_type)
+            equity_curve = _fetch_equity_curve(cursor, strategy_type, portfolio_id)
+            positions = _fetch_current_positions(cursor, strategy_type, portfolio_id)
+            executions = _fetch_recent_executions(cursor, strategy_type, portfolio_id)
+            yesterday_positions = _fetch_yesterday_positions(
+                cursor, strategy_type, portfolio_id
+            )
 
         initial_equity = _resolve_initial_equity(equity_curve, base_equity)
         current_value = float(latest["current_portfolio_value"])
@@ -348,12 +360,13 @@ def get_strategy_summary(cfg):
     """Build the lightweight summary payload for the /strategies list, or None when
     the strategy has no live_results yet."""
     strategy_type = cfg["strategy_type"]
+    portfolio_id = cfg["portfolio_id"]
     base_equity = cfg["initial_equity"]
 
     conn = get_db_connection()
     try:
         with conn.cursor() as cursor:
-            latest = _fetch_summary_row(cursor, strategy_type)
+            latest = _fetch_summary_row(cursor, strategy_type, portfolio_id)
     finally:
         conn.close()
 

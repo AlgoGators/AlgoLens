@@ -27,6 +27,10 @@ DEFAULT_REGISTRY = [
     {
         "id": "trendfollowing",
         "strategy_type": "LIVE_TREND_FOLLOWING",
+        # Required: the trading tables are keyed by portfolio as well as
+        # strategy, and LIVE_TREND_FOLLOWING exists under more than one.
+        # CONSERVATIVE_PORTFOLIO is the only one still being written.
+        "portfolio_id": "CONSERVATIVE_PORTFOLIO",
         "name": "Trend Following",
         "description": "Systematic trend following across multiple futures contracts",
         "initial_equity": 500000.0,
@@ -43,6 +47,7 @@ def _normalize(row):
     return {
         "id": row["id"],
         "strategy_type": row["strategy_type"],
+        "portfolio_id": row["portfolio_id"],
         "name": row["name"],
         "description": row.get("description") or "",
         "initial_equity": float(row["initial_equity"])
@@ -67,8 +72,8 @@ def get_registry(active_only=True):
         with conn.cursor() as cursor:
             cursor.execute(
                 """
-                SELECT id, strategy_type, name, description, initial_equity,
-                       managers, is_active, sort_order
+                SELECT id, strategy_type, portfolio_id, name, description,
+                       initial_equity, managers, is_active, sort_order
                 FROM trading.strategy_registry
                 ORDER BY sort_order ASC, id ASC
                 """
