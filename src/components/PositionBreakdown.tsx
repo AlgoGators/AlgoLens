@@ -1,6 +1,7 @@
 import React from 'react';
 import { useTheme } from '../contexts/ThemeContext';
 import type { Position } from '../data/portfolioData';
+import { formatCurrency } from '../lib/currency';
 
 interface PositionBreakdownProps {
   positions: Position[];
@@ -64,10 +65,10 @@ export function PositionBreakdown({ positions }: PositionBreakdownProps) {
               </div>
               <div className="text-right">{position.shares}</div>
               <div className="text-right">
-                ${marketPrice.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                {formatCurrency(marketPrice, { maximumFractionDigits: 2 })}
               </div>
               <div className="text-right">
-                ${notional.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                {formatCurrency(notional, { maximumFractionDigits: 2 })}
               </div>
               <div className="text-right">{percentOfTotal.toFixed(2)}%</div>
             </div>
@@ -89,7 +90,7 @@ export function PositionBreakdown({ positions }: PositionBreakdownProps) {
             }`}>
               Total Notional
             </div>
-            <div>${totalNotional.toLocaleString('en-US', { minimumFractionDigits: 2 })}</div>
+            <div>{formatCurrency(totalNotional)}</div>
           </div>
           <div className="text-right">100.00%</div>
         </div>

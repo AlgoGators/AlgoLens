@@ -3,6 +3,7 @@ import { ArrowLeft, TrendingUp, TrendingDown } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, ResponsiveContainer, Tooltip } from 'recharts';
 import type { Strategy } from '../data/portfolioData';
 import { useTheme } from '../contexts/ThemeContext';
+import { PERIOD_OPTIONS, filterByPeriod } from '../lib/period';
 import { FinancialAnalysis } from './FinancialAnalysis';
 import { PositionBreakdown } from './PositionBreakdown';
 import { TradingActivity } from './TradingActivity';
@@ -17,39 +18,13 @@ export function StrategyDetail({ strategy, onBack }: StrategyDetailProps) {
   const [selectedTab, setSelectedTab] = useState<'positions' | 'analysis' | 'activity'>('positions');
   const { theme } = useTheme();
   const isPositive = strategy.return >= 0;
-  const periods = ['1W', '1M', '3M', '1Y', 'ALL'];
+  const periods = PERIOD_OPTIONS;
 
   // Filter data based on selected period
-  const filteredData = useMemo(() => {
-    const now = new Date();
-    let daysToShow: number;
-
-    switch (selectedPeriod) {
-      case '1W':
-        daysToShow = 7;
-        break;
-      case '1M':
-        daysToShow = 30;
-        break;
-      case '3M':
-        daysToShow = 90;
-        break;
-      case '1Y':
-        daysToShow = 365;
-        break;
-      case 'ALL':
-      default:
-        return strategy.historicalData;
-    }
-
-    const cutoffDate = new Date(now);
-    cutoffDate.setDate(cutoffDate.getDate() - daysToShow);
-
-    return strategy.historicalData.filter(point => {
-      const pointDate = new Date(point.date);
-      return pointDate >= cutoffDate;
-    });
-  }, [selectedPeriod, strategy.historicalData]);
+  const filteredData = useMemo(
+    () => filterByPeriod(strategy.historicalData, selectedPeriod),
+    [selectedPeriod, strategy.historicalData]
+  );
 
   // Calculate period-specific return
   const periodReturn = useMemo(() => {

@@ -1,23 +1,34 @@
-# Authentication Backend Setup
+# AlgoLens Backend (Flask API)
+
+See the root [`README.md`](../README.md) and [`DEPLOYMENT.md`](../DEPLOYMENT.md) for architecture and deployment. This file covers local backend setup only.
 
 ## Installation
 
-1. Install Python dependencies:
 ```bash
 cd backend
 pip install -r requirements.txt
 ```
 
-2. Set JWT secret key (optional - defaults to a placeholder):
-```bash
-export JWT_SECRET_KEY="your-secure-secret-key-here"
+## Configuration
+
+Create `backend/.env` (see `backend/.env.example`) with:
+
+```env
+DB_HOST=your-database-host
+DB_PORT=5432
+DB_USER=your-database-user
+DB_PASSWORD=your-database-password
+DB_NAME=your-database-name
+JWT_SECRET_KEY=your-super-secret-jwt-key-change-this-to-something-random
+FLASK_ENV=production
+FLASK_DEBUG=False
+PORT=5000
+CORS_ORIGINS=https://yourdomain.com
 ```
 
-## Database Setup
+`backend/.env` is gitignored — never commit real credentials.
 
-The database connection is configured in `config.json` at the root of the project.
-
-Make sure your PostgreSQL database has the following schema:
+## Database Schema
 
 ```sql
 CREATE SCHEMA IF NOT EXISTS auth;
@@ -25,7 +36,7 @@ CREATE SCHEMA IF NOT EXISTS auth;
 CREATE TABLE auth.users (
     id SERIAL PRIMARY KEY,
     email VARCHAR(255) UNIQUE NOT NULL,
-    password VARCHAR(255) NOT NULL,
+    password_hash VARCHAR(255),
     first_name VARCHAR(100),
     last_name VARCHAR(100),
     role VARCHAR(50) DEFAULT 'general_member',
@@ -33,88 +44,38 @@ CREATE TABLE auth.users (
 );
 ```
 
-## Running the Backend
+Users are pre-authorized by inserting a row with `email` set and `password_hash` left `NULL`/empty (see `add_user_email.py`); they then complete registration via `POST /auth/register`, which sets their password.
+
+## Running
 
 ```bash
 cd backend
 python app.py
 ```
 
-The server will run on `http://localhost:5000`
+Runs at `http://localhost:5000`.
 
 ## API Endpoints
 
-### POST /auth/login
-Login with email and password
+### `POST /auth/check-email`
+Checks whether an email is pre-authorized and whether it has completed registration.
 
-Request:
-```json
-{
-  "email": "user@example.com",
-  "password": "password123"
-}
-```
+### `POST /auth/register`
+Completes registration for a pre-authorized email. Body: `{ "email", "password", "first_name", "last_name" }`.
 
-Response:
-```json
-{
-  "token": "jwt_token_here",
-  "user": {
-    "id": 1,
-    "email": "user@example.com",
-    "first_name": "John",
-    "last_name": "Doe",
-    "role": "general_member"
-  }
-}
-```
+### `POST /auth/login`
+Body: `{ "email", "password" }`. Returns `{ "token", "user" }`.
 
-### GET /auth/verify
-Verify JWT token (requires Authorization header)
+### `GET /auth/verify`
+Verifies a JWT. Header: `Authorization: Bearer <token>`.
 
-Request Headers:
-```
-Authorization: Bearer <jwt_token>
-```
+### `GET /portfolio/strategies`
+Returns summary data for all strategies. Requires `Authorization: Bearer <token>`.
 
-Response:
-```json
-{
-  "user": {
-    "id": 1,
-    "email": "user@example.com",
-    "first_name": "John",
-    "last_name": "Doe",
-    "role": "general_member"
-  }
-}
-```
+### `GET /portfolio/strategy/<strategy_id>`
+Returns full detail for one strategy. Requires `Authorization: Bearer <token>`.
 
-## Note
+## Notes
 
-Passwords in the database must be hashed using werkzeug.security.generate_password_hash().
-
-Example to create a test user:
-```python
-from werkzeug.security import generate_password_hash
-import psycopg2
-
-conn = psycopg2.connect(
-    host="13.58.153.216",
-    port="5432",
-    user="postgres",
-    password="algogators",
-    dbname="algo_data"
-)
-
-cursor = conn.cursor()
-hashed_password = generate_password_hash("your_password")
-
-cursor.execute(
-    "INSERT INTO auth.users (email, password, first_name, last_name) VALUES (%s, %s, %s, %s)",
-    ("test@example.com", hashed_password, "Test", "User")
-)
-
-conn.commit()
-conn.close()
-```
+- Passwords are hashed with `werkzeug.security.generate_password_hash()`.
+- `add_user_email.py <email>` pre-authorizes an email for registration.

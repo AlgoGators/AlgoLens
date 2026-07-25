@@ -59,7 +59,7 @@ sudo certbot --nginx -d algolens.algogators.com --non-interactive --agree-tos --
 echo ""
 echo "Step 5: Restoring full Nginx configuration..."
 cd /home/ec2-user/AlgoLens
-sudo cp nginx.conf /etc/nginx/conf.d/algolens.conf
+sudo cp deployment/algolens.conf /etc/nginx/conf.d/algolens.conf
 sudo nginx -t && sudo systemctl restart nginx
 
 echo ""

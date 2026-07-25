@@ -1,5 +1,4 @@
 import psycopg2
-from werkzeug.security import generate_password_hash
 import os
 from dotenv import load_dotenv
 
@@ -20,15 +19,12 @@ def setup_database():
         print("Creating auth schema if it doesn't exist...")
         cursor.execute("CREATE SCHEMA IF NOT EXISTS auth;")
 
-        print("\nDropping existing users table if it exists...")
-        cursor.execute("DROP TABLE IF EXISTS auth.users CASCADE;")
-
-        print("Creating users table with correct schema...")
+        print("Creating users table if it doesn't exist...")
         cursor.execute("""
-            CREATE TABLE auth.users (
+            CREATE TABLE IF NOT EXISTS auth.users (
                 id SERIAL PRIMARY KEY,
                 email VARCHAR(255) UNIQUE NOT NULL,
-                password VARCHAR(255),
+                password_hash VARCHAR(255),
                 first_name VARCHAR(100),
                 last_name VARCHAR(100),
                 role VARCHAR(50) DEFAULT 'general_member',
@@ -36,21 +32,10 @@ def setup_database():
             );
         """)
 
-        print("\nInserting test user: dominickdupuy@ufl.edu...")
-        hashed_password = generate_password_hash('wasd')
-
-        cursor.execute("""
-            INSERT INTO auth.users (email, password, first_name, last_name, role)
-            VALUES (%s, %s, %s, %s, %s)
-        """, ('dominickdupuy@ufl.edu', hashed_password, 'Dominick', 'Dupuy', 'general_member'))
-
         conn.commit()
 
         print("\nDatabase setup complete!")
-        print("\nTest user created:")
-        print("  Email: dominickdupuy@ufl.edu")
-        print("  Password: wasd")
-        print("  Name: Dominick Dupuy")
+        print("Use add_user_email.py <email> to pre-authorize a new user for registration.")
 
         cursor.execute("SELECT id, email, first_name, last_name, role, created_at FROM auth.users;")
         users = cursor.fetchall()

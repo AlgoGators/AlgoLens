@@ -1,8 +1,9 @@
 import React, { useState, useMemo } from 'react';
-import { X, TrendingUp, TrendingDown, ChevronUp, ChevronDown } from 'lucide-react';
-import { LineChart, Line, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, ResponsiveContainer, Tooltip, Legend } from 'recharts';
+import { X, ChevronUp, ChevronDown } from 'lucide-react';
+import { LineChart, Line, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, ResponsiveContainer, Tooltip } from 'recharts';
 import { useTheme } from '../contexts/ThemeContext';
 import type { Strategy, StrategyMetrics } from '../data/portfolioData';
+import { formatCurrency } from '../lib/currency';
 
 interface StrategyBuilderProps {
   strategies: Strategy[];
@@ -1021,7 +1022,7 @@ export function StrategyBuilder({ strategies, onClose }: StrategyBuilderProps) {
                     </div>
                     <div className="text-right">
                       <div className="text-lg">
-                        ${strategy.currentValue.toLocaleString('en-US', { minimumFractionDigits: 0 })}
+                        {formatCurrency(strategy.currentValue, { minimumFractionDigits: 0 })}
                       </div>
                     </div>
                   </div>
@@ -1087,7 +1088,7 @@ export function StrategyBuilder({ strategies, onClose }: StrategyBuilderProps) {
                         <span className="font-medium">{asset.symbol}</span>
                       </div>
                       <div className="col-span-3 text-right tabular-nums font-medium">
-                        ${asset.value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        {formatCurrency(asset.value, { maximumFractionDigits: 2 })}
                       </div>
                       <div className="col-span-3 text-right tabular-nums text-orange-500 font-medium">
                         {asset.percentage.toFixed(2)}%
@@ -1100,7 +1101,7 @@ export function StrategyBuilder({ strategies, onClose }: StrategyBuilderProps) {
                     <div className="col-span-1"></div>
                     <div className="col-span-5">Total ({combinedMetrics.assetAllocation.length} holdings)</div>
                     <div className="col-span-3 text-right tabular-nums">
-                      ${combinedMetrics.totalValue.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                      {formatCurrency(combinedMetrics.totalValue)}
                     </div>
                     <div className="col-span-3 text-right text-orange-500">100.00%</div>
                   </div>

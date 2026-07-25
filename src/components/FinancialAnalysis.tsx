@@ -2,6 +2,7 @@ import React from 'react';
 import { useTheme } from '../contexts/ThemeContext';
 import { MetricInfo } from './MetricInfo';
 import type { StrategyMetrics } from '../data/portfolioData';
+import { formatCurrency } from '../lib/currency';
 
 interface FinancialAnalysisProps {
   metrics: StrategyMetrics;
@@ -211,7 +212,7 @@ export function FinancialAnalysis({ metrics }: FinancialAnalysisProps) {
               Unrealized P&L
             </div>
             <div className={metrics.unrealizedPnL >= 0 ? 'text-orange-500 text-lg' : 'text-red-500 text-lg'}>
-              ${metrics.unrealizedPnL.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+              {formatCurrency(metrics.unrealizedPnL)}
             </div>
           </div>
           <div className={`p-4 rounded-lg ${theme === 'dark' ? 'bg-gray-900' : 'bg-gray-50'
@@ -221,7 +222,7 @@ export function FinancialAnalysis({ metrics }: FinancialAnalysisProps) {
               Realized P&L
             </div>
             <div className={metrics.realizedPnL >= 0 ? 'text-orange-500 text-lg' : 'text-red-500 text-lg'}>
-              ${metrics.realizedPnL.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+              {formatCurrency(metrics.realizedPnL)}
             </div>
           </div>
           <div className={`p-4 rounded-lg ${theme === 'dark' ? 'bg-gray-900' : 'bg-gray-50'
@@ -231,7 +232,7 @@ export function FinancialAnalysis({ metrics }: FinancialAnalysisProps) {
               Total Commissions
             </div>
             <div className="text-lg">
-              ${metrics.totalCommissions.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+              {formatCurrency(metrics.totalCommissions)}
             </div>
           </div>
           <div className={`p-4 rounded-lg ${theme === 'dark' ? 'bg-gray-900' : 'bg-gray-50'
@@ -241,7 +242,7 @@ export function FinancialAnalysis({ metrics }: FinancialAnalysisProps) {
               Net P&L
             </div>
             <div className={metrics.netPnL >= 0 ? 'text-orange-500 text-lg' : 'text-red-500 text-lg'}>
-              ${metrics.netPnL.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+              {formatCurrency(metrics.netPnL)}
             </div>
           </div>
         </div>
@@ -269,7 +270,7 @@ export function FinancialAnalysis({ metrics }: FinancialAnalysisProps) {
               Avg Win
             </div>
             <div className="text-lg text-orange-500">
-              ${metrics.avgWin.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+              {formatCurrency(metrics.avgWin)}
             </div>
           </div>
           <div className={`p-4 rounded-lg ${theme === 'dark' ? 'bg-gray-900' : 'bg-gray-50'
@@ -279,7 +280,7 @@ export function FinancialAnalysis({ metrics }: FinancialAnalysisProps) {
               Avg Loss
             </div>
             <div className="text-lg text-red-500">
-              ${metrics.avgLoss.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+              {formatCurrency(metrics.avgLoss)}
             </div>
           </div>
           <div className={`p-4 rounded-lg ${theme === 'dark' ? 'bg-gray-900' : 'bg-gray-50'
@@ -289,7 +290,7 @@ export function FinancialAnalysis({ metrics }: FinancialAnalysisProps) {
               Total Notional
             </div>
             <div className="text-lg">
-              ${metrics.totalNotional.toLocaleString('en-US', { minimumFractionDigits: 0 })}
+              {formatCurrency(metrics.totalNotional, { minimumFractionDigits: 0 })}
             </div>
           </div>
         </div>
@@ -309,7 +310,7 @@ export function FinancialAnalysis({ metrics }: FinancialAnalysisProps) {
               Portfolio Value
             </div>
             <div className="text-lg">
-              ${metrics.currentPortfolioValue.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+              {formatCurrency(metrics.currentPortfolioValue)}
             </div>
           </div>
           <div className={`p-4 rounded-lg ${theme === 'dark' ? 'bg-gray-900' : 'bg-gray-50'
@@ -319,7 +320,7 @@ export function FinancialAnalysis({ metrics }: FinancialAnalysisProps) {
               Cash Available
             </div>
             <div className="text-lg">
-              ${metrics.cashAvailable.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+              {formatCurrency(metrics.cashAvailable)}
             </div>
           </div>
           <div className={`p-4 rounded-lg ${theme === 'dark' ? 'bg-gray-900' : 'bg-gray-50'
@@ -329,7 +330,7 @@ export function FinancialAnalysis({ metrics }: FinancialAnalysisProps) {
               Margin Posted
             </div>
             <div className="text-lg">
-              ${metrics.marginPosted.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+              {formatCurrency(metrics.marginPosted)}
             </div>
           </div>
         </div>

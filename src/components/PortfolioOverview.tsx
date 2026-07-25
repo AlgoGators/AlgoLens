@@ -1,8 +1,10 @@
 import React, { useState, useMemo } from 'react';
-import { TrendingUp, TrendingDown, Beaker } from 'lucide-react';
+import { TrendingUp, TrendingDown } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, ResponsiveContainer, Tooltip } from 'recharts';
 import type { PortfolioData } from '../data/portfolioData';
 import { useTheme } from '../contexts/ThemeContext';
+import { PERIOD_OPTIONS, filterByPeriod } from '../lib/period';
+import { formatCurrency } from '../lib/currency';
 
 interface PortfolioOverviewProps {
   data: PortfolioData;
@@ -14,39 +16,13 @@ export function PortfolioOverview({ data, onBuilderClick }: PortfolioOverviewPro
   const { theme } = useTheme();
   const isPositive = data.totalReturn >= 0;
 
-  const periods = ['1W', '1M', '3M', '1Y', 'ALL'];
+  const periods = PERIOD_OPTIONS;
 
   // Filter data based on selected period
-  const filteredData = useMemo(() => {
-    const now = new Date();
-    let daysToShow: number;
-
-    switch (selectedPeriod) {
-      case '1W':
-        daysToShow = 7;
-        break;
-      case '1M':
-        daysToShow = 30;
-        break;
-      case '3M':
-        daysToShow = 90;
-        break;
-      case '1Y':
-        daysToShow = 365;
-        break;
-      case 'ALL':
-      default:
-        return data.historicalData;
-    }
-
-    const cutoffDate = new Date(now);
-    cutoffDate.setDate(cutoffDate.getDate() - daysToShow);
-
-    return data.historicalData.filter(point => {
-      const pointDate = new Date(point.date);
-      return pointDate >= cutoffDate;
-    });
-  }, [selectedPeriod, data.historicalData]);
+  const filteredData = useMemo(
+    () => filterByPeriod(data.historicalData, selectedPeriod),
+    [selectedPeriod, data.historicalData]
+  );
 
   // Calculate period-specific return
   const periodReturn = useMemo(() => {
@@ -71,12 +47,12 @@ export function PortfolioOverview({ data, onBuilderClick }: PortfolioOverviewPro
 
       <div className="mb-6">
         <div className="text-4xl md:text-5xl mb-2">
-          ${data.totalValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+          {formatCurrency(data.totalValue, { maximumFractionDigits: 2 })}
         </div>
         <div className={`flex items-center gap-2 text-lg ${periodReturn.value >= 0 ? 'text-orange-500' : 'text-red-500'}`}>
           {periodReturn.value >= 0 ? <TrendingUp className="w-5 h-5" /> : <TrendingDown className="w-5 h-5" />}
           <span>
-            ${Math.abs(periodReturn.value).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ({periodReturn.percent >= 0 ? '+' : ''}{periodReturn.percent.toFixed(2)}%) {periodLabel}
+            {formatCurrency(Math.abs(periodReturn.value), { maximumFractionDigits: 2 })} ({periodReturn.percent >= 0 ? '+' : ''}{periodReturn.percent.toFixed(2)}%) {periodLabel}
           </span>
         </div>
       </div>
@@ -109,7 +85,7 @@ export function PortfolioOverview({ data, onBuilderClick }: PortfolioOverviewPro
                 fontWeight: '600',
                 padding: '12px'
               }}
-              formatter={(value: number) => [`$${value.toLocaleString('en-US', { minimumFractionDigits: 2 })}`, 'Fund Value']}
+              formatter={(value: number) => [formatCurrency(value), 'Fund Value']}
               labelFormatter={(label) => new Date(label).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
             />
             <Line
