@@ -22,6 +22,15 @@ from services.position_writer import (
 from services.risk_gate import evaluate
 from services.strategy_registry import get_registry, get_strategy_config
 from services.portfolio_service import get_strategy_detail, get_strategy_summary
+from services.config_service import (
+    ConfigValidationError,
+    get_effective_config,
+    get_active_overrides,
+    get_config_history,
+    validate_overrides,
+    create_version,
+    activate_version,
+)
 
 # Writing the book and reading the fund's override reasoning are internal
 # operations. Subscriber roles (ADR-000 C-6) are external paying customers:
@@ -208,3 +217,221 @@ def get_overrides(strategy_id):
             f"Failed to fetch overrides for {strategy_id}: {e}", exc_info=True
         )
         return jsonify({"error": "Failed to fetch overrides"}), 500
+
+
+@portfolio_bp.route("/config/<strategy_id>", methods=["GET"])
+@jwt_required()
+@internal_only
+def get_config(strategy_id):
+    """Fetch the effective config and active overrides for one strategy.
+
+    Returns a dict with:
+    - effective: the newest manifest row's effective config (or null if unpublished)
+    - active_overrides: the active strategy_config row (or null if none)
+    - version: the active version number (or null)
+    """
+    cfg = get_strategy_config(strategy_id)
+    if cfg is None:
+        return jsonify({"error": "Strategy not found"}), 404
+
+    portfolio_id = cfg["portfolio_id"]
+
+    try:
+        conn = get_db_connection()
+        try:
+            with conn.cursor() as cursor:
+                effective = get_effective_config(cursor, portfolio_id)
+                active = get_active_overrides(cursor, portfolio_id)
+        finally:
+            conn.close()
+
+        # None is distinguishable from an empty dict: the engine has not published yet.
+        response = {
+            "effective": effective,
+            "active_overrides": dict(active) if active else None,
+            "version": active["version"] if active else None,
+        }
+        return jsonify(response), 200
+
+    except Exception as e:
+        current_app.logger.error(
+            f"Failed to fetch config for {strategy_id}: {e}", exc_info=True
+        )
+        return jsonify({"error": "Failed to fetch config"}), 500
+
+
+@portfolio_bp.route("/config/<strategy_id>/history", methods=["GET"])
+@jwt_required()
+@internal_only
+def get_config_history_route(strategy_id):
+    """Fetch the version history for one strategy's config, newest first."""
+    cfg = get_strategy_config(strategy_id)
+    if cfg is None:
+        return jsonify({"error": "Strategy not found"}), 404
+
+    portfolio_id = cfg["portfolio_id"]
+
+    try:
+        conn = get_db_connection()
+        try:
+            with conn.cursor() as cursor:
+                rows = get_config_history(cursor, portfolio_id)
+        finally:
+            conn.close()
+
+        versions = [dict(row) for row in rows]
+        return jsonify({"versions": versions}), 200
+
+    except Exception as e:
+        current_app.logger.error(
+            f"Failed to fetch config history for {strategy_id}: {e}", exc_info=True
+        )
+        return jsonify({"error": "Failed to fetch history"}), 500
+
+
+@portfolio_bp.route("/config/<strategy_id>", methods=["POST"])
+@jwt_required()
+@internal_only
+def create_config(strategy_id):
+    """Create a new config version with overrides.
+
+    Body: {"overrides": {...}, "reason": "..."}
+
+    Validates the overrides against the engine's published config, then
+    creates a new version and makes it active. Returns 201.
+    """
+    cfg = get_strategy_config(strategy_id)
+    if cfg is None:
+        return jsonify({"error": "Strategy not found"}), 404
+
+    portfolio_id = cfg["portfolio_id"]
+    payload = request.get_json(silent=True)
+
+    if not isinstance(payload, dict):
+        return jsonify({"error": "Request body must be a JSON object"}), 400
+
+    overrides = payload.get("overrides")
+    reason = payload.get("reason")
+
+    if overrides is None:
+        return jsonify({"error": "Missing required field: overrides"}), 400
+    if reason is None or not str(reason).strip():
+        return jsonify({"error": "Missing required field: reason"}), 400
+
+    # Parse user_id from JWT identity defensively.
+    try:
+        user_id = int(get_jwt_identity())
+    except (TypeError, ValueError):
+        current_app.logger.error(f"JWT identity is not numeric: {get_jwt_identity()!r}")
+        return jsonify({"error": "Invalid user identity in token"}), 400
+
+    try:
+        conn = get_db_connection()
+        try:
+            with conn.cursor() as cursor:
+                # Fetch the effective config to validate against.
+                effective = get_effective_config(cursor, portfolio_id)
+        finally:
+            # Cursor is closed, but connection stays open for create_version.
+            pass
+
+        # If the engine has never published, we have no schema to validate against.
+        if effective is None:
+            conn.close()
+            return (
+                jsonify(
+                    {
+                        "error": "Engine has not published a config yet",
+                        "details": "Cannot set overrides without knowing what the engine reads",
+                    }
+                ),
+                400,
+            )
+
+        # Validate overrides against effective schema.
+        try:
+            validate_overrides(overrides, effective)
+        except ConfigValidationError as e:
+            conn.close()
+            return jsonify({"error": str(e)}), 400
+
+        # All good: create the new version.
+        result = create_version(
+            conn, portfolio_id, overrides, reason=str(reason).strip(), user_id=user_id
+        )
+        conn.close()
+
+        current_app.logger.info(
+            f"Created config version {result.get('version')} for {strategy_id} "
+            f"by user {user_id}"
+        )
+        return jsonify(result), 201
+
+    except Exception as e:
+        current_app.logger.error(
+            f"Failed to create config version for {strategy_id}: {e}", exc_info=True
+        )
+        return jsonify({"error": "Failed to create config version"}), 500
+
+
+@portfolio_bp.route("/config/<strategy_id>/activate", methods=["POST"])
+@jwt_required()
+@internal_only
+def activate_config(strategy_id):
+    """Revert to an earlier config version.
+
+    Body: {"version": <version_number>, "reason": "..."}
+
+    Creates a new version row copying the old overrides, preserving the
+    append-only audit trail. Returns 201.
+    """
+    cfg = get_strategy_config(strategy_id)
+    if cfg is None:
+        return jsonify({"error": "Strategy not found"}), 404
+
+    portfolio_id = cfg["portfolio_id"]
+    payload = request.get_json(silent=True)
+
+    if not isinstance(payload, dict):
+        return jsonify({"error": "Request body must be a JSON object"}), 400
+
+    version = payload.get("version")
+    reason = payload.get("reason")
+
+    if version is None:
+        return jsonify({"error": "Missing required field: version"}), 400
+    if reason is None or not str(reason).strip():
+        return jsonify({"error": "Missing required field: reason"}), 400
+
+    # Parse user_id from JWT identity defensively.
+    try:
+        user_id = int(get_jwt_identity())
+    except (TypeError, ValueError):
+        current_app.logger.error(f"JWT identity is not numeric: {get_jwt_identity()!r}")
+        return jsonify({"error": "Invalid user identity in token"}), 400
+
+    try:
+        conn = get_db_connection()
+        result = activate_version(
+            conn,
+            portfolio_id,
+            version=int(version),
+            reason=str(reason).strip(),
+            user_id=user_id,
+        )
+        conn.close()
+
+        current_app.logger.info(
+            f"Reverted to config version {version} for {strategy_id} by user {user_id}"
+        )
+        return jsonify(result), 201
+
+    except ConfigValidationError as e:
+        return jsonify({"error": str(e)}), 400
+    except (ValueError, TypeError):
+        return jsonify({"error": "Invalid version number"}), 400
+    except Exception as e:
+        current_app.logger.error(
+            f"Failed to activate config version for {strategy_id}: {e}", exc_info=True
+        )
+        return jsonify({"error": "Failed to activate config version"}), 500
