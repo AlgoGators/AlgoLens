@@ -59,33 +59,59 @@ def _normalize(row):
     }
 
 
-def get_registry(active_only=True):
+def get_registry(active_only=True, include_incubating=False):
     """Return the list of strategy config dicts, ordered by sort_order then id.
 
     Reads from trading.strategy_registry; on any error indicating the table is not
-    available (or if it yields no rows) falls back to DEFAULT_REGISTRY so the app
-    keeps working before the migration is applied.
+    available (or if the table is completely empty) falls back to DEFAULT_REGISTRY
+    so the app keeps working before the migration is applied.
+
+    Args:
+        active_only: If True, filter to is_active=true strategies only
+        include_incubating: If True, include strategies with lifecycle='incubating'.
+                           Default is False: incubating strategies are excluded from
+                           the real portfolio dashboard and all existing call sites.
+                           This is fail-safe: a missing or buggy filter is caught
+                           because the test queries expect incubating strategies to
+                           never appear unless explicitly requested.
     """
     conn = None
     try:
         conn = get_db_connection()
         with conn.cursor() as cursor:
-            cursor.execute(
-                """
-                SELECT id, strategy_type, portfolio_id, name, description,
-                       initial_equity, managers, is_active, sort_order
-                FROM trading.strategy_registry
-                ORDER BY sort_order ASC, id ASC
-                """
-            )
-            rows = cursor.fetchall()
+            # Check if the table has any rows at all
+            cursor.execute("SELECT COUNT(*) as cnt FROM trading.strategy_registry")
+            count_row = cursor.fetchone()
+            total_count = count_row["cnt"] if count_row else 0
 
-        registry = [_normalize(r) for r in rows]
-        if not registry:
-            logger.warning(
-                "[REGISTRY] strategy_registry table is empty; using built-in default"
-            )
-            registry = list(DEFAULT_REGISTRY)
+            # If table is completely empty, fall back to default
+            if total_count == 0:
+                logger.warning(
+                    "[REGISTRY] strategy_registry table is empty; using built-in default"
+                )
+                registry = list(DEFAULT_REGISTRY)
+            else:
+                # Table has data; query respecting the lifecycle filter
+                if include_incubating:
+                    where_clause = ""
+                else:
+                    where_clause = (
+                        "WHERE lifecycle != 'incubating' OR lifecycle IS NULL"
+                    )
+
+                cursor.execute(
+                    f"""
+                    SELECT id, strategy_type, portfolio_id, name, description,
+                           initial_equity, managers, is_active, sort_order
+                    FROM trading.strategy_registry
+                    {where_clause}
+                    ORDER BY sort_order ASC, id ASC
+                    """
+                )
+                rows = cursor.fetchall()
+                registry = [_normalize(r) for r in rows]
+                # If filtering left no rows (all were incubating), return empty list
+                # rather than falling back to default
     except (psycopg2.Error, ValueError) as e:
         # psycopg2.Error: table missing (UndefinedTable, i.e. migration not applied),
         #   connection refused, auth failure, etc.

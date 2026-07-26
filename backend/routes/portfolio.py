@@ -31,6 +31,14 @@ from services.config_service import (
     create_version,
     activate_version,
 )
+from services.incubation import (
+    IncubationError,
+    get_incubating,
+    start_incubation,
+    promote_to_live,
+    retire,
+    get_incubation_performance,
+)
 
 # Writing the book and reading the fund's override reasoning are internal
 # operations. Subscriber roles (ADR-000 C-6) are external paying customers:
@@ -435,3 +443,224 @@ def activate_config(strategy_id):
             f"Failed to activate config version for {strategy_id}: {e}", exc_info=True
         )
         return jsonify({"error": "Failed to activate config version"}), 500
+
+
+@portfolio_bp.route("/incubation", methods=["GET"])
+@jwt_required()
+@internal_only
+def get_incubation_strategies():
+    """List all strategies currently in incubation, with days elapsed and progress."""
+    try:
+        conn = get_db_connection()
+        try:
+            with conn.cursor() as cursor:
+                strategies = get_incubating(cursor)
+        finally:
+            conn.close()
+
+        return jsonify({"incubating_strategies": strategies}), 200
+
+    except Exception as e:
+        current_app.logger.error(
+            f"Failed to fetch incubating strategies: {e}", exc_info=True
+        )
+        return jsonify({"error": "Failed to fetch incubating strategies"}), 500
+
+
+@portfolio_bp.route("/incubation/<strategy_id>/start", methods=["POST"])
+@jwt_required()
+@internal_only
+def start_strategy_incubation(strategy_id):
+    """Move a live strategy into incubation on mock capital.
+
+    Body: {"mock_capital": <positive_number>, "reason": "..."}
+
+    Returns 201 if successful.
+    """
+    cfg = get_strategy_config(strategy_id)
+    if cfg is None:
+        return jsonify({"error": "Strategy not found"}), 404
+
+    payload = request.get_json(silent=True)
+
+    if not isinstance(payload, dict):
+        return jsonify({"error": "Request body must be a JSON object"}), 400
+
+    mock_capital = payload.get("mock_capital")
+    reason = payload.get("reason")
+
+    if mock_capital is None:
+        return jsonify({"error": "Missing required field: mock_capital"}), 400
+    if reason is None or not str(reason).strip():
+        return jsonify({"error": "Missing required field: reason"}), 400
+
+    # Parse user_id from JWT identity defensively.
+    try:
+        user_id = int(get_jwt_identity())
+    except (TypeError, ValueError):
+        current_app.logger.error(f"JWT identity is not numeric: {get_jwt_identity()!r}")
+        return jsonify({"error": "Invalid user identity in token"}), 400
+
+    try:
+        conn = get_db_connection()
+        start_incubation(
+            conn,
+            strategy_id=strategy_id,
+            mock_capital=float(mock_capital),
+            reason=str(reason).strip(),
+            user_id=str(user_id),
+        )
+        conn.close()
+
+        current_app.logger.info(
+            f"Started incubation for strategy {strategy_id} by user {user_id}"
+        )
+        return jsonify({"message": "Incubation started"}), 201
+
+    except IncubationError as e:
+        return jsonify({"error": str(e)}), 400
+    except (ValueError, TypeError) as e:
+        return jsonify(
+            {"error": "Invalid mock_capital: must be a positive number"}
+        ), 400
+    except Exception as e:
+        current_app.logger.error(
+            f"Failed to start incubation for {strategy_id}: {e}", exc_info=True
+        )
+        return jsonify({"error": "Failed to start incubation"}), 500
+
+
+@portfolio_bp.route("/incubation/<strategy_id>/promote", methods=["POST"])
+@jwt_required()
+@internal_only
+def promote_strategy_to_live(strategy_id):
+    """Move an incubating strategy back into live trading.
+
+    Body: {"reason": "..."}
+
+    Returns 200 if successful.
+    """
+    cfg = get_strategy_config(strategy_id)
+    if cfg is None:
+        return jsonify({"error": "Strategy not found"}), 404
+
+    payload = request.get_json(silent=True)
+
+    if not isinstance(payload, dict):
+        return jsonify({"error": "Request body must be a JSON object"}), 400
+
+    reason = payload.get("reason")
+
+    if reason is None or not str(reason).strip():
+        return jsonify({"error": "Missing required field: reason"}), 400
+
+    # Parse user_id from JWT identity defensively.
+    try:
+        user_id = int(get_jwt_identity())
+    except (TypeError, ValueError):
+        current_app.logger.error(f"JWT identity is not numeric: {get_jwt_identity()!r}")
+        return jsonify({"error": "Invalid user identity in token"}), 400
+
+    try:
+        conn = get_db_connection()
+        promote_to_live(
+            conn,
+            strategy_id=strategy_id,
+            reason=str(reason).strip(),
+            user_id=str(user_id),
+        )
+        conn.close()
+
+        current_app.logger.info(
+            f"Promoted strategy {strategy_id} to live by user {user_id}"
+        )
+        return jsonify({"message": "Strategy promoted to live"}), 200
+
+    except IncubationError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        current_app.logger.error(f"Failed to promote {strategy_id}: {e}", exc_info=True)
+        return jsonify({"error": "Failed to promote strategy"}), 500
+
+
+@portfolio_bp.route("/incubation/<strategy_id>/retire", methods=["POST"])
+@jwt_required()
+@internal_only
+def retire_strategy(strategy_id):
+    """Retire a strategy (move it out of live or incubation).
+
+    Body: {"reason": "..."}
+
+    Returns 200 if successful.
+    """
+    cfg = get_strategy_config(strategy_id)
+    if cfg is None:
+        return jsonify({"error": "Strategy not found"}), 404
+
+    payload = request.get_json(silent=True)
+
+    if not isinstance(payload, dict):
+        return jsonify({"error": "Request body must be a JSON object"}), 400
+
+    reason = payload.get("reason")
+
+    if reason is None or not str(reason).strip():
+        return jsonify({"error": "Missing required field: reason"}), 400
+
+    # Parse user_id from JWT identity defensively.
+    try:
+        user_id = int(get_jwt_identity())
+    except (TypeError, ValueError):
+        current_app.logger.error(f"JWT identity is not numeric: {get_jwt_identity()!r}")
+        return jsonify({"error": "Invalid user identity in token"}), 400
+
+    try:
+        conn = get_db_connection()
+        retire(
+            conn,
+            strategy_id=strategy_id,
+            reason=str(reason).strip(),
+            user_id=str(user_id),
+        )
+        conn.close()
+
+        current_app.logger.info(f"Retired strategy {strategy_id} by user {user_id}")
+        return jsonify({"message": "Strategy retired"}), 200
+
+    except IncubationError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        current_app.logger.error(f"Failed to retire {strategy_id}: {e}", exc_info=True)
+        return jsonify({"error": "Failed to retire strategy"}), 500
+
+
+@portfolio_bp.route("/incubation/<strategy_id>/performance", methods=["GET"])
+@jwt_required()
+@internal_only
+def get_incubation_perf(strategy_id):
+    """Get day-by-day mock positions and equity for an incubating strategy.
+
+    Only returns data from incubation_started_at onward.
+    """
+    cfg = get_strategy_config(strategy_id)
+    if cfg is None:
+        return jsonify({"error": "Strategy not found"}), 404
+
+    try:
+        conn = get_db_connection()
+        try:
+            with conn.cursor() as cursor:
+                performance = get_incubation_performance(
+                    cursor, strategy_id, cfg["portfolio_id"]
+                )
+        finally:
+            conn.close()
+
+        return jsonify(performance), 200
+
+    except Exception as e:
+        current_app.logger.error(
+            f"Failed to fetch incubation performance for {strategy_id}: {e}",
+            exc_info=True,
+        )
+        return jsonify({"error": "Failed to fetch incubation performance"}), 500
