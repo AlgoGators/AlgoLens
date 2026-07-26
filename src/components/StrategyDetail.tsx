@@ -3,10 +3,13 @@ import { ArrowLeft, TrendingUp, TrendingDown } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, ResponsiveContainer, Tooltip } from 'recharts';
 import type { Strategy } from '../data/portfolioData';
 import { useTheme } from '../contexts/ThemeContext';
+import { useAuth } from '../contexts/AuthContext';
 import { FinancialAnalysis } from './FinancialAnalysis';
 import { PositionBreakdown } from './PositionBreakdown';
 import { TradingActivity } from './TradingActivity';
 import { AlphaAttribution } from './AlphaAttribution';
+import { EditPositionModal } from './EditPositionModal';
+import { OverrideHistory } from './OverrideHistory';
 
 interface StrategyDetailProps {
   strategy: Strategy;
@@ -15,8 +18,15 @@ interface StrategyDetailProps {
 
 export function StrategyDetail({ strategy, onBack }: StrategyDetailProps) {
   const [selectedPeriod, setSelectedPeriod] = useState('1M');
-  const [selectedTab, setSelectedTab] = useState<'positions' | 'analysis' | 'activity'>('positions');
+  const [selectedTab, setSelectedTab] = useState<'positions' | 'analysis' | 'activity' | 'history'>('positions');
+  const [editing, setEditing] = useState<{ symbol: string | null } | null>(null);
   const { theme } = useTheme();
+  const { user } = useAuth();
+
+  // Mirrors backend INTERNAL_ROLES; prevents showing buttons that would 403
+  const INTERNAL_ROLES = ['admin', 'general_member'];
+  const canEdit = INTERNAL_ROLES.includes(user?.role ?? '');
+
   const isPositive = strategy.return >= 0;
   const periods = ['1W', '1M', '3M', '1Y', 'ALL'];
 
@@ -63,6 +73,14 @@ export function StrategyDetail({ strategy, onBack }: StrategyDetailProps) {
   }, [filteredData]);
 
   const periodLabel = selectedPeriod === 'ALL' ? 'All Time' : selectedPeriod;
+
+  // Find existing position for modal (when editing a symbol)
+  const existingPosition = editing?.symbol
+    ? strategy.positions.find(p => p.symbol === editing.symbol)
+    : null;
+  const modalExisting = existingPosition
+    ? { quantity: existingPosition.shares, average_price: null }
+    : null;
 
   return (
     <div>
@@ -217,6 +235,22 @@ export function StrategyDetail({ strategy, onBack }: StrategyDetailProps) {
               <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-orange-500" />
             )}
           </button>
+          {canEdit && (
+            <button
+              onClick={() => setSelectedTab('history')}
+              className={`pb-3 px-1 transition-colors relative ${selectedTab === 'history'
+                ? 'text-orange-500'
+                : theme === 'dark'
+                  ? 'text-gray-400 hover:text-white'
+                  : 'text-gray-500 hover:text-gray-900'
+                }`}
+            >
+              History
+              {selectedTab === 'history' && (
+                <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-orange-500" />
+              )}
+            </button>
+          )}
         </div>
 
         <button
@@ -233,7 +267,11 @@ export function StrategyDetail({ strategy, onBack }: StrategyDetailProps) {
 
       {/* Tab Content */}
       {selectedTab === 'positions' && (
-        <PositionBreakdown positions={strategy.positions} />
+        <PositionBreakdown
+          positions={strategy.positions}
+          onEdit={canEdit ? (symbol) => setEditing({ symbol }) : undefined}
+          onAdd={canEdit ? () => setEditing({ symbol: null }) : undefined}
+        />
       )}
 
       {selectedTab === 'analysis' && (
@@ -244,6 +282,24 @@ export function StrategyDetail({ strategy, onBack }: StrategyDetailProps) {
         <TradingActivity
           executions={strategy.executions}
           finalizedPositions={strategy.finalizedPositions}
+        />
+      )}
+
+      {selectedTab === 'history' && (
+        <OverrideHistory strategyId={strategy.id} />
+      )}
+
+      {/* Edit Position Modal */}
+      {editing && (
+        <EditPositionModal
+          strategyId={strategy.id}
+          symbol={editing.symbol}
+          existing={modalExisting}
+          onClose={() => setEditing(null)}
+          onSaved={() => {
+            setEditing(null);
+            onBack();
+          }}
         />
       )}
     </div>

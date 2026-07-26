@@ -1,31 +1,49 @@
 import React from 'react';
 import { useTheme } from '../contexts/ThemeContext';
 import type { Position } from '../data/portfolioData';
+import { Edit2, Plus } from 'lucide-react';
 
 interface PositionBreakdownProps {
   positions: Position[];
+  onEdit?: (symbol: string) => void;
+  onAdd?: () => void;
 }
 
-export function PositionBreakdown({ positions }: PositionBreakdownProps) {
+export function PositionBreakdown({ positions, onEdit, onAdd }: PositionBreakdownProps) {
   const { theme } = useTheme();
 
   const totalNotional = positions.reduce((sum, pos) => sum + (pos.notional || pos.currentValue), 0);
 
   return (
     <div>
-      <h3 className={`text-sm uppercase tracking-wider mb-4 ${
-        theme === 'dark' ? 'text-gray-400' : 'text-gray-500'
-      }`}>
-        Today's Positions
-      </h3>
+      <div className="flex items-center justify-between mb-4">
+        <h3 className={`text-sm uppercase tracking-wider ${
+          theme === 'dark' ? 'text-gray-400' : 'text-gray-500'
+        }`}>
+          Today's Positions
+        </h3>
+        {onAdd && (
+          <button
+            onClick={onAdd}
+            className={`flex items-center gap-1 text-sm px-3 py-1 rounded transition-colors ${
+              theme === 'dark'
+                ? 'text-orange-400 hover:bg-gray-900'
+                : 'text-orange-600 hover:bg-gray-50'
+            }`}
+          >
+            <Plus className="w-4 h-4" />
+            Add position
+          </button>
+        )}
+      </div>
       
       <div className={`border rounded-lg overflow-hidden ${
         theme === 'dark' ? 'border-gray-800' : 'border-gray-200'
       }`}>
         {/* Header */}
-        <div className={`grid grid-cols-5 gap-4 p-4 text-sm border-b ${
-          theme === 'dark' 
-            ? 'bg-gray-900 border-gray-800 text-gray-400' 
+        <div className={`grid ${onEdit ? 'grid-cols-6' : 'grid-cols-5'} gap-4 p-4 text-sm border-b ${
+          theme === 'dark'
+            ? 'bg-gray-900 border-gray-800 text-gray-400'
             : 'bg-gray-50 border-gray-200 text-gray-500'
         }`}>
           <div>Symbol</div>
@@ -33,6 +51,7 @@ export function PositionBreakdown({ positions }: PositionBreakdownProps) {
           <div className="text-right">Market Price</div>
           <div className="text-right">Notional</div>
           <div className="text-right">% of Total</div>
+          {onEdit && <div className="text-center"></div>}
         </div>
 
         {/* Positions */}
@@ -44,13 +63,13 @@ export function PositionBreakdown({ positions }: PositionBreakdownProps) {
           return (
             <div
               key={position.symbol}
-              className={`grid grid-cols-5 gap-4 p-4 transition-colors ${
+              className={`grid ${onEdit ? 'grid-cols-6' : 'grid-cols-5'} gap-4 p-4 transition-colors ${
                 theme === 'dark' ? 'hover:bg-gray-900' : 'hover:bg-gray-50'
               } ${
-                index !== positions.length - 1 
-                  ? theme === 'dark' 
-                    ? 'border-b border-gray-800' 
-                    : 'border-b border-gray-200' 
+                index !== positions.length - 1
+                  ? theme === 'dark'
+                    ? 'border-b border-gray-800'
+                    : 'border-b border-gray-200'
                   : ''
               }`}
             >
@@ -70,17 +89,31 @@ export function PositionBreakdown({ positions }: PositionBreakdownProps) {
                 ${notional.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </div>
               <div className="text-right">{percentOfTotal.toFixed(2)}%</div>
+              {onEdit && (
+                <div className="flex items-center justify-center">
+                  <button
+                    onClick={() => onEdit(position.symbol)}
+                    className={`p-1 rounded transition-colors ${
+                      theme === 'dark'
+                        ? 'text-gray-400 hover:text-orange-400 hover:bg-gray-800'
+                        : 'text-gray-500 hover:text-orange-600 hover:bg-gray-100'
+                    }`}
+                  >
+                    <Edit2 className="w-4 h-4" />
+                  </button>
+                </div>
+              )}
             </div>
           );
         })}
 
         {/* Summary */}
-        <div className={`grid grid-cols-5 gap-4 p-4 border-t ${
-          theme === 'dark' 
-            ? 'bg-gray-900 border-gray-800' 
+        <div className={`grid ${onEdit ? 'grid-cols-6' : 'grid-cols-5'} gap-4 p-4 border-t ${
+          theme === 'dark'
+            ? 'bg-gray-900 border-gray-800'
             : 'bg-gray-50 border-gray-200'
         }`}>
-          <div className="col-span-3">
+          <div className={onEdit ? 'col-span-3' : 'col-span-3'}>
             <div className="mb-1">Active Positions: {positions.length}</div>
           </div>
           <div className="text-right">
@@ -92,6 +125,7 @@ export function PositionBreakdown({ positions }: PositionBreakdownProps) {
             <div>${totalNotional.toLocaleString('en-US', { minimumFractionDigits: 2 })}</div>
           </div>
           <div className="text-right">100.00%</div>
+          {onEdit && <div></div>}
         </div>
       </div>
     </div>
