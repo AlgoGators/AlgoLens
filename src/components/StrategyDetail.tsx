@@ -10,6 +10,8 @@ import { TradingActivity } from './TradingActivity';
 import { AlphaAttribution } from './AlphaAttribution';
 import { EditPositionModal } from './EditPositionModal';
 import { OverrideHistory } from './OverrideHistory';
+import { ConfigDashboard } from './ConfigDashboard';
+import { ConfigHistory } from './ConfigHistory';
 
 interface StrategyDetailProps {
   strategy: Strategy;
@@ -19,7 +21,7 @@ interface StrategyDetailProps {
 
 export function StrategyDetail({ strategy, onBack, onRefresh }: StrategyDetailProps) {
   const [selectedPeriod, setSelectedPeriod] = useState('1M');
-  const [selectedTab, setSelectedTab] = useState<'positions' | 'analysis' | 'activity' | 'history'>('positions');
+  const [selectedTab, setSelectedTab] = useState<'positions' | 'analysis' | 'activity' | 'history' | 'config'>('positions');
   const [editing, setEditing] = useState<{ symbol: string | null } | null>(null);
   const { theme } = useTheme();
   const { user } = useAuth();
@@ -241,20 +243,36 @@ export function StrategyDetail({ strategy, onBack, onRefresh }: StrategyDetailPr
             )}
           </button>
           {canEdit && (
-            <button
-              onClick={() => setSelectedTab('history')}
-              className={`pb-3 px-1 transition-colors relative ${selectedTab === 'history'
-                ? 'text-orange-500'
-                : theme === 'dark'
-                  ? 'text-gray-400 hover:text-white'
-                  : 'text-gray-500 hover:text-gray-900'
-                }`}
-            >
-              History
-              {selectedTab === 'history' && (
-                <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-orange-500" />
-              )}
-            </button>
+            <>
+              <button
+                onClick={() => setSelectedTab('history')}
+                className={`pb-3 px-1 transition-colors relative ${selectedTab === 'history'
+                  ? 'text-orange-500'
+                  : theme === 'dark'
+                    ? 'text-gray-400 hover:text-white'
+                    : 'text-gray-500 hover:text-gray-900'
+                  }`}
+              >
+                History
+                {selectedTab === 'history' && (
+                  <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-orange-500" />
+                )}
+              </button>
+              <button
+                onClick={() => setSelectedTab('config')}
+                className={`pb-3 px-1 transition-colors relative ${selectedTab === 'config'
+                  ? 'text-orange-500'
+                  : theme === 'dark'
+                    ? 'text-gray-400 hover:text-white'
+                    : 'text-gray-500 hover:text-gray-900'
+                  }`}
+              >
+                Config
+                {selectedTab === 'config' && (
+                  <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-orange-500" />
+                )}
+              </button>
+            </>
           )}
         </div>
 
@@ -292,6 +310,22 @@ export function StrategyDetail({ strategy, onBack, onRefresh }: StrategyDetailPr
 
       {selectedTab === 'history' && (
         <OverrideHistory strategyId={strategy.id} />
+      )}
+
+      {selectedTab === 'config' && (
+        <div className="grid gap-8 lg:grid-cols-3">
+          <div className="lg:col-span-2">
+            <ConfigDashboard strategyId={strategy.id} />
+          </div>
+          <div>
+            <h3 className={`text-sm font-semibold uppercase tracking-wider mb-4 ${
+              theme === 'dark' ? 'text-gray-300' : 'text-gray-700'
+            }`}>
+              Audit Trail
+            </h3>
+            <ConfigHistory strategyId={strategy.id} />
+          </div>
+        </div>
       )}
 
       {/* Edit Position Modal */}
