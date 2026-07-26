@@ -73,7 +73,7 @@ def evaluate(envelope, current_book, proposed):
     max_count = envelope.get("max_position_count")
     if max_count is not None:
         actual = len(projected)
-        if actual >= max_count:
+        if actual > max_count:
             breaches.append(
                 {
                     "limit": "max_position_count",

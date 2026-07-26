@@ -9,7 +9,7 @@ from services.risk_gate import evaluate
 ENVELOPE = {
     "max_gross_notional": 1_000_000.0,
     "max_symbol_notional": {"ES": 300_000.0},
-    "max_position_count": 3,
+    "max_position_count": 2,
 }
 
 BOOK = [
