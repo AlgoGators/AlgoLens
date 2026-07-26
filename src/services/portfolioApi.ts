@@ -33,6 +33,59 @@ export type OverrideRecord = {
 };
 
 /**
+ * Config response from GET /portfolio/config/<strategy_id>
+ * 'effective': what the engine is currently running
+ * 'active_overrides': what is staged for the next session (or null)
+ * 'version': audit table sequence number (or null)
+ */
+export type ConfigResponse = {
+  effective: Record<string, Record<string, number | boolean | string>>;
+  active_overrides: {
+    id: number;
+    version: number;
+    overrides: Record<string, any>;
+    reason: string;
+    created_by: string;
+    created_at: string;
+  } | null;
+  version: number | null;
+};
+
+/**
+ * Config history entry from GET /portfolio/config/<strategy_id>/history
+ * Each version in the audit table, newest first
+ */
+export type ConfigHistoryEntry = {
+  id: number;
+  version: number;
+  overrides: Record<string, any>;
+  reason: string;
+  created_by: string;
+  created_at: string;
+  is_active: boolean;
+};
+
+export type ConfigHistoryResponse = {
+  versions: ConfigHistoryEntry[];
+};
+
+/**
+ * Request body for POST /portfolio/config/<strategy_id>
+ */
+export type UpdateConfigInput = {
+  overrides: Record<string, Record<string, any>>;
+  reason: string;
+};
+
+/**
+ * Request body for POST /portfolio/config/<strategy_id>/activate
+ */
+export type ActivateConfigInput = {
+  version: number;
+  reason: string;
+};
+
+/**
  * The backend answered 409 WITH a risk_check: the write is allowed, but only
  * after the user explicitly acknowledges the breach. Distinct from a plain
  * rejection, which carries no risk_check and cannot be overridden at all.
@@ -402,5 +455,171 @@ export class PortfolioApiService {
     const response = await this.fetchWithAuth(url);
     const payload = await response.json();
     return payload.overrides ?? [];
+  }
+
+  /**
+   * Fetch config for a strategy: effective (running), active_overrides (pending),
+   * and version number for audit trail.
+   */
+  static async getConfig(strategyId: string): Promise<ConfigResponse> {
+    log('info', `getConfig(${strategyId}) called`);
+    const url = `${API_BASE_URL}/portfolio/config/${strategyId}`;
+    log('info', `Fetching config from: ${url}`);
+
+    const response = await this.fetchWithAuth(url);
+
+    // Handle 403 distinctly: user does not have permission to edit config
+    if (response.status === 403) {
+      log('warn', 'Config edit not permitted (403)');
+      throw new Error('You do not have permission to edit this strategy\'s configuration.');
+    }
+
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({}));
+      throw new Error(payload.error ?? `Failed to fetch config (${response.status})`);
+    }
+
+    const data = await response.json();
+    log('info', 'Config fetched successfully', {
+      effectiveKeys: Object.keys(data.effective || {}).length,
+      hasActiveOverrides: !!data.active_overrides,
+      version: data.version,
+    });
+
+    return data as ConfigResponse;
+  }
+
+  /**
+   * Fetch config version history: audit trail of all config changes.
+   * Newest first; includes is_active flag for the currently staged version.
+   */
+  static async getConfigHistory(strategyId: string): Promise<ConfigHistoryResponse> {
+    log('info', `getConfigHistory(${strategyId}) called`);
+    const url = `${API_BASE_URL}/portfolio/config/${strategyId}/history`;
+    log('info', `Fetching config history from: ${url}`);
+
+    const response = await this.fetchWithAuth(url);
+
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({}));
+      throw new Error(payload.error ?? `Failed to fetch config history (${response.status})`);
+    }
+
+    const data = await response.json();
+    log('info', 'Config history fetched', { versionCount: data.versions?.length || 0 });
+
+    return data as ConfigHistoryResponse;
+  }
+
+  /**
+   * Update strategy config: post new overrides to take effect at next session start.
+   * Returns 201 on success. Never sends unchanged values to avoid audit bloat.
+   */
+  static async updateConfig(
+    strategyId: string,
+    input: UpdateConfigInput,
+  ): Promise<{ id: number; version: number }> {
+    log('info', `updateConfig(${strategyId}) called`);
+    const token = this.getAuthToken();
+    if (!token) throw new Error('No authentication token found');
+
+    const url = `${API_BASE_URL}/portfolio/config/${strategyId}`;
+    log('info', `Posting config update to: ${url}`, { reason: input.reason });
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(input),
+    });
+
+    const payload = await response.json().catch(() => ({}));
+
+    // Handle 401/422 token errors
+    if (response.status === 401 || response.status === 422) {
+      log('warn', `Token error (${response.status}) - clearing credentials and redirecting to login`);
+      localStorage.removeItem('token');
+      localStorage.removeItem('user');
+      window.location.href = '/login';
+      throw new Error('Session expired or invalid. Please log in again.');
+    }
+
+    // Handle 403: user does not have permission
+    if (response.status === 403) {
+      log('warn', 'Config update not permitted (403)');
+      throw new Error('You do not have permission to edit this strategy\'s configuration.');
+    }
+
+    // Handle 400: validation error (e.g., invalid parameter names, bad nesting)
+    if (response.status === 400) {
+      log('error', 'Config validation error (400)', payload);
+      throw new Error(payload.error ?? 'Invalid configuration: check parameter names and types.');
+    }
+
+    if (!response.ok) {
+      log('error', `Config update failed (${response.status})`, payload);
+      throw new Error(payload.error ?? `Request failed (${response.status})`);
+    }
+
+    log('info', 'Config updated successfully', payload);
+    return payload as { id: number; version: number };
+  }
+
+  /**
+   * Activate a specific config version from history: revert or jump to a prior snapshot.
+   * Takes effect at next session start. Returns 201 on success.
+   */
+  static async activateConfigVersion(
+    strategyId: string,
+    input: ActivateConfigInput,
+  ): Promise<{ version: number }> {
+    log('info', `activateConfigVersion(${strategyId}, v${input.version}) called`);
+    const token = this.getAuthToken();
+    if (!token) throw new Error('No authentication token found');
+
+    const url = `${API_BASE_URL}/portfolio/config/${strategyId}/activate`;
+    log('info', `Activating config version at: ${url}`, { version: input.version, reason: input.reason });
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(input),
+    });
+
+    const payload = await response.json().catch(() => ({}));
+
+    // Handle 401/422 token errors
+    if (response.status === 401 || response.status === 422) {
+      log('warn', `Token error (${response.status}) - clearing credentials and redirecting to login`);
+      localStorage.removeItem('token');
+      localStorage.removeItem('user');
+      window.location.href = '/login';
+      throw new Error('Session expired or invalid. Please log in again.');
+    }
+
+    // Handle 403: user does not have permission
+    if (response.status === 403) {
+      log('warn', 'Config activation not permitted (403)');
+      throw new Error('You do not have permission to edit this strategy\'s configuration.');
+    }
+
+    // Handle 404: version not found
+    if (response.status === 404) {
+      log('error', 'Config version not found (404)', { version: input.version });
+      throw new Error('This config version does not exist or belongs to a different strategy.');
+    }
+
+    if (!response.ok) {
+      log('error', `Config activation failed (${response.status})`, payload);
+      throw new Error(payload.error ?? `Request failed (${response.status})`);
+    }
+
+    log('info', 'Config version activated successfully', payload);
+    return payload as { version: number };
   }
 }
