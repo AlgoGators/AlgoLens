@@ -62,7 +62,13 @@ def get_incubating(cursor):
         }
 
         if row["incubation_started_at"]:
-            days_elapsed = (now - row["incubation_started_at"]).days
+            # Clamped at zero. `incubation_started_at` is stamped by the DATABASE
+            # (`now()`), while this subtracts the APPLICATION host's clock, and the
+            # two are never perfectly in step. timedelta.days floors toward negative
+            # infinity, so a sub-second skew of the wrong sign turns into -1 -- which
+            # is what a strategy incubated moments ago actually reported. A negative
+            # elapsed count then renders as negative progress against the window.
+            days_elapsed = max(0, (now - row["incubation_started_at"]).days)
             row_dict["days_elapsed"] = days_elapsed
             row_dict["window_days"] = INCUBATION_WINDOW_DAYS
         else:

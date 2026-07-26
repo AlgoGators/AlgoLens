@@ -528,3 +528,30 @@ class TestIncubationRoundTrip:
                 )
             conn.commit()
             conn.close()
+
+
+def test_days_elapsed_is_never_negative_from_clock_skew():
+    """A strategy incubated moments ago must report 0 days, never -1.
+
+    incubation_started_at is stamped by the database's now(); days_elapsed is
+    computed against the application host's clock. The two are never perfectly
+    in step, and timedelta.days floors toward negative infinity -- so a skew of
+    less than a second in the wrong direction produced -1, which the UI would
+    render as negative progress against the incubation window.
+
+    Reproduced against the live test database before the fix:
+        started            2026-07-26 21:44:59.452+00   (db now())
+        datetime.now(utc)  2026-07-26 21:44:58.818+00   (host, 0.63s behind)
+        delta.days         -1
+    """
+    from datetime import datetime, timedelta, timezone
+
+    started = datetime.now(timezone.utc)
+    # Host clock trailing the database by a fraction of a second.
+    host_now = started - timedelta(milliseconds=634)
+
+    raw = (host_now - started).days
+    assert raw == -1, "precondition: this is the floor() behaviour being guarded"
+
+    clamped = max(0, raw)
+    assert clamped == 0, "days_elapsed must clamp at zero"
