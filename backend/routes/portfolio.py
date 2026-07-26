@@ -5,9 +5,20 @@ Thin HTTP layer: resolve the requested strategy against the data-driven registry
 services.portfolio_service. No strategy is hardcoded here anymore.
 """
 
-from flask import Blueprint, jsonify, current_app
-from flask_jwt_extended import jwt_required
+from flask import Blueprint, jsonify, current_app, request
+from flask_jwt_extended import jwt_required, get_jwt_identity
 
+from database import get_db_connection
+from services.position_writer import (
+    PositionValidationError,
+    StrategyNameUnresolved,
+    fetch_overrides,
+    fetch_qt_book,
+    fetch_risk_envelope,
+    validate_position_payload,
+    write_qt_position,
+)
+from services.risk_gate import evaluate
 from services.strategy_registry import get_registry, get_strategy_config
 from services.portfolio_service import get_strategy_detail, get_strategy_summary
 
@@ -68,3 +79,91 @@ def get_all_strategies():
             f"[STRATEGIES] Error fetching strategies: {str(e)}", exc_info=True
         )
         return jsonify({"error": "Failed to fetch strategies"}), 500
+
+
+@portfolio_bp.route("/positions", methods=["POST"])
+@jwt_required()
+def upsert_position():
+    """Create or amend one position in the qt stream.
+
+    A risk breach does not block the write, but it does require the caller to
+    come back with acknowledge_risk=true (409 on the first attempt). Every write
+    lands in trading.position_overrides in the same transaction.
+    """
+    try:
+        normalized = validate_position_payload(request.get_json(silent=True))
+    except PositionValidationError as e:
+        return jsonify({"error": str(e)}), 400
+
+    cfg = get_strategy_config(normalized["strategy_id"])
+    if cfg is None:
+        return jsonify({"error": "Strategy not found"}), 404
+
+    acknowledge = bool((request.get_json(silent=True) or {}).get("acknowledge_risk"))
+
+    try:
+        conn = get_db_connection()
+        try:
+            with conn.cursor() as cursor:
+                envelope = fetch_risk_envelope(
+                    cursor, cfg["strategy_type"], cfg["portfolio_id"]
+                )
+                book = fetch_qt_book(cursor, cfg["strategy_type"], cfg["portfolio_id"])
+
+            verdict = evaluate(envelope, book, normalized)
+
+            if not verdict["passed"] and not acknowledge:
+                return jsonify(
+                    {
+                        "error": "This position breaches a risk limit",
+                        "risk_check": verdict,
+                        "resubmit_with": "acknowledge_risk",
+                    }
+                ), 409
+
+            result = write_qt_position(
+                conn,
+                cfg,
+                normalized,
+                user_id=int(get_jwt_identity()),
+                verdict=verdict,
+                overrode_risk=not verdict["passed"],
+            )
+        finally:
+            conn.close()
+
+        return jsonify({**result, "risk_check": verdict}), 201
+
+    except StrategyNameUnresolved as e:
+        current_app.logger.error(
+            f"Strategy name unresolved for {normalized['symbol']}: {e}"
+        )
+        return jsonify({"error": str(e)}), 409
+    except Exception as e:
+        current_app.logger.error(
+            f"Failed to write position {normalized['symbol']}: {e}", exc_info=True
+        )
+        return jsonify({"error": "Failed to write position"}), 500
+
+
+@portfolio_bp.route("/overrides/<strategy_id>", methods=["GET"])
+@jwt_required()
+def get_overrides(strategy_id):
+    """The audit trail for one strategy, most recent first."""
+    cfg = get_strategy_config(strategy_id)
+    if cfg is None:
+        return jsonify({"error": "Strategy not found"}), 404
+
+    try:
+        conn = get_db_connection()
+        try:
+            with conn.cursor() as cursor:
+                rows = fetch_overrides(cursor, cfg["strategy_type"])
+        finally:
+            conn.close()
+        return jsonify({"overrides": rows}), 200
+    except Exception as e:
+        current_app.logger.error(
+            f"Failed to fetch overrides for {strategy_id}: {e}", exc_info=True
+        )
+        return jsonify({"error": "Failed to fetch overrides"}), 500
