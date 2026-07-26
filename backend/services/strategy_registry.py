@@ -132,9 +132,29 @@ def get_registry(active_only=True, include_incubating=False):
     return registry
 
 
-def get_strategy_config(strategy_id):
-    """Return the config dict for a public API id, or None if unknown/inactive."""
-    for strategy in get_registry(active_only=True):
+def get_strategy_config(strategy_id, include_incubating=False):
+    """Return the config dict for a public API id, or None if unknown/inactive.
+
+    Args:
+        strategy_id: The strategy identifier to look up
+        include_incubating: If True, include strategies with lifecycle='incubating'.
+                           Default is False: incubating strategies are excluded from
+                           the real portfolio dashboard (get_registry without the flag).
+                           The incubation endpoints are the deliberate exception — they
+                           explicitly pass include_incubating=True to manage the lifecycle.
+                           This fail-safe is critical: if filtering is accidentally
+                           removed, the test suite catches it because the real dashboard
+                           tests expect incubating strategies to never appear unless
+                           explicitly requested. The goal is to prevent mock capital from
+                           blending into the fund's headline portfolio metrics through
+                           a missing or buggy filter.
+
+    Returns:
+        Config dict matching strategy_id, or None if not found/inactive
+    """
+    for strategy in get_registry(
+        active_only=True, include_incubating=include_incubating
+    ):
         if strategy["id"] == strategy_id:
             return strategy
     return None

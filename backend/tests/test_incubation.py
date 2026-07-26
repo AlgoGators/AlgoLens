@@ -336,3 +336,195 @@ class TestIncubationAuditTrail:
                 )
             conn.commit()
             conn.close()
+
+
+class TestIncubationRoundTrip:
+    """End-to-end round-trip tests verifying the lifecycle is reversible."""
+
+    def test_round_trip_incubate_promote_to_live(self):
+        """Full round-trip: live -> incubating -> live, with database verification.
+
+        This is the test that should have caught the one-way door bug.
+        Asserts database lifecycle values at each step.
+        """
+        conn = get_db_connection()
+        try:
+            # Verify starting state: live
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    "SELECT lifecycle FROM trading.strategy_registry WHERE id = %s",
+                    ("trendfollowing",),
+                )
+                row = cursor.fetchone()
+            assert row["lifecycle"] == "live", "Test setup: strategy should start live"
+
+            # Step 1: Start incubation
+            start_incubation(
+                conn,
+                strategy_id="trendfollowing",
+                mock_capital=250000,
+                reason="Testing round-trip",
+                user_id="1",
+            )
+            conn.commit()
+
+            # Verify database: lifecycle is now 'incubating'
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    "SELECT lifecycle FROM trading.strategy_registry WHERE id = %s",
+                    ("trendfollowing",),
+                )
+                row = cursor.fetchone()
+            assert row["lifecycle"] == "incubating", (
+                "After start_incubation, lifecycle should be 'incubating'"
+            )
+
+            # Verify isolation: get_registry() should NOT return it
+            registry = get_registry(active_only=True)
+            strategy_ids = [s["id"] for s in registry]
+            assert "trendfollowing" not in strategy_ids, (
+                "After incubation, strategy should not appear in get_registry()"
+            )
+
+            # Verify it appears in get_registry(include_incubating=True)
+            registry_incubating = get_registry(
+                active_only=True, include_incubating=True
+            )
+            strategy_ids_incubating = [s["id"] for s in registry_incubating]
+            assert "trendfollowing" in strategy_ids_incubating, (
+                "With include_incubating=True, strategy should appear"
+            )
+
+            # Verify get_incubating returns it
+            with conn.cursor() as cursor:
+                strategies = get_incubating(cursor)
+            strategy_ids_list = [s["id"] for s in strategies]
+            assert "trendfollowing" in strategy_ids_list, (
+                "get_incubating should return the incubating strategy"
+            )
+
+            # Step 2: Promote back to live
+            promote_to_live(
+                conn,
+                strategy_id="trendfollowing",
+                reason="Performance acceptable",
+                user_id="2",
+            )
+            conn.commit()
+
+            # Verify database: lifecycle is now 'live' again
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    "SELECT lifecycle FROM trading.strategy_registry WHERE id = %s",
+                    ("trendfollowing",),
+                )
+                row = cursor.fetchone()
+            assert row["lifecycle"] == "live", (
+                "After promote_to_live, lifecycle should be 'live'"
+            )
+
+            # Verify it now appears in get_registry() again
+            registry = get_registry(active_only=True)
+            strategy_ids = [s["id"] for s in registry]
+            assert "trendfollowing" in strategy_ids, (
+                "After promotion, strategy should appear in get_registry()"
+            )
+
+            # Verify it does NOT appear in get_incubating
+            with conn.cursor() as cursor:
+                strategies = get_incubating(cursor)
+            strategy_ids_list = [s["id"] for s in strategies]
+            assert "trendfollowing" not in strategy_ids_list, (
+                "After promotion, get_incubating should not return it"
+            )
+
+        finally:
+            # Clean up
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    "UPDATE trading.strategy_registry SET lifecycle = %s WHERE id = %s",
+                    ("live", "trendfollowing"),
+                )
+                cursor.execute(
+                    "DELETE FROM trading.strategy_lifecycle_log WHERE strategy_id = %s",
+                    ("trendfollowing",),
+                )
+            conn.commit()
+            conn.close()
+
+    def test_round_trip_incubate_retire(self):
+        """Full round-trip: live -> incubating -> retired.
+
+        Verifies database lifecycle values at each step.
+        """
+        conn = get_db_connection()
+        try:
+            # Verify starting state: live
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    "SELECT lifecycle FROM trading.strategy_registry WHERE id = %s",
+                    ("trendfollowing",),
+                )
+                row = cursor.fetchone()
+            assert row["lifecycle"] == "live", "Test setup: strategy should start live"
+
+            # Step 1: Start incubation
+            start_incubation(
+                conn,
+                strategy_id="trendfollowing",
+                mock_capital=250000,
+                reason="Testing retire path",
+                user_id="1",
+            )
+            conn.commit()
+
+            # Verify database: lifecycle is now 'incubating'
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    "SELECT lifecycle FROM trading.strategy_registry WHERE id = %s",
+                    ("trendfollowing",),
+                )
+                row = cursor.fetchone()
+            assert row["lifecycle"] == "incubating"
+
+            # Step 2: Retire from incubation
+            retire(
+                conn,
+                strategy_id="trendfollowing",
+                reason="Strategy underperformed",
+                user_id="3",
+            )
+            conn.commit()
+
+            # Verify database: lifecycle is now 'retired'
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    "SELECT lifecycle FROM trading.strategy_registry WHERE id = %s",
+                    ("trendfollowing",),
+                )
+                row = cursor.fetchone()
+            assert row["lifecycle"] == "retired", (
+                "After retire, lifecycle should be 'retired'"
+            )
+
+            # Verify it does NOT appear in get_incubating()
+            with conn.cursor() as cursor:
+                strategies = get_incubating(cursor)
+            strategy_ids_list = [s["id"] for s in strategies]
+            assert "trendfollowing" not in strategy_ids_list, (
+                "After retirement, get_incubating should not return it"
+            )
+
+        finally:
+            # Clean up: reset to live
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    "UPDATE trading.strategy_registry SET lifecycle = %s WHERE id = %s",
+                    ("live", "trendfollowing"),
+                )
+                cursor.execute(
+                    "DELETE FROM trading.strategy_lifecycle_log WHERE strategy_id = %s",
+                    ("trendfollowing",),
+                )
+            conn.commit()
+            conn.close()

@@ -476,8 +476,12 @@ def start_strategy_incubation(strategy_id):
     Body: {"mock_capital": <positive_number>, "reason": "..."}
 
     Returns 201 if successful.
+
+    Note: We resolve with include_incubating=True so that if the strategy is
+    already incubating, the service layer can detect it and return the proper
+    400 error (not a misleading 404).
     """
-    cfg = get_strategy_config(strategy_id)
+    cfg = get_strategy_config(strategy_id, include_incubating=True)
     if cfg is None:
         return jsonify({"error": "Strategy not found"}), 404
 
@@ -540,7 +544,7 @@ def promote_strategy_to_live(strategy_id):
 
     Returns 200 if successful.
     """
-    cfg = get_strategy_config(strategy_id)
+    cfg = get_strategy_config(strategy_id, include_incubating=True)
     if cfg is None:
         return jsonify({"error": "Strategy not found"}), 404
 
@@ -593,7 +597,7 @@ def retire_strategy(strategy_id):
 
     Returns 200 if successful.
     """
-    cfg = get_strategy_config(strategy_id)
+    cfg = get_strategy_config(strategy_id, include_incubating=True)
     if cfg is None:
         return jsonify({"error": "Strategy not found"}), 404
 
@@ -642,7 +646,7 @@ def get_incubation_perf(strategy_id):
 
     Only returns data from incubation_started_at onward.
     """
-    cfg = get_strategy_config(strategy_id)
+    cfg = get_strategy_config(strategy_id, include_incubating=True)
     if cfg is None:
         return jsonify({"error": "Strategy not found"}), 404
 
