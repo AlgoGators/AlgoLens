@@ -33,13 +33,17 @@ export function Dashboard({ onLogout }: DashboardProps) {
 
   // Extract fetchPortfolioData as a stable callback with no external dependencies.
   // This can be called on mount or when a child component needs fresh data.
-  const fetchPortfolioData = useCallback(async () => {
+  // The initial load should show the full-screen loading state. A refresh after a
+  // save should not -- flashing the whole dashboard makes a successful write look
+  // like a page reload, and hides the very number the trader is checking.
+  const fetchPortfolioData = useCallback(async (options?: { background?: boolean }) => {
+    const background = options?.background ?? false;
     console.log('[Dashboard] === Starting fetchPortfolioData ===');
     console.log('[Dashboard] Current URL:', window.location.href);
     console.log('[Dashboard] Token exists:', !!localStorage.getItem('token'));
 
     try {
-      setIsLoading(true);
+      if (!background) setIsLoading(true);
       setError(null);
       const data = await PortfolioApiService.getPortfolioData();
       console.log('[Dashboard] Portfolio data received successfully:', data);
@@ -62,7 +66,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
       // Include the actual error message for debugging
       setError(`Failed to load portfolio data: ${errorMessage}`);
     } finally {
-      setIsLoading(false);
+      if (!background) setIsLoading(false);
       console.log('[Dashboard] fetchPortfolioData complete');
     }
   }, []);
@@ -185,7 +189,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
             <StrategyDetail
               strategy={portfolioData.strategies.find(s => s.id === selectedStrategy)!}
               onBack={() => setSelectedStrategy(null)}
-              onRefresh={fetchPortfolioData}
+              onRefresh={() => fetchPortfolioData({ background: true })}
             />
           )}
         </div>
