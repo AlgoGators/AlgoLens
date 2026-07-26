@@ -11,6 +11,9 @@ the audit trail.
 
 
 def _notional(position):
+    # A None average_price is treated as 0.0, so a position with unknown price
+    # contributes nothing to notional limits regardless of its size. This is
+    # deliberate: we cannot compute risk for a position we don't know the price of.
     price = position.get("average_price") or 0.0
     return abs(position["quantity"] * price)
 

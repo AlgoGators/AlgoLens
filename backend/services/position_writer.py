@@ -143,6 +143,12 @@ def fetch_risk_envelope(cursor, strategy_id, portfolio_id):
 
 
 def _fetch_existing_position(cursor, cfg, symbol):
+    # Lock the row for the rest of the transaction so we capture the true before_state
+    # in the audit trail. If two QT members edit the same symbol concurrently, or the
+    # engine's daily run writes between our read and write, the lock ensures we read
+    # the current row and record what it was at the moment we decided to change it.
+    # When the row does not exist yet there is nothing to lock; the ON CONFLICT
+    # clause in write_qt_position still makes the insert safe.
     cursor.execute(
         """
         SELECT symbol, quantity, average_price,
@@ -154,6 +160,7 @@ def _fetch_existing_position(cursor, cfg, symbol):
           AND symbol = %s
         ORDER BY updated_at DESC
         LIMIT 1
+        FOR UPDATE
         """,
         (cfg["strategy_type"], cfg["portfolio_id"], QT_STREAM, symbol),
     )
