@@ -1,6 +1,50 @@
 import { Strategy, PortfolioData, HistoricalDataPoint } from '../data/portfolioData';
+import type { RiskCheck } from '../lib/positionEdit';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+
+export type CreatePositionInput = {
+  strategy_id: string;
+  symbol: string;
+  quantity: number;
+  average_price?: number | null;
+  reason: string;
+  acknowledge_risk?: boolean;
+};
+
+export type CreatePositionResult = {
+  position: { symbol: string; quantity: number; average_price: number | null };
+  override_id: number;
+  risk_check: RiskCheck;
+};
+
+export type OverrideRecord = {
+  id: number;
+  user_id: number;
+  source_app: string;
+  strategy_id: string;
+  symbol: string;
+  before_state: Record<string, unknown>;
+  after_state: Record<string, unknown>;
+  reason: string;
+  risk_check_result: RiskCheck;
+  overrode_risk: boolean;
+  created_at: string;
+};
+
+/**
+ * The backend answered 409 WITH a risk_check: the write is allowed, but only
+ * after the user explicitly acknowledges the breach. Distinct from a plain
+ * rejection, which carries no risk_check and cannot be overridden at all.
+ */
+export class RiskBreachError extends Error {
+  risk_check: RiskCheck;
+  constructor(message: string, risk_check: RiskCheck) {
+    super(message);
+    this.name = 'RiskBreachError';
+    this.risk_check = risk_check;
+  }
+}
 
 // Environment detection
 const isDev = import.meta.env.DEV;
@@ -308,5 +352,43 @@ export class PortfolioApiService {
       .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
     return aggregated;
+  }
+
+  static async createPosition(input: CreatePositionInput): Promise<CreatePositionResult> {
+    const token = this.getAuthToken();
+    if (!token) throw new Error('No authentication token found');
+
+    const response = await fetch(`${API_BASE_URL}/portfolio/positions`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(input),
+    });
+
+    const payload = await response.json().catch(() => ({}));
+
+    if (response.status === 409 && payload.risk_check) {
+      // Overridable. The caller must surface the breaches and require a second,
+      // deliberate submit with acknowledge_risk. Never retry here.
+      throw new RiskBreachError(
+        payload.error ?? 'This position breaches a risk limit',
+        payload.risk_check,
+      );
+    }
+
+    if (!response.ok) {
+      throw new Error(payload.error ?? `Request failed (${response.status})`);
+    }
+
+    return payload as CreatePositionResult;
+  }
+
+  static async getOverrides(strategyId: string): Promise<OverrideRecord[]> {
+    const url = `${API_BASE_URL}/portfolio/overrides/${strategyId}`;
+    const response = await this.fetchWithAuth(url);
+    const payload = await response.json();
+    return payload.overrides ?? [];
   }
 }
