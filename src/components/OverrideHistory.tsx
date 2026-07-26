@@ -33,6 +33,19 @@ export function OverrideHistory({ strategyId }: OverrideHistoryProps) {
     fetchOverrides();
   }, [strategyId]);
 
+  // Coerce a value to a display string, returning '—' for non-finite numbers.
+  // This guards against undefined, null, non-numeric strings, and other edge cases.
+  const formatFieldValue = (value: unknown): string => {
+    if (value === null || value === undefined) {
+      return '—';
+    }
+    const num = Number(value);
+    if (isFinite(num)) {
+      return num.toString();
+    }
+    return '—';
+  };
+
   // Derive the "what changed" description from before_state and after_state
   const getChangeDescription = (before: Record<string, unknown>, after: Record<string, unknown>): string => {
     // before_state may be {} for a newly created position
@@ -47,10 +60,10 @@ export function OverrideHistory({ strategyId }: OverrideHistoryProps) {
 
     const changes: string[] = [];
     if (beforeQty !== afterQty) {
-      changes.push(`qty: ${beforeQty} → ${afterQty}`);
+      changes.push(`qty: ${formatFieldValue(beforeQty)} → ${formatFieldValue(afterQty)}`);
     }
     if (beforePrice !== afterPrice) {
-      changes.push(`price: ${beforePrice ?? 'n/a'} → ${afterPrice ?? 'n/a'}`);
+      changes.push(`price: ${formatFieldValue(beforePrice)} → ${formatFieldValue(afterPrice)}`);
     }
 
     return changes.length > 0 ? changes.join(', ') : 'No changes';

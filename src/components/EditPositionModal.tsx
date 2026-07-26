@@ -217,7 +217,7 @@ export function EditPositionModal({
                   setAvgPrice(e.target.value)
                   dispatch({ type: 'edited' })
                 }}
-                placeholder="e.g., 150.25"
+                placeholder={existing ? 'Unchanged' : 'e.g., 150.25'}
                 className={`w-full px-3 py-2 rounded-lg border transition-colors ${theme === 'dark'
                   ? 'bg-gray-900 border-gray-800 text-white placeholder-gray-500 focus:border-orange-500 focus:ring-1 focus:ring-orange-500'
                   : 'bg-white border-gray-200 text-black placeholder-gray-400 focus:border-orange-500 focus:ring-1 focus:ring-orange-500'

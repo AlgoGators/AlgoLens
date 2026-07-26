@@ -79,6 +79,10 @@ export function StrategyDetail({ strategy, onBack, onRefresh }: StrategyDetailPr
   const existingPosition = editing?.symbol
     ? strategy.positions.find(p => p.symbol === editing.symbol)
     : null;
+  // Deliberately pass average_price as null (not costBasis) so the backend only overwrites it when a value
+  // is actually supplied. Null means "leave the stored price unchanged". The costBasis field exists but its
+  // per-unit vs. total semantics are unconfirmed; writing a wrong value would silently corrupt the book with
+  // a plausible-looking number, far worse than leaving it blank.
   const modalExisting = existingPosition
     ? { quantity: existingPosition.shares, average_price: null }
     : null;
@@ -293,6 +297,12 @@ export function StrategyDetail({ strategy, onBack, onRefresh }: StrategyDetailPr
       {/* Edit Position Modal */}
       {editing && (
         <EditPositionModal
+          // Force a fresh mount whenever the target symbol changes, so form state (reason, price, quantity)
+          // doesn't leak from the previous edit into the audit row of a different symbol. The reason field
+          // is most dangerous: a trader closes an ES edit with text like "Trimming ES ahead of CPI", opens
+          // an NQ edit, and the reason box still shows stale ES text — which, if not noticed, lands in
+          // NQ's immutable audit record describing the wrong instrument. This key ensures each edit starts clean.
+          key={editing.symbol ?? '__new__'}
           strategyId={strategy.id}
           symbol={editing.symbol}
           existing={modalExisting}
