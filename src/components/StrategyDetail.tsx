@@ -14,9 +14,10 @@ import { OverrideHistory } from './OverrideHistory';
 interface StrategyDetailProps {
   strategy: Strategy;
   onBack: () => void;
+  onRefresh?: () => void | Promise<void>;
 }
 
-export function StrategyDetail({ strategy, onBack }: StrategyDetailProps) {
+export function StrategyDetail({ strategy, onBack, onRefresh }: StrategyDetailProps) {
   const [selectedPeriod, setSelectedPeriod] = useState('1M');
   const [selectedTab, setSelectedTab] = useState<'positions' | 'analysis' | 'activity' | 'history'>('positions');
   const [editing, setEditing] = useState<{ symbol: string | null } | null>(null);
@@ -296,9 +297,11 @@ export function StrategyDetail({ strategy, onBack }: StrategyDetailProps) {
           symbol={editing.symbol}
           existing={modalExisting}
           onClose={() => setEditing(null)}
-          onSaved={() => {
+          onSaved={async () => {
             setEditing(null);
-            onBack();
+            // Refresh data in place instead of navigating away. Parent only fetches once on mount,
+            // so navigating back and then in would show stale server data and read as a failed save.
+            await onRefresh?.();
           }}
         />
       )}

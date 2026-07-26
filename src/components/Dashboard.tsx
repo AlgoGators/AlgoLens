@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Header } from './Header';
 import { PortfolioOverview } from './PortfolioOverview';
 import { StrategyList } from './StrategyList';
@@ -31,44 +31,46 @@ export function Dashboard({ onLogout }: DashboardProps) {
   const [error, setError] = useState<string | null>(null);
   const { theme } = useTheme();
 
+  // Extract fetchPortfolioData as a stable callback with no external dependencies.
+  // This can be called on mount or when a child component needs fresh data.
+  const fetchPortfolioData = useCallback(async () => {
+    console.log('[Dashboard] === Starting fetchPortfolioData ===');
+    console.log('[Dashboard] Current URL:', window.location.href);
+    console.log('[Dashboard] Token exists:', !!localStorage.getItem('token'));
+
+    try {
+      setIsLoading(true);
+      setError(null);
+      const data = await PortfolioApiService.getPortfolioData();
+      console.log('[Dashboard] Portfolio data received successfully:', data);
+      setPortfolioData(data);
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      console.error('[Dashboard] === ERROR FETCHING PORTFOLIO ===');
+      console.error('[Dashboard] Error:', err);
+      console.error('[Dashboard] Error details:', {
+        message: errorMessage,
+        type: err instanceof Error ? err.constructor.name : typeof err,
+        stack: err instanceof Error ? err.stack : 'N/A',
+      });
+
+      // Provide debugging hint
+      console.error('[Dashboard] DEBUG TIP: Run this in browser console:');
+      console.error('  import("./services/portfolioApi").then(m => m.PortfolioApiService.testConnectivity())');
+      console.error('  Or open Network tab and look for failed requests');
+
+      // Include the actual error message for debugging
+      setError(`Failed to load portfolio data: ${errorMessage}`);
+    } finally {
+      setIsLoading(false);
+      console.log('[Dashboard] fetchPortfolioData complete');
+    }
+  }, []);
+
   // Fetch portfolio data on mount
   useEffect(() => {
-    const fetchPortfolioData = async () => {
-      console.log('[Dashboard] === Starting fetchPortfolioData ===');
-      console.log('[Dashboard] Current URL:', window.location.href);
-      console.log('[Dashboard] Token exists:', !!localStorage.getItem('token'));
-
-      try {
-        setIsLoading(true);
-        setError(null);
-        const data = await PortfolioApiService.getPortfolioData();
-        console.log('[Dashboard] Portfolio data received successfully:', data);
-        setPortfolioData(data);
-      } catch (err) {
-        const errorMessage = err instanceof Error ? err.message : String(err);
-        console.error('[Dashboard] === ERROR FETCHING PORTFOLIO ===');
-        console.error('[Dashboard] Error:', err);
-        console.error('[Dashboard] Error details:', {
-          message: errorMessage,
-          type: err instanceof Error ? err.constructor.name : typeof err,
-          stack: err instanceof Error ? err.stack : 'N/A',
-        });
-
-        // Provide debugging hint
-        console.error('[Dashboard] DEBUG TIP: Run this in browser console:');
-        console.error('  import("./services/portfolioApi").then(m => m.PortfolioApiService.testConnectivity())');
-        console.error('  Or open Network tab and look for failed requests');
-
-        // Include the actual error message for debugging
-        setError(`Failed to load portfolio data: ${errorMessage}`);
-      } finally {
-        setIsLoading(false);
-        console.log('[Dashboard] fetchPortfolioData complete');
-      }
-    };
-
     fetchPortfolioData();
-  }, []);
+  }, [fetchPortfolioData]);
 
   // Check if portfolio has any positions
   const hasPositions = portfolioData?.strategies && portfolioData.strategies.length > 0 &&
@@ -183,6 +185,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
             <StrategyDetail
               strategy={portfolioData.strategies.find(s => s.id === selectedStrategy)!}
               onBack={() => setSelectedStrategy(null)}
+              onRefresh={fetchPortfolioData}
             />
           )}
         </div>
