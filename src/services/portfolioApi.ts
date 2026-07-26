@@ -369,6 +369,18 @@ export class PortfolioApiService {
 
     const payload = await response.json().catch(() => ({}));
 
+    // Handle 401/422 token errors BEFORE checking for 409 risk breach.
+    // This duplicates logic from fetchWithAuth because refactoring that helper to support POST
+    // would change its shape and break existing GET call sites (higher risk than this duplication).
+    // An expired token should never be mistaken for a risk breach or other error.
+    if (response.status === 401 || response.status === 422) {
+      log('warn', `Token error (${response.status}) - clearing credentials and redirecting to login`);
+      localStorage.removeItem('token');
+      localStorage.removeItem('user');
+      window.location.href = '/login';
+      throw new Error('Session expired or invalid. Please log in again.');
+    }
+
     if (response.status === 409 && payload.risk_check) {
       // Overridable. The caller must surface the breaches and require a second,
       // deliberate submit with acknowledge_risk. Never retry here.

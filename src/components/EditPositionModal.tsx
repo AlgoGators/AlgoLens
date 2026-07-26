@@ -1,4 +1,4 @@
-import { useState, useReducer } from 'react'
+import { useState, useReducer, useEffect, useRef } from 'react'
 import { X } from 'lucide-react'
 import { useTheme } from '../contexts/ThemeContext'
 import { PortfolioApiService, RiskBreachError } from '../services/portfolioApi'
@@ -30,6 +30,11 @@ export function EditPositionModal({
   // The reducer manages phase transitions: idle -> submitting -> needs_acknowledgement/error/done
   const [state, dispatch] = useReducer(reduce, undefined, initialState)
 
+  // Guard against post-unmount callbacks: if user closes modal mid-flight,
+  // the in-flight request still completes and would call React callbacks on unmounted component
+  const mounted = useRef(true)
+  useEffect(() => () => { mounted.current = false }, [])
+
   // Form fields, each dispatching {type:'edited'} to clear stale breaches
   const [symbolInput, setSymbolInput] = useState(symbol ?? '')
   const [quantity, setQuantity] = useState(existing ? String(existing.quantity) : '')
@@ -39,6 +44,12 @@ export function EditPositionModal({
   const [reason, setReason] = useState('')
 
   // True when we're waiting for the user to acknowledge a breach and resubmit
+  // IMPORTANT: This value is captured at render time, not inside the async function.
+  // On the first click, acknowledging is false (phase is 'submitting'); on resubmit, it's true
+  // (phase was 'needs_acknowledgement' from the previous render, then becomes 'submitting' on this click).
+  // If code is refactored to read state.phase directly inside handleSubmit's async function,
+  // it would always evaluate to 'submitting' (after the dispatch), breaking the acknowledgement flow:
+  // the backend would always receive acknowledge_risk=false, defeating the risk gate.
   const acknowledging = state.phase === 'needs_acknowledgement'
 
   async function handleSubmit() {
@@ -54,10 +65,13 @@ export function EditPositionModal({
         acknowledge_risk: acknowledging,
       })
       // The backend accepted. Transition to done; only then call onSaved.
+      // Only dispatch/call callbacks if still mounted (user did not close modal mid-flight).
+      if (!mounted.current) return
       dispatch({ type: 'succeeded' })
       onSaved()
       onClose()
     } catch (err) {
+      if (!mounted.current) return
       if (err instanceof RiskBreachError) {
         // The breach is overridable. Dispatch the breach and STOP.
         // The user must click the button again to acknowledge and retry.
