@@ -9,6 +9,7 @@ maintains. If a parameter is not in the manifest, the engine does not read it,
 and it must not appear in the UI.
 """
 
+import json
 from numbers import Real
 
 
@@ -277,7 +278,11 @@ def create_version(conn, portfolio_id, overrides, reason, user_id):
             VALUES (%s, %s, %s, %s, %s, true, now())
             RETURNING id, version, overrides, reason, created_by, is_active, created_at
             """,
-            (portfolio_id, next_version, overrides, reason, user_id),
+            # json.dumps, not the dict itself: psycopg2 cannot adapt a dict to
+            # JSONB and raises "can't adapt type 'dict'" at execute time. The
+            # unit tests here are pure-function and never reach the driver, so
+            # this only shows up against a real database.
+            (portfolio_id, next_version, json.dumps(overrides), reason, user_id),
         )
         row = cursor.fetchone()
 
@@ -352,7 +357,8 @@ def activate_version(conn, portfolio_id, version, reason, user_id):
             VALUES (%s, %s, %s, %s, %s, true, now())
             RETURNING id, version, overrides, reason, created_by, is_active, created_at
             """,
-            (portfolio_id, next_version, old_overrides, reason, user_id),
+            # Same dict-to-JSONB adaptation as create_version above.
+            (portfolio_id, next_version, json.dumps(old_overrides), reason, user_id),
         )
         new_row = cursor.fetchone()
 
