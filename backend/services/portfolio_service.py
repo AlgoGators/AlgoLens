@@ -54,18 +54,81 @@ def _fetch_summary_row(cursor, strategy_type, portfolio_id):
     return cursor.fetchone()
 
 
-def _fetch_equity_curve(cursor, strategy_type, portfolio_id):
+# The three streams the engine writes. See trade-ngin migrations 001/003.
+#   qt        what QT actually decided -- the real book
+#   system    what the algorithm said today, given the real book
+#   benchmark what the algorithm would have compounded to untouched
+PORTFOLIO_STREAMS = ("qt", "system", "benchmark")
+
+# The stream the main dashboard figures represent: the real book.
+PRIMARY_STREAM = "qt"
+
+
+def _has_portfolio_type(cursor):
+    """Detect the dual-portfolio migration at runtime.
+
+    Lets this backend run against a database that has not been migrated yet,
+    rather than requiring a lockstep deploy with trade-ngin. Mirrors the same
+    detection on the C++ side.
+    """
     cursor.execute(
         """
-        SELECT timestamp, equity
-        FROM trading.equity_curve
-        WHERE strategy_id = %s
-        AND portfolio_id = %s
-        ORDER BY timestamp ASC
-        """,
-        (strategy_type, portfolio_id),
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'trading' AND table_name = 'equity_curve'
+          AND column_name = 'portfolio_type'
+        """
     )
+    return cursor.fetchone() is not None
+
+
+def _fetch_equity_curve(cursor, strategy_type, portfolio_id, portfolio_type=None):
+    """One stream's equity curve.
+
+    portfolio_type MUST be constrained once the migration has run. Without it the
+    query returns every stream interleaved and the chart plots them as a single
+    line -- the same silent blending fixed for portfolio_id in AlgoLens#29.
+    """
+    if portfolio_type is not None and _has_portfolio_type(cursor):
+        cursor.execute(
+            """
+            SELECT timestamp, equity
+            FROM trading.equity_curve
+            WHERE strategy_id = %s
+            AND portfolio_id = %s
+            AND portfolio_type = %s
+            ORDER BY timestamp ASC
+            """,
+            (strategy_type, portfolio_id, portfolio_type),
+        )
+    else:
+        cursor.execute(
+            """
+            SELECT timestamp, equity
+            FROM trading.equity_curve
+            WHERE strategy_id = %s
+            AND portfolio_id = %s
+            ORDER BY timestamp ASC
+            """,
+            (strategy_type, portfolio_id),
+        )
     return cursor.fetchall()
+
+
+def _fetch_equity_by_stream(cursor, strategy_type, portfolio_id):
+    """Every stream's curve, keyed by stream name.
+
+    Returns {} when the migration has not run -- there is only one stream then,
+    and the caller already has it.
+    """
+    if not _has_portfolio_type(cursor):
+        return {}
+
+    by_stream = {}
+    for stream in PORTFOLIO_STREAMS:
+        rows = _fetch_equity_curve(cursor, strategy_type, portfolio_id, stream)
+        if rows:
+            by_stream[stream] = _build_historical_data(rows)
+    return by_stream
 
 
 def _fetch_current_positions(cursor, strategy_type, portfolio_id):
@@ -285,7 +348,13 @@ def get_strategy_detail(cfg):
                 logger.warning("[PORTFOLIO] No live_results for %s", strategy_type)
                 return None
 
-            equity_curve = _fetch_equity_curve(cursor, strategy_type, portfolio_id)
+            # The headline figures are the real book, so read the qt stream.
+            equity_curve = _fetch_equity_curve(
+                cursor, strategy_type, portfolio_id, PRIMARY_STREAM
+            )
+            equity_by_stream = _fetch_equity_by_stream(
+                cursor, strategy_type, portfolio_id
+            )
             positions = _fetch_current_positions(cursor, strategy_type, portfolio_id)
             executions = _fetch_recent_executions(cursor, strategy_type, portfolio_id)
             yesterday_positions = _fetch_yesterday_positions(
@@ -319,6 +388,9 @@ def get_strategy_detail(cfg):
             "returnPercent": return_percent,
             "positions": transformed_positions,
             "historicalData": historical_data,
+            # Every stream, so the dashboard can overlay them and show the
+            # spread. Empty until the dual-portfolio migration has run.
+            "equityByStream": equity_by_stream,
             "bestDay": stats["best_day"],
             "worstDay": stats["worst_day"],
             "executions": transformed_executions,
