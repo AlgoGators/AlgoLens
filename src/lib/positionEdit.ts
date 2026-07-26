@@ -66,12 +66,27 @@ export function reduce(state: SubmitState, event: SubmitEvent): SubmitState {
       return { phase: 'error', breaches: [], message: event.message }
 
     case 'succeeded':
-      return { phase: 'done', breaches: [], message: null }
+      // Only transition to done from submitting. If this event arrived out of
+      // order (e.g., a duplicated success from a stale promise), ignore it.
+      // This enforces the acknowledge-once rule at the machine level: reaching
+      // done must always pass through submitting, so an out-of-order success
+      // cannot mark a breaching write as committed.
+      if (state.phase === 'submitting') {
+        return { phase: 'done', breaches: [], message: null }
+      }
+      return state
 
     case 'edited':
       // Any change to the form invalidates a verdict computed from the old
       // values. Falling back to idle forces a fresh check.
       return initialState()
+
+    default: {
+      // If a new SubmitEvent variant is added without a branch above, this line
+      // stops compiling -- a build error rather than an undefined state at runtime.
+      const _exhaustive: never = event
+      return state
+    }
   }
 }
 
@@ -97,6 +112,9 @@ export function buildDiff(
   }
 
   const bp = before?.average_price ?? null
+  // A blank price field means "leave it alone", not "set it to nothing" --
+  // the backend only overwrites average_price when a value is present, so
+  // omitting the line when after.average_price is null is correct.
   if (after.average_price !== null && bp !== after.average_price) {
     lines.push({
       field: 'Average price',

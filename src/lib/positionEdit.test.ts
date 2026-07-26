@@ -45,6 +45,7 @@ describe('submission state machine', () => {
                      { type: 'breach', risk_check: BREACHED })
     expect(s.phase).not.toBe('submitting')
     expect(s.phase).not.toBe('done')
+    expect(s.phase).toBe('needs_acknowledgement')
   })
 
   it('requires a fresh submit event to move on from an acknowledged breach', () => {
@@ -77,6 +78,15 @@ describe('submission state machine', () => {
     const s = reduce(reduce(initialState(), { type: 'submit' }), { type: 'succeeded' })
     expect(s.phase).toBe('done')
   })
+
+  it('ignores a success that did not come from an in-flight submit', () => {
+    // Guards the acknowledge-once rule at the machine level rather than trusting
+    // the caller to dispatch in the right order.
+    const breached = reduce(reduce(initialState(), { type: 'submit' }),
+                            { type: 'breach', risk_check: BREACHED })
+    const s = reduce(breached, { type: 'succeeded' })
+    expect(s.phase).toBe('needs_acknowledgement')
+  })
 })
 
 describe('canSubmit', () => {
@@ -91,6 +101,9 @@ describe('canSubmit', () => {
   })
   it('rejects an empty quantity', () => {
     expect(canSubmit('trimming', '')).toBe(false)
+  })
+  it('rejects a whitespace-only quantity', () => {
+    expect(canSubmit('trimming', '   ')).toBe(false)
   })
   it('accepts zero because it means close the position', () => {
     expect(canSubmit('flattening', '0')).toBe(true)
@@ -122,5 +135,12 @@ describe('buildDiff', () => {
     const d = buildDiff({ quantity: 10, average_price: 5000 },
                         { quantity: 0, average_price: 5000 })
     expect(d).toContainEqual({ field: 'Quantity', from: '10', to: '0 (closing)' })
+  })
+  it('omits the price line when no new price was supplied', () => {
+    // A blank price field means "leave it alone", not "set it to nothing" --
+    // the backend only overwrites average_price when a value is present.
+    const d = buildDiff({ quantity: 10, average_price: 5000 },
+                        { quantity: 12, average_price: null })
+    expect(d.find(l => l.field === 'Average price')).toBeUndefined()
   })
 })
