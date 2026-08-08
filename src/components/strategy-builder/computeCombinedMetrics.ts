@@ -92,10 +92,11 @@ function emptyCombined(): CombinedMetrics {
  * Combine the selected strategies into the aggregate view model: totals, asset and
  * strategy allocations, weighted metrics, and advanced risk stats.
  *
- * NOTE: some series (historicalPerformance, dailyPnL, and the correlation matrix)
- * are simulated with Math.random() -- this preserves the original component's
- * behaviour exactly. It is intentionally kept non-deterministic here; the caller
- * memoizes on the selection so the values are stable per selection.
+ * historicalPerformance and dailyPnL are derived from the selected strategies' REAL
+ * equity curves (Strategy.historicalData) -- summed by date, then expressed as a
+ * cumulative % return and day-over-day dollar change respectively. The correlation
+ * matrix is left empty: a real one needs per-symbol price history the API does not
+ * expose yet (see issue #56). This function is deterministic given its inputs.
  */
 export function computeCombinedMetrics(
   strategies: Strategy[],
@@ -151,19 +152,24 @@ export function computeCombinedMetrics(
     percentage: (s.currentValue / totalValue) * 100
   }));
 
-  // Historical performance data (combined)
-  const historicalPerformance: { date: string; return: number }[] = [];
-  const today = new Date();
-  let cumulativeReturn = 0;
-  for (let i = 90; i >= 0; i--) {
-    const date = new Date(today);
-    date.setDate(date.getDate() - i);
-    cumulativeReturn += (Math.random() - 0.45) * 0.5; // Trend upward
-    historicalPerformance.push({
-      date: date.toISOString().split('T')[0],
-      return: cumulativeReturn
+  // Combined equity curve: sum each selected strategy's REAL historical equity by
+  // date, then express it as cumulative % return from the first (earliest) point.
+  // Reads the actual per-strategy equity curves instead of simulating a series.
+  const equityByDate = new Map<string, number>();
+  selected.forEach(s => {
+    s.historicalData.forEach(pt => {
+      equityByDate.set(pt.date, (equityByDate.get(pt.date) || 0) + pt.value);
     });
-  }
+  });
+  const combinedCurve = Array.from(equityByDate.entries())
+    .map(([date, value]) => ({ date, value }))
+    .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+
+  const baseEquity = combinedCurve.length > 0 ? combinedCurve[0].value : 0;
+  const historicalPerformance = combinedCurve.map(pt => ({
+    date: pt.date,
+    return: baseEquity > 0 ? ((pt.value - baseEquity) / baseEquity) * 100 : 0
+  }));
 
   // Combine all finalized positions for PnL by symbol
   const symbolPnL: { [key: string]: number } = {};
@@ -178,18 +184,14 @@ export function computeCombinedMetrics(
     .sort((a, b) => a[1] - b[1])
     .map(([symbol, pnl]) => ({ symbol, pnl }));
 
-  // Generate daily PnL data (simulated)
-  const dailyPnL = [];
-  for (let i = 30; i >= 0; i--) {
-    const date = new Date(today);
-    date.setDate(date.getDate() - i);
-    const variance = Math.random() - 0.5;
-    const basePnl = returnPercent > 0 ? 200 : -200;
-    dailyPnL.push({
-      date: date.toISOString().split('T')[0],
-      pnl: basePnl + variance * 800
-    });
-  }
+  // Daily PnL: day-over-day change in the combined equity curve (real dollars),
+  // most recent 31 days. Derived from the same real curve, not simulated.
+  const dailyPnL = combinedCurve
+    .map((pt, i) => ({
+      date: pt.date,
+      pnl: i === 0 ? 0 : pt.value - combinedCurve[i - 1].value
+    }))
+    .slice(-31);
 
   // Weighted average metrics - MUST BE CALCULATED FIRST
   const weightedMetrics: StrategyMetrics = {
@@ -277,15 +279,12 @@ export function computeCombinedMetrics(
     sum + Math.pow(asset.percentage, 2), 0
   );
 
-  // Correlation Matrix (top 5 holdings)
+  // Correlation Matrix (top 5 holdings). A real correlation needs per-symbol price
+  // history, which the API does not expose today (we only have current positions and
+  // the portfolio-level equity curve). Rather than fabricate values with Math.random,
+  // leave it empty so the UI shows an honest "unavailable" state. See issue #56.
   const topHoldings = assetAllocation.slice(0, 5);
-  const correlationMatrix = topHoldings.map(asset1 =>
-    topHoldings.map(asset2 => {
-      if (asset1.symbol === asset2.symbol) return 1;
-      // Simulate correlations (in real app, calculate from historical prices)
-      return 0.3 + Math.random() * 0.5;
-    })
-  );
+  const correlationMatrix: number[][] = [];
 
   // Value at Risk (95% confidence, 1-day)
   const portfolioStdDev = (weightedMetrics.volatility / 100) * totalValue / Math.sqrt(252);
