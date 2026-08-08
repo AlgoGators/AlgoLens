@@ -23,7 +23,10 @@ services:
       - backend-logs:/app/logs
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5001/health"]
+      # Runs INSIDE the backend container, where gunicorn listens on 5000. The
+      # "5001:5000" mapping above is host-side only, so the internal check must
+      # target 5000 (it was hitting 5001 and always failing).
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
       interval: 30s
       timeout: 10s
       retries: 3
