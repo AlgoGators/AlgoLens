@@ -1,0 +1,67 @@
+name: AlgoLens CI
+
+# Runs the backend and frontend test/build gates on every PR and on pushes to main.
+# The Deploy workflow is chained to this via workflow_run, so a red build here
+# blocks the production deploy.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend (pytest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install backend dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+          pip install pytest
+
+      - name: Run backend tests
+        # The suites are designed to run without a database (fail-closed guards run
+        # in subprocesses; the registry/service tests stub the DB). The guard keeps
+        # this green until the test-bearing PRs land, then it enforces automatically.
+        run: |
+          if [ -d backend/tests ]; then
+            cd backend && python -m pytest tests -q
+          else
+            echo "::warning::backend/tests not present yet — merge the test PRs to enable this gate"
+          fi
+
+  frontend:
+    name: Frontend (build + vitest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Test
+        # --if-present no-ops (green) until the "test" script lands, then runs vitest.
+        run: npm test --if-present
