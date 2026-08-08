@@ -16,11 +16,6 @@ from database import get_db_connection
 
 logger = logging.getLogger(__name__)
 
-# How close to the configured starting equity the first equity-curve point must be
-# before we snap it to the round number (preserves the original behaviour).
-_EQUITY_SNAP_TOLERANCE = 5000
-
-
 # --- data access -------------------------------------------------------------
 
 
@@ -193,12 +188,12 @@ def _fetch_yesterday_positions(cursor, strategy_type, portfolio_id):
 
 
 def _resolve_initial_equity(equity_curve, base_equity):
-    """First equity-curve value, snapped to the configured starting equity when
-    within tolerance; falls back to the configured value when there is no curve."""
-    initial_equity = float(equity_curve[0]["equity"]) if equity_curve else base_equity
-    if abs(initial_equity - base_equity) < _EQUITY_SNAP_TOLERANCE:
-        initial_equity = base_equity
-    return initial_equity
+    """The FIRST point of the live-trading equity curve -- the real starting
+    capital, used as-is with no snapping to a round number. Falls back to the
+    registry's configured initial_equity only when the curve has no rows yet."""
+    if equity_curve:
+        return float(equity_curve[0]["equity"])
+    return base_equity
 
 
 def _build_historical_data(equity_curve):

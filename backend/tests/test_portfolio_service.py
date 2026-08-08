@@ -55,13 +55,14 @@ def test_get_strategy_config_known_and_unknown(monkeypatch):
 # --- pure computation helpers ------------------------------------------------
 
 
-def test_resolve_initial_equity_snaps_within_tolerance():
+def test_resolve_initial_equity_uses_the_true_first_point():
+    # No snapping: the actual first equity-curve value is used as-is, even when it
+    # sits close to the configured base.
     curve = [{"equity": 500123, "timestamp": None}]
-    # within 5000 of the configured base -> snap to the round number
-    assert svc._resolve_initial_equity(curve, 500000) == 500000
+    assert svc._resolve_initial_equity(curve, 500000) == 500123
 
 
-def test_resolve_initial_equity_keeps_value_outside_tolerance():
+def test_resolve_initial_equity_uses_first_point_far_from_base():
     curve = [{"equity": 480000, "timestamp": None}]
     assert svc._resolve_initial_equity(curve, 500000) == 480000
 
