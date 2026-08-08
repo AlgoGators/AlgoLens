@@ -36,7 +36,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
     const fetchPortfolioData = async () => {
       console.log('[Dashboard] === Starting fetchPortfolioData ===');
       console.log('[Dashboard] Current URL:', window.location.href);
-      console.log('[Dashboard] Token exists:', !!localStorage.getItem('token'));
+      // Auth is carried by an httpOnly cookie now; JS cannot inspect it here.
 
       try {
         setIsLoading(true);
