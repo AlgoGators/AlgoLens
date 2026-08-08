@@ -74,6 +74,19 @@ app.logger.addHandler(console_handler)
 app.logger.setLevel(logging.DEBUG)
 app.logger.info("AlgoLens backend startup")
 
+# Loudly surface the dev auth bypass so it can never be a silent surprise.
+if os.getenv("DEV_MODE") == "1":
+    if IS_PRODUCTION:
+        app.logger.warning(
+            "[DEV_MODE] DEV_MODE=1 is set but FLASK_ENV=production -- the "
+            "/auth/dev-login bypass is DISABLED for safety."
+        )
+    else:
+        app.logger.warning(
+            "[DEV_MODE] DEV_MODE=1 active -- POST /auth/dev-login will establish "
+            "a session WITHOUT credentials. Local development only."
+        )
+
 
 # Log all requests
 @app.before_request

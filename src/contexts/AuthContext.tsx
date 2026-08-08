@@ -21,7 +21,12 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 // Get API URL from environment variable or default to localhost
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
 
-console.log('[AuthContext] Initialized with API_URL:', API_URL);
+// When set, skip the login screen and auto-authenticate via the backend's
+// dev-login endpoint (which sets the same httpOnly cookie as a real login).
+// Local development only; requires DEV_MODE=1 on the backend.
+const DEV_MODE = import.meta.env.VITE_DEV_MODE === '1';
+
+console.log('[AuthContext] Initialized with API_URL:', API_URL, 'DEV_MODE:', DEV_MODE);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
@@ -48,6 +53,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           if (!cancelled) {
             console.log('[AuthContext] Session restored for user:', data.user?.email);
             setUser(data.user);
+          }
+        } else if (DEV_MODE) {
+          // No active session, but dev mode is on: establish one without
+          // credentials via the backend dev-login (which sets the same httpOnly
+          // cookie a real login would), so the login screen is skipped entirely.
+          console.log('[AuthContext] DEV_MODE on -- requesting dev session');
+          const devResp = await fetch(`${API_URL}/auth/dev-login`, {
+            method: 'POST',
+            credentials: 'include',
+            headers: { 'Content-Type': 'application/json' },
+          });
+          if (devResp.ok) {
+            const devData = await devResp.json();
+            if (!cancelled) {
+              console.log('[AuthContext] Dev session established for', devData.user?.email);
+              setUser(devData.user);
+            }
+          } else {
+            console.warn(
+              `[AuthContext] dev-login unavailable (status ${devResp.status}) -- ` +
+              'is DEV_MODE=1 set on the backend? Showing login screen.'
+            );
           }
         } else {
           // 401 here just means "not logged in" -- expected, not an error.
