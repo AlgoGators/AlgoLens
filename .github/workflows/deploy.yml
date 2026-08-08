@@ -1,13 +1,20 @@
 name: Deploy AlgoLens
 
+# Gated on CI: this runs only after the "AlgoLens CI" workflow completes
+# successfully on main, so a failing test/build never reaches production.
+# workflow_dispatch is kept for manual, on-demand deploys.
 on:
-  push:
-    branches:
-      - main
+  workflow_run:
+    workflows: ["AlgoLens CI"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
 
 jobs:
   deploy:
     runs-on: ubuntu-24.04
+    # Deploy on a green CI run, or when manually triggered.
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
 
     steps:
       - name: Deploy to EC2

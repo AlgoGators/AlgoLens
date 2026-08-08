@@ -59,8 +59,9 @@ export function RegisterView({ onBackToLogin }: RegisterViewProps) {
       return;
     }
 
-    if (password.length < 4) {
-      setError('Password must be at least 4 characters');
+    // Mirror the server-side policy (backend enforces >= 12; this is UX only).
+    if (password.length < 12) {
+      setError('Password must be at least 12 characters');
       return;
     }
 
