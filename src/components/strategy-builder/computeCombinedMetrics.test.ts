@@ -118,17 +118,50 @@ describe('computeCombinedMetrics', () => {
     expect(es.pnl).toBe(800);
   });
 
-  it('builds a correlation matrix with a unit diagonal', () => {
+  it('does not fabricate a correlation matrix (unavailable without per-symbol history)', () => {
     const a = strategy({
       id: 'a',
       currentValue: 100000,
       positions: [pos('ES', 40000), pos('NQ', 35000), pos('CL', 25000)],
     });
     const out = computeCombinedMetrics([a], ['a']);
-    const m = out.advancedMetrics.correlationMatrix;
-    expect(m).toHaveLength(3);
-    for (let i = 0; i < m.length; i++) {
-      expect(m[i][i]).toBe(1);
-    }
+    // Correlation needs per-symbol price history the API doesn't expose (issue #56),
+    // so it's returned empty rather than as random values...
+    expect(out.advancedMetrics.correlationMatrix).toEqual([]);
+    // ...but the real top holdings it would describe are still populated.
+    expect(out.advancedMetrics.topHoldings.map(h => h.symbol)).toEqual(['ES', 'NQ', 'CL']);
+  });
+
+  it('builds combined performance and daily PnL from the real equity curves', () => {
+    const a = strategy({
+      id: 'a',
+      currentValue: 100000,
+      historicalData: [
+        { date: '2026-01-01', value: 100000 },
+        { date: '2026-01-02', value: 110000 },
+        { date: '2026-01-03', value: 105000 },
+      ],
+    });
+    const b = strategy({
+      id: 'b',
+      currentValue: 100000,
+      historicalData: [
+        { date: '2026-01-01', value: 100000 },
+        { date: '2026-01-02', value: 100000 },
+        { date: '2026-01-03', value: 130000 },
+      ],
+    });
+    const out = computeCombinedMetrics([a, b], ['a', 'b']);
+
+    // Combined equity by date is 200k -> 210k -> 235k; performance is % from the base.
+    expect(out.historicalPerformance.map(p => p.date)).toEqual([
+      '2026-01-01', '2026-01-02', '2026-01-03',
+    ]);
+    expect(out.historicalPerformance[0].return).toBeCloseTo(0, 6);
+    expect(out.historicalPerformance[1].return).toBeCloseTo(5, 6);    // 210/200 - 1
+    expect(out.historicalPerformance[2].return).toBeCloseTo(17.5, 6); // 235/200 - 1
+
+    // Daily PnL is the day-over-day dollar change of that combined curve.
+    expect(out.dailyPnL.map(p => p.pnl)).toEqual([0, 10000, 25000]);
   });
 });
