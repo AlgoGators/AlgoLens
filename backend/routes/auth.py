@@ -1,3 +1,5 @@
+import os
+
 from flask import Blueprint, request, jsonify, current_app
 from flask_jwt_extended import (
     create_access_token,
@@ -11,6 +13,19 @@ from database import execute_query
 from extensions import limiter
 
 auth_bp = Blueprint("auth", __name__)
+
+
+def _dev_mode_enabled():
+    """Whether the local dev auth bypass is active.
+
+    True only when DEV_MODE=1 *and* we are not running as production. The
+    FLASK_ENV guard is deliberate defence-in-depth: even if DEV_MODE=1 leaks
+    into a deployed .env, the bypass stays off. Read at call time (not import
+    time) so it is togglable in tests and per-request.
+    """
+    if os.getenv("FLASK_ENV", "production").lower() == "production":
+        return False
+    return os.getenv("DEV_MODE") == "1"
 
 # Minimum password length enforced server-side (the client mirrors this in
 # RegisterView.tsx, but the server is the authority).
@@ -135,6 +150,56 @@ def logout():
     or jwt_required is imposed here."""
     resp = jsonify({"message": "Logged out"})
     unset_jwt_cookies(resp)
+    return resp, 200
+
+
+@auth_bp.route("/dev-login", methods=["POST"])
+def dev_login():
+    """Establish a dev session without credentials, for local development only.
+
+    Mirrors /login's cookie delivery: it mints a real signed JWT for a synthetic
+    dev user and sets it as the httpOnly access cookie (plus the CSRF companion),
+    so every @jwt_required / @internal_only route works unchanged. The token is
+    never returned in the body -- same reasoning as /login.
+
+    Returns 404 unless DEV_MODE=1 and FLASK_ENV is not production, so the route
+    is invisible in a deployed build. Identity/role come from env (DEV_USER_ID /
+    DEV_USER_EMAIL / DEV_USER_ROLE, default admin); point DEV_USER_ID at a real
+    auth.users id if you need writes to satisfy foreign keys.
+    """
+    if not _dev_mode_enabled():
+        # Behave as if the route does not exist when the bypass is off.
+        return jsonify({"error": "Not found"}), 404
+
+    try:
+        dev_user_id = int(os.getenv("DEV_USER_ID", "1"))
+    except ValueError:
+        current_app.logger.warning(
+            "[DEV_MODE] DEV_USER_ID is not an integer; falling back to 1"
+        )
+        dev_user_id = 1
+
+    dev_user = {
+        "id": dev_user_id,
+        "email": os.getenv("DEV_USER_EMAIL", "dev@algolens.local"),
+        "first_name": "Dev",
+        "last_name": "User",
+        "role": os.getenv("DEV_USER_ROLE", "admin"),
+    }
+
+    access_token = create_access_token(
+        identity=str(dev_user["id"]),
+        additional_claims={"email": dev_user["email"], "role": dev_user["role"]},
+    )
+
+    current_app.logger.warning(
+        "[DEV_MODE] Issued dev-login cookie for %s (role=%s) -- auth is bypassed; "
+        "never enable this in production",
+        dev_user["email"], dev_user["role"],
+    )
+
+    resp = jsonify({"user": dev_user})
+    set_access_cookies(resp, access_token)
     return resp, 200
 
 
