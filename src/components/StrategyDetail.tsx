@@ -6,6 +6,7 @@ import { useTheme } from '../contexts/ThemeContext';
 import { FinancialAnalysis } from './FinancialAnalysis';
 import { PositionBreakdown } from './PositionBreakdown';
 import { TradingActivity } from './TradingActivity';
+import { AlphaAttribution } from './AlphaAttribution';
 
 interface StrategyDetailProps {
   strategy: Strategy;
@@ -141,6 +142,12 @@ export function StrategyDetail({ strategy, onBack }: StrategyDetailProps) {
             />
           </LineChart>
         </ResponsiveContainer>
+      </div>
+
+      {/* Is QT's judgement adding value? Renders an explanation instead of a
+          chart until both streams exist. */}
+      <div className="mb-8">
+        <AlphaAttribution equityByStream={strategy.equityByStream} theme={theme} />
       </div>
 
       <div className={`flex items-center justify-between mb-8 border-b ${theme === 'dark' ? 'border-gray-800' : 'border-gray-200'
