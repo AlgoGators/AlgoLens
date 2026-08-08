@@ -29,42 +29,52 @@ export function AdvancedSections({ metrics, theme, expanded, onToggle }: Advance
       {expanded.diversification && (
         <div className={`p-4 border ${theme === 'dark' ? 'bg-gray-950 border-gray-800' : 'bg-gray-50 border-gray-200'
           }`}>
-          <div className="overflow-x-auto">
-            <table className="w-full text-xs">
-              <thead>
-                <tr>
-                  <th className="p-1 text-left"></th>
-                  {metrics.advancedMetrics.topHoldings.map(h => (
-                    <th key={h.symbol} className="p-1 text-center font-mono">{h.symbol}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {metrics.advancedMetrics.correlationMatrix.map((row, i) => (
-                  <tr key={i}>
-                    <td className="p-1 font-mono">{metrics.advancedMetrics.topHoldings[i].symbol}</td>
-                    {row.map((corr, j) => (
-                      <td key={j} className="p-1">
-                        <div
-                          className="w-12 h-8 flex items-center justify-center text-white text-xs font-mono"
-                          style={{
-                            backgroundColor: `rgba(${corr > 0.7 ? '239, 68, 68' : corr > 0.4 ? '251, 146, 60' : '34, 197, 94'
-                              }, ${Math.abs(corr) * 0.7 + 0.3})`
-                          }}
-                        >
-                          {corr.toFixed(2)}
-                        </div>
-                      </td>
+          {metrics.advancedMetrics.correlationMatrix.length === 0 ? (
+            <div className={`text-xs ${theme === 'dark' ? 'text-gray-500' : 'text-gray-500'
+              }`}>
+              Correlation data unavailable — a real correlation matrix needs per-symbol
+              price history, which the API does not expose yet (tracked in issue #56).
+            </div>
+          ) : (
+            <>
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr>
+                      <th className="p-1 text-left"></th>
+                      {metrics.advancedMetrics.topHoldings.map(h => (
+                        <th key={h.symbol} className="p-1 text-center font-mono">{h.symbol}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {metrics.advancedMetrics.correlationMatrix.map((row, i) => (
+                      <tr key={i}>
+                        <td className="p-1 font-mono">{metrics.advancedMetrics.topHoldings[i].symbol}</td>
+                        {row.map((corr, j) => (
+                          <td key={j} className="p-1">
+                            <div
+                              className="w-12 h-8 flex items-center justify-center text-white text-xs font-mono"
+                              style={{
+                                backgroundColor: `rgba(${corr > 0.7 ? '239, 68, 68' : corr > 0.4 ? '251, 146, 60' : '34, 197, 94'
+                                  }, ${Math.abs(corr) * 0.7 + 0.3})`
+                              }}
+                            >
+                              {corr.toFixed(2)}
+                            </div>
+                          </td>
+                        ))}
+                      </tr>
                     ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <div className={`text-xs mt-3 ${theme === 'dark' ? 'text-gray-600' : 'text-gray-400'
-            }`}>
-            ■ Green: Low correlation (0.3-0.4) • ■ Orange: Moderate (0.4-0.7) • ■ Red: High (0.7+)
-          </div>
+                  </tbody>
+                </table>
+              </div>
+              <div className={`text-xs mt-3 ${theme === 'dark' ? 'text-gray-600' : 'text-gray-400'
+                }`}>
+                ■ Green: Low correlation (0.3-0.4) • ■ Orange: Moderate (0.4-0.7) • ■ Red: High (0.7+)
+              </div>
+            </>
+          )}
         </div>
       )}
 
