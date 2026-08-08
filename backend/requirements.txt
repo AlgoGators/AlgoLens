@@ -4,4 +4,4 @@ Flask-JWT-Extended==4.7.1
 psycopg2-binary==2.9.10
 Werkzeug==3.1.6
 python-dotenv==1.2.2
-gunicorn==23.0.0
+gunicorn==26.0.0
