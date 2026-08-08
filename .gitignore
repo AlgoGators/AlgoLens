@@ -17,3 +17,4 @@ backend/logs/algolens.log
 
 tables/
 
+.pytest_cache/
