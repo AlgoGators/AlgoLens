@@ -103,16 +103,25 @@ def get_live_trend_following_strategy():
 
             # Calculate values
             current_app.logger.info('[TREND] Calculating values...')
-            initial_equity = float(equity_curve[0]['equity']) if equity_curve else 500000
-            # Round to 500k if very close
-            if abs(initial_equity - 500000) < 5000:
-                initial_equity = 500000
+            current_value = float(latest['current_portfolio_value'])
+
+            # Starting capital is the FIRST point of the live-trading equity curve --
+            # read it from the data, never hardcode it or snap it to a round number.
+            # If the curve has no rows yet, reconstruct the baseline from the reported
+            # cumulative return rather than assuming a fixed figure.
+            if equity_curve:
+                initial_equity = float(equity_curve[0]['equity'])
+            else:
+                cumulative_return = float(latest.get('total_cumulative_return') or 0)
+                initial_equity = (
+                    current_value / (1 + cumulative_return / 100)
+                    if cumulative_return > -100 else current_value
+                )
 
             current_app.logger.info(f'[TREND] Initial equity: {initial_equity}')
 
-            current_value = float(latest['current_portfolio_value'])
             total_return = current_value - initial_equity
-            # Calculate return percent from actual values, not database
+            # Return percent from the actual start/end equity, not a stored field.
             return_percent = (total_return / initial_equity * 100) if initial_equity > 0 else 0
 
             current_app.logger.info(f'[TREND] Current value: {current_value}, Return: {return_percent}%')
@@ -318,8 +327,26 @@ def get_all_strategies():
 
                 if latest:
                     current_value = float(latest['current_portfolio_value'])
-                    initial_equity = 500000  # Known starting value
-                    actual_return_percent = ((current_value - initial_equity) / initial_equity * 100) if initial_equity > 0 else 0
+
+                    # Starting capital = the FIRST point of the live-trading equity
+                    # curve (read from data, not hardcoded). Fall back to the stored
+                    # cumulative return only if the curve has no rows yet.
+                    cursor.execute("""
+                        SELECT equity
+                        FROM trading.equity_curve
+                        WHERE strategy_id = 'LIVE_TREND_FOLLOWING'
+                        ORDER BY timestamp ASC
+                        LIMIT 1
+                    """)
+                    first_point = cursor.fetchone()
+                    if first_point:
+                        initial_equity = float(first_point['equity'])
+                        actual_return_percent = (
+                            (current_value - initial_equity) / initial_equity * 100
+                            if initial_equity > 0 else 0
+                        )
+                    else:
+                        actual_return_percent = float(latest.get('total_cumulative_return') or 0)
 
                     current_app.logger.info(f'[STRATEGIES] Found live_results data: portfolio_value={current_value}, calculated_return={actual_return_percent}%')
                     sharpe = (float(latest['total_annualized_return']) / float(latest['volatility'])) if float(latest['volatility']) > 0 else 0

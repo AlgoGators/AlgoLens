@@ -1,0 +1,38 @@
+version: 2
+updates:
+  # Python backend (Flask, gunicorn, etc.)
+  - package-ecosystem: pip
+    directory: /backend
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    labels: [dependencies, backend]
+
+  # Frontend (React / Vite / Radix / recharts)
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    labels: [dependencies, frontend]
+
+  # Backend container image
+  - package-ecosystem: docker
+    directory: /backend
+    schedule:
+      interval: weekly
+    labels: [dependencies, docker]
+
+  # Frontend container image
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+    labels: [dependencies, docker]
+
+  # Keep the Actions themselves current
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    labels: [dependencies, ci]

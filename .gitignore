@@ -10,6 +10,8 @@ build
 # Backend
 __pycache__
 venv
+.venv
+backend/.venv
 
 backend/logs/algolens.log
 
