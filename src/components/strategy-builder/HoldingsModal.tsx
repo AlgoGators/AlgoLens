@@ -1,5 +1,5 @@
 import { X } from 'lucide-react';
-import type { CombinedMetrics } from './computeCombinedMetrics';
+import type { CombinedMetrics } from '../../domain/portfolio/computeCombinedMetrics';
 import { COLORS } from './chartTheme';
 
 interface HoldingsModalProps {

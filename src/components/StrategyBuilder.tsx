@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react';
 import { useTheme } from '../contexts/ThemeContext';
-import type { Strategy } from '../data/portfolioData';
-import { computeCombinedMetrics } from './strategy-builder/computeCombinedMetrics';
+import type { Strategy } from '../domain/portfolio/portfolioData';
+import { computeCombinedMetrics } from '../domain/portfolio/computeCombinedMetrics';
 import { StrategySelection } from './strategy-builder/StrategySelection';
 import { PerformanceOverview } from './strategy-builder/PerformanceOverview';
 import { PerformanceCharts } from './strategy-builder/PerformanceCharts';

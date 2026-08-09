@@ -24,7 +24,9 @@ import ast
 import os
 
 BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SERVICE = os.path.join(BACKEND_DIR, "services", "portfolio_service.py")
+SERVICE = os.path.join(
+    BACKEND_DIR, "algolens", "infrastructure", "portfolio", "repositories.py"
+)
 
 # cursor, strategy_type, portfolio_id, portfolio_type
 EXPECTED_ARGC = 4
@@ -73,7 +75,7 @@ def test_every_equity_curve_read_names_its_stream():
 
     assert not unscoped, (
         "_fetch_equity_curve is called without a portfolio_type at "
-        "portfolio_service.py line(s) "
+        "repositories.py line(s) "
         + ", ".join(str(n) for n in unscoped)
         + ". Those reads will blend qt, system and benchmark into a single line."
     )

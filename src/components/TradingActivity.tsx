@@ -1,6 +1,6 @@
 import React from 'react';
 import { useTheme } from '../contexts/ThemeContext';
-import type { Execution, FinalizedPosition } from '../data/portfolioData';
+import type { Execution, FinalizedPosition } from '../domain/portfolio/portfolioData';
 
 interface TradingActivityProps {
   executions: Execution[];

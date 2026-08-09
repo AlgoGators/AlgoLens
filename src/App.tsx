@@ -3,7 +3,7 @@ import { LoginView } from './components/LoginView';
 import { RegisterView } from './components/RegisterView';
 import { Dashboard } from './components/Dashboard';
 import { ThemeProvider } from './contexts/ThemeContext';
-import { AuthProvider, useAuth } from './contexts/AuthContext';
+import { AuthProvider, useAuth } from './adapters/react/AuthContext';
 
 function AppContent() {
   const { user, logout, isLoading } = useAuth();

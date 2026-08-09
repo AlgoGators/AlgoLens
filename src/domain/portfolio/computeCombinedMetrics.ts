@@ -1,4 +1,4 @@
-import type { Strategy, StrategyMetrics } from '../../data/portfolioData';
+import type { Strategy, StrategyMetrics } from './portfolioData';
 
 // Shapes of the derived data the StrategyBuilder view renders. Extracted verbatim
 // from the old inline useMemo so the computation can live (and be tested) apart

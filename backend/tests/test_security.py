@@ -8,6 +8,9 @@ import os
 import subprocess
 import sys
 
+from algolens.domain.identity.models import User
+from algolens.infrastructure.identity.sessions import FlaskJwtSessionIssuer
+
 BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
@@ -45,7 +48,11 @@ def test_login_is_rate_limited(client, monkeypatch):
     # and we can drive the endpoint past its 10/min limit.
     import routes.auth as auth_mod
 
-    monkeypatch.setattr(auth_mod, "execute_query", lambda *a, **k: None)
+    monkeypatch.setattr(
+        auth_mod,
+        "_identity_dependencies",
+        lambda: (_FakeUsers(), _FakeHasher(), FlaskJwtSessionIssuer()),
+    )
 
     statuses = [
         client.post(
@@ -113,15 +120,47 @@ def test_production_boots_with_valid_config():
 # --- httpOnly cookie auth transport ------------------------------------------
 
 
+class _FakeUsers:
+    def __init__(self, user=None):
+        self.user = user
+
+    def find_by_email(self, email):
+        return self.user if self.user and self.user.email == email else None
+
+    def find_by_id(self, user_id):
+        return self.user if self.user and str(self.user.id) == str(user_id) else None
+
+    def complete_registration(self, email, password_hash, first_name, last_name):
+        return User(
+            id=1,
+            email=email,
+            first_name=first_name,
+            last_name=last_name,
+            role="general_member",
+            password_hash=password_hash,
+        )
+
+
+class _FakeHasher:
+    def __init__(self, valid=True):
+        self.valid = valid
+
+    def verify(self, password_hash, password):
+        return self.valid
+
+    def hash(self, password):
+        return f"hashed:{password}"
+
+
 def _fake_user():
-    return {
-        "id": 1,
-        "email": "user@example.com",
-        "password_hash": "irrelevant-because-check-is-stubbed",
-        "first_name": "A",
-        "last_name": "B",
-        "role": "general_member",
-    }
+    return User(
+        id=1,
+        email="user@example.com",
+        password_hash="irrelevant-because-check-is-stubbed",
+        first_name="A",
+        last_name="B",
+        role="general_member",
+    )
 
 
 def test_cookie_transport_configured():
@@ -136,8 +175,11 @@ def test_cookie_transport_configured():
 def test_login_sets_httponly_cookie_and_no_body_token(client, monkeypatch):
     import routes.auth as auth_mod
 
-    monkeypatch.setattr(auth_mod, "execute_query", lambda *a, **k: _fake_user())
-    monkeypatch.setattr(auth_mod, "check_password_hash", lambda *a, **k: True)
+    monkeypatch.setattr(
+        auth_mod,
+        "_identity_dependencies",
+        lambda: (_FakeUsers(_fake_user()), _FakeHasher(), FlaskJwtSessionIssuer()),
+    )
 
     resp = client.post(
         "/auth/login",

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { computeCombinedMetrics } from './computeCombinedMetrics';
-import type { Strategy, StrategyMetrics, Position, FinalizedPosition } from '../../data/portfolioData';
+import type { Strategy, StrategyMetrics, Position, FinalizedPosition } from './portfolioData';
 
 // Minimal builders so tests stay readable. Only the fields the computation reads
 // need realistic values; everything else is zeroed.

@@ -1,6 +1,6 @@
 import React from 'react';
 import { useTheme } from '../contexts/ThemeContext';
-import type { Position } from '../data/portfolioData';
+import type { Position } from '../domain/portfolio/portfolioData';
 
 interface PositionBreakdownProps {
   positions: Position[];

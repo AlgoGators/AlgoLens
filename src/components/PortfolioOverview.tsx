@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { TrendingUp, TrendingDown, Beaker } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, ResponsiveContainer, Tooltip } from 'recharts';
-import type { PortfolioData } from '../data/portfolioData';
+import type { PortfolioData } from '../domain/portfolio/portfolioData';
 import { useTheme } from '../contexts/ThemeContext';
 
 interface PortfolioOverviewProps {

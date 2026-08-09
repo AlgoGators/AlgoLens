@@ -10,8 +10,8 @@ import { PrivacySettings } from './PrivacySettings';
 import { StrategyBuilder } from './StrategyBuilder';
 import { NewsView } from './NewsView';
 import { EmptyPortfolioScreen } from './EmptyPortfolioScreen';
-import { PortfolioData } from '../data/portfolioData';
-import { PortfolioApiService } from '../services/portfolioApi';
+import { PortfolioData } from '../domain/portfolio/portfolioData';
+import { PortfolioApplicationService } from '../application/portfolio/portfolioService';
 import { useTheme } from '../contexts/ThemeContext';
 
 interface DashboardProps {
@@ -41,7 +41,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
       try {
         setIsLoading(true);
         setError(null);
-        const data = await PortfolioApiService.getPortfolioData();
+        const data = await PortfolioApplicationService.getPortfolioData();
         console.log('[Dashboard] Portfolio data received successfully:', data);
         setPortfolioData(data);
       } catch (err) {
@@ -56,7 +56,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
 
         // Provide debugging hint
         console.error('[Dashboard] DEBUG TIP: Run this in browser console:');
-        console.error('  import("./services/portfolioApi").then(m => m.PortfolioApiService.testConnectivity())');
+        console.error('  import("./application/portfolio/portfolioService").then(m => m.PortfolioApplicationService.testConnectivity())');
         console.error('  Or open Network tab and look for failed requests');
 
         // Include the actual error message for debugging
@@ -155,7 +155,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
                   <button
                     onClick={() => {
                       console.log('[Dashboard] Running connectivity test...');
-                      PortfolioApiService.testConnectivity();
+                      PortfolioApplicationService.testConnectivity();
                     }}
                     className={`px-4 py-2 rounded-lg ${theme === 'dark' ? 'bg-gray-700 text-white hover:bg-gray-600' : 'bg-gray-200 text-gray-800 hover:bg-gray-300'}`}
                   >

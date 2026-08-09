@@ -1,4 +1,4 @@
-import type { CombinedMetrics } from './computeCombinedMetrics';
+import type { CombinedMetrics } from '../../domain/portfolio/computeCombinedMetrics';
 
 interface PerformanceOverviewProps {
   metrics: CombinedMetrics;
