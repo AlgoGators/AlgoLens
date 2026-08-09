@@ -48,6 +48,9 @@ jobs:
   frontend:
     name: Frontend (build + vitest)
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: algolens-frontend
     steps:
       - uses: actions/checkout@v7
 
@@ -56,6 +59,7 @@ jobs:
         with:
           node-version: "20"
           cache: npm
+          cache-dependency-path: algolens-frontend/package-lock.json
 
       - name: Install dependencies
         run: npm ci
@@ -64,5 +68,4 @@ jobs:
         run: npm run build
 
       - name: Test
-        # --if-present no-ops (green) until the "test" script lands, then runs vitest.
-        run: npm test --if-present
+        run: npm test

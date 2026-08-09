@@ -9,7 +9,7 @@ The original Figma design is available at https://www.figma.com/design/ZeqHCUFlW
 
 | Component | Port | How it runs |
 |---|---|---|
-| Frontend (React/Vite) | 3000 | `algolens.service` via `npx serve ./build` |
+| Frontend (React/Vite) | 3000 | `algolens.service` via `npx serve ./algolens-frontend/build` |
 | Backend API (Flask/gunicorn) | 5000 | Docker container `algolens-docker-backend-1` |
 | ~~Legacy backend~~ | ~~5001~~ | `algolens-backend.service` — **do not use**, has no DB credentials |
 | Nginx (public) | 80 / 443 | Reverse proxy: `/` → 3000, `/auth` + `/portfolio` → 5000 |
@@ -21,11 +21,12 @@ The original Figma design is available at https://www.figma.com/design/ZeqHCUFlW
 ## Local Development
 
 ```bash
+cd algolens-frontend
 npm install
-npm run dev       # frontend dev server at http://localhost:5173
+npm run dev       # frontend dev server at http://localhost:3000
 ```
 
-For the backend locally, create `algolens-api/.env` (see `algolens-api/.env.example`) and run:
+For the backend locally, from the repo root create `algolens-api/.env` (see `algolens-api/.env.example`) and run:
 
 ```bash
 cd algolens-api
@@ -41,7 +42,7 @@ Pushing to `main` triggers the GitHub Actions workflow (`.github/workflows/deplo
 
 1. SSHes into the EC2 instance
 2. Runs `git pull origin main`
-3. Runs `npm ci && npm run build` on EC2 (2 GB swap is provisioned to handle this)
+3. Runs `cd algolens-frontend && npm ci && npm run build` on EC2 (2 GB swap is provisioned to handle this)
 4. Copies `deployment/` service and nginx configs, reloads nginx
 5. Restarts `algolens` (frontend) and `algolens-backend` (legacy systemd backend) services
 
@@ -51,7 +52,7 @@ Pushing to `main` triggers the GitHub Actions workflow (`.github/workflows/deplo
 
 | File | Purpose |
 |---|---|
-| `/home/ec2-user/AlgoLens/.env` | `VITE_API_URL=https://algolens.algogators.com` — baked into the frontend build |
+| `/home/ec2-user/AlgoLens/algolens-frontend/.env` | `VITE_API_URL=https://algolens.algogators.com` — baked into the frontend build |
 | `/home/ec2-user/algolens-docker/.env` | DB credentials and JWT secret for the backend Docker container |
 
 If you need to change DB credentials or the DB name, update `/home/ec2-user/algolens-docker/.env` and run:

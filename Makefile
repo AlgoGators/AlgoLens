@@ -1,7 +1,7 @@
 # AlgoLens developer entrypoints.
 #
-# This repo is a hybrid: a Vite/React frontend at the root and a Flask API
-# service under algolens-api/. `make install` sets up both.
+# This repo is a hybrid: a Vite/React frontend under algolens-frontend/ and a
+# Flask API service under algolens-api/. `make install` sets up both.
 #
 # Fresh clone, first time:
 #     make install        # frontend deps + backend venv + .env scaffold
@@ -12,6 +12,7 @@ VENV   := algolens-api/.venv
 VPY    := $(VENV)/bin/python
 VPIP   := $(VENV)/bin/pip
 PYTHON ?= python3
+FRONTEND := algolens-frontend
 
 .DEFAULT_GOAL := help
 .PHONY: help install install-frontend install-backend test build dev clean
@@ -28,7 +29,7 @@ install: install-frontend install-backend ## Install everything (main entrypoint
 
 install-frontend: ## Install frontend (npm) dependencies
 	@command -v npm >/dev/null 2>&1 || { echo "npm not found. Install Node.js 20+."; exit 1; }
-	@npm ci
+	@cd $(FRONTEND) && npm ci
 
 install-backend: ## Create the backend venv and install Python dependencies
 	@command -v $(PYTHON) >/dev/null 2>&1 || { echo "$(PYTHON) not found. Install Python 3.11+."; exit 1; }
@@ -46,7 +47,7 @@ install-backend: ## Create the backend venv and install Python dependencies
 
 test: ## Run frontend and backend test suites
 	@echo "==> Frontend"
-	@npm test --if-present
+	@cd $(FRONTEND) && npm test
 	@echo "==> Backend"
 	@if [ -d algolens-api/tests ]; then \
 		cd algolens-api && .venv/bin/python -m pytest tests -q; \
@@ -55,12 +56,12 @@ test: ## Run frontend and backend test suites
 	fi
 
 build: ## Build the production frontend bundle
-	@npm run build
+	@cd $(FRONTEND) && npm run build
 
 dev: ## Start the frontend dev server
-	@npm run dev
+	@cd $(FRONTEND) && npm run dev
 
 clean: ## Remove installed dependencies and build output
-	@rm -rf node_modules build $(VENV)
+	@rm -rf $(FRONTEND)/node_modules $(FRONTEND)/build $(VENV)
 	@find algolens-api -type d -name __pycache__ -prune -exec rm -rf {} + 2>/dev/null || true
-	@echo "Cleaned node_modules, build/, and the backend venv."
+	@echo "Cleaned frontend node_modules/build and the backend venv."

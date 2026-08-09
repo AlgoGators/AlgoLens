@@ -1,7 +1,7 @@
 services:
   frontend:
     build:
-      context: .
+      context: ./algolens-frontend
       dockerfile: Dockerfile
       args:
         VITE_API_URL: ${VITE_API_URL:-http://localhost:5001}

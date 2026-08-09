@@ -34,7 +34,7 @@ node -v
 
 | Service | Port | Notes |
 |---|---|---|
-| Frontend | 3000 | `algolens.service` via `npx serve ./build` |
+| Frontend | 3000 | `algolens.service` via `npx serve ./algolens-frontend/build` |
 | Backend API | **5000** | Docker container — authoritative backend with DB credentials |
 | Legacy backend | ~~5001~~ | `algolens-backend.service` — no DB env vars, do not route to this |
 | Nginx (public) | 80 / 443 | `/` → 3000 · `/auth` → 5000 · `/portfolio` → 5000 |
@@ -49,7 +49,7 @@ Push to `main`. The workflow (`.github/workflows/deploy.yml`) will:
 
 1. SSH into EC2
 2. `git pull origin main`
-3. `npm ci && npm run build` — builds frontend with `VITE_API_URL` from `/home/ec2-user/AlgoLens/.env`
+3. `cd algolens-frontend && npm ci && npm run build` — builds frontend with `VITE_API_URL` from `/home/ec2-user/AlgoLens/algolens-frontend/.env`
 4. Copy `deployment/algolens-backend.service`, `deployment/algolens.service`, `deployment/algolens.conf` into system paths
 5. Reload nginx, restart `algolens` and `algolens-backend` systemd services
 
@@ -72,8 +72,10 @@ git pull origin main
 
 ### 3. Build frontend
 ```bash
+cd algolens-frontend
 npm ci
 npm run build
+cd ..
 ```
 
 ### 4. Restart frontend service
@@ -113,7 +115,7 @@ docker logs algolens-docker-backend-1 --tail 50
 
 | Path on EC2 | Contents |
 |---|---|
-| `/home/ec2-user/AlgoLens/.env` | `VITE_API_URL=https://algolens.algogators.com` |
+| `/home/ec2-user/AlgoLens/algolens-frontend/.env` | `VITE_API_URL=https://algolens.algogators.com` |
 | `/home/ec2-user/algolens-docker/.env` | `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`, `JWT_SECRET_KEY` |
 
 These files are gitignored. Do not commit them. Share via password manager or private message only.

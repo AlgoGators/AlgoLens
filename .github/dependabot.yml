@@ -10,7 +10,7 @@ updates:
 
   # Frontend (React / Vite / Radix / recharts)
   - package-ecosystem: npm
-    directory: /
+    directory: /algolens-frontend
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
@@ -25,7 +25,7 @@ updates:
 
   # Frontend container image
   - package-ecosystem: docker
-    directory: /
+    directory: /algolens-frontend
     schedule:
       interval: weekly
     labels: [dependencies, docker]
