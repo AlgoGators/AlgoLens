@@ -10,8 +10,11 @@ import { PrivacySettings } from './PrivacySettings';
 import { StrategyBuilder } from './StrategyBuilder';
 import { NewsView } from './NewsView';
 import { EmptyPortfolioScreen } from './EmptyPortfolioScreen';
+import { IncubationScreen } from './IncubationScreen';
 import type { PortfolioData } from '../domain/portfolio/portfolioData';
 import { PortfolioApplicationService } from '../application/portfolio/portfolioService';
+import { isInternalRole } from '../domain/identity/user';
+import { useAuth } from '../adapters/react/AuthContext';
 import { useTheme } from '../adapters/react/ThemeContext';
 
 interface DashboardProps {
@@ -19,7 +22,7 @@ interface DashboardProps {
 }
 
 type SettingsScreen = 'profile' | 'account' | 'privacy' | null;
-type ActiveTab = 'portfolio' | 'builder' | 'news' | 'profile';
+type ActiveTab = 'portfolio' | 'incubation' | 'builder' | 'news' | 'profile';
 
 export function Dashboard({ onLogout }: DashboardProps) {
   const [selectedStrategy, setSelectedStrategy] = useState<string | null>(null);
@@ -30,6 +33,8 @@ export function Dashboard({ onLogout }: DashboardProps) {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const { theme } = useTheme();
+  const { user } = useAuth();
+  const isInternalMember = isInternalRole(user?.role);
 
   // Fetch portfolio data on mount
   useEffect(() => {
@@ -70,11 +75,22 @@ export function Dashboard({ onLogout }: DashboardProps) {
     fetchPortfolioData();
   }, []);
 
+  useEffect(() => {
+    if (activeTab === 'incubation' && !isInternalMember) {
+      setActiveTab('portfolio');
+      setSelectedStrategy(null);
+    }
+  }, [activeTab, isInternalMember]);
+
   // Check if portfolio has any positions
   const hasPositions = portfolioData?.strategies && portfolioData.strategies.length > 0 &&
     portfolioData.strategies.some(s => s.positions.length > 0);
 
   const handleTabChange = (tab: string) => {
+    if (tab === 'incubation' && !isInternalMember) {
+      return;
+    }
+
     setActiveTab(tab as ActiveTab);
     setSelectedStrategy(null);
 
@@ -114,6 +130,13 @@ export function Dashboard({ onLogout }: DashboardProps) {
           onHomeClick={() => {
             setShowBuilder(false);
             setActiveTab('portfolio');
+            setSelectedStrategy(null);
+          }}
+          onIncubationClick={() => {
+            if (!isInternalMember) return;
+            setShowBuilder(false);
+            setSettingsScreen(null);
+            setActiveTab('incubation');
             setSelectedStrategy(null);
           }}
         />
@@ -185,6 +208,12 @@ export function Dashboard({ onLogout }: DashboardProps) {
               onBack={() => setSelectedStrategy(null)}
             />
           )}
+        </div>
+      )}
+
+      {activeTab === 'incubation' && isInternalMember && (
+        <div className="max-w-5xl mx-auto px-4 md:px-6 py-6 md:py-8">
+          <IncubationScreen />
         </div>
       )}
 

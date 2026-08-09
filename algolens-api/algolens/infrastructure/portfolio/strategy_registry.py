@@ -18,6 +18,7 @@ DEFAULT_REGISTRY = [
         "initial_equity": 500000.0,
         "managers": ["AlgoLens System"],
         "is_active": True,
+        "lifecycle": "live",
         "sort_order": 0,
     }
 ]
@@ -36,8 +37,20 @@ def _normalize(row):
         else 500000.0,
         "managers": row.get("managers") or ["AlgoLens System"],
         "is_active": bool(row.get("is_active", True)),
+        "lifecycle": row.get("lifecycle") or "live",
         "sort_order": int(row.get("sort_order") or 0),
     }
+
+
+def _has_lifecycle_column(cursor):
+    cursor.execute(
+        """
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'trading' AND table_name = 'strategy_registry'
+          AND column_name = 'lifecycle'
+        """
+    )
+    return cursor.fetchone() is not None
 
 
 class PostgresStrategyRegistry:
@@ -49,14 +62,25 @@ class PostgresStrategyRegistry:
         try:
             conn = self.connection_factory()
             with conn.cursor() as cursor:
-                cursor.execute(
-                    """
-                    SELECT id, strategy_type, portfolio_id, name, description,
-                           initial_equity, managers, is_active, sort_order
-                    FROM trading.strategy_registry
-                    ORDER BY sort_order ASC, id ASC
-                    """
-                )
+                has_lifecycle = _has_lifecycle_column(cursor)
+                if has_lifecycle:
+                    cursor.execute(
+                        """
+                        SELECT id, strategy_type, portfolio_id, name, description,
+                               initial_equity, managers, is_active, lifecycle, sort_order
+                        FROM trading.strategy_registry
+                        ORDER BY sort_order ASC, id ASC
+                        """
+                    )
+                else:
+                    cursor.execute(
+                        """
+                        SELECT id, strategy_type, portfolio_id, name, description,
+                               initial_equity, managers, is_active, sort_order
+                        FROM trading.strategy_registry
+                        ORDER BY sort_order ASC, id ASC
+                        """
+                    )
                 rows = cursor.fetchall()
 
             registry = [_normalize(row) for row in rows]
@@ -76,7 +100,11 @@ class PostgresStrategyRegistry:
                 conn.close()
 
         if active_only:
-            registry = [strategy for strategy in registry if strategy["is_active"]]
+            registry = [
+                strategy
+                for strategy in registry
+                if strategy["is_active"] and strategy.get("lifecycle", "live") == "live"
+            ]
         return registry
 
     def get(self, strategy_id):
