@@ -1,7 +1,7 @@
 services:
   frontend:
     build:
-      context: .
+      context: ./algolens-frontend
       dockerfile: Dockerfile
       args:
         VITE_API_URL: ${VITE_API_URL:-http://localhost:5001}
@@ -13,12 +13,12 @@ services:
 
   backend:
     build:
-      context: ./backend
+      context: ./algolens-api
       dockerfile: Dockerfile
     ports:
       - "5001:5000"
     env_file:
-      - ./backend/.env
+      - ./algolens-api/.env
     volumes:
       - backend-logs:/app/logs
     restart: unless-stopped

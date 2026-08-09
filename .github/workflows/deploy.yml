@@ -32,14 +32,21 @@ jobs:
             echo "Pulling latest code..."
             git pull origin main
 
+            if [ ! -f algolens-frontend/.env ] && [ -f .env ]; then
+              echo "Migrating root frontend .env into algolens-frontend/.env..."
+              cp .env algolens-frontend/.env
+            fi
+
             echo "Installing frontend dependencies..."
+            cd algolens-frontend
             npm ci
 
             echo "Building frontend..."
             npm run build
+            cd ..
 
             echo "Installing backend dependencies..."
-            pip3 install -r backend/requirements.txt --quiet
+            pip3 install -r algolens-api/requirements.txt --quiet
 
             echo "Updating service and nginx config..."
             sudo cp deployment/algolens-backend.service /etc/systemd/system/

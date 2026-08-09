@@ -11,9 +11,9 @@ build
 __pycache__
 venv
 .venv
-backend/.venv
+algolens-api/.venv
 
-backend/logs/algolens.log
+algolens-api/logs/algolens.log
 
 tables/
 

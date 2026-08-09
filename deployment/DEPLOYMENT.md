@@ -33,20 +33,22 @@ cd AlgoLens
 
 ```bash
 # Frontend dependencies
+cd algolens-frontend
 npm install
+cd ..
 
 # Backend dependencies
-cd backend
+cd algolens-api
 pip3 install -r requirements.txt
 cd ..
 ```
 
 ### 4. Configure Environment Variables
 
-Create a `.env` file in the `backend` directory:
+Create a `.env` file in the `algolens-api` directory:
 
 ```bash
-cd /home/ec2-user/AlgoLens/backend
+cd /home/ec2-user/AlgoLens/algolens-api
 nano .env
 ```
 
@@ -60,6 +62,8 @@ DB_PASSWORD=algogators
 DB_NAME=algo_data
 JWT_SECRET_KEY=your-super-secret-jwt-key-change-this
 ```
+
+For the frontend, create `/home/ec2-user/AlgoLens/algolens-frontend/.env` if you need to override `VITE_API_URL` or enable `VITE_DEV_MODE`.
 
 **Important**: Generate a secure random JWT secret key. You can use:
 ```bash
@@ -131,8 +135,8 @@ sudo journalctl -u algolens -f
 Once set up, the GitHub Actions workflow in `.github/workflows/deploy.yml` will automatically:
 
 1. Pull the latest code from the main branch
-2. Install frontend dependencies
-3. Build the frontend
+2. Install frontend dependencies from `algolens-frontend/`
+3. Build the frontend from `algolens-frontend/`
 4. Install backend dependencies
 5. Restart both services
 
@@ -205,6 +209,6 @@ sudo journalctl -u algolens -n 50
 ### Database connection issues
 ```bash
 # Test database connection
-cd /home/ec2-user/AlgoLens/backend
+cd /home/ec2-user/AlgoLens/algolens-api
 python3 -c "from database import get_db_connection; print(get_db_connection())"
 ```
