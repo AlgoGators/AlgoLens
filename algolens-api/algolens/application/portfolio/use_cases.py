@@ -2,9 +2,12 @@
 
 import logging
 from collections.abc import Mapping
+from datetime import datetime
 from typing import Any
 
 from algolens.application.portfolio.ports import (
+    IncubationError,
+    IncubationPerformanceRows,
     PortfolioDetailRows,
     PortfolioReaderPort,
     StrategyRegistryPort,
@@ -20,6 +23,7 @@ from algolens.domain.portfolio.calculations import (
     transform_finalized,
     transform_positions,
 )
+from algolens.domain.portfolio.incubation import compute_incubation_window
 
 logger = logging.getLogger(__name__)
 
@@ -128,6 +132,45 @@ def build_strategy_summary(
     }
 
 
+def build_incubating_strategy(row: Mapping[str, Any], now: datetime) -> dict[str, Any]:
+    window = compute_incubation_window(row.get("incubation_started_at"), now)
+    return {
+        "id": row["id"],
+        "strategy_type": row["strategy_type"],
+        "portfolio_id": row["portfolio_id"],
+        "name": row["name"],
+        "description": row.get("description") or "",
+        "mock_capital": float(row["mock_capital"])
+        if row.get("mock_capital") is not None
+        else None,
+        "incubation_started_at": row.get("incubation_started_at"),
+        "days_elapsed": window.days_elapsed,
+        "window_days": window.window_days,
+        "progress": window.progress,
+    }
+
+
+def build_incubation_performance(
+    rows: IncubationPerformanceRows,
+) -> dict[str, list[Mapping[str, Any]]]:
+    return {
+        "positions": list(rows.positions),
+        "equity_curve": list(rows.equity_curve),
+    }
+
+
+def _require_reason(reason: str) -> str:
+    if not reason or not reason.strip():
+        raise IncubationError("reason must be non-empty")
+    return reason.strip()
+
+
+def _require_mock_capital(mock_capital: float) -> float:
+    if mock_capital <= 0:
+        raise IncubationError("mock_capital must be positive")
+    return mock_capital
+
+
 class GetStrategyDetail:
     def __init__(self, registry: StrategyRegistryPort, reader: PortfolioReaderPort):
         self.registry = registry
@@ -169,3 +212,66 @@ class ListStrategies:
             if summary:
                 strategies.append(summary)
         return strategies
+
+
+class ListIncubatingStrategies:
+    def __init__(self, reader: PortfolioReaderPort):
+        self.reader = reader
+
+    def execute(self, now: datetime) -> list[dict[str, Any]]:
+        return [
+            build_incubating_strategy(row, now)
+            for row in self.reader.list_incubating_strategies()
+        ]
+
+
+class GetIncubationPerformance:
+    def __init__(self, reader: PortfolioReaderPort):
+        self.reader = reader
+
+    def execute(self, strategy_id: str) -> dict[str, list[Mapping[str, Any]]]:
+        rows = self.reader.fetch_incubation_performance(strategy_id)
+        return build_incubation_performance(rows)
+
+
+class StartIncubation:
+    def __init__(self, reader: PortfolioReaderPort):
+        self.reader = reader
+
+    def execute(
+        self,
+        strategy_id: str,
+        mock_capital: float,
+        reason: str,
+        user_id: str,
+    ) -> None:
+        self.reader.start_incubation(
+            strategy_id=strategy_id,
+            mock_capital=_require_mock_capital(mock_capital),
+            reason=_require_reason(reason),
+            user_id=user_id,
+        )
+
+
+class PromoteToLive:
+    def __init__(self, reader: PortfolioReaderPort):
+        self.reader = reader
+
+    def execute(self, strategy_id: str, reason: str, user_id: str) -> None:
+        self.reader.promote_to_live(
+            strategy_id=strategy_id,
+            reason=_require_reason(reason),
+            user_id=user_id,
+        )
+
+
+class RetireStrategy:
+    def __init__(self, reader: PortfolioReaderPort):
+        self.reader = reader
+
+    def execute(self, strategy_id: str, reason: str, user_id: str) -> None:
+        self.reader.retire_strategy(
+            strategy_id=strategy_id,
+            reason=_require_reason(reason),
+            user_id=user_id,
+        )

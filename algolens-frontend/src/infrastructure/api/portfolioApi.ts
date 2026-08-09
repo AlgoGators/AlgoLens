@@ -1,4 +1,5 @@
 import type { Strategy, PortfolioData, HistoricalDataPoint } from '../../domain/portfolio/portfolioData';
+import type { IncubatingStrategy, IncubationPerformance } from '../../domain/portfolio/incubationData';
 import { API_BASE_URL, log } from './httpClient';
 
 export class PortfolioApiService {
@@ -169,6 +170,22 @@ export class PortfolioApiService {
     const response = await this.fetchWithAuth(`${API_BASE_URL}/portfolio/strategies`);
     const data = await response.json();
     return data.strategies;
+  }
+
+  static async getIncubationStrategies(): Promise<IncubatingStrategy[]> {
+    const response = await this.fetchWithAuth(`${API_BASE_URL}/portfolio/incubation`);
+    const data = await response.json();
+    return data.incubating_strategies || [];
+  }
+
+  static async getIncubationPerformance(strategyId: string): Promise<IncubationPerformance> {
+    const encodedId = encodeURIComponent(strategyId);
+    const response = await this.fetchWithAuth(`${API_BASE_URL}/portfolio/incubation/${encodedId}/performance`);
+    const data = await response.json();
+    return {
+      positions: data.positions || [],
+      equity_curve: data.equity_curve || [],
+    };
   }
 
   static async getPortfolioData(): Promise<PortfolioData> {

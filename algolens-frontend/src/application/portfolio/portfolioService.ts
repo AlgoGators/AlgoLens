@@ -1,4 +1,5 @@
 import type { PortfolioData, Strategy } from '../../domain/portfolio/portfolioData';
+import type { IncubatingStrategy, IncubationPerformance } from '../../domain/portfolio/incubationData';
 import { PortfolioApiService } from '../../infrastructure/api/portfolioApi';
 
 export class PortfolioApplicationService {
@@ -16,5 +17,13 @@ export class PortfolioApplicationService {
 
   static async getPortfolioData(): Promise<PortfolioData> {
     return PortfolioApiService.getPortfolioData();
+  }
+
+  static async getIncubationStrategies(): Promise<IncubatingStrategy[]> {
+    return PortfolioApiService.getIncubationStrategies();
+  }
+
+  static async getIncubationPerformance(strategyId: string): Promise<IncubationPerformance> {
+    return PortfolioApiService.getIncubationPerformance(strategyId);
   }
 }
