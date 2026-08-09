@@ -5,11 +5,11 @@ After=network.target
 [Service]
 Type=simple
 User=ec2-user
-WorkingDirectory=/home/ec2-user/AlgoLens/backend
+WorkingDirectory=/home/ec2-user/AlgoLens/algolens-api
 Environment="PATH=/usr/local/bin:/usr/bin:/bin"
 Environment="PORT=5001"
-EnvironmentFile=/home/ec2-user/AlgoLens/backend/.env
-ExecStart=/usr/bin/python3 /home/ec2-user/AlgoLens/backend/app.py
+EnvironmentFile=/home/ec2-user/AlgoLens/algolens-api/.env
+ExecStart=/usr/bin/python3 -m gunicorn --bind 127.0.0.1:5001 --workers 2 --threads 4 wsgi:app
 Restart=always
 RestartSec=10
 

@@ -2,7 +2,7 @@ version: 2
 updates:
   # Python backend (Flask, gunicorn, etc.)
   - package-ecosystem: pip
-    directory: /backend
+    directory: /algolens-api
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
@@ -10,7 +10,7 @@ updates:
 
   # Frontend (React / Vite / Radix / recharts)
   - package-ecosystem: npm
-    directory: /
+    directory: /algolens-frontend
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
@@ -18,14 +18,14 @@ updates:
 
   # Backend container image
   - package-ecosystem: docker
-    directory: /backend
+    directory: /algolens-api
     schedule:
       interval: weekly
     labels: [dependencies, docker]
 
   # Frontend container image
   - package-ecosystem: docker
-    directory: /
+    directory: /algolens-frontend
     schedule:
       interval: weekly
     labels: [dependencies, docker]
