@@ -2,7 +2,13 @@
 
 import time
 
-from algolens.application.portfolio.ports import PortfolioDetailRows
+import psycopg2
+
+from algolens.application.portfolio.ports import (
+    IncubationError,
+    IncubationPerformanceRows,
+    PortfolioDetailRows,
+)
 from algolens.domain.portfolio.streams import PORTFOLIO_STREAMS, PRIMARY_STREAM
 from algolens.infrastructure.db.postgres import get_db_connection
 
@@ -228,3 +234,213 @@ class PostgresPortfolioRepository:
             executions=executions,
             yesterday_positions=yesterday_positions,
         )
+
+    def list_incubating_strategies(self):
+        conn = self.connection_factory()
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    SELECT id, strategy_type, portfolio_id, name, description,
+                           mock_capital, incubation_started_at
+                    FROM trading.strategy_registry
+                    WHERE lifecycle = 'incubating'
+                    ORDER BY incubation_started_at ASC NULLS LAST, sort_order ASC, id ASC
+                    """
+                )
+                return cursor.fetchall()
+        finally:
+            conn.close()
+
+    def _fetch_incubating_registry_row(self, cursor, strategy_id):
+        cursor.execute(
+            """
+            SELECT strategy_type, portfolio_id, incubation_started_at
+            FROM trading.strategy_registry
+            WHERE id = %s AND lifecycle = 'incubating'
+            """,
+            (strategy_id,),
+        )
+        return cursor.fetchone()
+
+    def fetch_incubation_performance(self, strategy_id):
+        conn = self.connection_factory()
+        try:
+            with conn.cursor() as cursor:
+                registry_row = self._fetch_incubating_registry_row(cursor, strategy_id)
+                if (
+                    registry_row is None
+                    or registry_row["incubation_started_at"] is None
+                ):
+                    return IncubationPerformanceRows(positions=[], equity_curve=[])
+
+                strategy_type = registry_row["strategy_type"]
+                portfolio_id = registry_row["portfolio_id"]
+                incubation_start = registry_row["incubation_started_at"]
+
+                cursor.execute(
+                    """
+                    SELECT updated_at AS date, symbol, quantity,
+                           average_price AS entry_price
+                    FROM trading.positions
+                    WHERE strategy_id = %s AND portfolio_id = %s AND updated_at >= %s
+                    ORDER BY updated_at ASC, symbol ASC
+                    """,
+                    (strategy_type, portfolio_id, incubation_start),
+                )
+                positions = cursor.fetchall()
+
+                cursor.execute(
+                    """
+                    SELECT timestamp AS date, equity
+                    FROM trading.equity_curve
+                    WHERE strategy_id = %s AND portfolio_id = %s AND timestamp >= %s
+                    ORDER BY timestamp ASC
+                    """,
+                    (strategy_type, portfolio_id, incubation_start),
+                )
+                equity_curve = cursor.fetchall()
+        finally:
+            conn.close()
+
+        return IncubationPerformanceRows(
+            positions=positions,
+            equity_curve=equity_curve,
+        )
+
+    def _fetch_lifecycle(self, cursor, strategy_id):
+        cursor.execute(
+            "SELECT lifecycle FROM trading.strategy_registry WHERE id = %s",
+            (strategy_id,),
+        )
+        return cursor.fetchone()
+
+    def _insert_lifecycle_audit(
+        self, cursor, strategy_id, before_state, after_state, reason, user_id
+    ):
+        cursor.execute(
+            """
+            INSERT INTO trading.strategy_lifecycle_log
+                (strategy_id, before_state, after_state, reason, user_id)
+            VALUES (%s, %s, %s, %s, %s)
+            """,
+            (strategy_id, before_state, after_state, reason, user_id),
+        )
+
+    def start_incubation(self, strategy_id, mock_capital, reason, user_id):
+        if mock_capital <= 0:
+            raise IncubationError("mock_capital must be positive")
+        if not reason or not reason.strip():
+            raise IncubationError("reason must be non-empty")
+
+        conn = self.connection_factory()
+        try:
+            with conn.cursor() as cursor:
+                row = self._fetch_lifecycle(cursor, strategy_id)
+                if row is None:
+                    raise IncubationError(f"Strategy {strategy_id} not found")
+
+                current_state = row["lifecycle"]
+                if current_state == "incubating":
+                    raise IncubationError(f"Strategy {strategy_id} is already incubating")
+
+                cursor.execute(
+                    """
+                    UPDATE trading.strategy_registry
+                    SET lifecycle = %s, mock_capital = %s,
+                        incubation_started_at = now(), updated_at = now()
+                    WHERE id = %s
+                    """,
+                    ("incubating", mock_capital, strategy_id),
+                )
+                self._insert_lifecycle_audit(
+                    cursor,
+                    strategy_id,
+                    current_state,
+                    "incubating",
+                    reason,
+                    user_id,
+                )
+            conn.commit()
+        except psycopg2.Error as exc:
+            conn.rollback()
+            raise IncubationError(f"Database error: {exc}") from exc
+        finally:
+            conn.close()
+
+    def promote_to_live(self, strategy_id, reason, user_id):
+        if not reason or not reason.strip():
+            raise IncubationError("reason must be non-empty")
+
+        conn = self.connection_factory()
+        try:
+            with conn.cursor() as cursor:
+                row = self._fetch_lifecycle(cursor, strategy_id)
+                if row is None:
+                    raise IncubationError(f"Strategy {strategy_id} not found")
+
+                current_state = row["lifecycle"]
+                if current_state != "incubating":
+                    raise IncubationError(
+                        f"Strategy {strategy_id} is not currently incubating"
+                    )
+
+                cursor.execute(
+                    """
+                    UPDATE trading.strategy_registry
+                    SET lifecycle = %s, mock_capital = NULL,
+                        incubation_started_at = NULL, updated_at = now()
+                    WHERE id = %s
+                    """,
+                    ("live", strategy_id),
+                )
+                self._insert_lifecycle_audit(
+                    cursor,
+                    strategy_id,
+                    "incubating",
+                    "live",
+                    reason,
+                    user_id,
+                )
+            conn.commit()
+        except psycopg2.Error as exc:
+            conn.rollback()
+            raise IncubationError(f"Database error: {exc}") from exc
+        finally:
+            conn.close()
+
+    def retire_strategy(self, strategy_id, reason, user_id):
+        if not reason or not reason.strip():
+            raise IncubationError("reason must be non-empty")
+
+        conn = self.connection_factory()
+        try:
+            with conn.cursor() as cursor:
+                row = self._fetch_lifecycle(cursor, strategy_id)
+                if row is None:
+                    raise IncubationError(f"Strategy {strategy_id} not found")
+
+                current_state = row["lifecycle"]
+                cursor.execute(
+                    """
+                    UPDATE trading.strategy_registry
+                    SET lifecycle = %s, mock_capital = NULL,
+                        incubation_started_at = NULL, updated_at = now()
+                    WHERE id = %s
+                    """,
+                    ("retired", strategy_id),
+                )
+                self._insert_lifecycle_audit(
+                    cursor,
+                    strategy_id,
+                    current_state,
+                    "retired",
+                    reason,
+                    user_id,
+                )
+            conn.commit()
+        except psycopg2.Error as exc:
+            conn.rollback()
+            raise IncubationError(f"Database error: {exc}") from exc
+        finally:
+            conn.close()

@@ -9,3 +9,9 @@ export interface User {
 export interface AuthResponse {
   user: User;
 }
+
+const INTERNAL_ROLES = new Set(['admin', 'general_member']);
+
+export function isInternalRole(role?: string | null): boolean {
+  return role ? INTERNAL_ROLES.has(role) : false;
+}
