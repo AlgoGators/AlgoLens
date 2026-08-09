@@ -36,17 +36,17 @@ cd AlgoLens
 npm install
 
 # Backend dependencies
-cd backend
+cd algolens-api
 pip3 install -r requirements.txt
 cd ..
 ```
 
 ### 4. Configure Environment Variables
 
-Create a `.env` file in the `backend` directory:
+Create a `.env` file in the `algolens-api` directory:
 
 ```bash
-cd /home/ec2-user/AlgoLens/backend
+cd /home/ec2-user/AlgoLens/algolens-api
 nano .env
 ```
 
@@ -205,6 +205,6 @@ sudo journalctl -u algolens -n 50
 ### Database connection issues
 ```bash
 # Test database connection
-cd /home/ec2-user/AlgoLens/backend
+cd /home/ec2-user/AlgoLens/algolens-api
 python3 -c "from database import get_db_connection; print(get_db_connection())"
 ```

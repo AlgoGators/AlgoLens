@@ -13,4 +13,4 @@ build
 .idea
 coverage
 .nyc_output
-backend
+algolens-api

@@ -122,8 +122,8 @@ These files are gitignored. Do not commit them. Share via password manager or pr
 
 ## Adding New API Endpoints
 
-1. Add the route to the Flask backend (`backend/routes/`)
-2. Register the blueprint in `backend/app.py`
+1. Add the route to the Flask backend (`algolens-api/algolens/adapters/http/`)
+2. Register the blueprint in `algolens-api/algolens/infrastructure/config/app_factory.py`
 3. Add a `location` block to `deployment/algolens.conf`:
 ```nginx
 location /your-route {

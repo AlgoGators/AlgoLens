@@ -25,10 +25,10 @@ npm install
 npm run dev       # frontend dev server at http://localhost:5173
 ```
 
-For the backend locally, create `backend/.env` (see `backend/.env.example`) and run:
+For the backend locally, create `algolens-api/.env` (see `algolens-api/.env.example`) and run:
 
 ```bash
-cd backend
+cd algolens-api
 pip install -r requirements.txt
 python app.py     # runs at http://localhost:5000
 ```

@@ -39,7 +39,7 @@ jobs:
             npm run build
 
             echo "Installing backend dependencies..."
-            pip3 install -r backend/requirements.txt --quiet
+            pip3 install -r algolens-api/requirements.txt --quiet
 
             echo "Updating service and nginx config..."
             sudo cp deployment/algolens-backend.service /etc/systemd/system/
