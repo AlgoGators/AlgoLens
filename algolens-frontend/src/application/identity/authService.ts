@@ -1,4 +1,4 @@
-import type { User } from '../../domain/identity/user';
+import type { User } from '@/models';
 import {
   DEV_MODE,
   devLoginRequest,

@@ -1,7 +1,7 @@
 import React from 'react';
 import { useTheme } from '../adapters/react/ThemeContext';
 import { MetricInfo } from './MetricInfo';
-import type { StrategyMetrics } from '../domain/portfolio/portfolioData';
+import type { StrategyMetrics } from '@/models';
 
 interface FinancialAnalysisProps {
   metrics: StrategyMetrics;

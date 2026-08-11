@@ -1,4 +1,4 @@
-import type { CombinedMetrics } from '../../domain/portfolio/computeCombinedMetrics';
+import type { CombinedMetrics } from '@/models';
 
 interface StrategySummaryProps {
   metrics: CombinedMetrics;

@@ -96,3 +96,44 @@ export interface PortfolioData {
   strategies: Strategy[];
   historicalData: HistoricalDataPoint[];
 }
+
+export interface AllocationSlice {
+  symbol: string;
+  value: number;
+  percentage: number;
+}
+
+export interface StrategySlice {
+  name: string;
+  value: number;
+  percentage: number;
+}
+
+export interface SymbolPnL {
+  symbol: string;
+  pnl: number;
+}
+
+export interface AdvancedMetrics {
+  sortinoRatio: number;
+  informationRatio: number;
+  hhi: number;
+  correlationMatrix: number[][];
+  topHoldings: AllocationSlice[];
+  var95: number;
+}
+
+export interface CombinedMetrics {
+  totalInvested: number;
+  totalValue: number;
+  totalReturn: number;
+  returnPercent: number;
+  metrics: StrategyMetrics;
+  symbolPnL: SymbolPnL[];
+  dailyPnL: { date: string; pnl: number }[];
+  strategies: Strategy[];
+  assetAllocation: AllocationSlice[];
+  strategyAllocation: StrategySlice[];
+  historicalPerformance: { date: string; return: number }[];
+  advancedMetrics: AdvancedMetrics;
+}

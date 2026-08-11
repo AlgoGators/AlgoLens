@@ -1,6 +1,6 @@
 import React from 'react';
 import { Home, TrendingUp, FileText, FlaskConical, User } from 'lucide-react';
-import { isInternalRole } from '../domain/identity/user';
+import { isInternalRole } from '@/lib/roles';
 import { useAuth } from '../adapters/react/AuthContext';
 import { useTheme } from '../adapters/react/ThemeContext';
 

@@ -1,7 +1,9 @@
 import React, { useState, useMemo } from 'react';
 import { TrendingUp, TrendingDown, Beaker } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, ResponsiveContainer, Tooltip } from 'recharts';
-import type { PortfolioData } from '../domain/portfolio/portfolioData';
+import type { PortfolioData } from '@/models';
+import { filterByPeriod, type Period } from '@/lib/filterByPeriod';
+import { PeriodSelector } from './PeriodSelector';
 import { useTheme } from '../adapters/react/ThemeContext';
 
 interface PortfolioOverviewProps {
@@ -10,43 +12,16 @@ interface PortfolioOverviewProps {
 }
 
 export function PortfolioOverview({ data, onBuilderClick }: PortfolioOverviewProps) {
-  const [selectedPeriod, setSelectedPeriod] = useState('1M');
+  const [selectedPeriod, setSelectedPeriod] = useState<Period>('1M');
   const { theme } = useTheme();
   const isPositive = data.totalReturn >= 0;
 
-  const periods = ['1W', '1M', '3M', '1Y', 'ALL'];
+  const periods: Period[] = ['1W', '1M', '3M', '1Y', 'ALL'];
 
-  // Filter data based on selected period
-  const filteredData = useMemo(() => {
-    const now = new Date();
-    let daysToShow: number;
-
-    switch (selectedPeriod) {
-      case '1W':
-        daysToShow = 7;
-        break;
-      case '1M':
-        daysToShow = 30;
-        break;
-      case '3M':
-        daysToShow = 90;
-        break;
-      case '1Y':
-        daysToShow = 365;
-        break;
-      case 'ALL':
-      default:
-        return data.historicalData;
-    }
-
-    const cutoffDate = new Date(now);
-    cutoffDate.setDate(cutoffDate.getDate() - daysToShow);
-
-    return data.historicalData.filter(point => {
-      const pointDate = new Date(point.date);
-      return pointDate >= cutoffDate;
-    });
-  }, [selectedPeriod, data.historicalData]);
+  const filteredData = useMemo(
+    () => filterByPeriod(data.historicalData, selectedPeriod),
+    [selectedPeriod, data.historicalData]
+  );
 
   // Calculate period-specific return
   const periodReturn = useMemo(() => {
@@ -124,26 +99,7 @@ export function PortfolioOverview({ data, onBuilderClick }: PortfolioOverviewPro
         </ResponsiveContainer>
       </div>
 
-      <div className={`flex items-center justify-between mb-8 border-b ${theme === 'dark' ? 'border-gray-800' : 'border-gray-200'
-        }`}>
-        {periods.map((period) => (
-          <button
-            key={period}
-            onClick={() => setSelectedPeriod(period)}
-            className={`px-3 py-3 text-sm transition-colors relative ${selectedPeriod === period
-              ? 'text-orange-500'
-              : theme === 'dark'
-                ? 'text-gray-400 hover:text-white'
-                : 'text-gray-500 hover:text-gray-900'
-              }`}
-          >
-            {period}
-            {selectedPeriod === period && (
-              <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-orange-500" />
-            )}
-          </button>
-        ))}
-      </div>
+      <PeriodSelector periods={periods} selected={selectedPeriod} onSelect={setSelectedPeriod} />
 
       <div className="flex items-center justify-between mb-6">
         <h2 className="text-xl">Investment Strategies</h2>

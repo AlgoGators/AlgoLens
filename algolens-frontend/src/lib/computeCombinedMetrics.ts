@@ -1,49 +1,8 @@
-import type { Strategy, StrategyMetrics } from './portfolioData';
+import type { CombinedMetrics, Strategy, StrategyMetrics } from '@/models';
 
 // Shapes of the derived data the StrategyBuilder view renders. Extracted verbatim
 // from the old inline useMemo so the computation can live (and be tested) apart
 // from the ~760 lines of JSX it used to be buried in.
-
-export interface AllocationSlice {
-  symbol: string;
-  value: number;
-  percentage: number;
-}
-
-export interface StrategySlice {
-  name: string;
-  value: number;
-  percentage: number;
-}
-
-export interface SymbolPnL {
-  symbol: string;
-  pnl: number;
-}
-
-export interface AdvancedMetrics {
-  sortinoRatio: number;
-  informationRatio: number;
-  hhi: number;
-  correlationMatrix: number[][];
-  topHoldings: AllocationSlice[];
-  var95: number;
-}
-
-export interface CombinedMetrics {
-  totalInvested: number;
-  totalValue: number;
-  totalReturn: number;
-  returnPercent: number;
-  metrics: StrategyMetrics;
-  symbolPnL: SymbolPnL[];
-  dailyPnL: { date: string; pnl: number }[];
-  strategies: Strategy[];
-  assetAllocation: AllocationSlice[];
-  strategyAllocation: StrategySlice[];
-  historicalPerformance: { date: string; return: number }[];
-  advancedMetrics: AdvancedMetrics;
-}
 
 function zeroMetrics(): StrategyMetrics {
   return {

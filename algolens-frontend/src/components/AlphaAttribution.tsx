@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis, Legend } from 'recharts';
-import type { HistoricalDataPoint } from '../domain/portfolio/portfolioData';
+import type { HistoricalDataPoint } from '@/models';
 
 /**
  * Shows whether QT's decisions are adding value.

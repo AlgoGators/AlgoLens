@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Bell, FlaskConical, User, X } from 'lucide-react';
 import logo from '../assets/logo.png';
-import { isInternalRole } from '../domain/identity/user';
+import { isInternalRole } from '@/lib/roles';
 import { useAuth } from '../adapters/react/AuthContext';
 import { useTheme } from '../adapters/react/ThemeContext';
 

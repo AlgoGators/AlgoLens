@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { IdentityApplicationService } from '../../application/identity/authService';
-import type { User } from '../../domain/identity/user';
+import type { User } from '@/models';
 
 interface AuthContextType {
   user: User | null;

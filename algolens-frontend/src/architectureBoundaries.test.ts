@@ -28,29 +28,41 @@ function rel(filePath: string): string {
   return path.relative(process.cwd(), filePath).replace(/\\/g, '/');
 }
 
-function resolvedRelativeImport(filePath: string, imported: string): string | null {
-  if (!imported.startsWith('.')) return null;
-  return path
-    .normalize(path.join(path.dirname(filePath), imported))
-    .replace(/\\/g, '/');
+function resolvedSourceImport(filePath: string, imported: string): string | null {
+  if (imported.startsWith('@/')) {
+    return path.normalize(path.join(SRC_DIR, imported.slice(2))).replace(/\\/g, '/');
+  }
+
+  if (imported.startsWith('.')) {
+    return path
+      .normalize(path.join(path.dirname(filePath), imported))
+      .replace(/\\/g, '/');
+  }
+
+  return null;
+}
+
+function importsReact(imported: string): boolean {
+  return imported === 'react' || imported.startsWith('react/');
+}
+
+function importsSourceFolder(resolved: string | null, folder: string): boolean {
+  return resolved?.includes(`/src/${folder}/`) ?? false;
 }
 
 describe('frontend architecture boundaries', () => {
-  it('keeps domain free of React, application, adapters, and API transport', () => {
+  it('keeps models free of React and outward application code', () => {
     const offenders: string[] = [];
 
-    for (const filePath of sourceFiles(path.join(SRC_DIR, 'domain'))) {
+    for (const filePath of sourceFiles(path.join(SRC_DIR, 'models'))) {
       for (const imported of importsFrom(filePath)) {
-        const resolved = resolvedRelativeImport(filePath, imported);
+        const resolved = resolvedSourceImport(filePath, imported);
         if (
-          imported === 'react' ||
-          imported.startsWith('react/') ||
-          resolved?.includes('/src/application/') ||
-          resolved?.includes('/src/adapters/') ||
-          resolved?.includes('/src/infrastructure/') ||
-          resolved?.includes('/src/components/') ||
-          resolved?.includes('/src/contexts/') ||
-          resolved?.includes('/src/services/')
+          importsReact(imported) ||
+          importsSourceFolder(resolved, 'application') ||
+          importsSourceFolder(resolved, 'adapters') ||
+          importsSourceFolder(resolved, 'infrastructure') ||
+          importsSourceFolder(resolved, 'components')
         ) {
           offenders.push(`${rel(filePath)} imports ${imported}`);
         }
@@ -65,14 +77,13 @@ describe('frontend architecture boundaries', () => {
 
     for (const filePath of sourceFiles(path.join(SRC_DIR, 'application'))) {
       for (const imported of importsFrom(filePath)) {
-        const resolved = resolvedRelativeImport(filePath, imported);
+        const resolved = resolvedSourceImport(filePath, imported);
         if (
-          imported === 'react' ||
-          imported.startsWith('react/') ||
-          resolved?.includes('/src/adapters/') ||
-          resolved?.includes('/src/components/') ||
-          resolved?.includes('/src/contexts/') ||
-          resolved?.includes('/src/services/')
+          importsReact(imported) ||
+          importsSourceFolder(resolved, 'adapters') ||
+          importsSourceFolder(resolved, 'components') ||
+          importsSourceFolder(resolved, 'contexts') ||
+          importsSourceFolder(resolved, 'services')
         ) {
           offenders.push(`${rel(filePath)} imports ${imported}`);
         }

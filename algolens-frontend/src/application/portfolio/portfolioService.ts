@@ -1,5 +1,9 @@
-import type { PortfolioData, Strategy } from '../../domain/portfolio/portfolioData';
-import type { IncubatingStrategy, IncubationPerformance } from '../../domain/portfolio/incubationData';
+import type {
+  IncubatingStrategy,
+  IncubationPerformance,
+  PortfolioData,
+  Strategy,
+} from '@/models';
 import { PortfolioApiService } from '../../infrastructure/api/portfolioApi';
 
 export class PortfolioApplicationService {

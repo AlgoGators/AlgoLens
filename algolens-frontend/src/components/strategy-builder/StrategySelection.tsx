@@ -1,4 +1,4 @@
-import type { Strategy } from '../../domain/portfolio/portfolioData';
+import type { Strategy } from '@/models';
 
 interface StrategySelectionProps {
   strategies: Strategy[];

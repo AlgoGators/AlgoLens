@@ -1,5 +1,5 @@
 import { LineChart, Line, BarChart, Bar, Cell, XAxis, YAxis, ResponsiveContainer, Tooltip } from 'recharts';
-import type { CombinedMetrics } from '../../domain/portfolio/computeCombinedMetrics';
+import type { CombinedMetrics } from '@/models';
 
 interface PerformanceChartsProps {
   metrics: CombinedMetrics;

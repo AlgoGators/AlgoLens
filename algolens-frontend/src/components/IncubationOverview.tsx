@@ -1,13 +1,13 @@
 import React, { useMemo } from 'react';
 import { Clock, FlaskConical, TrendingUp } from 'lucide-react';
-import type { IncubatingStrategy } from '../domain/portfolio/incubationData';
+import type { IncubatingStrategy } from '@/models';
 import {
   calculateIncubationProgress,
   calculateDaysRemaining,
   formatMockCapital,
   isNearEndOfWindow,
   isWindowComplete,
-} from '../domain/portfolio/incubationUtils';
+} from '@/lib/incubationUtils';
 import { useTheme } from '../adapters/react/ThemeContext';
 
 interface IncubationOverviewProps {

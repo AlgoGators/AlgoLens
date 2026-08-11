@@ -1,6 +1,6 @@
 import { BarChart, Bar, Cell, XAxis, YAxis, ResponsiveContainer, Tooltip } from 'recharts';
 import { ChevronUp, ChevronDown } from 'lucide-react';
-import type { CombinedMetrics } from '../../domain/portfolio/computeCombinedMetrics';
+import type { CombinedMetrics } from '@/models';
 
 export type SectionKey = 'diversification' | 'trading' | 'leverage';
 export type ExpandedSections = Record<SectionKey, boolean>;

@@ -1,6 +1,6 @@
 import React from 'react';
 import { ChevronRight, TrendingUp, TrendingDown, BarChart3 } from 'lucide-react';
-import type { Strategy } from '../domain/portfolio/portfolioData';
+import type { Strategy } from '@/models';
 import { useTheme } from '../adapters/react/ThemeContext';
 
 interface StrategyListProps {

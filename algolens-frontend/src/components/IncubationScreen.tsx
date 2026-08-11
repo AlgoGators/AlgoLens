@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import type {
   IncubatingStrategy,
   IncubationPerformance,
-} from '../domain/portfolio/incubationData';
+} from '@/models';
 import { PortfolioApplicationService } from '../application/portfolio/portfolioService';
 import { useTheme } from '../adapters/react/ThemeContext';
 import { IncubationDetail } from './IncubationDetail';

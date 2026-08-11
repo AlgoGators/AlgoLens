@@ -6,7 +6,7 @@ import {
   FlaskConical,
   Sprout,
 } from 'lucide-react';
-import type { IncubatingStrategy } from '../domain/portfolio/incubationData';
+import type { IncubatingStrategy } from '@/models';
 import {
   calculateDaysRemaining,
   calculateIncubationProgress,
@@ -14,7 +14,7 @@ import {
   formatMockCapital,
   isNearEndOfWindow,
   isWindowComplete,
-} from '../domain/portfolio/incubationUtils';
+} from '@/lib/incubationUtils';
 import { useTheme } from '../adapters/react/ThemeContext';
 
 interface IncubationListProps {

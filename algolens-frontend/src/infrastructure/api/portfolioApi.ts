@@ -1,5 +1,10 @@
-import type { Strategy, PortfolioData, HistoricalDataPoint } from '../../domain/portfolio/portfolioData';
-import type { IncubatingStrategy, IncubationPerformance } from '../../domain/portfolio/incubationData';
+import type {
+  HistoricalDataPoint,
+  IncubatingStrategy,
+  IncubationPerformance,
+  PortfolioData,
+  Strategy,
+} from '@/models';
 import { API_BASE_URL, log } from './httpClient';
 
 export class PortfolioApiService {
@@ -67,6 +72,7 @@ export class PortfolioApiService {
         credentials: 'include',
         headers: {
           'Content-Type': 'application/json',
+          'ngrok-skip-browser-warning': '1',
         },
       });
       const elapsed = (performance.now() - startTime).toFixed(2);

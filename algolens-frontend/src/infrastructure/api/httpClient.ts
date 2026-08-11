@@ -53,6 +53,7 @@ export async function fetchWithAuth(url: string): Promise<Response> {
       credentials: 'include',
       headers: {
         'Content-Type': 'application/json',
+        'ngrok-skip-browser-warning': '1',
       },
     });
     const elapsed = (performance.now() - startTime).toFixed(2);

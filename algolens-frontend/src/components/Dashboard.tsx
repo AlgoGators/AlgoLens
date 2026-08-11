@@ -11,9 +11,9 @@ import { StrategyBuilder } from './StrategyBuilder';
 import { NewsView } from './NewsView';
 import { EmptyPortfolioScreen } from './EmptyPortfolioScreen';
 import { IncubationScreen } from './IncubationScreen';
-import type { PortfolioData } from '../domain/portfolio/portfolioData';
+import type { PortfolioData } from '@/models';
 import { PortfolioApplicationService } from '../application/portfolio/portfolioService';
-import { isInternalRole } from '../domain/identity/user';
+import { isInternalRole } from '@/lib/roles';
 import { useAuth } from '../adapters/react/AuthContext';
 import { useTheme } from '../adapters/react/ThemeContext';
 

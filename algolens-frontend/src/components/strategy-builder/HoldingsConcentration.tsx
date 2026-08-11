@@ -1,4 +1,4 @@
-import type { CombinedMetrics } from '../../domain/portfolio/computeCombinedMetrics';
+import type { CombinedMetrics } from '@/models';
 import { COLORS } from './chartTheme';
 
 interface HoldingsConcentrationProps {
