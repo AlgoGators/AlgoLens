@@ -9,7 +9,6 @@ import { useTheme } from '../adapters/react/ThemeContext';
 import { FinancialAnalysis } from './FinancialAnalysis';
 import { PositionBreakdown } from './PositionBreakdown';
 import { TradingActivity } from './TradingActivity';
-import { AlphaAttribution } from './AlphaAttribution';
 
 interface StrategyDetailProps {
   strategy: Strategy;
@@ -96,11 +95,6 @@ export function StrategyDetail({ strategy, onBack }: StrategyDetailProps) {
 
       <StrategyChart data={filteredData} positive={positive} />
 
-      {/* Is QT's judgement adding value? Renders an explanation instead of a
-          chart until both streams exist. */}
-      <div className="mb-8">
-        <AlphaAttribution equityByStream={strategy.equityByStream} theme={theme} />
-      </div>
 
       <PeriodSelector periods={PERIODS} selected={selectedPeriod} onSelect={setSelectedPeriod} />
 

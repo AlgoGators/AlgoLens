@@ -49,10 +49,6 @@ def build_strategy_detail(
     return_percent = (total_return / initial_equity * 100) if initial_equity > 0 else 0
 
     historical_data = build_historical_data(rows.equity_curve)
-    equity_by_stream = {
-        stream: build_historical_data(stream_rows)
-        for stream, stream_rows in rows.equity_by_stream.items()
-    }
     transformed_positions = transform_positions(rows.positions, current_value)
     stats = compute_return_stats(historical_data)
     transformed_executions = transform_executions(rows.executions)
@@ -72,7 +68,6 @@ def build_strategy_detail(
         "returnPercent": return_percent,
         "positions": transformed_positions,
         "historicalData": historical_data,
-        "equityByStream": equity_by_stream,
         "bestDay": stats["best_day"],
         "worstDay": stats["worst_day"],
         "executions": transformed_executions,

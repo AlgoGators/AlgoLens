@@ -1,7 +1,5 @@
 """Postgres portfolio readers."""
 
-import time
-
 import psycopg2
 
 from algolens.application.portfolio.ports import (
@@ -9,12 +7,7 @@ from algolens.application.portfolio.ports import (
     IncubationPerformanceRows,
     PortfolioDetailRows,
 )
-from algolens.domain.portfolio.streams import PORTFOLIO_STREAMS, PRIMARY_STREAM
 from algolens.infrastructure.db.postgres import get_db_connection
-
-_PORTFOLIO_TYPE_CACHE_TTL_SECONDS = 300
-_has_portfolio_type_cache = None
-_has_portfolio_type_expires_at = 0
 
 
 class PostgresPortfolioRepository:
@@ -49,83 +42,18 @@ class PostgresPortfolioRepository:
         )
         return cursor.fetchone()
 
-    def _has_portfolio_type(self, cursor):
-        global _has_portfolio_type_cache, _has_portfolio_type_expires_at
-
-        now = time.monotonic()
-        if (
-            _has_portfolio_type_cache is not None
-            and now < _has_portfolio_type_expires_at
-        ):
-            return _has_portfolio_type_cache
-
+    def _fetch_equity_curve(self, cursor, strategy_type, portfolio_id):
         cursor.execute(
             """
-            SELECT 1 FROM information_schema.columns
-            WHERE table_schema = 'trading' AND table_name = 'equity_curve'
-              AND column_name = 'portfolio_type'
-            """
+            SELECT timestamp, equity
+            FROM trading.equity_curve
+            WHERE strategy_id = %s
+            AND portfolio_id = %s
+            ORDER BY timestamp ASC
+            """,
+            (strategy_type, portfolio_id),
         )
-        _has_portfolio_type_cache = cursor.fetchone() is not None
-        _has_portfolio_type_expires_at = now + _PORTFOLIO_TYPE_CACHE_TTL_SECONDS
-        return _has_portfolio_type_cache
-
-    def _fetch_equity_curve(
-        self,
-        cursor,
-        strategy_type,
-        portfolio_id,
-        portfolio_type=None,
-        has_portfolio_type=None,
-    ):
-        if portfolio_type is not None and has_portfolio_type is None:
-            has_portfolio_type = self._has_portfolio_type(cursor)
-
-        if portfolio_type is not None and has_portfolio_type:
-            cursor.execute(
-                """
-                SELECT timestamp, equity
-                FROM trading.equity_curve
-                WHERE strategy_id = %s
-                AND portfolio_id = %s
-                AND portfolio_type = %s
-                ORDER BY timestamp ASC
-                """,
-                (strategy_type, portfolio_id, portfolio_type),
-            )
-        else:
-            cursor.execute(
-                """
-                SELECT timestamp, equity
-                FROM trading.equity_curve
-                WHERE strategy_id = %s
-                AND portfolio_id = %s
-                ORDER BY timestamp ASC
-                """,
-                (strategy_type, portfolio_id),
-            )
         return cursor.fetchall()
-
-    def _fetch_equity_by_stream(
-        self, cursor, strategy_type, portfolio_id, has_portfolio_type=None
-    ):
-        if has_portfolio_type is None:
-            has_portfolio_type = self._has_portfolio_type(cursor)
-        if not has_portfolio_type:
-            return {}
-
-        by_stream = {}
-        for stream in PORTFOLIO_STREAMS:
-            rows = self._fetch_equity_curve(
-                cursor,
-                strategy_type,
-                portfolio_id,
-                stream,
-                has_portfolio_type=has_portfolio_type,
-            )
-            if rows:
-                by_stream[stream] = rows
-        return by_stream
 
     def _fetch_current_positions(self, cursor, strategy_type, portfolio_id):
         cursor.execute(
@@ -194,25 +122,13 @@ class PostgresPortfolioRepository:
                     return PortfolioDetailRows(
                         latest=None,
                         equity_curve=[],
-                        equity_by_stream={},
                         positions=[],
                         executions=[],
                         yesterday_positions=[],
                     )
 
-                has_portfolio_type = self._has_portfolio_type(cursor)
                 equity_curve = self._fetch_equity_curve(
-                    cursor,
-                    strategy_type,
-                    portfolio_id,
-                    PRIMARY_STREAM,
-                    has_portfolio_type=has_portfolio_type,
-                )
-                equity_by_stream = self._fetch_equity_by_stream(
-                    cursor,
-                    strategy_type,
-                    portfolio_id,
-                    has_portfolio_type=has_portfolio_type,
+                    cursor, strategy_type, portfolio_id
                 )
                 positions = self._fetch_current_positions(
                     cursor, strategy_type, portfolio_id
@@ -229,7 +145,6 @@ class PostgresPortfolioRepository:
         return PortfolioDetailRows(
             latest=latest,
             equity_curve=equity_curve,
-            equity_by_stream=equity_by_stream,
             positions=positions,
             executions=executions,
             yesterday_positions=yesterday_positions,

@@ -15,7 +15,6 @@ class IncubationError(ValidationError):
 class PortfolioDetailRows:
     latest: Mapping[str, Any] | None
     equity_curve: Sequence[Mapping[str, Any]]
-    equity_by_stream: Mapping[str, Sequence[Mapping[str, Any]]]
     positions: Sequence[Mapping[str, Any]]
     executions: Sequence[Mapping[str, Any]]
     yesterday_positions: Sequence[Mapping[str, Any]]

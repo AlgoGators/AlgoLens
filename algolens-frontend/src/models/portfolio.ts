@@ -70,15 +70,6 @@ export interface Strategy {
   returnPercent: number;
   positions: Position[];
   historicalData: HistoricalDataPoint[];
-  /**
-   * Equity curve per portfolio stream, keyed by stream name:
-   *   qt        what QT actually decided -- the real book
-   *   system    what the algorithm said today, given the real book
-   *   benchmark what the algorithm would have compounded to untouched
-   *
-   * Absent until the dual-portfolio migration has run, so always guard on it.
-   */
-  equityByStream?: Record<string, HistoricalDataPoint[]>;
   bestDay: number;
   worstDay: number;
   metrics: StrategyMetrics;
