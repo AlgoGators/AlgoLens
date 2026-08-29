@@ -23,7 +23,8 @@ export interface SymbolPnL {
 
 export interface AdvancedMetrics {
   sortinoRatio: number;
-  informationRatio: number;
+  /** null when it cannot be computed honestly -- see informationRatioVsBenchmark. */
+  informationRatio: number | null;
   hhi: number;
   correlationMatrix: number[][];
   topHoldings: AllocationSlice[];
@@ -82,10 +83,75 @@ function emptyCombined(): CombinedMetrics {
     strategyAllocation: [],
     historicalPerformance: zeroHistorical,
     advancedMetrics: {
-      sortinoRatio: 0, informationRatio: 0, hhi: 0, correlationMatrix: [],
+      sortinoRatio: 0, informationRatio: null, hhi: 0, correlationMatrix: [],
       topHoldings: [], var95: 0
     }
   };
+}
+
+/**
+ * Information ratio: mean active return over its own standard deviation, annualised.
+ *
+ * The yardstick is the `benchmark` stream -- what the algorithm would have compounded
+ * to with no human edits. That is the only benchmark series the platform actually
+ * produces, and it is the comparison AlphaAttribution already treats as the answer to
+ * "did the desk add value". `system` is deliberately not the yardstick: position
+ * buffering anchors each day's target on yesterday's actual position, so `system`
+ * drifts along with the desk's own past decisions.
+ *
+ * Returns null rather than a number whenever it cannot be computed honestly. There are
+ * four such cases, and each of them used to produce a plausible-looking figure:
+ *
+ *   - a selected strategy carries no benchmark stream (the pre-migration state, and
+ *     the reason this must not silently sum a partial benchmark against a full book)
+ *   - fewer than three dates overlap, so there is no dispersion to divide by
+ *   - tracking error is zero. This is production today: nothing writes edits into
+ *     `qt`, so the two curves are identical. Reporting 0.00 would read as "the desk
+ *     added nothing" when the truth is "the desk has not acted yet"
+ *   - a curve touches zero, which would make a return undefined
+ *
+ * Same convention as the downside deviation above: population standard deviation, and
+ * sqrt(252) to annualise.
+ */
+export function informationRatioVsBenchmark(
+  bookCurve: { date: string; value: number }[],
+  selected: Strategy[]
+): number | null {
+  const streams = selected.map(s => s.equityByStream?.benchmark);
+  if (streams.some(stream => !stream || stream.length === 0)) return null;
+
+  const benchmarkByDate = new Map<string, number>();
+  streams.forEach(stream => {
+    stream!.forEach(pt => {
+      benchmarkByDate.set(pt.date, (benchmarkByDate.get(pt.date) || 0) + pt.value);
+    });
+  });
+
+  // Only dates present in both curves. A book date the benchmark does not cover is
+  // not a day on which the benchmark returned zero.
+  const paired = bookCurve
+    .filter(pt => benchmarkByDate.has(pt.date))
+    .map(pt => ({ book: pt.value, bench: benchmarkByDate.get(pt.date)! }));
+
+  // n points give n-1 returns, and dispersion needs at least two of those.
+  if (paired.length < 3) return null;
+
+  const active: number[] = [];
+  for (let i = 1; i < paired.length; i++) {
+    const prev = paired[i - 1];
+    if (prev.book <= 0 || prev.bench <= 0) return null;
+    active.push(
+      (paired[i].book - prev.book) / prev.book - (paired[i].bench - prev.bench) / prev.bench
+    );
+  }
+
+  const mean = active.reduce((sum, r) => sum + r, 0) / active.length;
+  const variance =
+    active.reduce((sum, r) => sum + (r - mean) * (r - mean), 0) / active.length;
+  const trackingError = Math.sqrt(variance);
+  if (trackingError === 0) return null;
+
+  return (mean * Math.sqrt(252)) / trackingError;
 }
 
 /**
@@ -268,11 +334,8 @@ export function computeCombinedMetrics(
     ? (weightedMetrics.annualizedReturn / downsideDeviation)
     : 0;
 
-  // Information Ratio (excess return vs benchmark)
-  const benchmarkReturn = 12.5; // S&P 500 average
-  const excessReturn = weightedMetrics.annualizedReturn - benchmarkReturn;
-  const trackingError = weightedMetrics.volatility * 0.7; // Simulated
-  const informationRatio = trackingError > 0 ? excessReturn / trackingError : 0;
+  // Information Ratio: active return against the benchmark stream, annualised.
+  const informationRatio = informationRatioVsBenchmark(combinedCurve, selected);
 
   // Herfindahl-Hirschman Index (concentration risk)
   const hhi = assetAllocation.reduce((sum, asset) =>

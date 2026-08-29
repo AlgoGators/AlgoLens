@@ -165,3 +165,131 @@ describe('computeCombinedMetrics', () => {
     expect(out.dailyPnL.map(p => p.pnl)).toEqual([0, 10000, 25000]);
   });
 });
+
+describe('information ratio', () => {
+  // The yardstick is the `benchmark` stream -- what the algorithm would have
+  // compounded to with no human edits -- not an index. That is the only benchmark
+  // series the platform actually has, and it is the comparison AlphaAttribution
+  // already treats as the answer to "did the desk add value".
+
+  function withStreams(
+    id: string,
+    book: [string, number][],
+    benchmark?: [string, number][],
+  ) {
+    return strategy({
+      id,
+      historicalData: book.map(([date, value]) => ({ date, value })),
+      ...(benchmark
+        ? { equityByStream: { benchmark: benchmark.map(([date, value]) => ({ date, value })) } }
+        : {}),
+    });
+  }
+
+  it('is unavailable when no strategy carries a benchmark stream', () => {
+    // The pre-migration state. Reporting a number here would mean inventing one.
+    const a = withStreams('a', [['2026-01-01', 100], ['2026-01-02', 102]]);
+    const out = computeCombinedMetrics([a], ['a']);
+    expect(out.advancedMetrics.informationRatio).toBeNull();
+  });
+
+  it('is unavailable when the two curves overlap on fewer than three dates', () => {
+    // Two shared dates yield a single active return, which has no dispersion.
+    const a = withStreams(
+      'a',
+      [['2026-01-01', 100], ['2026-01-02', 102]],
+      [['2026-01-01', 100], ['2026-01-02', 101]],
+    );
+    const out = computeCombinedMetrics([a], ['a']);
+    expect(out.advancedMetrics.informationRatio).toBeNull();
+  });
+
+  it('is unavailable when the book has never diverged from the benchmark', () => {
+    // This is production today: nothing writes edits into qt, so the two curves
+    // are identical and tracking error is zero. Dividing by it would produce
+    // Infinity; reporting 0.00 would read as "the desk added nothing".
+    const curve: [string, number][] = [
+      ['2026-01-01', 100], ['2026-01-02', 102], ['2026-01-03', 102], ['2026-01-04', 106.08],
+    ];
+    const a = withStreams('a', curve, curve);
+    const out = computeCombinedMetrics([a], ['a']);
+    expect(out.advancedMetrics.informationRatio).toBeNull();
+  });
+
+  it('measures active return against the benchmark stream, annualised', () => {
+    // Book returns   +2%, 0%, +4%
+    // Benchmark      +1%, +1%, +1%
+    // Active          +1%, -1%, +3%  -> mean 1%, population sd 1.63299%
+    // IR = 0.01 * sqrt(252) / 0.0163299 = 9.7211
+    const a = withStreams(
+      'a',
+      [['2026-01-01', 100], ['2026-01-02', 102], ['2026-01-03', 102], ['2026-01-04', 106.08]],
+      [['2026-01-01', 100], ['2026-01-02', 101], ['2026-01-03', 102.01], ['2026-01-04', 103.0301]],
+    );
+    const out = computeCombinedMetrics([a], ['a']);
+    expect(out.advancedMetrics.informationRatio).toBeCloseTo(9.7211, 3);
+  });
+
+  it('goes negative when the book trails the benchmark', () => {
+    const a = withStreams(
+      'a',
+      [['2026-01-01', 100], ['2026-01-02', 101], ['2026-01-03', 102.01], ['2026-01-04', 103.0301]],
+      [['2026-01-01', 100], ['2026-01-02', 102], ['2026-01-03', 102], ['2026-01-04', 106.08]],
+    );
+    const out = computeCombinedMetrics([a], ['a']);
+    expect(out.advancedMetrics.informationRatio).toBeCloseTo(-9.7211, 3);
+  });
+
+  it('sums benchmark curves across strategies the same way the book is summed', () => {
+    // Two strategies, each half the size. Summed, they reproduce the single-strategy
+    // case above exactly, so the ratio must come out identical.
+    const a = withStreams(
+      'a',
+      [['2026-01-01', 50], ['2026-01-02', 51], ['2026-01-03', 51], ['2026-01-04', 53.04]],
+      [['2026-01-01', 50], ['2026-01-02', 50.5], ['2026-01-03', 51.005], ['2026-01-04', 51.51505]],
+    );
+    const b = withStreams(
+      'b',
+      [['2026-01-01', 50], ['2026-01-02', 51], ['2026-01-03', 51], ['2026-01-04', 53.04]],
+      [['2026-01-01', 50], ['2026-01-02', 50.5], ['2026-01-03', 51.005], ['2026-01-04', 51.51505]],
+    );
+    const out = computeCombinedMetrics([a, b], ['a', 'b']);
+    expect(out.advancedMetrics.informationRatio).toBeCloseTo(9.7211, 3);
+  });
+
+  it('ignores dates the benchmark does not cover', () => {
+    // A trailing book date with no benchmark point must not be read as a day the
+    // benchmark returned zero -- that would invent an active return.
+    const a = withStreams(
+      'a',
+      [
+        ['2026-01-01', 100], ['2026-01-02', 102], ['2026-01-03', 102],
+        ['2026-01-04', 106.08], ['2026-01-05', 200],
+      ],
+      [['2026-01-01', 100], ['2026-01-02', 101], ['2026-01-03', 102.01], ['2026-01-04', 103.0301]],
+    );
+    const out = computeCombinedMetrics([a], ['a']);
+    expect(out.advancedMetrics.informationRatio).toBeCloseTo(9.7211, 3);
+  });
+
+  it('is unavailable when only some of the selected strategies have a benchmark', () => {
+    // Summing a partial benchmark against a full book would understate the benchmark
+    // and overstate the desk -- a wrong number, not a missing one.
+    const a = withStreams(
+      'a',
+      [['2026-01-01', 50], ['2026-01-02', 51], ['2026-01-03', 51], ['2026-01-04', 53.04]],
+      [['2026-01-01', 50], ['2026-01-02', 50.5], ['2026-01-03', 51.005], ['2026-01-04', 51.51505]],
+    );
+    const b = withStreams(
+      'b',
+      [['2026-01-01', 50], ['2026-01-02', 51], ['2026-01-03', 51], ['2026-01-04', 53.04]],
+    );
+    const out = computeCombinedMetrics([a, b], ['a', 'b']);
+    expect(out.advancedMetrics.informationRatio).toBeNull();
+  });
+
+  it('is unavailable rather than zero when nothing is selected', () => {
+    const out = computeCombinedMetrics([strategy({ id: 'a' })], []);
+    expect(out.advancedMetrics.informationRatio).toBeNull();
+  });
+});

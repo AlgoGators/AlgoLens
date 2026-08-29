@@ -68,8 +68,19 @@ export function PerformanceOverview({ metrics, theme }: PerformanceOverviewProps
         <div className={`p-3 border ${theme === 'dark' ? 'bg-gray-950 border-gray-800' : 'bg-gray-50 border-gray-200'
           }`}>
           <div className={`text-xs mb-1 ${theme === 'dark' ? 'text-gray-500' : 'text-gray-400'}`}>INFO RATIO</div>
-          <div className="text-base">{metrics.advancedMetrics.informationRatio.toFixed(2)}</div>
-          <div className={`text-xs ${theme === 'dark' ? 'text-gray-600' : 'text-gray-400'}`}>vs SPX</div>
+          {/* null means the ratio could not be computed against a real benchmark
+              series. Show that rather than a number -- the caption used to read
+              "vs SPX" while the figure was derived from a hardcoded constant. */}
+          <div className="text-base">
+            {metrics.advancedMetrics.informationRatio === null
+              ? '—'
+              : metrics.advancedMetrics.informationRatio.toFixed(2)}
+          </div>
+          <div className={`text-xs ${theme === 'dark' ? 'text-gray-600' : 'text-gray-400'}`}>
+            {metrics.advancedMetrics.informationRatio === null
+              ? 'Needs a benchmark stream'
+              : 'vs system alone'}
+          </div>
         </div>
 
         <div className={`p-3 border ${theme === 'dark' ? 'bg-gray-950 border-gray-800' : 'bg-gray-50 border-gray-200'
