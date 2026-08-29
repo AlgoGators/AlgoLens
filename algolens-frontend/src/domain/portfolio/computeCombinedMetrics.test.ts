@@ -293,3 +293,88 @@ describe('information ratio', () => {
     expect(out.advancedMetrics.informationRatio).toBeNull();
   });
 });
+
+describe('sortino ratio', () => {
+  // Downside deviation is target semi-deviation with a minimum acceptable return of
+  // zero: root-mean-square of the negative daily returns over EVERY period, not just
+  // the losing ones, annualised by sqrt(252). Returns are percentages, matching
+  // annualizedReturn, so the ratio is dimensionless.
+
+  function book(id: string, curve: [string, number][], annualizedReturn: number) {
+    return strategy({
+      id,
+      historicalData: curve.map(([date, value]) => ({ date, value })),
+      metrics: metrics({ annualizedReturn }),
+    });
+  }
+
+  it('measures each day against the previous day, not against the first day', () => {
+    // 100 -> 110 -> 99 is +10% then -10%.
+    // Downside = sqrt(10^2 / 2) * sqrt(252) = 7.0710678 * 15.8745079 = 112.24972
+    // Sortino  = 10 / 112.24972 = 0.089087
+    //
+    // Reading the differences of cumulative-return-from-base instead would call the
+    // second day -11 rather than -10, because it divides by the opening equity rather
+    // than by yesterday's.
+    const a = book('a', [['2026-01-01', 100], ['2026-01-02', 110], ['2026-01-03', 99]], 10);
+    const out = computeCombinedMetrics([a], ['a']);
+    expect(out.advancedMetrics.sortinoRatio).toBeCloseTo(0.089087, 5);
+  });
+
+  it('divides by every period, not only the losing ones', () => {
+    // +10%, -10%, +10%. One losing day out of three.
+    // Downside = sqrt(10^2 / 3) * sqrt(252) = 5.7735027 * 15.8745079 = 91.651514
+    // Sortino  = 10 / 91.651514 = 0.109109
+    //
+    // Dividing by the count of losing days instead would give 158.745, understating
+    // the ratio by a factor that grows as the portfolio wins more often -- the exact
+    // opposite of what the number is supposed to reward.
+    const a = book(
+      'a',
+      [['2026-01-01', 100], ['2026-01-02', 110], ['2026-01-03', 99], ['2026-01-04', 108.9]],
+      10,
+    );
+    const out = computeCombinedMetrics([a], ['a']);
+    expect(out.advancedMetrics.sortinoRatio).toBeCloseTo(0.109109, 5);
+  });
+
+  it('is unavailable when the book has never had a down day', () => {
+    // There is no downside to divide by. The old fallback substituted 0.1, which
+    // turned a 10% annualised return into a Sortino of 100.00 on screen.
+    const a = book('a', [['2026-01-01', 100], ['2026-01-02', 110], ['2026-01-03', 120]], 10);
+    const out = computeCombinedMetrics([a], ['a']);
+    expect(out.advancedMetrics.sortinoRatio).toBeNull();
+  });
+
+  it('is unavailable when there are not two points to take a return between', () => {
+    const a = book('a', [['2026-01-01', 100]], 10);
+    const out = computeCombinedMetrics([a], ['a']);
+    expect(out.advancedMetrics.sortinoRatio).toBeNull();
+  });
+
+  it('is unavailable when the curve touches zero', () => {
+    // A return off a zero base is undefined; the ratio must not be built on it.
+    const a = book('a', [['2026-01-01', 0], ['2026-01-02', 100], ['2026-01-03', 90]], 10);
+    const out = computeCombinedMetrics([a], ['a']);
+    expect(out.advancedMetrics.sortinoRatio).toBeNull();
+  });
+
+  it('goes negative when the book lost money over the period', () => {
+    const a = book('a', [['2026-01-01', 100], ['2026-01-02', 110], ['2026-01-03', 99]], -10);
+    const out = computeCombinedMetrics([a], ['a']);
+    expect(out.advancedMetrics.sortinoRatio).toBeCloseTo(-0.089087, 5);
+  });
+
+  it('sums the strategies before taking returns, not after', () => {
+    // Two halves of the single-strategy case above must reproduce it exactly.
+    const a = book('a', [['2026-01-01', 50], ['2026-01-02', 55], ['2026-01-03', 49.5]], 10);
+    const b = book('b', [['2026-01-01', 50], ['2026-01-02', 55], ['2026-01-03', 49.5]], 10);
+    const out = computeCombinedMetrics([a, b], ['a', 'b']);
+    expect(out.advancedMetrics.sortinoRatio).toBeCloseTo(0.089087, 5);
+  });
+
+  it('is unavailable rather than zero when nothing is selected', () => {
+    const out = computeCombinedMetrics([strategy({ id: 'a' })], []);
+    expect(out.advancedMetrics.sortinoRatio).toBeNull();
+  });
+});

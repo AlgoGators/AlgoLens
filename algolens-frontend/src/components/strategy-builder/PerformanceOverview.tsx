@@ -61,8 +61,19 @@ export function PerformanceOverview({ metrics, theme }: PerformanceOverviewProps
         <div className={`p-3 border ${theme === 'dark' ? 'bg-gray-950 border-gray-800' : 'bg-gray-50 border-gray-200'
           }`}>
           <div className={`text-xs mb-1 ${theme === 'dark' ? 'text-gray-500' : 'text-gray-400'}`}>SORTINO</div>
-          <div className="text-base">{metrics.advancedMetrics.sortinoRatio.toFixed(2)}</div>
-          <div className={`text-xs ${theme === 'dark' ? 'text-gray-600' : 'text-gray-400'}`}>Downside only</div>
+          {/* null means there is no downside to divide by. Show that rather than a
+              number -- this used to fall back to a hardcoded 0.1 denominator, which
+              reported a Sortino of 100.00 for a book that had simply never lost. */}
+          <div className="text-base">
+            {metrics.advancedMetrics.sortinoRatio === null
+              ? '—'
+              : metrics.advancedMetrics.sortinoRatio.toFixed(2)}
+          </div>
+          <div className={`text-xs ${theme === 'dark' ? 'text-gray-600' : 'text-gray-400'}`}>
+            {metrics.advancedMetrics.sortinoRatio === null
+              ? 'No measurable downside'
+              : 'Downside only'}
+          </div>
         </div>
 
         <div className={`p-3 border ${theme === 'dark' ? 'bg-gray-950 border-gray-800' : 'bg-gray-50 border-gray-200'
