@@ -36,6 +36,30 @@ from algolens.infrastructure.config.dependencies import create_portfolio_depende
 
 portfolio_bp = Blueprint("portfolio", __name__)
 
+# Rendered from PositionValidationError.code rather than from the exception
+# itself, so no exception text can reach a client (CodeQL py/stack-trace-
+# exposure). Every message here is authored, not derived.
+VALIDATION_MESSAGES = {
+    "not_an_object": "Request body must be a JSON object",
+    "portfolio_type_forbidden": (
+        "portfolio_type may not be supplied by the caller: this endpoint "
+        "writes the qt stream only. Other portfolio types are read-only."
+    ),
+    "missing_strategy_id": "Missing required field: strategy_id",
+    "missing_symbol": "Missing required field: symbol",
+    "missing_quantity": "Missing required field: quantity",
+    "missing_reason": "Missing required field: reason",
+    "empty_symbol": "Field 'symbol' must not be empty",
+    "empty_strategy_id": "Field 'strategy_id' must not be empty",
+    "empty_reason": (
+        "Field 'reason' must not be empty: an override with no stated reason "
+        "is indistinguishable from an accident when read back months later"
+    ),
+    "quantity_not_a_number": "Field 'quantity' must be a number",
+    "price_not_a_number": "Field 'average_price' must be a number",
+    "price_negative": "Field 'average_price' must not be negative",
+}
+
 # Incubation is an internal member-only surface. Default-deny: an unrecognised
 # or absent role is refused, so new roles stay locked out until explicitly added.
 INTERNAL_ROLES = frozenset({"admin", "general_member"})
@@ -283,20 +307,30 @@ def upsert_position():
         )
         return jsonify(result), 201
     except PositionValidationError as exc:
-        return jsonify({"error": str(exc)}), 400
+        message = VALIDATION_MESSAGES.get(exc.code, "Invalid request body")
+        return jsonify({"error": message, "code": exc.code}), 400
     except StrategyNotFound:
         return jsonify({"error": "Strategy not found"}), 404
     except RiskAcknowledgementRequired as exc:
         return jsonify(
             {
-                "error": str(exc),
+                "error": "This position breaches a risk limit",
                 "risk_check": exc.verdict,
                 "resubmit_with": "acknowledge_risk",
             }
         ), 409
     except StrategyNameUnresolved as exc:
+        # The detail names internal strategy and portfolio ids, so it is logged
+        # rather than returned.
         current_app.logger.error("Strategy name unresolved: %s", exc)
-        return jsonify({"error": str(exc)}), 409
+        return jsonify(
+            {
+                "error": (
+                    "The engine has not written any positions for this strategy "
+                    "yet, so this edit cannot be attached to a book."
+                )
+            }
+        ), 409
     except Exception:
         current_app.logger.error("Failed to write position", exc_info=True)
         return jsonify({"error": "Failed to write position"}), 500

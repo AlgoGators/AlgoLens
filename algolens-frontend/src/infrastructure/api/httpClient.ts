@@ -140,10 +140,18 @@ export async function fetchWithAuth(url: string): Promise<Response> {
  * httpOnly and is never readable here.
  */
 function readCookie(name: string): string | null {
-  const match = document.cookie.match(
-    new RegExp(`(?:^|;\s*)${name}=([^;]*)`),
-  );
-  return match ? decodeURIComponent(match[1]) : null;
+  // Split rather than build a RegExp. Interpolating into a template literal
+  // silently swallowed the escape in "\s" -- an unrecognised escape in a
+  // template literal is just the character -- so the pattern degraded to
+  // ";s*" and missed the cookie whenever it was not the first one.
+  for (const part of document.cookie.split(";")) {
+    const separator = part.indexOf("=");
+    if (separator === -1) continue;
+    if (part.slice(0, separator).trim() === name) {
+      return decodeURIComponent(part.slice(separator + 1));
+    }
+  }
+  return null;
 }
 
 /**

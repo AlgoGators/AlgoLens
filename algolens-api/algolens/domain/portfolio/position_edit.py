@@ -22,7 +22,16 @@ REQUIRED_FIELDS = ("strategy_id", "symbol", "quantity", "reason")
 
 
 class PositionValidationError(Exception):
-    """Bad input from the caller. Maps to HTTP 400."""
+    """Bad input from the caller. Maps to HTTP 400.
+
+    Carries a stable `code` as well as the human message. The HTTP adapter
+    renders the response from the code rather than from this exception, so no
+    exception text ever reaches a client -- see VALIDATION_MESSAGES there.
+    """
+
+    def __init__(self, code, message):
+        super().__init__(message)
+        self.code = code
 
 
 def validate_position_payload(payload):
@@ -31,44 +40,60 @@ def validate_position_payload(payload):
     Returns a new dict; does not mutate the input.
     """
     if not isinstance(payload, dict):
-        raise PositionValidationError("Request body must be a JSON object")
+        raise PositionValidationError(
+            "not_an_object", "Request body must be a JSON object"
+        )
 
     if "portfolio_type" in payload:
         raise PositionValidationError(
+            "portfolio_type_forbidden",
             "portfolio_type may not be supplied by the caller: this endpoint "
-            "writes the qt stream only. Other portfolio types are read-only."
+            "writes the qt stream only. Other portfolio types are read-only.",
         )
 
     for field in REQUIRED_FIELDS:
         if field not in payload or payload[field] is None:
-            raise PositionValidationError(f"Missing required field: {field}")
+            raise PositionValidationError(
+                f"missing_{field}", f"Missing required field: {field}"
+            )
 
     symbol = str(payload["symbol"]).strip().upper()
     if not symbol:
-        raise PositionValidationError("Field 'symbol' must not be empty")
+        raise PositionValidationError(
+            "empty_symbol", "Field 'symbol' must not be empty"
+        )
 
     strategy_id = str(payload["strategy_id"]).strip()
     if not strategy_id:
-        raise PositionValidationError("Field 'strategy_id' must not be empty")
+        raise PositionValidationError(
+            "empty_strategy_id", "Field 'strategy_id' must not be empty"
+        )
 
     reason = str(payload["reason"]).strip()
     if not reason:
         raise PositionValidationError(
+            "empty_reason",
             "Field 'reason' must not be empty: an override with no stated reason "
-            "is indistinguishable from an accident when read back months later"
+            "is indistinguishable from an accident when read back months later",
         )
 
     quantity = payload["quantity"]
     # bool is a subclass of int in Python; True would otherwise become 1 contract.
     if isinstance(quantity, bool) or not isinstance(quantity, Real):
-        raise PositionValidationError("Field 'quantity' must be a number")
+        raise PositionValidationError(
+            "quantity_not_a_number", "Field 'quantity' must be a number"
+        )
 
     average_price = payload.get("average_price")
     if average_price is not None:
         if isinstance(average_price, bool) or not isinstance(average_price, Real):
-            raise PositionValidationError("Field 'average_price' must be a number")
+            raise PositionValidationError(
+                "price_not_a_number", "Field 'average_price' must be a number"
+            )
         if average_price < 0:
-            raise PositionValidationError("Field 'average_price' must not be negative")
+            raise PositionValidationError(
+                "price_negative", "Field 'average_price' must not be negative"
+            )
 
     return {
         "strategy_id": strategy_id,
