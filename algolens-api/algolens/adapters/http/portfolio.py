@@ -13,18 +13,25 @@ from algolens.adapters.serializers.portfolio import (
     serialize_strategy_detail,
     serialize_strategy_list,
 )
-from algolens.application.portfolio.ports import IncubationError
+from algolens.application.portfolio.ports import (
+    IncubationError,
+    RiskAcknowledgementRequired,
+    StrategyNameUnresolved,
+)
 from algolens.application.portfolio.use_cases import (
     GetIncubationPerformance,
     GetStrategyDetail,
     ListIncubatingStrategies,
+    ListPositionOverrides,
     ListStrategies,
     PromoteToLive,
     RetireStrategy,
     StartIncubation,
     StrategyDataNotFound,
     StrategyNotFound,
+    UpsertQtPosition,
 )
+from algolens.domain.portfolio.position_edit import PositionValidationError
 from algolens.infrastructure.config.dependencies import create_portfolio_dependencies
 
 portfolio_bp = Blueprint("portfolio", __name__)
@@ -249,3 +256,65 @@ def retire_strategy(strategy_id):
             "Failed to retire %s: %s", strategy_id, str(exc), exc_info=True
         )
         return jsonify({"error": "Failed to retire strategy"}), 500
+
+
+@portfolio_bp.route("/positions", methods=["POST"])
+@jwt_required()
+@internal_only
+def upsert_position():
+    """Create or amend one position in the qt stream.
+
+    A risk breach does not block the write, but it does require the caller to
+    come back with acknowledge_risk=true (409 on the first attempt). Every write
+    lands in trading.position_overrides in the same transaction.
+    """
+    payload = request.get_json(silent=True)
+    acknowledge = bool((payload or {}).get("acknowledge_risk"))
+
+    # Parse the user_id from the JWT identity defensively.
+    user_id = get_jwt_identity()
+    if user_id is None:
+        return jsonify({"error": "Invalid user identity in token"}), 400
+
+    try:
+        registry, reader = _portfolio_dependencies()
+        result = UpsertQtPosition(registry, reader).execute(
+            payload, user_id=user_id, acknowledge_risk=acknowledge
+        )
+        return jsonify(result), 201
+    except PositionValidationError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except StrategyNotFound:
+        return jsonify({"error": "Strategy not found"}), 404
+    except RiskAcknowledgementRequired as exc:
+        return jsonify(
+            {
+                "error": str(exc),
+                "risk_check": exc.verdict,
+                "resubmit_with": "acknowledge_risk",
+            }
+        ), 409
+    except StrategyNameUnresolved as exc:
+        current_app.logger.error("Strategy name unresolved: %s", exc)
+        return jsonify({"error": str(exc)}), 409
+    except Exception:
+        current_app.logger.error("Failed to write position", exc_info=True)
+        return jsonify({"error": "Failed to write position"}), 500
+
+
+@portfolio_bp.route("/overrides/<strategy_id>", methods=["GET"])
+@jwt_required()
+@internal_only
+def get_overrides(strategy_id):
+    """The audit trail for one strategy, most recent first."""
+    try:
+        registry, reader = _portfolio_dependencies()
+        overrides = ListPositionOverrides(registry, reader).execute(strategy_id)
+        return jsonify({"overrides": overrides}), 200
+    except StrategyNotFound:
+        return jsonify({"error": "Strategy not found"}), 404
+    except Exception:
+        current_app.logger.error(
+            "Failed to fetch overrides for %s", strategy_id, exc_info=True
+        )
+        return jsonify({"error": "Failed to fetch overrides"}), 500
