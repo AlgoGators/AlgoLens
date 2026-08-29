@@ -1,6 +1,7 @@
 import type { Strategy, PortfolioData, HistoricalDataPoint } from '../../domain/portfolio/portfolioData';
 import type { IncubatingStrategy, IncubationPerformance } from '../../domain/portfolio/incubationData';
-import { API_BASE_URL, log } from './httpClient';
+import type { RiskCheck } from '../../domain/portfolio/positionEdit';
+import { API_BASE_URL, log, postWithAuth } from './httpClient';
 
 export class PortfolioApiService {
   // Debug method to test backend connectivity (call from browser console)
@@ -270,5 +271,60 @@ export class PortfolioApiService {
       .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
     return aggregated;
+  }
+
+  /**
+   * Write one position into the qt stream.
+   *
+   * Returns the outcome rather than throwing, because a 409 is not an error the
+   * caller should swallow: it means the write breached a published risk limit
+   * and needs a second, deliberate acknowledgement. Collapsing that into a
+   * thrown Error is how a UI ends up silently retrying and disabling the gate.
+   */
+  static async savePosition(input: {
+    strategy_id: string;
+    symbol: string;
+    quantity: number;
+    average_price?: number | null;
+    reason: string;
+    acknowledge_risk?: boolean;
+  }): Promise<
+    | { outcome: 'saved'; risk_check: RiskCheck }
+    | { outcome: 'needs_acknowledgement'; risk_check: RiskCheck }
+    | { outcome: 'rejected'; message: string }
+  > {
+    const response = await postWithAuth(`${API_BASE_URL}/portfolio/positions`, input);
+    const data = await response.json().catch(() => ({}));
+
+    if (response.status === 201) {
+      return { outcome: 'saved', risk_check: data.risk_check };
+    }
+    // A 409 carrying risk_check is the acknowledgeable one. The other 409
+    // (an unresolvable strategy_name) has no risk_check and is a flat refusal.
+    if (response.status === 409 && data.risk_check) {
+      return { outcome: 'needs_acknowledgement', risk_check: data.risk_check };
+    }
+    return { outcome: 'rejected', message: data.error || `Request failed (${response.status})` };
+  }
+
+  static async getPositionOverrides(strategyId: string): Promise<PositionOverride[]> {
+    const encodedId = encodeURIComponent(strategyId);
+    const response = await this.fetchWithAuth(`${API_BASE_URL}/portfolio/overrides/${encodedId}`);
+    const data = await response.json();
+    return data.overrides || [];
   }
 }
+
+export type PositionOverride = {
+  id: number;
+  user_id: string;
+  source_app: string;
+  strategy_id: string;
+  symbol: string;
+  before_state: Record<string, unknown>;
+  after_state: Record<string, unknown>;
+  reason: string;
+  risk_check_result: RiskCheck | null;
+  overrode_risk: boolean;
+  created_at: string;
+};

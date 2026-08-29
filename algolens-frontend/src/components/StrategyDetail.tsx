@@ -11,9 +11,11 @@ import { AlphaAttribution } from './AlphaAttribution';
 interface StrategyDetailProps {
   strategy: Strategy;
   onBack: () => void;
+  /** Re-fetch the book after a manual position edit. */
+  onPositionsChanged?: () => void;
 }
 
-export function StrategyDetail({ strategy, onBack }: StrategyDetailProps) {
+export function StrategyDetail({ strategy, onBack, onPositionsChanged }: StrategyDetailProps) {
   const [selectedPeriod, setSelectedPeriod] = useState('1M');
   const [selectedTab, setSelectedTab] = useState<'positions' | 'analysis' | 'activity'>('positions');
   const { theme } = useTheme();
@@ -233,7 +235,11 @@ export function StrategyDetail({ strategy, onBack }: StrategyDetailProps) {
 
       {/* Tab Content */}
       {selectedTab === 'positions' && (
-        <PositionBreakdown positions={strategy.positions} />
+        <PositionBreakdown
+          positions={strategy.positions}
+          strategyId={strategy.id}
+          onEdited={onPositionsChanged}
+        />
       )}
 
       {selectedTab === 'analysis' && (
