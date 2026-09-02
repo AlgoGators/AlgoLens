@@ -21,6 +21,7 @@ DEFAULT_REGISTRY = [
         "is_active": True,
         "lifecycle": "live",
         "sort_order": 0,
+        "mock_capital": None,
     }
 ]
 
@@ -40,6 +41,11 @@ def _normalize(row):
         "is_active": bool(row.get("is_active", True)),
         "lifecycle": row.get("lifecycle") or "live",
         "sort_order": int(row.get("sort_order") or 0),
+        # Needed wherever an incubating strategy is displayed: without it the
+        # trial size silently reads as absent.
+        "mock_capital": float(row["mock_capital"])
+        if row.get("mock_capital") is not None
+        else None,
     }
 
 
@@ -68,7 +74,8 @@ class PostgresStrategyRegistry:
                     cursor.execute(
                         """
                         SELECT id, strategy_type, portfolio_id, name, description,
-                               initial_equity, managers, is_active, lifecycle, sort_order
+                               initial_equity, managers, is_active, lifecycle,
+                               sort_order, mock_capital
                         FROM trading.strategy_registry
                         ORDER BY sort_order ASC, id ASC
                         """

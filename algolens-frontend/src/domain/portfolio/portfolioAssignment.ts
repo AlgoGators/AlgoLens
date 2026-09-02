@@ -120,6 +120,10 @@ export type PortfolioSummary = {
     lifecycle: string;
     /** null when the engine has published nothing for this (strategy, portfolio). */
     current_value: number | null;
+    /** Trial size when incubating. Never counted toward a book total. */
+    mock_capital?: number | null;
+    /** true for the book the engine reads where a single answer is needed. */
+    is_primary?: boolean;
   }[];
 };
 

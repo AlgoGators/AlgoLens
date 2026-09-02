@@ -391,43 +391,88 @@ class ListPortfolios:
         self.registry = registry
         self.reader = reader
 
+    def _books_by_strategy(self) -> dict[str, list[str]]:
+        """Which books each strategy belongs to.
+
+        Falls back to nothing when memberships are unavailable; the caller then
+        uses the primary column, so a partially migrated database still lists
+        every strategy exactly once rather than none at all.
+        """
+        try:
+            rows = self.registry.list_memberships()
+        except Exception as exc:
+            logger.error("[PORTFOLIOS] Membership read failed: %s", exc, exc_info=True)
+            return {}
+        by_strategy: dict[str, list[str]] = {}
+        for row in rows:
+            by_strategy.setdefault(row["strategy_id"], []).append(row["portfolio_id"])
+        return by_strategy
+
     def execute(self) -> list[dict[str, Any]]:
+        # Grouped by membership, not by the single primary column. A strategy can
+        # belong to several books, and listing it only under its primary made
+        # this view and the Books tab give different answers about the same data.
+        by_strategy = self._books_by_strategy()
         buckets: dict[str, dict[str, Any]] = {}
-        for cfg in self.registry.list(active_only=True):
-            portfolio_id = cfg["portfolio_id"]
-            bucket = buckets.setdefault(
-                portfolio_id,
-                {"portfolio_id": portfolio_id, "strategies": [], "total_value": 0.0},
-            )
-            # None, not 0.0. The engine keys live_results on
-            # (strategy_type, portfolio_id), so a strategy just moved to a new
-            # portfolio has no row until the engine publishes one. Reporting 0
-            # there would read as "this strategy is worth nothing" rather than
-            # "nothing has been published for this pairing yet".
-            value = None
-            try:
-                latest = self.reader.fetch_summary_row(
-                    cfg["strategy_type"], portfolio_id
+
+        # active_only=False: an incubating strategy still occupies its book, and
+        # omitting it made this view disagree with the Books tab about what a
+        # book contains. It is listed and marked; its mock capital is kept out
+        # of the total, because mock capital is not fund capital.
+        for cfg in self.registry.list(active_only=False):
+            lifecycle = (cfg.get("lifecycle") or "live").strip().lower()
+            if lifecycle == "retired":
+                continue
+            books = by_strategy.get(cfg["id"]) or [cfg["portfolio_id"]]
+            for portfolio_id in books:
+                bucket = buckets.setdefault(
+                    portfolio_id,
+                    {"portfolio_id": portfolio_id, "strategies": [], "total_value": 0.0},
                 )
-                if latest and latest.get("current_portfolio_value") is not None:
-                    value = float(latest["current_portfolio_value"])
-            except Exception as exc:
-                # A portfolio is still worth listing when one strategy's numbers
-                # are unreadable -- it just contributes nothing to the total.
-                logger.error(
-                    "[PORTFOLIOS] Failed to read %s: %s", cfg["id"], str(exc), exc_info=True
+                # None, not 0.0. The engine keys live_results on
+                # (strategy_type, portfolio_id), so a pairing it has not
+                # published for -- a strategy just added to a second book, for
+                # instance -- has no row. Reporting 0 there would read as "this
+                # strategy is worth nothing" rather than "nothing published yet".
+                #
+                # This is also what keeps the book totals honest under multi-book
+                # membership: a strategy contributes to a book only the capital
+                # the engine actually reports for that pairing, so nothing is
+                # counted twice.
+                value = None
+                # An incubating strategy trades mock capital. Its live_results
+                # row is history from before it was pulled, so reporting it
+                # here would put retired-from-live money in a live book total.
+                try:
+                    latest = None if lifecycle == "incubating" else self.reader.fetch_summary_row(
+                        cfg["strategy_type"], portfolio_id
+                    )
+                    if latest and latest.get("current_portfolio_value") is not None:
+                        value = float(latest["current_portfolio_value"])
+                except Exception as exc:
+                    # A book is still worth listing when one strategy's numbers
+                    # are unreadable -- it just contributes nothing to the total.
+                    logger.error(
+                        "[PORTFOLIOS] Failed to read %s in %s: %s",
+                        cfg["id"], portfolio_id, str(exc), exc_info=True,
+                    )
+                bucket["strategies"].append(
+                    {
+                        "id": cfg["id"],
+                        "name": cfg["name"],
+                        "strategy_type": cfg["strategy_type"],
+                        "lifecycle": lifecycle,
+                        "current_value": value,
+                        "mock_capital": (
+                            float(cfg["mock_capital"])
+                            if lifecycle == "incubating" and cfg.get("mock_capital") is not None
+                            else None
+                        ),
+                        "is_primary": portfolio_id == cfg["portfolio_id"],
+                    }
                 )
-            bucket["strategies"].append(
-                {
-                    "id": cfg["id"],
-                    "name": cfg["name"],
-                    "strategy_type": cfg["strategy_type"],
-                    "lifecycle": cfg.get("lifecycle") or "live",
-                    "current_value": value,
-                }
-            )
-            if value is not None:
-                bucket["total_value"] += value
+                if value is not None:
+                    bucket["total_value"] += value
 
         return sorted(buckets.values(), key=lambda b: b["portfolio_id"])
 

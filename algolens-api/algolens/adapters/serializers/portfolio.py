@@ -73,6 +73,8 @@ def serialize_portfolio(portfolio):
                 "strategy_type": s["strategy_type"],
                 "lifecycle": s["lifecycle"],
                 "current_value": _float_or_none(s["current_value"]),
+                "is_primary": s.get("is_primary", True),
+                "mock_capital": _float_or_none(s.get("mock_capital")),
             }
             for s in portfolio["strategies"]
         ],

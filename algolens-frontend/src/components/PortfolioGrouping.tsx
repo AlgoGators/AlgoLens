@@ -116,6 +116,11 @@ export function PortfolioGrouping() {
                   {strategy.lifecycle !== 'live' && (
                     <span className="ml-2 uppercase">· {strategy.lifecycle}</span>
                   )}
+                  {strategy.is_primary === false && (
+                    <span className="ml-2 uppercase" title="Also belongs to another book">
+                      · also here
+                    </span>
+                  )}
                 </div>
               </div>
               <div className="flex items-center gap-4">
@@ -123,7 +128,15 @@ export function PortfolioGrouping() {
                     (strategy, portfolio) pairing yet -- which is exactly what
                     happens right after a move. Showing $0 would read as
                     "worth nothing" instead of "not published yet". */}
-                {strategy.current_value === null ? (
+                {/* An incubating strategy trades mock capital, which is not fund
+                    capital -- shown, but never added to the book total. */}
+                {strategy.lifecycle === 'incubating' ? (
+                  <span className={`text-xs ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
+                    {strategy.mock_capital != null
+                      ? `$${strategy.mock_capital.toLocaleString('en-US', { maximumFractionDigits: 0 })} mock`
+                      : 'mock capital'}
+                  </span>
+                ) : strategy.current_value === null ? (
                   <span
                     className={`text-xs ${isDark ? 'text-amber-400' : 'text-amber-600'}`}
                     title="The engine has not published results for this strategy in this portfolio yet"
