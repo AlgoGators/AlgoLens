@@ -234,3 +234,59 @@ def test_overrides_are_listed_by_the_engine_strategy_type_not_the_display_id():
 def test_overrides_for_an_unknown_strategy_are_not_found():
     with pytest.raises(StrategyNotFound):
         ListPositionOverrides(_Registry(None), _Reader()).execute("nope")
+
+
+def test_evaluate_risk_accepts_decimal_rows_from_the_database():
+    # psycopg2 returns NUMERIC columns as Decimal; the proposal is a float.
+    # Decimal + float raises TypeError, and this only shows up against a real
+    # database, so the unit suite has to inject it deliberately.
+    from decimal import Decimal
+
+    book = [{"symbol": "NQ", "quantity": Decimal("5"), "average_price": Decimal("18420.50")}]
+    proposed = {"symbol": "ES", "quantity": 20, "average_price": 5280.25}
+    envelope = {"max_gross_notional": 1000.0}
+    verdict = evaluate_risk(envelope, book, proposed)
+    assert verdict["evaluated"] is True
+    assert verdict["passed"] is False
+    assert isinstance(verdict["breaches"][0]["actual"], float)
+
+
+def test_a_quantity_only_edit_is_risk_checked_at_the_existing_price():
+    # The UI sends no average_price to mean "keep it". The gate must price the
+    # proposal from the existing row, not treat the blank as zero notional.
+    from algolens.domain.portfolio.position_edit import with_known_price
+
+    book = [{"symbol": "ES", "quantity": 12, "average_price": 5280.25}]
+    proposed = {"symbol": "ES", "quantity": 20, "average_price": None}
+    priced = with_known_price(book, proposed)
+    assert priced["average_price"] == 5280.25
+
+    envelope = {"max_symbol_notional": {"ES": 70000}}
+    verdict = evaluate_risk(envelope, book, priced)
+    assert verdict["passed"] is False
+    assert verdict["breaches"][0]["limit"] == "max_symbol_notional"
+
+
+def test_a_new_symbol_with_no_price_still_cannot_be_priced():
+    from algolens.domain.portfolio.position_edit import with_known_price
+
+    proposed = {"symbol": "NEW", "quantity": 5, "average_price": None}
+    assert with_known_price([], proposed) is proposed
+
+
+def test_an_explicit_price_is_never_overridden_by_the_book():
+    from algolens.domain.portfolio.position_edit import with_known_price
+
+    book = [{"symbol": "ES", "quantity": 12, "average_price": 5280.25}]
+    proposed = {"symbol": "ES", "quantity": 20, "average_price": 6000.0}
+    assert with_known_price(book, proposed)["average_price"] == 6000.0
+
+
+def test_a_null_average_price_does_not_take_down_the_detail_view():
+    from algolens.domain.portfolio.calculations import transform_positions
+
+    rows = [{"symbol": "ES", "quantity": 20, "average_price": None,
+             "daily_unrealized_pnl": 0, "daily_realized_pnl": 0}]
+    out = transform_positions(rows, 100000.0)
+    assert out[0]["symbol"] == "ES"
+    assert out[0]["priceUnknown"] is True

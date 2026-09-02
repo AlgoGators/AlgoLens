@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Pencil, Plus } from 'lucide-react';
 import { useTheme } from '../adapters/react/ThemeContext';
-import { useAuth } from '../adapters/react/AuthContext';
+import { useAuth } from '../adapters/react/useAuth';
 import { isInternalRole } from '../domain/identity/user';
 import type { Position } from '../domain/portfolio/portfolioData';
 import { EditPositionModal } from './EditPositionModal';

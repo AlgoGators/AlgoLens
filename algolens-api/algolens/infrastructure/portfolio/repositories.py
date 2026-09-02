@@ -1,3 +1,4 @@
+import logging
 """Postgres portfolio readers."""
 
 import json
@@ -9,6 +10,7 @@ import psycopg2
 from algolens.application.portfolio.ports import (
     IncubationError,
     IncubationPerformanceRows,
+    IncubationStorageError,
     PortfolioDetailRows,
     StrategyNameUnresolved,
 )
@@ -19,10 +21,26 @@ from algolens.domain.portfolio.position_edit import (
 from algolens.domain.portfolio.streams import PORTFOLIO_STREAMS, PRIMARY_STREAM
 from algolens.infrastructure.db.postgres import get_db_connection
 
+logger = logging.getLogger(__name__)
+
 _PORTFOLIO_TYPE_CACHE_TTL_SECONDS = 300
 _has_portfolio_type_cache = None
 _has_portfolio_type_expires_at = 0
 
+
+
+def _plain_number(value):
+    """Decimal from a NUMERIC column -> float, so domain arithmetic and JSON both work."""
+    return float(value) if value is not None else None
+
+
+def _plain_position(row):
+    """Position row with NUMERIC fields coerced, and nothing else changed."""
+    out = dict(row)
+    for key in ("quantity", "average_price", "daily_unrealized_pnl", "daily_realized_pnl"):
+        if key in out:
+            out[key] = _plain_number(out[key])
+    return out
 
 class PostgresPortfolioRepository:
     def __init__(self, connection_factory=None):
@@ -371,7 +389,8 @@ class PostgresPortfolioRepository:
             conn.commit()
         except psycopg2.Error as exc:
             conn.rollback()
-            raise IncubationError(f"Database error: {exc}") from exc
+            logger.error("Incubation write failed: %s", exc, exc_info=True)
+            raise IncubationStorageError("Database error") from exc
         finally:
             conn.close()
 
@@ -412,7 +431,8 @@ class PostgresPortfolioRepository:
             conn.commit()
         except psycopg2.Error as exc:
             conn.rollback()
-            raise IncubationError(f"Database error: {exc}") from exc
+            logger.error("Incubation write failed: %s", exc, exc_info=True)
+            raise IncubationStorageError("Database error") from exc
         finally:
             conn.close()
 
@@ -448,7 +468,8 @@ class PostgresPortfolioRepository:
             conn.commit()
         except psycopg2.Error as exc:
             conn.rollback()
-            raise IncubationError(f"Database error: {exc}") from exc
+            logger.error("Incubation write failed: %s", exc, exc_info=True)
+            raise IncubationStorageError("Database error") from exc
         finally:
             conn.close()
 
@@ -512,7 +533,7 @@ class PostgresPortfolioRepository:
                     """,
                     (strategy_type, portfolio_id, QT_STREAM),
                 )
-                return [dict(r) for r in cursor.fetchall()]
+                return [_plain_position(r) for r in cursor.fetchall()]
         finally:
             conn.close()
 
@@ -539,7 +560,7 @@ class PostgresPortfolioRepository:
             (strategy_type, portfolio_id, QT_STREAM, symbol),
         )
         row = cursor.fetchone()
-        return dict(row) if row else None
+        return _plain_position(row) if row else None
 
     def _resolve_strategy_name(self, cursor, strategy_type, portfolio_id):
         """The engine's own strategy_name for this book.
@@ -618,8 +639,12 @@ class PostgresPortfolioRepository:
                             _date.today(),
                             normalized["symbol"],
                             QT_STREAM,
-                            normalized["quantity"],
-                            normalized["average_price"],
+                            after["quantity"],
+                            # after, not normalized: a blank price on an edit means
+                            # "keep it", and build_after_state already carried the
+                            # existing price forward. Writing the raw proposal here
+                            # wiped average_price on every quantity-only edit.
+                            after.get("average_price"),
                         ),
                     )
                     position = dict(cursor.fetchone())

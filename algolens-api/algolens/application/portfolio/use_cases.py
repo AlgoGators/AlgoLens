@@ -38,6 +38,7 @@ from algolens.domain.portfolio.calculations import (
 )
 from algolens.domain.portfolio.incubation import compute_incubation_window
 from algolens.domain.portfolio.position_edit import (
+    with_known_price,
     evaluate_risk,
     validate_position_payload,
 )
@@ -349,7 +350,7 @@ class UpsertQtPosition:
         # The verdict describes the book at gate-evaluation time, not at commit
         # time. That is acceptable because the gate is advisory by design: a
         # breach never blocks, it only requires acknowledgement.
-        verdict = evaluate_risk(envelope, book, normalized)
+        verdict = evaluate_risk(envelope, book, with_known_price(book, normalized))
 
         if not verdict["passed"] and not acknowledge_risk:
             raise RiskAcknowledgementRequired(verdict)

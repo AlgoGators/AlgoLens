@@ -1,7 +1,7 @@
 import React from 'react';
 import { Home, TrendingUp, FileText, FlaskConical, User } from 'lucide-react';
 import { isInternalRole } from '../domain/identity/user';
-import { useAuth } from '../adapters/react/AuthContext';
+import { useAuth } from '../adapters/react/useAuth';
 import { useTheme } from '../adapters/react/ThemeContext';
 
 interface BottomNavProps {

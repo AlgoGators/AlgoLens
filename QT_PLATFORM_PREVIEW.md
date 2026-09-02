@@ -27,10 +27,22 @@ The engine half is a **separate branch in a separate repo**, because the platfor
 That is what publishes the risk limits this app checks edits against, and what writes the
 three portfolio streams.
 
+## Audit and local database
+
+**Read [`QT_PLATFORM_AUDIT.md`](QT_PLATFORM_AUDIT.md) before relying on this branch.** It lists
+seven bugs found and fixed by driving every feature against a real Postgres -- three of
+them would have broken or silently bypassed the risk gate on first use -- and everything
+still open, ordered by urgency.
+
+To run against a local database with realistic data, use
+`algolens-api/scripts/demo_seed.sql`. It carries four schema pieces the first seed lacked,
+each of which produced a 500 that looked like an app bug. Login is `admin@admin.com` /
+`admin`, local only.
+
 ## Verified on this branch
 
-- 81 backend tests pass
-- 63 frontend tests pass
+- 126 backend tests pass
+- 82 frontend tests pass
 - Production frontend build clean
 
 Note that `npm run build` does **not** typecheck — there is no `tsconfig.json` and no

@@ -159,3 +159,13 @@ class PortfolioReaderPort(Protocol):
         self, strategy_type: str, limit: int = 100
     ) -> Sequence[Mapping[str, Any]]:
         ...
+
+
+class IncubationStorageError(IncubationError):
+    """The database refused an incubation write.
+
+    Distinct from IncubationError so the HTTP layer can answer 500 with a fixed
+    message. The parent is rendered with str(exc), which is right for the
+    domain messages it carries and wrong for a psycopg2 error: those name
+    columns and SQL, and were reaching clients as a 400.
+    """

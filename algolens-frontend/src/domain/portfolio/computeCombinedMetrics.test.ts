@@ -378,3 +378,21 @@ describe('sortino ratio', () => {
     expect(out.advancedMetrics.sortinoRatio).toBeNull();
   });
 });
+
+describe('placeholder strategies', () => {
+  it('excludes a strategy the engine has not published from every aggregate', () => {
+    // Its zeros are shape-fillers. Letting it in would produce a 0% allocation
+    // slice and a $0 summary line that both read as measurements.
+    const priced = strategy({
+      id: 'a',
+      currentValue: 100000,
+      invested: 100000,
+      positions: [pos('ES', 100000)],
+    });
+    const placeholder = strategy({ id: 'b', dataAvailable: false, currentValue: 0, invested: 0 });
+    const out = computeCombinedMetrics([priced, placeholder], ['a', 'b']);
+    expect(out.strategies.map(s => s.id)).toEqual(['a']);
+    expect(out.strategyAllocation.map(s => s.name)).toEqual(['a']);
+    expect(out.totalValue).toBe(100000);
+  });
+});

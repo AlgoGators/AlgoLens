@@ -1,7 +1,7 @@
 import React from 'react';
 import { X, Moon, Sun, LogOut, ChevronRight } from 'lucide-react';
 import { useTheme } from '../adapters/react/ThemeContext';
-import { useAuth } from '../adapters/react/AuthContext';
+import { useAuth } from '../adapters/react/useAuth';
 import logo from '../assets/logo.png';
 
 interface ProfileScreenProps {

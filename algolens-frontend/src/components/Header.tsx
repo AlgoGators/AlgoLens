@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Bell, FlaskConical, Library, User, X } from 'lucide-react';
 import logo from '../assets/logo.png';
 import { isInternalRole } from '../domain/identity/user';
-import { useAuth } from '../adapters/react/AuthContext';
+import { useAuth } from '../adapters/react/useAuth';
 import { useTheme } from '../adapters/react/ThemeContext';
 
 interface HeaderProps {

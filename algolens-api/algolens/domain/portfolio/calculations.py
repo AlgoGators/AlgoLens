@@ -28,7 +28,11 @@ def transform_positions(positions: Sequence[Any], current_value: float) -> list[
     transformed = []
     for pos in positions:
         quantity = float(_get(pos, "quantity"))
-        average_price = float(_get(pos, "average_price"))
+        # A NULL price must not take the whole detail view down. Treated as 0.0
+        # for the notional maths and flagged, so the row still renders and the
+        # UI can say the price is unknown rather than showing a fabricated one.
+        raw_price = _get(pos, "average_price")
+        average_price = float(raw_price) if raw_price is not None else 0.0
         notional = abs(quantity * average_price)
         transformed.append(
             {
@@ -37,6 +41,7 @@ def transform_positions(positions: Sequence[Any], current_value: float) -> list[
                 "shares": quantity,
                 "quantity": quantity,
                 "costBasis": average_price,
+                "priceUnknown": raw_price is None,
                 "currentValue": notional,
                 "marketPrice": average_price,
                 "notional": notional,
@@ -118,11 +123,11 @@ def transform_finalized(yesterday_positions: Sequence[Any], positions: Sequence[
     for yesterday in yesterday_positions:
         symbol = _get(yesterday, "symbol")
         yesterday_qty = float(_get(yesterday, "quantity"))
-        yesterday_price = float(_get(yesterday, "average_price"))
+        yesterday_price = float(_get(yesterday, "average_price") or 0.0)
 
         today_pos = next((p for p in positions if _get(p, "symbol") == symbol), None)
         today_qty = float(_get(today_pos, "quantity")) if today_pos else 0
-        today_price = float(_get(today_pos, "average_price")) if today_pos else yesterday_price
+        today_price = float(_get(today_pos, "average_price") or 0.0) if today_pos else yesterday_price
 
         if today_qty - yesterday_qty != 0:
             realized_pnl = float(_get(yesterday, "daily_realized_pnl") or 0)

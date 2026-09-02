@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import logo from '../assets/logo.png';
-import { useAuth } from '../adapters/react/AuthContext';
+import { useAuth } from '../adapters/react/useAuth';
 
 interface RegisterViewProps {
   onBackToLogin: () => void;

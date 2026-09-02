@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { ArrowLeft, ChevronRight, User, Mail, Phone, MapPin, Briefcase, Calendar } from 'lucide-react';
 import { useTheme } from '../adapters/react/ThemeContext';
-import { useAuth } from '../adapters/react/AuthContext';
+import { useAuth } from '../adapters/react/useAuth';
 
 interface AccountSettingsProps {
   onBack: () => void;

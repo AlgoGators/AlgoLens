@@ -217,7 +217,13 @@ export function computeCombinedMetrics(
   strategies: Strategy[],
   selectedStrategyIds: string[]
 ): CombinedMetrics {
-  const selected = strategies.filter(s => selectedStrategyIds.includes(s.id));
+  // A strategy with dataAvailable === false carries placeholder zeros, not
+  // measurements. It must not reach the maths: a zero-value strategy would show
+  // up as a 0% allocation slice and a $0 line in the summary, both of which read
+  // as real. The selection UI shows it as awaiting data instead.
+  const selected = strategies.filter(
+    s => selectedStrategyIds.includes(s.id) && s.dataAvailable !== false,
+  );
 
   if (selected.length === 0) {
     return emptyCombined();

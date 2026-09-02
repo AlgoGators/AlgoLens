@@ -14,7 +14,7 @@ import { IncubationScreen } from './IncubationScreen';
 import type { PortfolioData } from '../domain/portfolio/portfolioData';
 import { PortfolioApplicationService } from '../application/portfolio/portfolioService';
 import { isInternalRole } from '../domain/identity/user';
-import { useAuth } from '../adapters/react/AuthContext';
+import { useAuth } from '../adapters/react/useAuth';
 import { useTheme } from '../adapters/react/ThemeContext';
 import { BooksScreen } from './BooksScreen';
 

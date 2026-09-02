@@ -62,6 +62,11 @@ export function StrategySelection({ strategies, selectedStrategies, onToggle, th
                 </div>
               </div>
 
+              {strategy.dataAvailable === false ? (
+                <div className={`text-xs ${theme === 'dark' ? 'text-amber-400' : 'text-amber-600'}`}>
+                  awaiting engine data
+                </div>
+              ) : (
               <div className="grid grid-cols-3 gap-2 text-xs">
                 <div>
                   <div className={isSelected ? 'text-gray-500' : theme === 'dark' ? 'text-gray-500' : 'text-gray-400'}>VAL</div>
@@ -78,6 +83,7 @@ export function StrategySelection({ strategies, selectedStrategies, onToggle, th
                   <div>{strategy.metrics.sharpeRatio.toFixed(2)}</div>
                 </div>
               </div>
+              )}
             </button>
           );
         })}

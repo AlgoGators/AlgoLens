@@ -19,6 +19,7 @@ from algolens.adapters.serializers.portfolio import (
 )
 from algolens.application.portfolio.ports import (
     IncubationError,
+    IncubationStorageError,
     MembershipAcknowledgementRequired,
     PortfolioReassignmentAcknowledgementRequired,
     RiskAcknowledgementRequired,
@@ -249,6 +250,10 @@ def start_strategy_incubation(strategy_id):
         )
         current_app.logger.info("Started incubation for strategy %s", strategy_id)
         return jsonify({"message": "Incubation started"}), 201
+    except IncubationStorageError:
+        # Detail is in the server log. The driver message names columns and
+        # SQL, and a storage fault is not a client error.
+        return jsonify({"error": "Incubation change could not be saved"}), 500
     except IncubationError as exc:
         return jsonify({"error": str(exc)}), _incubation_error_status(exc)
     except Exception as exc:
@@ -281,6 +286,10 @@ def promote_strategy_to_live(strategy_id):
         )
         current_app.logger.info("Promoted strategy %s to live", strategy_id)
         return jsonify({"message": "Strategy promoted to live"}), 200
+    except IncubationStorageError:
+        # Detail is in the server log. The driver message names columns and
+        # SQL, and a storage fault is not a client error.
+        return jsonify({"error": "Incubation change could not be saved"}), 500
     except IncubationError as exc:
         return jsonify({"error": str(exc)}), _incubation_error_status(exc)
     except Exception as exc:
@@ -310,6 +319,10 @@ def retire_strategy(strategy_id):
         )
         current_app.logger.info("Retired strategy %s", strategy_id)
         return jsonify({"message": "Strategy retired"}), 200
+    except IncubationStorageError:
+        # Detail is in the server log. The driver message names columns and
+        # SQL, and a storage fault is not a client error.
+        return jsonify({"error": "Incubation change could not be saved"}), 500
     except IncubationError as exc:
         return jsonify({"error": str(exc)}), _incubation_error_status(exc)
     except Exception as exc:
