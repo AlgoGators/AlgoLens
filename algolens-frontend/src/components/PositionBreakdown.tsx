@@ -32,7 +32,14 @@ export function PositionBreakdown({ positions, strategyId, onEdited }: PositionB
   const canEdit = Boolean(strategyId) && isInternalRole(user?.role);
   const columns = canEdit ? 'grid-cols-6' : 'grid-cols-5';
 
-  const totalNotional = positions.reduce((sum, pos) => sum + (pos.notional || pos.currentValue), 0);
+  // Positions with no known price contribute a placeholder zero, so they are
+  // excluded rather than quietly dragging the total down.
+  const pricedPositions = positions.filter(p => !p.priceUnknown);
+  const totalNotional = pricedPositions.reduce(
+    (sum, pos) => sum + (pos.notional || pos.currentValue),
+    0,
+  );
+  const unpricedCount = positions.length - pricedPositions.length;
 
   return (
     <div>
@@ -102,13 +109,22 @@ export function PositionBreakdown({ positions, strategyId, onEdited }: PositionB
                 </div>
               </div>
               <div className="text-right">{position.shares}</div>
+              {/* An unknown price makes the price, the notional and the share
+                  of the book all meaningless. Showing $0.00 would state that
+                  the position is worthless. */}
               <div className="text-right">
-                ${marketPrice.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                {position.priceUnknown
+                  ? '—'
+                  : `$${marketPrice.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
               </div>
               <div className="text-right">
-                ${notional.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                {position.priceUnknown
+                  ? '—'
+                  : `$${notional.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
               </div>
-              <div className="text-right">{percentOfTotal.toFixed(2)}%</div>
+              <div className="text-right">
+                {position.priceUnknown ? '—' : `${percentOfTotal.toFixed(2)}%`}
+              </div>
               {canEdit && (
                 <div className="text-right">
                   <button
@@ -142,6 +158,12 @@ export function PositionBreakdown({ positions, strategyId, onEdited }: PositionB
         }`}>
           <div className="col-span-3">
             <div className="mb-1">Active Positions: {positions.length}</div>
+            {unpricedCount > 0 && (
+              <div className={`text-sm ${theme === 'dark' ? 'text-amber-400' : 'text-amber-600'}`}>
+                Total excludes {unpricedCount}{' '}
+                {unpricedCount === 1 ? 'position' : 'positions'} with no known price.
+              </div>
+            )}
           </div>
           <div className="text-right">
             <div className={`text-sm ${

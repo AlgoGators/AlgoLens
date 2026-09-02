@@ -161,6 +161,29 @@ class PortfolioReaderPort(Protocol):
         ...
 
 
+class BookNotEmpty(Exception):
+    """A book still holds strategies and cannot be deleted. Maps to HTTP 409.
+
+    Carries the count so the adapter can build its own message. Rendering
+    str(exc) straight into a response is how raw database text reached clients
+    from the incubation routes; the shape is avoided here rather than repeated.
+    """
+
+    def __init__(self, portfolio_id, occupied):
+        super().__init__(f"{portfolio_id} still holds {occupied} strategies")
+        self.portfolio_id = portfolio_id
+        self.occupied = occupied
+
+
+class StrategyNotInRegistry(IncubationError):
+    """No such strategy. Maps to HTTP 404.
+
+    Typed rather than detected by searching the message for "not found": a
+    reason string containing those words would otherwise change the status code
+    of an unrelated failure.
+    """
+
+
 class IncubationStorageError(IncubationError):
     """The database refused an incubation write.
 

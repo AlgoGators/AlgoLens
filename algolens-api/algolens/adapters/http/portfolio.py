@@ -18,12 +18,14 @@ from algolens.adapters.serializers.portfolio import (
     serialize_strategy_list,
 )
 from algolens.application.portfolio.ports import (
+    BookNotEmpty,
     IncubationError,
     IncubationStorageError,
     MembershipAcknowledgementRequired,
     PortfolioReassignmentAcknowledgementRequired,
     RiskAcknowledgementRequired,
     StrategyNameUnresolved,
+    StrategyNotInRegistry,
 )
 from algolens.application.portfolio.use_cases import (
     ChangeBookMembership,
@@ -134,7 +136,13 @@ def _request_user_id():
 
 
 def _incubation_error_status(exc):
-    return 404 if "not found" in str(exc).lower() else 400
+    """404 for a missing strategy, 400 for a lifecycle rule.
+
+    Decided on the exception type. This used to search the message for the words
+    "not found", which meant a reason string containing them silently turned a
+    400 into a 404.
+    """
+    return 404 if isinstance(exc, StrategyNotInRegistry) else 400
 
 
 @portfolio_bp.route("/strategy/<strategy_id>", methods=["GET"])
@@ -538,9 +546,20 @@ def delete_book(portfolio_id):
             ),
             400,
         )
-    except ValueError as exc:
-        # Occupied. The message names the count, which is safe to surface.
-        return jsonify({"error": str(exc), "code": "book_not_empty"}), 409
+    except BookNotEmpty as exc:
+        return (
+            jsonify(
+                {
+                    "error": (
+                        f"{exc.portfolio_id} still holds {exc.occupied} "
+                        f"{'strategy' if exc.occupied == 1 else 'strategies'}. "
+                        f"Move them to another book first."
+                    ),
+                    "code": "book_not_empty",
+                }
+            ),
+            409,
+        )
     except Exception as exc:
         current_app.logger.error("Failed to delete book: %s", str(exc), exc_info=True)
         return jsonify({"error": "Failed to delete the book"}), 500
@@ -550,7 +569,28 @@ def delete_book(portfolio_id):
 @jwt_required()
 @internal_only
 def add_strategy_to_book(portfolio_id):
-    """Put a strategy in this book. It keeps the books it is already in."""
+    """Put a strategy in this book. It keeps the books it is already in.
+
+    A reason is required, as it is for removal. Adding needs no acknowledgement
+    -- nothing is taken away -- but it still changes what a book contains, and a
+    change with no stated reason is indistinguishable from an accident when the
+    audit trail is read back months later.
+    """
+    payload = request.get_json(silent=True) or {}
+    if not str(payload.get("reason") or "").strip():
+        return (
+            jsonify(
+                {
+                    "error": (
+                        "Field 'reason' must not be empty: a book change with no "
+                        "stated reason is indistinguishable from an accident when "
+                        "read back months later"
+                    ),
+                    "code": "empty_reason",
+                }
+            ),
+            400,
+        )
     return _change_book_membership(portfolio_id, "add")
 
 
@@ -570,6 +610,20 @@ def _change_book_membership(portfolio_id, action, strategy_id=None):
     payload = request.get_json(silent=True) or {}
     if not isinstance(payload, dict):
         return jsonify({"error": "Request body must be a JSON object"}), 400
+    if not str(payload.get("reason") or "").strip():
+        return (
+            jsonify(
+                {
+                    "error": (
+                        "Field 'reason' must not be empty: a book change with no "
+                        "stated reason is indistinguishable from an accident when "
+                        "read back months later"
+                    ),
+                    "code": "empty_reason",
+                }
+            ),
+            400,
+        )
     strategy_id = strategy_id or payload.get("strategy_id")
     if not strategy_id:
         return jsonify({"error": "Missing required field: strategy_id"}), 400

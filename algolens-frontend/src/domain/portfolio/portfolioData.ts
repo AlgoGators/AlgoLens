@@ -6,6 +6,11 @@ export interface Position {
   currentValue: number;
   quantity?: number;
   marketPrice?: number;
+  /**
+   * true when the engine has no average_price for this row. Every price and
+   * notional derived from it is then a placeholder, not a measurement.
+   */
+  priceUnknown?: boolean;
   notional?: number;
   percentOfTotal?: number;
 }

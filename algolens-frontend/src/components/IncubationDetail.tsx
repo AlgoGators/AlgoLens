@@ -142,6 +142,18 @@ export function IncubationDetail({
             <div className="text-3xl md:text-4xl mb-2">
               {formatEquity(currentEquity)}
             </div>
+            {/* No equity points means the trial has not recorded a day yet.
+                "+0.00%" would state a measured flat return, which is a
+                different and false claim. */}
+            {historicalData.length === 0 ? (
+              <div
+                className={`text-lg ${
+                  theme === 'dark' ? 'text-gray-400' : 'text-gray-500'
+                }`}
+              >
+                No trading days recorded yet
+              </div>
+            ) : (
             <div
               className={`flex items-center gap-2 text-lg ${
                 periodReturn.value >= 0 ? 'text-orange-500' : 'text-red-500'
@@ -161,8 +173,20 @@ export function IncubationDetail({
                 {periodReturn.percent.toFixed(2)}%) {periodLabel}
               </span>
             </div>
+            )}
           </div>
 
+          {historicalData.length === 0 ? (
+            <div
+              className={`mb-4 flex h-[300px] items-center justify-center rounded-lg border text-sm ${
+                theme === 'dark'
+                  ? 'border-gray-800 text-gray-500'
+                  : 'border-gray-200 text-gray-400'
+              }`}
+            >
+              The equity curve appears once the trial has its first day of data.
+            </div>
+          ) : (
           <div className="mb-4">
             <ResponsiveContainer width="100%" height={300}>
               <LineChart data={filteredData}>
@@ -203,6 +227,7 @@ export function IncubationDetail({
               </LineChart>
             </ResponsiveContainer>
           </div>
+          )}
 
           <div
             className={`flex items-center justify-between mb-8 border-b ${

@@ -29,6 +29,8 @@ export function BooksScreen() {
   const [notice, setNotice] = useState<string | null>(null);
   const [removing, setRemoving] = useState<RemoveTarget | null>(null);
   const [addingTo, setAddingTo] = useState<string | null>(null);
+  const [addStrategyId, setAddStrategyId] = useState('');
+  const [addReason, setAddReason] = useState('');
 
   const [newId, setNewId] = useState('');
   const [newName, setNewName] = useState('');
@@ -98,18 +100,24 @@ export function BooksScreen() {
   const allStrategies = new Map<string, { id: string; name: string }>();
   (books ?? []).forEach(b => b.strategies.forEach(st => allStrategies.set(st.id, st)));
 
-  async function handleAdd(book: Book, strategyId: string) {
+  function beginAdd(portfolioId: string) {
+    setAddingTo(portfolioId);
+    setAddStrategyId('');
+    setAddReason('');
+  }
+
+  async function handleAdd(book: Book) {
     setNotice(null);
     const result = await PortfolioApiService.addStrategyToBook({
       portfolio_id: book.portfolio_id,
-      strategy_id: strategyId,
-      reason: 'Added from the Books tab',
+      strategy_id: addStrategyId,
+      reason: addReason.trim(),
     });
-    setAddingTo(null);
     if (result.outcome === 'rejected') {
       setError(result.message);
       return;
     }
+    setAddingTo(null);
     setError(null);
     await load();
   }
@@ -303,12 +311,12 @@ export function BooksScreen() {
                   in, so it needs no confirmation step. */}
               <div className={`px-4 py-3 border-t ${isDark ? 'border-gray-800' : 'border-gray-200'}`}>
                 {addingTo === book.portfolio_id ? (
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
                     <select
                       autoFocus
                       aria-label={`Add a strategy to ${book.portfolio_id}`}
-                      defaultValue=""
-                      onChange={e => e.target.value && handleAdd(book, e.target.value)}
+                      value={addStrategyId}
+                      onChange={e => setAddStrategyId(e.target.value)}
                       className={`rounded-lg border px-2 py-1.5 text-sm ${
                         isDark ? 'bg-gray-900 border-gray-700 text-white' : 'bg-white border-gray-300'
                       }`}
@@ -318,6 +326,28 @@ export function BooksScreen() {
                         .filter(st => !book.strategies.some(existing => existing.id === st.id))
                         .map(st => <option key={st.id} value={st.id}>{st.name}</option>)}
                     </select>
+                    {/* Required, exactly as it is for removal. Adding takes
+                        nothing away, so it needs no acknowledgement -- but it
+                        still changes what a book holds, and the audit row is
+                        worthless without a stated reason. */}
+                    <input
+                      aria-label={`Reason for adding to ${book.portfolio_id}`}
+                      value={addReason}
+                      onChange={e => setAddReason(e.target.value)}
+                      placeholder="Reason (required)"
+                      className={`flex-1 min-w-[200px] rounded-lg border px-2 py-1.5 text-sm ${
+                        isDark
+                          ? 'bg-gray-900 border-gray-700 text-white placeholder-gray-500'
+                          : 'bg-white border-gray-300 placeholder-gray-400'
+                      }`}
+                    />
+                    <button
+                      onClick={() => handleAdd(book)}
+                      disabled={!addStrategyId || addReason.trim() === ''}
+                      className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-500 disabled:opacity-40"
+                    >
+                      Add
+                    </button>
                     <button
                       onClick={() => setAddingTo(null)}
                       className={`rounded-lg px-2.5 py-1.5 text-xs ${
@@ -329,7 +359,7 @@ export function BooksScreen() {
                   </div>
                 ) : (
                   <button
-                    onClick={() => setAddingTo(book.portfolio_id)}
+                    onClick={() => beginAdd(book.portfolio_id)}
                     className={`inline-flex items-center gap-1.5 text-xs ${
                       isDark ? 'text-gray-400 hover:text-white' : 'text-gray-500 hover:text-black'
                     }`}

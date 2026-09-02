@@ -129,3 +129,36 @@ class TestMembershipAudit:
             registry_row(lifecycle="incubating"), "MACRO_BOOK", "add", "2", "trial", False
         )
         assert audit["lifecycle_at_move"] == "incubating"
+
+
+class TestBookNotEmpty:
+    def test_it_carries_the_count_rather_than_only_a_message(self):
+        # The adapter builds its own wording from these. Rendering str(exc) into
+        # a response is the shape that leaked raw psycopg2 text from the
+        # incubation routes; it is not repeated here.
+        from algolens.application.portfolio.ports import BookNotEmpty
+
+        exc = BookNotEmpty("CONSERVATIVE_PORTFOLIO", 2)
+        assert exc.portfolio_id == "CONSERVATIVE_PORTFOLIO"
+        assert exc.occupied == 2
+
+
+class TestIncubationStatusMapping:
+    def test_a_missing_strategy_is_404_and_a_lifecycle_rule_is_400(self):
+        from algolens.adapters.http.portfolio import _incubation_error_status
+        from algolens.application.portfolio.ports import (
+            IncubationError,
+            StrategyNotInRegistry,
+        )
+
+        assert _incubation_error_status(StrategyNotInRegistry("Strategy x not found")) == 404
+        assert _incubation_error_status(IncubationError("already incubating")) == 400
+
+    def test_a_reason_mentioning_not_found_no_longer_changes_the_status(self):
+        # The old implementation searched the message for "not found", so a
+        # lifecycle refusal quoting a user's reason could turn 400 into 404.
+        from algolens.adapters.http.portfolio import _incubation_error_status
+        from algolens.application.portfolio.ports import IncubationError
+
+        exc = IncubationError("cannot promote: the backtest was not found in the archive")
+        assert _incubation_error_status(exc) == 400

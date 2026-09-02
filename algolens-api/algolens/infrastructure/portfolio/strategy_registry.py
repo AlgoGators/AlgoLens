@@ -5,6 +5,8 @@ import logging
 
 import psycopg2
 
+from algolens.application.portfolio.ports import BookNotEmpty
+
 from algolens.infrastructure.db.postgres import get_db_connection
 
 logger = logging.getLogger(__name__)
@@ -220,9 +222,7 @@ class PostgresStrategyRegistry:
                     )
                     occupied = cursor.fetchone()["occupied"]
                     if occupied:
-                        raise ValueError(
-                            f"{portfolio_id} still holds {occupied} strategies"
-                        )
+                        raise BookNotEmpty(portfolio_id, occupied)
                     cursor.execute(
                         "DELETE FROM trading.portfolios WHERE portfolio_id = %s",
                         (portfolio_id,),

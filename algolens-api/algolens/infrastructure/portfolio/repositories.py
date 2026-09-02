@@ -13,6 +13,7 @@ from algolens.application.portfolio.ports import (
     IncubationStorageError,
     PortfolioDetailRows,
     StrategyNameUnresolved,
+    StrategyNotInRegistry,
 )
 from algolens.domain.portfolio.position_edit import (
     QT_STREAM,
@@ -363,7 +364,7 @@ class PostgresPortfolioRepository:
             with conn.cursor() as cursor:
                 row = self._fetch_lifecycle(cursor, strategy_id)
                 if row is None:
-                    raise IncubationError(f"Strategy {strategy_id} not found")
+                    raise StrategyNotInRegistry(f"Strategy {strategy_id} not found")
 
                 current_state = row["lifecycle"]
                 if current_state == "incubating":
@@ -403,7 +404,7 @@ class PostgresPortfolioRepository:
             with conn.cursor() as cursor:
                 row = self._fetch_lifecycle(cursor, strategy_id)
                 if row is None:
-                    raise IncubationError(f"Strategy {strategy_id} not found")
+                    raise StrategyNotInRegistry(f"Strategy {strategy_id} not found")
 
                 current_state = row["lifecycle"]
                 if current_state != "incubating":
@@ -445,7 +446,7 @@ class PostgresPortfolioRepository:
             with conn.cursor() as cursor:
                 row = self._fetch_lifecycle(cursor, strategy_id)
                 if row is None:
-                    raise IncubationError(f"Strategy {strategy_id} not found")
+                    raise StrategyNotInRegistry(f"Strategy {strategy_id} not found")
 
                 current_state = row["lifecycle"]
                 cursor.execute(
