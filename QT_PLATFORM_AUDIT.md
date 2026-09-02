@@ -4,7 +4,9 @@
 
 The short version: **the platform works, but it did not when this audit started.** Three of the bugs below would have made the core QT feature — a human editing a position through a risk gate — fail or silently pass on the first real use. None of them were visible to the unit suite, because the suite feeds the domain plain Python floats and a real database does not.
 
-Everything in §1 is fixed and verified. §2 is what a demo environment needs that the first seed lacked. §3 is what is still open, ordered by **when it has to be done**, and within each band by **how fast it is to do**.
+Everything in §1 is fixed and verified. §2 is what a demo environment needs that the first seed lacked. §3 was what remained open.
+
+**Update, same day:** §3 has since been worked to completion. Every P0 and P1 item is fixed and verified, P2-a and P2-d are done, and P1-h turned out not to be a bug. What is left is §6 — two questions that are genuinely the team's to answer, not code.
 
 ---
 
@@ -73,7 +75,7 @@ The first local seed did not match the production `trading` schema closely enoug
 
 All four are now in **`algolens-api/scripts/demo_seed.sql`**, with the schema the app creates lazily (books, memberships, assignment audit) declared in the same place so the shape is visible. The seed embeds the `admin@admin.com / admin` login; it exists only in that database.
 
-**Lesson worth keeping:** unit tests with float fixtures gave 120+ green results while the feature was completely broken against Postgres. There is no integration test that runs the write path against a real database. That is §3 item P0-c.
+**Lesson worth keeping:** unit tests with float fixtures gave 120+ green results while the feature was completely broken against Postgres. `tests/integration` now closes that gap, and the CI job fails if those tests *skip* rather than run — a missing service would otherwise drop the only coverage of the write path while the job stayed green.
 
 ---
 
@@ -87,7 +89,7 @@ All four are now in **`algolens-api/scripts/demo_seed.sql`**, with the schema th
 |---|---|---|---|
 | ~~P0-a~~ | ~~Position response serialises numbers as strings~~ — **FIXED** | S | `jsonify` stringifies Decimal. Coerce in the serializer. Any client that parses these as numbers breaks. |
 | ~~P0-b~~ | ~~Add `tsc --noEmit` to frontend CI~~ — **FIXED**, and it immediately caught that `Book`/`AssignmentRecord` were never declared | S | There is no `tsconfig.json` and no `typescript` dependency. Nothing typechecks. Today's `number \| null` widenings and placeholder shapes were verified by grep, not a compiler. |
-| P0-c | One integration test that runs `write_qt_position` against Postgres | **M** | Would have caught 1.1, 1.2 and 1.3 outright. A `testcontainers`-style throwaway DB or the demo seed in CI. |
+| ~~P0-c~~ | ~~Integration test against Postgres~~ — **FIXED**: `tests/integration`, 4 cases driving the real write, plus a CI guard that fails if they silently skip | M | Would have caught 1.1, 1.2 and 1.3 outright. |
 | ~~P0-d~~ | ~~Canonical migrations in trade-ngin~~ — **FIXED**: migration 008 + rollback; lazy DDL removed from the app | M | The app creates them lazily with `CREATE TABLE IF NOT EXISTS`. trade-ngin owns this schema (migrations 004/005). Lazy creation must not survive into production. |
 | ~~P0-e~~ | ~~Portfolio tab grouping ignores multi-book membership~~ — **FIXED**, and it also stopped hiding incubating strategies (P1-i) | M | `ListPortfolios` buckets by `registry.portfolio_id` (primary only). A strategy in two books shows under one on the Portfolio tab and under both on Books. Same data, two answers. |
 
@@ -95,24 +97,24 @@ All four are now in **`algolens-api/scripts/demo_seed.sql`**, with the schema th
 
 | # | Item | Effort | Notes |
 |---|---|---|---|
-| P1-a | `IncubationDetail` shows `+0.00%` and an empty chart when there is no performance yet | **S** | Fabricated zero. Needs an empty state: "No trading days recorded yet". |
-| P1-b | Positions flagged `priceUnknown` still render `$0` notional / `$0.00` price | **S** | Backend now flags them (1.4); `Position` type and `PositionBreakdown` need to show "—". |
-| P1-c | `_incubation_error_status` decides 404 vs 400 by searching the message for "not found" | **S** | Typed exceptions. Fragile: a reason containing the words "not found" would change the status. |
-| P1-d | `book_not_empty` is a bare `ValueError` rendered with `str(exc)` | **S** | Controlled message today, but it is the same anti-pattern as 1.5. Typed exception. |
-| P1-e | "Add to book" records a hardcoded reason (`Added from the Books tab`) | **S** | Removal asks for a reason; adding does not. Asymmetric audit trail. |
-| P1-f | Override history endpoint exists (`GET /portfolio/overrides/<id>`); nothing renders it | **M** | The desk cannot see what has been overridden without SQL. |
-| P1-g | Incubation lifecycle has no UI — start / promote / retire are API-only | **M** | Pre-existing. The Incubation tab is read-only; verified the API transitions and audit log work. |
-| P1-h | `retired → incubating` is permitted by the incubation path, but membership treats `retired` as frozen | **D** | Two subsystems disagree about whether a retired strategy is a closed record. Decide once. |
+| ~~P1-a~~ | ~~`IncubationDetail` shows `+0.00%` over an empty chart~~ — **FIXED**: "No trading days recorded yet" | S | |
+| ~~P1-b~~ | ~~`priceUnknown` positions render `$0`~~ — **FIXED**: em dashes, excluded from the total, and the total says how many | S | |
+| ~~P1-c~~ | ~~404 vs 400 decided by searching the message for "not found"~~ — **FIXED**: typed `StrategyNotInRegistry` | S | |
+| ~~P1-d~~ | ~~`book_not_empty` is a bare `ValueError`~~ — **FIXED**: typed `BookNotEmpty` carrying the count | S | |
+| ~~P1-e~~ | ~~"Add to book" records a hardcoded reason~~ — **FIXED**: required by the API, asked for by the form | S | |
+| ~~P1-f~~ | ~~Override history rendered by nothing~~ — **FIXED**: on the positions tab, with a three-state risk column | M | |
+| ~~P1-g~~ | ~~Incubation lifecycle is API-only~~ — **FIXED**: promote and retire on the detail view, with a partial-window warning | M | |
+| ~~P1-h~~ | ~~`retired → incubating` vs membership freezing `retired`~~ — **NOT A BUG.** Different questions: a strategy may be retried; its *closed history* may never change books. Documented and pinned by a test so it is not "reconciled" later | D | |
 | ~~P1-i~~ | ~~Fund headline silently excludes incubating strategies~~ — **FIXED** with P0-e: listed, marked, mock capital shown and excluded from totals | S | By design (mock capital), but there is no note. Same shape as the "Excludes N…" notice already added for unpublished ones. |
 
 ### P2 — later
 
 | # | Item | Effort | Notes |
 |---|---|---|---|
-| P2-a | Node 20 deprecation warnings on `actions/checkout@v4`, `upload-artifact@v4` in CI | **S** | Bump to v5/v6 before the runners drop Node 20. |
+| ~~P2-a~~ | ~~Node 20 deprecation warnings~~ — **FIXED** in trade-ngin; versions read from the GitHub API, not guessed | S | |
 | P2-b | The `history_discontinuity` warning names a real problem the feature does not solve | **L / D** | Attribution across a book move still spans two compositions. Options: forbid moves on live strategies, or snapshot-and-restart the curve at the move. |
 | P2-c | `refactor/models-range-filter` deletes the three-stream read side (220 lines, all of `AlphaAttribution.tsx`) | **D** | Still on the remote. Merging it removes half of this feature. Nobody has confirmed whether the deletion was intended. |
-| P2-d | Demo seed is a repo script, not part of any test run | **S** | Wire into P0-c once that exists. |
+| ~~P2-d~~ | ~~Demo seed is not part of any test run~~ — **SUPERSEDED**: `tests/integration` builds its own isolated schema per test, so it needs no seed and cannot be polluted by one | S | |
 
 ---
 
@@ -142,3 +144,27 @@ Test counts after this audit: **126 backend** (was 107), **82 frontend** (was 81
 - **Storage failures → 500 with a fixed message.** The detail is in the server log. If you want the message to carry a correlation id, that is a two-line change.
 - **`retired → incubating` left as-is.** It is pre-existing behaviour; flagged as P1-h rather than changed unilaterally.
 - **Demo seed committed to `algolens-api/scripts/`** with the `admin/admin` login. It is local-only and documented as such; delete the user block if you would rather it were not in the repo.
+
+---
+
+## 6. What is left, and why it is not code
+
+Two items from §3 remain open. Neither is a defect, and neither should be closed by whoever picks this up next without the team actually deciding.
+
+### P2-b — the history-discontinuity warning describes a problem the feature does not solve
+
+Moving or removing a strategy from a book makes that book's history discontinuous: every number computed across the boundary — cumulative return, drawdown, and the qt/system/benchmark attribution this branch just fixed — spans two different compositions. The platform now *states* that cost, records an acknowledgement, and audits who accepted it. It does not repair the maths.
+
+Three ways out, in rising order of cost:
+
+1. **Forbid book changes on live strategies.** Simplest, and defensible: assign at creation, retire and re-create to move. Costs flexibility the desk may want.
+2. **Snapshot and restart the curve at the boundary.** The book's history becomes explicitly segmented, and every chart has to learn about segments.
+3. **Leave it as it is** — the cost is stated, acknowledged and audited, and readers are trusted to know a composition change happened.
+
+Option 3 is what ships today. It is a reasonable answer, but it should be a chosen one rather than a default, because the moment there is a year of live history the cost of changing it rises sharply.
+
+### P2-c — `refactor/models-range-filter` deletes the other half of this feature
+
+That branch is still on the remote and removes 220 lines: the stream constants and the whole of `AlphaAttribution.tsx`. When the edit surface was going to live in another repo, losing AlgoLens's read side was survivable. It is not now — merging it would delete the three-stream comparison that the position edit path exists to make meaningful.
+
+Nobody has confirmed whether the deletion was intended or fell out of an unrelated models refactor. That needs an answer from whoever wrote it before it goes near `main`.
