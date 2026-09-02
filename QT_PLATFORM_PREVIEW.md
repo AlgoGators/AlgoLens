@@ -139,3 +139,36 @@ Open a PR comment on #80, or just tell John.
   including all of `AlphaAttribution.tsx`). If that lands, it removes the other half of this
   feature. Nobody has confirmed whether that deletion is intended — it needs an answer before
   it goes anywhere near `main`.
+
+---
+
+## There is no UI for assigning strategies to portfolios
+
+This one is worth stating plainly, because the data model implies a feature the app does not
+have, and it is easy to assume from a demo that the feature exists.
+
+`portfolio_id` is real. It is a column on `trading.strategy_registry` and it scopes **every**
+query in the portfolio repositories — equity curves, positions, executions, risk limits, the
+lot. Two strategies with different `portfolio_id`s genuinely have separate books.
+
+What does not exist is any way to see or change that mapping from the app:
+
+- **The API serialises `portfolio_id` in exactly one place** — the incubation list
+  (`adapters/serializers/portfolio.py`). Nowhere else sends it to the client.
+- **The frontend references it in exactly one place** — `IncubationList.tsx`. The main
+  dashboard and the Strategy Builder group by *strategy*, never by portfolio. Looking at the
+  screen you cannot tell that two strategies share a portfolio and a third does not.
+- **Nothing writes it.** The only three `UPDATE trading.strategy_registry` statements in the
+  codebase set `lifecycle`, `mock_capital` and `incubation_started_at` — the incubation
+  promote/retire flow. No code path anywhere assigns or reassigns `portfolio_id`.
+
+So today a strategy is assigned to a portfolio by someone editing a database row by hand.
+
+Making this a real feature is net-new work, not a wiring-up job: it needs an endpoint, a UI,
+and a decision on whether reassignment is permitted on a live book at all. Moving a strategy
+between portfolios mid-life makes both portfolios' histories discontinuous, which directly
+corrupts the attribution numbers this branch just fixed. "Assign at creation, never move"
+may well be the right answer — but it is a decision someone has to make, not a default to
+fall into.
+
+Verified by source inspection on this branch, 2026-09-02 — not inferred from the running app.
