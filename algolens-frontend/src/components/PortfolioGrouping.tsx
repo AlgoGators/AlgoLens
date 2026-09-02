@@ -1,38 +1,29 @@
 import { useCallback, useEffect, useState } from 'react';
-import { ArrowRightLeft, Briefcase } from 'lucide-react';
+import { Briefcase, ChevronDown, ChevronUp } from 'lucide-react';
 
-import { useAuth } from '../adapters/react/AuthContext';
 import { useTheme } from '../adapters/react/ThemeContext';
-import { isInternalRole } from '../domain/identity/user';
 import {
-  knownPortfolioIds,
   portfolioWeights,
   type PortfolioSummary,
 } from '../domain/portfolio/portfolioAssignment';
 import { PortfolioApiService } from '../infrastructure/api/portfolioApi';
-import { ReassignPortfolioModal } from './ReassignPortfolioModal';
-
-type MoveTarget = { strategyId: string; strategyName: string; portfolioId: string };
 
 /**
  * The strategies grouped by the portfolio that owns them.
  *
- * portfolio_id has always scoped every read in this app, but nothing ever
- * showed it — you could not tell from any screen that two strategies shared a
- * book and a third did not. This is that view, plus the only place the mapping
- * can be changed.
+ * Read-only. Changing which book a strategy belongs to lives on the Books tab —
+ * this is an overview, and a destructive control sitting inside one is easy to
+ * hit by accident while reading.
+ *
+ * Collapsed by default so it does not crowd the fund summary.
  */
 export function PortfolioGrouping() {
   const { theme } = useTheme();
-  const { user } = useAuth();
   const [portfolios, setPortfolios] = useState<PortfolioSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [moving, setMoving] = useState<MoveTarget | null>(null);
+  const [expanded, setExpanded] = useState(false);
 
   const isDark = theme === 'dark';
-  // The backend enforces this too (@internal_only); this only avoids offering a
-  // control that would come back 403.
-  const canReassign = isInternalRole(user?.role);
 
   const load = useCallback(async () => {
     try {
@@ -57,18 +48,31 @@ export function PortfolioGrouping() {
   }
 
   const weights = new Map(portfolioWeights(portfolios).map(w => [w.portfolio_id, w.percent]));
-  const allIds = knownPortfolioIds(portfolios);
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h3 className={`text-sm uppercase tracking-wider ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
-          Portfolios
-        </h3>
-        <span className={`text-xs ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>
-          {portfolios.length} {portfolios.length === 1 ? 'portfolio' : 'portfolios'}
+      <button
+        onClick={() => setExpanded(v => !v)}
+        aria-expanded={expanded}
+        className={`flex w-full items-center justify-between rounded-lg border px-4 py-3 ${
+          isDark ? 'border-gray-800 hover:bg-gray-900' : 'border-gray-200 hover:bg-gray-50'
+        }`}
+      >
+        <span className="flex items-center gap-2">
+          <Briefcase className="w-4 h-4" />
+          <span className={`text-sm uppercase tracking-wider ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
+            Portfolios
+          </span>
         </span>
-      </div>
+        <span className="flex items-center gap-3">
+          <span className={`text-xs ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>
+            {portfolios.length} {portfolios.length === 1 ? 'portfolio' : 'portfolios'}
+          </span>
+          {expanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+        </span>
+      </button>
+
+      {expanded && (<>
 
       {portfolios.map(portfolio => (
         <div
@@ -131,43 +135,12 @@ export function PortfolioGrouping() {
                     ${strategy.current_value.toLocaleString('en-US', { maximumFractionDigits: 0 })}
                   </span>
                 )}
-                {canReassign && (
-                  <button
-                    aria-label={`Move ${strategy.name} to another portfolio`}
-                    onClick={() =>
-                      setMoving({
-                        strategyId: strategy.id,
-                        strategyName: strategy.name,
-                        portfolioId: portfolio.portfolio_id,
-                      })
-                    }
-                    className={`inline-flex items-center justify-center rounded-lg p-1.5 ${
-                      isDark ? 'hover:bg-gray-800' : 'hover:bg-gray-200'
-                    }`}
-                  >
-                    <ArrowRightLeft className="w-4 h-4" />
-                  </button>
-                )}
               </div>
             </div>
           ))}
         </div>
       ))}
-
-      {moving && (
-        <ReassignPortfolioModal
-          strategyId={moving.strategyId}
-          strategyName={moving.strategyName}
-          currentPortfolioId={moving.portfolioId}
-          knownPortfolioIds={allIds}
-          theme={theme}
-          onClose={() => setMoving(null)}
-          onSaved={() => {
-            setMoving(null);
-            void load();
-          }}
-        />
-      )}
+      </>)}
     </div>
   );
 }

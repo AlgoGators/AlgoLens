@@ -7,6 +7,42 @@ import type {
 } from '../../domain/portfolio/portfolioAssignment';
 import { API_BASE_URL, deleteWithAuth, log, postWithAuth, putWithAuth } from './httpClient';
 
+/**
+ * A strategy the engine has published nothing for.
+ *
+ * Every numeric field is zero and `dataAvailable` is false; nothing that reads
+ * this should treat the zeros as measurements -- they exist so the shape stays
+ * valid for components that index into it. Callers filter on dataAvailable.
+ */
+function placeholderStrategy(summary: { id: string; name: string }): Strategy {
+  return {
+    id: summary.id,
+    name: summary.name,
+    description: '',
+    dataAvailable: false,
+    invested: 0,
+    currentValue: 0,
+    return: 0,
+    returnPercent: 0,
+    positions: [],
+    historicalData: [],
+    bestDay: 0,
+    worstDay: 0,
+    metrics: {
+      volatility: 0, sharpeRatio: 0, maxDrawdown: 0, winRate: 0, totalTrades: 0,
+      avgWin: 0, avgLoss: 0, profitFactor: 0, dailyReturn: 0, cumulativeReturn: 0,
+      annualizedReturn: 0, grossLeverage: 0, netLeverage: 0, portfolioLeverage: 0,
+      marginPosted: 0, equityToMarginRatio: 0, marginCushion: 0, totalNotional: 0,
+      unrealizedPnL: 0, realizedPnL: 0, totalCommissions: 0, netPnL: 0,
+      cashAvailable: 0, currentPortfolioValue: 0,
+    },
+    executions: [],
+    finalizedPositions: [],
+    managers: [],
+    lastUpdate: '',
+  };
+}
+
 export class PortfolioApiService {
   // Debug method to test backend connectivity (call from browser console)
   static async testConnectivity(): Promise<void> {
@@ -211,10 +247,20 @@ export class PortfolioApiService {
       log('warn', 'No strategies found in response');
     }
 
-    // Fetch detailed data for each strategy
+    // Fetch detailed data for each strategy.
+    //
+    // A summary with dataAvailable === false has no live_results row for its
+    // (strategy_type, portfolio_id) pairing -- the state right after a strategy
+    // changes book. Its detail endpoint would 404, which inside Promise.all
+    // would reject and take the whole dashboard down, so do not ask for it.
+    // Carry a placeholder instead: the strategy is real and must stay visible.
     log('info', 'Fetching detailed data for each strategy...');
     const strategies: Strategy[] = await Promise.all(
       strategySummaries.map(async (summary: any, index: number) => {
+        if (summary.dataAvailable === false) {
+          log('warn', `Strategy ${summary.id} has no published results; showing it without numbers`);
+          return placeholderStrategy(summary);
+        }
         log('info', `Fetching strategy ${index + 1}/${strategySummaries.length}: ${summary.id}`);
         const strategy = await this.getStrategy(summary.id);
         log('info', `Strategy ${summary.id} fetched successfully`);
@@ -223,16 +269,21 @@ export class PortfolioApiService {
     );
     log('info', `All ${strategies.length} strategies fetched`);
 
-    // Calculate portfolio totals
+    // Portfolio totals cover only the strategies the engine has actually
+    // published. The count of the rest is carried alongside so the headline can
+    // say it is partial -- a total that quietly omits a strategy is the bug
+    // this replaces.
     log('info', 'Calculating portfolio totals...');
-    const totalInvested = strategies.reduce((sum, s) => sum + s.invested, 0);
-    const totalValue = strategies.reduce((sum, s) => sum + s.currentValue, 0);
+    const priced = strategies.filter(s => s.dataAvailable !== false);
+    const strategiesAwaitingData = strategies.length - priced.length;
+    const totalInvested = priced.reduce((sum, s) => sum + s.invested, 0);
+    const totalValue = priced.reduce((sum, s) => sum + s.currentValue, 0);
     const totalReturn = totalValue - totalInvested;
     const totalReturnPercent = totalInvested > 0 ? (totalReturn / totalInvested) * 100 : 0;
 
     // Aggregate historical data
     log('info', 'Aggregating historical data...');
-    const historicalData = this.aggregateHistoricalData(strategies);
+    const historicalData = this.aggregateHistoricalData(priced);
 
     const result = {
       totalValue,
@@ -241,6 +292,7 @@ export class PortfolioApiService {
       totalReturnPercent,
       strategies,
       historicalData,
+      strategiesAwaitingData,
     };
 
     log('info', '=== getPortfolioData() SUCCESS ===', {

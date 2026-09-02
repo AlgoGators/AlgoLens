@@ -74,6 +74,16 @@ export function PortfolioOverview({ data, onBuilderClick }: PortfolioOverviewPro
         <div className="text-4xl md:text-5xl mb-2">
           ${data.totalValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
         </div>
+        {/* A total that quietly omits a strategy is worse than one that admits
+            it is partial. This is the state right after a strategy changes book,
+            before the engine has published for the new pairing. */}
+        {(data.strategiesAwaitingData ?? 0) > 0 && (
+          <div className={`mb-2 text-sm ${theme === 'dark' ? 'text-amber-400' : 'text-amber-600'}`}>
+            Excludes {data.strategiesAwaitingData}{' '}
+            {data.strategiesAwaitingData === 1 ? 'strategy' : 'strategies'} the engine has not
+            published results for yet.
+          </div>
+        )}
         <div className={`flex items-center gap-2 text-lg ${periodReturn.value >= 0 ? 'text-orange-500' : 'text-red-500'}`}>
           {periodReturn.value >= 0 ? <TrendingUp className="w-5 h-5" /> : <TrendingDown className="w-5 h-5" />}
           <span>

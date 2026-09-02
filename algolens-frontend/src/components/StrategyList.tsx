@@ -68,9 +68,16 @@ export function StrategyList({ strategies, onSelectStrategy }: StrategyListProps
                   }`}>
                     Current Value
                   </div>
-                  <div className="text-lg">
-                    ${strategy.currentValue.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
-                  </div>
+                  {/* Placeholder zeros are not measurements. */}
+                  {strategy.dataAvailable === false ? (
+                    <div className={`text-sm ${theme === 'dark' ? 'text-amber-400' : 'text-amber-600'}`}>
+                      awaiting engine data
+                    </div>
+                  ) : (
+                    <div className="text-lg">
+                      ${strategy.currentValue.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                    </div>
+                  )}
                 </div>
 
                 {/* Total Return */}

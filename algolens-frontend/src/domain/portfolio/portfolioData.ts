@@ -64,6 +64,12 @@ export interface Strategy {
   id: string;
   name: string;
   description: string;
+  /**
+   * false when the engine has published no live_results row for this
+   * (strategy_type, portfolio_id) pairing. Every number on the object is then a
+   * placeholder zero, not a measurement -- filter on this before aggregating.
+   */
+  dataAvailable?: boolean;
   invested: number;
   currentValue: number;
   return: number;
@@ -89,10 +95,17 @@ export interface Strategy {
 }
 
 export interface PortfolioData {
+  /** Covers only strategies with published results. See strategiesAwaitingData. */
   totalValue: number;
   totalInvested: number;
   totalReturn: number;
   totalReturnPercent: number;
   strategies: Strategy[];
   historicalData: HistoricalDataPoint[];
+  /**
+   * How many strategies are excluded from the totals because the engine has
+   * published nothing for them. Non-zero means the headline is partial and the
+   * UI must say so.
+   */
+  strategiesAwaitingData?: number;
 }

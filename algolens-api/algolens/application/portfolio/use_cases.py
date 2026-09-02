@@ -125,7 +125,25 @@ def build_strategy_summary(
     cfg: Mapping[str, Any], latest: Mapping[str, Any] | None
 ) -> dict[str, Any] | None:
     if not latest:
-        return None
+        # The engine keys live_results on (strategy_type, portfolio_id), so a
+        # strategy that has just moved book -- or a book the engine has not
+        # published for yet -- has no row. It is still a real strategy holding
+        # real positions.
+        #
+        # This used to return None and the caller dropped it from the list
+        # entirely, which silently removed its value from the fund headline: the
+        # fund appeared to shrink by that strategy's worth, with nothing on
+        # screen saying why. Report it instead, with its numbers marked unknown.
+        return {
+            "id": cfg["id"],
+            "name": cfg["name"],
+            "dataAvailable": False,
+            "currentValue": None,
+            "returnPercent": None,
+            "volatility": None,
+            "sharpeRatio": None,
+            "annualizedReturn": None,
+        }
 
     base_equity = cfg["initial_equity"]
     current_value = float(latest["current_portfolio_value"])
@@ -137,6 +155,7 @@ def build_strategy_summary(
     return {
         "id": cfg["id"],
         "name": cfg["name"],
+        "dataAvailable": True,
         "currentValue": current_value,
         "returnPercent": return_percent,
         "volatility": volatility,
@@ -221,7 +240,10 @@ class ListStrategies:
                     str(exc),
                     exc_info=True,
                 )
-                continue
+                # Still report it. Dropping a strategy because its numbers could
+                # not be read removes its value from the fund total without
+                # saying so, which is worse than showing it with no numbers.
+                summary = build_strategy_summary(cfg, None)
             if summary:
                 strategies.append(summary)
         return strategies
