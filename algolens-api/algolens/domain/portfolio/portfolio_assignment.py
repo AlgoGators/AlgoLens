@@ -151,3 +151,81 @@ def build_assignment_audit(current, verdict, user_id, reason, acknowledged):
         "consequences": verdict["consequences"],
         "acknowledged": bool(acknowledged),
     }
+
+
+# ---------------------------------------------------------------------------
+# Books
+#
+# A "book" is a portfolio. Until now one existed only as a distinct portfolio_id
+# on strategy_registry, which means an empty book could not exist -- you could
+# not define a book and then decide what goes in it. Declaring them separately
+# makes that possible, and gives a book a human name and a description.
+#
+# A declared book and a book that is merely in use are both real. The listing
+# unions them, so a book created before this feature existed does not vanish.
+# ---------------------------------------------------------------------------
+
+MAX_BOOK_NAME_LENGTH = 120
+
+
+def validate_book(payload):
+    """Normalize and check a new book definition."""
+    if not isinstance(payload, dict):
+        raise AssignmentValidationError(
+            "not_an_object", "Request body must be a JSON object"
+        )
+
+    portfolio_id = normalize_portfolio_id(payload.get("portfolio_id"))
+
+    raw_name = payload.get("name")
+    name = str(raw_name).strip() if raw_name is not None else ""
+    if not name:
+        # Default to the id rather than refusing: the id is already a usable
+        # label, and forcing a second field adds friction for no safety gain.
+        name = portfolio_id
+    if len(name) > MAX_BOOK_NAME_LENGTH:
+        raise AssignmentValidationError(
+            "book_name_too_long",
+            f"Field 'name' must be at most {MAX_BOOK_NAME_LENGTH} characters",
+        )
+
+    raw_description = payload.get("description")
+    description = str(raw_description).strip() if raw_description is not None else ""
+
+    return {
+        "portfolio_id": portfolio_id,
+        "name": name,
+        "description": description,
+    }
+
+
+def merge_books(declared, in_use):
+    """Every book, whether declared or merely occupied.
+
+    `declared` are rows from the books table; `in_use` are the distinct
+    portfolio_ids found on strategy_registry. A book can be either, or both:
+
+      - declared and empty      -> a book waiting to be filled
+      - in use but not declared -> predates this feature, or was created by the
+                                   engine; must still appear
+      - both                    -> the normal case
+
+    Declared metadata wins where it exists, because someone typed it.
+    """
+    by_id = {}
+    for row in declared:
+        by_id[row["portfolio_id"]] = {
+            "portfolio_id": row["portfolio_id"],
+            "name": row.get("name") or row["portfolio_id"],
+            "description": row.get("description") or "",
+            "declared": True,
+        }
+    for portfolio_id in in_use:
+        if portfolio_id not in by_id:
+            by_id[portfolio_id] = {
+                "portfolio_id": portfolio_id,
+                "name": portfolio_id,
+                "description": "",
+                "declared": False,
+            }
+    return sorted(by_id.values(), key=lambda b: b["portfolio_id"])

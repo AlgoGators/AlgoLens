@@ -16,13 +16,14 @@ import { PortfolioApplicationService } from '../application/portfolio/portfolioS
 import { isInternalRole } from '../domain/identity/user';
 import { useAuth } from '../adapters/react/AuthContext';
 import { useTheme } from '../adapters/react/ThemeContext';
+import { BooksScreen } from './BooksScreen';
 
 interface DashboardProps {
   onLogout: () => void;
 }
 
 type SettingsScreen = 'profile' | 'account' | 'privacy' | null;
-type ActiveTab = 'portfolio' | 'incubation' | 'builder' | 'news' | 'profile';
+type ActiveTab = 'portfolio' | 'incubation' | 'builder' | 'books' | 'news' | 'profile';
 
 export function Dashboard({ onLogout }: DashboardProps) {
   const [selectedStrategy, setSelectedStrategy] = useState<string | null>(null);
@@ -76,7 +77,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
   }, [fetchPortfolioData]);
 
   useEffect(() => {
-    if (activeTab === 'incubation' && !isInternalMember) {
+    if ((activeTab === 'incubation' || activeTab === 'books') && !isInternalMember) {
       setActiveTab('portfolio');
       setSelectedStrategy(null);
     }
@@ -130,6 +131,13 @@ export function Dashboard({ onLogout }: DashboardProps) {
           onHomeClick={() => {
             setShowBuilder(false);
             setActiveTab('portfolio');
+            setSelectedStrategy(null);
+          }}
+          onBooksClick={() => {
+            if (!isInternalMember) return;
+            setShowBuilder(false);
+            setSettingsScreen(null);
+            setActiveTab('books');
             setSelectedStrategy(null);
           }}
           onIncubationClick={() => {
@@ -211,6 +219,8 @@ export function Dashboard({ onLogout }: DashboardProps) {
           )}
         </div>
       )}
+
+      {activeTab === 'books' && isInternalMember && <BooksScreen />}
 
       {activeTab === 'incubation' && isInternalMember && (
         <div className="max-w-5xl mx-auto px-4 md:px-6 py-6 md:py-8">

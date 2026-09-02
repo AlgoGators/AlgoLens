@@ -8,7 +8,9 @@ from typing import Any
 from algolens.domain.portfolio.portfolio_assignment import (
     build_assignment_audit,
     evaluate_assignment,
+    merge_books,
     normalize_portfolio_id,
+    validate_book,
 )
 from algolens.application.portfolio.ports import (
     IncubationError,
@@ -467,3 +469,54 @@ class ListAssignmentHistory:
 
     def execute(self, strategy_id: str, limit: int = 100) -> list[dict[str, Any]]:
         return self.registry.list_assignment_history(strategy_id, limit)
+
+
+class ListBooks:
+    """Every book, with what is currently in it.
+
+    Unions declared books with those merely in use, so a book defined and not
+    yet filled appears alongside one that predates the feature.
+    """
+
+    def __init__(self, registry: StrategyRegistryPort, reader: PortfolioReaderPort):
+        self.registry = registry
+        self.reader = reader
+
+    def execute(self) -> list[dict[str, Any]]:
+        declared = self.registry.list_declared_books()
+        in_use = self.registry.list_portfolio_ids_in_use()
+        books = merge_books(declared, in_use)
+
+        occupancy = {b["portfolio_id"]: [] for b in books}
+        for cfg in self.registry.list(active_only=False):
+            occupancy.setdefault(cfg["portfolio_id"], []).append(
+                {
+                    "id": cfg["id"],
+                    "name": cfg["name"],
+                    "strategy_type": cfg["strategy_type"],
+                    "lifecycle": cfg.get("lifecycle") or "live",
+                }
+            )
+
+        for book in books:
+            book["strategies"] = occupancy.get(book["portfolio_id"], [])
+            book["strategy_count"] = len(book["strategies"])
+        return books
+
+
+class CreateBook:
+    def __init__(self, registry: StrategyRegistryPort):
+        self.registry = registry
+
+    def execute(self, payload: Any, user_id: str) -> dict[str, Any]:
+        return self.registry.create_book(validate_book(payload), user_id)
+
+
+class DeleteBook:
+    """Remove a book declaration. The repository refuses if it is occupied."""
+
+    def __init__(self, registry: StrategyRegistryPort):
+        self.registry = registry
+
+    def execute(self, portfolio_id: str) -> dict[str, Any]:
+        return self.registry.delete_book(normalize_portfolio_id(portfolio_id))

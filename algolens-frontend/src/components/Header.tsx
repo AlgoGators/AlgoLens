@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Bell, FlaskConical, User, X } from 'lucide-react';
+import { Bell, FlaskConical, Library, User, X } from 'lucide-react';
 import logo from '../assets/logo.png';
 import { isInternalRole } from '../domain/identity/user';
 import { useAuth } from '../adapters/react/AuthContext';
@@ -10,7 +10,8 @@ interface HeaderProps {
   onBuilderClick?: () => void;
   onHomeClick?: () => void;
   onIncubationClick?: () => void;
-  activeTab?: 'portfolio' | 'incubation' | 'builder' | 'news' | 'profile';
+  onBooksClick?: () => void;
+  activeTab?: 'portfolio' | 'incubation' | 'builder' | 'books' | 'news' | 'profile';
 }
 
 export function Header({
@@ -18,6 +19,7 @@ export function Header({
   onBuilderClick,
   onHomeClick,
   onIncubationClick,
+  onBooksClick,
   activeTab = 'portfolio',
 }: HeaderProps) {
   const { theme } = useTheme();
@@ -116,6 +118,22 @@ export function Header({
               >
                 Strategy Builder
               </button>
+              {isInternalMember && (
+                <button
+                  onClick={onBooksClick}
+                  className={`transition-colors flex items-center gap-2 ${activeTab === 'books'
+                    ? theme === 'dark'
+                      ? 'text-white font-semibold'
+                      : 'text-black font-semibold'
+                    : theme === 'dark'
+                      ? 'text-gray-400 hover:text-orange-500'
+                      : 'text-gray-500 hover:text-orange-500'
+                    }`}
+                >
+                  <Library className="w-4 h-4" />
+                  Books
+                </button>
+              )}
               {isInternalMember && (
                 <button
                   onClick={onIncubationClick}

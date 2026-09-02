@@ -10,6 +10,7 @@ from flask_jwt_extended import get_jwt, get_jwt_identity, jwt_required
 from algolens.adapters.serializers.portfolio import (
     serialize_assignment_history,
     serialize_assignment_result,
+    serialize_book_list,
     serialize_incubating_strategy_list,
     serialize_incubation_performance,
     serialize_portfolio_list,
@@ -23,9 +24,12 @@ from algolens.application.portfolio.ports import (
     StrategyNameUnresolved,
 )
 from algolens.application.portfolio.use_cases import (
+    CreateBook,
+    DeleteBook,
     GetIncubationPerformance,
     GetStrategyDetail,
     ListAssignmentHistory,
+    ListBooks,
     ListIncubatingStrategies,
     ListPortfolios,
     ListPositionOverrides,
@@ -57,6 +61,8 @@ ASSIGNMENT_MESSAGES = {
         "Field 'portfolio_id' may contain only letters, digits, underscores and hyphens"
     ),
     "strategy_not_found": "Strategy not found",
+    "book_name_too_long": "Field 'name' is too long",
+    "not_an_object": "Request body must be a JSON object",
     "strategy_retired": (
         "A retired strategy cannot be reassigned: its book is closed and moving it "
         "would rewrite history that has already been reported"
@@ -456,3 +462,65 @@ def get_assignment_history(strategy_id):
             "Failed to read assignment history for %s: %s", strategy_id, str(exc), exc_info=True
         )
         return jsonify({"error": "Failed to read assignment history"}), 500
+
+
+@portfolio_bp.route("/books", methods=["GET"])
+@jwt_required()
+@internal_only
+def get_books():
+    """Every book and what is in it, including books defined but still empty."""
+    try:
+        registry, reader = _portfolio_dependencies()
+        return jsonify(serialize_book_list(ListBooks(registry, reader).execute())), 200
+    except Exception as exc:
+        current_app.logger.error("Failed to list books: %s", str(exc), exc_info=True)
+        return jsonify({"error": "Failed to list books"}), 500
+
+
+@portfolio_bp.route("/books", methods=["POST"])
+@jwt_required()
+@internal_only
+def create_book():
+    try:
+        registry, _reader = _portfolio_dependencies()
+        book = CreateBook(registry).execute(request.get_json(silent=True), _request_user_id())
+        return jsonify(book), 201
+    except AssignmentValidationError as exc:
+        return (
+            jsonify(
+                {
+                    "error": ASSIGNMENT_MESSAGES.get(exc.code, "Invalid request body"),
+                    "code": exc.code,
+                }
+            ),
+            400,
+        )
+    except Exception as exc:
+        current_app.logger.error("Failed to create book: %s", str(exc), exc_info=True)
+        return jsonify({"error": "Failed to create the book"}), 500
+
+
+@portfolio_bp.route("/books/<portfolio_id>", methods=["DELETE"])
+@jwt_required()
+@internal_only
+def delete_book(portfolio_id):
+    """Remove a book. Refused while anything still sits in it."""
+    try:
+        registry, _reader = _portfolio_dependencies()
+        return jsonify(DeleteBook(registry).execute(portfolio_id)), 200
+    except AssignmentValidationError as exc:
+        return (
+            jsonify(
+                {
+                    "error": ASSIGNMENT_MESSAGES.get(exc.code, "Invalid request"),
+                    "code": exc.code,
+                }
+            ),
+            400,
+        )
+    except ValueError as exc:
+        # Occupied. The message names the count, which is safe to surface.
+        return jsonify({"error": str(exc), "code": "book_not_empty"}), 409
+    except Exception as exc:
+        current_app.logger.error("Failed to delete book: %s", str(exc), exc_info=True)
+        return jsonify({"error": "Failed to delete the book"}), 500

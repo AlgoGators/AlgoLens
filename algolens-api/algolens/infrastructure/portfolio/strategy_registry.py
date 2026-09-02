@@ -155,6 +155,111 @@ class PostgresStrategyRegistry:
             """
         )
 
+    def _ensure_books_table(self, cursor):
+        """Create the books table if the migration has not run.
+
+        Same reasoning as the assignment audit table: the canonical migration
+        belongs in trade-ngin, which owns this schema. Until then a book can
+        still be declared rather than only inferred from a strategy sitting in
+        one -- which is what makes an empty book possible at all.
+        """
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS trading.portfolios (
+                portfolio_id TEXT PRIMARY KEY,
+                name         TEXT        NOT NULL,
+                description  TEXT        NOT NULL DEFAULT '',
+                created_by   TEXT,
+                created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+            )
+            """
+        )
+
+    def list_declared_books(self):
+        conn = self.connection_factory()
+        try:
+            with conn.cursor() as cursor:
+                self._ensure_books_table(cursor)
+                cursor.execute(
+                    """
+                    SELECT portfolio_id, name, description, created_by, created_at
+                    FROM trading.portfolios
+                    ORDER BY portfolio_id
+                    """
+                )
+                # RealDictCursor: rows are already dicts.
+                return [dict(row) for row in cursor.fetchall()]
+        finally:
+            conn.close()
+
+    def list_portfolio_ids_in_use(self):
+        conn = self.connection_factory()
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    "SELECT DISTINCT portfolio_id FROM trading.strategy_registry"
+                )
+                return [row["portfolio_id"] for row in cursor.fetchall()]
+        finally:
+            conn.close()
+
+    def create_book(self, book, user_id):
+        """Declare a book. Idempotent on the id: re-declaring updates the label.
+
+        Deliberately an upsert rather than a conflict: a book that already
+        exists because a strategy sits in it is exactly the case where someone
+        wants to give it a proper name.
+        """
+        conn = self.connection_factory()
+        try:
+            with conn:
+                with conn.cursor() as cursor:
+                    self._ensure_books_table(cursor)
+                    cursor.execute(
+                        """
+                        INSERT INTO trading.portfolios
+                            (portfolio_id, name, description, created_by)
+                        VALUES (%s, %s, %s, %s)
+                        ON CONFLICT (portfolio_id) DO UPDATE
+                          SET name = EXCLUDED.name,
+                              description = EXCLUDED.description
+                        """,
+                        (
+                            book["portfolio_id"],
+                            book["name"],
+                            book["description"],
+                            user_id,
+                        ),
+                    )
+        finally:
+            conn.close()
+        return book
+
+    def delete_book(self, portfolio_id):
+        """Remove a book declaration. Refuses if anything still sits in it."""
+        conn = self.connection_factory()
+        try:
+            with conn:
+                with conn.cursor() as cursor:
+                    cursor.execute(
+                        "SELECT count(*) AS occupied FROM trading.strategy_registry"
+                        " WHERE portfolio_id = %s",
+                        (portfolio_id,),
+                    )
+                    occupied = cursor.fetchone()["occupied"]
+                    if occupied:
+                        raise ValueError(
+                            f"{portfolio_id} still holds {occupied} strategies"
+                        )
+                    self._ensure_books_table(cursor)
+                    cursor.execute(
+                        "DELETE FROM trading.portfolios WHERE portfolio_id = %s",
+                        (portfolio_id,),
+                    )
+        finally:
+            conn.close()
+        return {"portfolio_id": portfolio_id}
+
     def reassign_portfolio(self, strategy_id, portfolio_id, audit):
         """Move the strategy and record why, in one transaction.
 
@@ -214,8 +319,7 @@ class PostgresStrategyRegistry:
                     """,
                     (strategy_id, limit),
                 )
-                columns = [c[0] for c in cursor.description]
-                return [dict(zip(columns, row)) for row in cursor.fetchall()]
+                return [dict(row) for row in cursor.fetchall()]
         finally:
             conn.close()
 

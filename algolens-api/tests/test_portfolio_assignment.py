@@ -4,7 +4,9 @@ from algolens.domain.portfolio.portfolio_assignment import (
     AssignmentValidationError,
     build_assignment_audit,
     evaluate_assignment,
+    merge_books,
     normalize_portfolio_id,
+    validate_book,
 )
 
 
@@ -129,3 +131,64 @@ class TestBuildAssignmentAudit:
             registry_row(lifecycle="incubating"), verdict, "1", "moving", acknowledged=None
         )
         assert audit["acknowledged"] is False
+
+
+class TestValidateBook:
+    def test_normalizes_the_id_and_defaults_the_name_to_it(self):
+        book = validate_book({"portfolio_id": " macro-book "})
+        assert book["portfolio_id"] == "MACRO-BOOK"
+        assert book["name"] == "MACRO-BOOK"
+        assert book["description"] == ""
+
+    def test_keeps_a_supplied_name_and_description(self):
+        book = validate_book(
+            {"portfolio_id": "macro", "name": "  Macro Book ", "description": " Global macro "}
+        )
+        assert book["name"] == "Macro Book"
+        assert book["description"] == "Global macro"
+
+    def test_rejects_a_non_object_body(self):
+        with pytest.raises(AssignmentValidationError) as exc:
+            validate_book(["macro"])
+        assert exc.value.code == "not_an_object"
+
+    def test_applies_the_same_id_rules_as_a_move(self):
+        with pytest.raises(AssignmentValidationError) as exc:
+            validate_book({"portfolio_id": "bad id!"})
+        assert exc.value.code == "portfolio_id_invalid_characters"
+
+    def test_rejects_an_absurd_name(self):
+        with pytest.raises(AssignmentValidationError) as exc:
+            validate_book({"portfolio_id": "macro", "name": "x" * 121})
+        assert exc.value.code == "book_name_too_long"
+
+
+class TestMergeBooks:
+    def test_a_declared_but_empty_book_still_appears(self):
+        # The whole point: define a book, then decide what goes in it.
+        books = merge_books([{"portfolio_id": "MACRO", "name": "Macro", "description": ""}], [])
+        assert [b["portfolio_id"] for b in books] == ["MACRO"]
+        assert books[0]["declared"] is True
+
+    def test_a_book_only_in_use_still_appears(self):
+        # Predates this feature, or was created by the engine. Must not vanish.
+        books = merge_books([], ["CONSERVATIVE_PORTFOLIO"])
+        assert books[0]["portfolio_id"] == "CONSERVATIVE_PORTFOLIO"
+        assert books[0]["declared"] is False
+        assert books[0]["name"] == "CONSERVATIVE_PORTFOLIO"
+
+    def test_declared_metadata_wins_over_the_derived_default(self):
+        books = merge_books(
+            [{"portfolio_id": "MACRO", "name": "Macro Book", "description": "Global macro"}],
+            ["MACRO"],
+        )
+        assert len(books) == 1
+        assert books[0]["name"] == "Macro Book"
+        assert books[0]["declared"] is True
+
+    def test_results_are_sorted_and_deduplicated(self):
+        books = merge_books(
+            [{"portfolio_id": "ZULU", "name": "Z", "description": ""}],
+            ["ALPHA", "ZULU", "ALPHA"],
+        )
+        assert [b["portfolio_id"] for b in books] == ["ALPHA", "ZULU"]

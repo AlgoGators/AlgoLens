@@ -5,7 +5,7 @@ import type {
   AssignmentCheck,
   PortfolioSummary,
 } from '../../domain/portfolio/portfolioAssignment';
-import { API_BASE_URL, log, postWithAuth, putWithAuth } from './httpClient';
+import { API_BASE_URL, deleteWithAuth, log, postWithAuth, putWithAuth } from './httpClient';
 
 export class PortfolioApiService {
   // Debug method to test backend connectivity (call from browser console)
@@ -309,6 +309,34 @@ export class PortfolioApiService {
     if (response.status === 409 && data.risk_check) {
       return { outcome: 'needs_acknowledgement', risk_check: data.risk_check };
     }
+    return { outcome: 'rejected', message: data.error || `Request failed (${response.status})` };
+  }
+
+  static async getBooks(): Promise<Book[]> {
+    const response = await this.fetchWithAuth(`${API_BASE_URL}/portfolio/books`);
+    const data = await response.json();
+    return data.books || [];
+  }
+
+  static async createBook(input: {
+    portfolio_id: string;
+    name?: string;
+    description?: string;
+  }): Promise<{ outcome: 'created'; book: Book } | { outcome: 'rejected'; message: string }> {
+    const response = await postWithAuth(`${API_BASE_URL}/portfolio/books`, input);
+    const data = await response.json().catch(() => ({}));
+    if (response.ok) return { outcome: 'created', book: data };
+    return { outcome: 'rejected', message: data.error || `Request failed (${response.status})` };
+  }
+
+  static async deleteBook(
+    portfolioId: string,
+  ): Promise<{ outcome: 'deleted' } | { outcome: 'rejected'; message: string }> {
+    const response = await deleteWithAuth(
+      `${API_BASE_URL}/portfolio/books/${encodeURIComponent(portfolioId)}`,
+    );
+    if (response.ok) return { outcome: 'deleted' };
+    const data = await response.json().catch(() => ({}));
     return { outcome: 'rejected', message: data.error || `Request failed (${response.status})` };
   }
 

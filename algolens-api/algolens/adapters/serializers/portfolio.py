@@ -109,3 +109,18 @@ def serialize_assignment_history(rows):
             for row in rows
         ]
     }
+
+
+def serialize_book(book):
+    return {
+        "portfolio_id": book["portfolio_id"],
+        "name": book["name"],
+        "description": book["description"],
+        "declared": book["declared"],
+        "strategy_count": book["strategy_count"],
+        "strategies": book["strategies"],
+    }
+
+
+def serialize_book_list(books):
+    return {"books": [serialize_book(b) for b in books]}
