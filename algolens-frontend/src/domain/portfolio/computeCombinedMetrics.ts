@@ -22,8 +22,10 @@ export interface SymbolPnL {
 }
 
 export interface AdvancedMetrics {
-  sortinoRatio: number;
-  informationRatio: number;
+  /** null when it cannot be computed honestly -- see sortinoRatioFromCurve. */
+  sortinoRatio: number | null;
+  /** null when it cannot be computed honestly -- see informationRatioVsBenchmark. */
+  informationRatio: number | null;
   hhi: number;
   correlationMatrix: number[][];
   topHoldings: AllocationSlice[];
@@ -82,10 +84,123 @@ function emptyCombined(): CombinedMetrics {
     strategyAllocation: [],
     historicalPerformance: zeroHistorical,
     advancedMetrics: {
-      sortinoRatio: 0, informationRatio: 0, hhi: 0, correlationMatrix: [],
+      sortinoRatio: null, informationRatio: null, hhi: 0, correlationMatrix: [],
       topHoldings: [], var95: 0
     }
   };
+}
+
+/**
+ * Period-over-period returns of an equity curve, as percentages.
+ *
+ * Returns null if any point is non-positive, because a return off a zero or negative
+ * base is undefined and everything downstream of it would be noise.
+ */
+function periodReturns(curve: { value: number }[]): number[] | null {
+  if (curve.length < 2) return null;
+  const returns: number[] = [];
+  for (let i = 1; i < curve.length; i++) {
+    const prev = curve[i - 1].value;
+    if (prev <= 0) return null;
+    returns.push(((curve[i].value - prev) / prev) * 100);
+  }
+  return returns;
+}
+
+/**
+ * Sortino ratio: annualised return over downside deviation.
+ *
+ * Downside deviation is the target semi-deviation with a minimum acceptable return of
+ * zero -- the root-mean-square of the negative returns taken over EVERY period, not
+ * only the losing ones, annualised by sqrt(252). Dividing by the count of losing days
+ * instead (as this did) inflates the denominator as the portfolio wins more often,
+ * which understates the ratio exactly where it should reward.
+ *
+ * Returns are percentages so they share units with annualizedReturn, leaving the
+ * ratio dimensionless.
+ *
+ * Returns null rather than a number when there is no downside to divide by. That case
+ * used to substitute a hardcoded 0.1, which turned a 10% annualised return into a
+ * Sortino of 100.00 on screen for any book that simply had not had a losing day yet.
+ * An undefined ratio is undefined; it is not an outstanding one.
+ */
+export function sortinoRatioFromCurve(
+  bookCurve: { date: string; value: number }[],
+  annualizedReturn: number
+): number | null {
+  const returns = periodReturns(bookCurve);
+  if (returns === null) return null;
+
+  const downside = returns.reduce(
+    (sum, r) => sum + (r < 0 ? r * r : 0),
+    0
+  );
+  if (downside === 0) return null;
+
+  const downsideDeviation = Math.sqrt(downside / returns.length) * Math.sqrt(252);
+  return annualizedReturn / downsideDeviation;
+}
+
+/**
+ * Information ratio: mean active return over its own standard deviation, annualised.
+ *
+ * The yardstick is the `benchmark` stream -- what the algorithm would have compounded
+ * to with no human edits. That is the only benchmark series the platform actually
+ * produces, and it is the comparison AlphaAttribution already treats as the answer to
+ * "did the desk add value". `system` is deliberately not the yardstick: position
+ * buffering anchors each day's target on yesterday's actual position, so `system`
+ * drifts along with the desk's own past decisions.
+ *
+ * Returns null rather than a number whenever it cannot be computed honestly. There are
+ * four such cases, and each of them used to produce a plausible-looking figure:
+ *
+ *   - a selected strategy carries no benchmark stream (the pre-migration state, and
+ *     the reason this must not silently sum a partial benchmark against a full book)
+ *   - fewer than three dates overlap, so there is no dispersion to divide by
+ *   - tracking error is zero. This is production today: nothing writes edits into
+ *     `qt`, so the two curves are identical. Reporting 0.00 would read as "the desk
+ *     added nothing" when the truth is "the desk has not acted yet"
+ *   - a curve touches zero, which would make a return undefined
+ *
+ * Same convention as the downside deviation above: population standard deviation, and
+ * sqrt(252) to annualise.
+ */
+export function informationRatioVsBenchmark(
+  bookCurve: { date: string; value: number }[],
+  selected: Strategy[]
+): number | null {
+  const streams = selected.map(s => s.equityByStream?.benchmark);
+  if (streams.some(stream => !stream || stream.length === 0)) return null;
+
+  const benchmarkByDate = new Map<string, number>();
+  streams.forEach(stream => {
+    stream!.forEach(pt => {
+      benchmarkByDate.set(pt.date, (benchmarkByDate.get(pt.date) || 0) + pt.value);
+    });
+  });
+
+  // Only dates present in both curves. A book date the benchmark does not cover is
+  // not a day on which the benchmark returned zero.
+  const paired = bookCurve.filter(pt => benchmarkByDate.has(pt.date));
+
+  // n points give n-1 returns, and dispersion needs at least two of those.
+  if (paired.length < 3) return null;
+
+  const bookReturns = periodReturns(paired);
+  const benchReturns = periodReturns(
+    paired.map(pt => ({ value: benchmarkByDate.get(pt.date)! }))
+  );
+  if (bookReturns === null || benchReturns === null) return null;
+
+  const active = bookReturns.map((r, i) => r - benchReturns[i]);
+
+  const mean = active.reduce((sum, r) => sum + r, 0) / active.length;
+  const variance =
+    active.reduce((sum, r) => sum + (r - mean) * (r - mean), 0) / active.length;
+  const trackingError = Math.sqrt(variance);
+  if (trackingError === 0) return null;
+
+  return (mean * Math.sqrt(252)) / trackingError;
 }
 
 /**
@@ -256,23 +371,10 @@ export function computeCombinedMetrics(
     : 0;
 
   // Calculate advanced risk metrics (NOW weightedMetrics is available)
-  // Sortino Ratio (only penalizes downward volatility)
-  const dailyReturns = historicalPerformance.map((_, i) =>
-    i > 0 ? historicalPerformance[i].return - historicalPerformance[i - 1].return : 0
-  );
-  const negativeReturns = dailyReturns.filter(r => r < 0);
-  const downsideDeviation = negativeReturns.length > 0
-    ? Math.sqrt(negativeReturns.reduce((sum, r) => sum + r * r, 0) / negativeReturns.length) * Math.sqrt(252)
-    : 0.1;
-  const sortinoRatio = downsideDeviation > 0
-    ? (weightedMetrics.annualizedReturn / downsideDeviation)
-    : 0;
+  const sortinoRatio = sortinoRatioFromCurve(combinedCurve, weightedMetrics.annualizedReturn);
 
-  // Information Ratio (excess return vs benchmark)
-  const benchmarkReturn = 12.5; // S&P 500 average
-  const excessReturn = weightedMetrics.annualizedReturn - benchmarkReturn;
-  const trackingError = weightedMetrics.volatility * 0.7; // Simulated
-  const informationRatio = trackingError > 0 ? excessReturn / trackingError : 0;
+  // Information Ratio: active return against the benchmark stream, annualised.
+  const informationRatio = informationRatioVsBenchmark(combinedCurve, selected);
 
   // Herfindahl-Hirschman Index (concentration risk)
   const hhi = assetAllocation.reduce((sum, asset) =>
