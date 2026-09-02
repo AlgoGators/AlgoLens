@@ -290,3 +290,16 @@ def test_a_null_average_price_does_not_take_down_the_detail_view():
     out = transform_positions(rows, 100000.0)
     assert out[0]["symbol"] == "ES"
     assert out[0]["priceUnknown"] is True
+
+
+def test_the_written_position_is_returned_as_numbers_not_strings():
+    # jsonify renders Decimal as a JSON string. A client parsing "quantity"
+    # as a number would silently get a string instead.
+    from algolens.infrastructure.portfolio.repositories import _plain_position
+    from decimal import Decimal
+
+    row = {"symbol": "ES", "quantity": Decimal("20"), "average_price": Decimal("5280.25")}
+    out = _plain_position(row)
+    assert isinstance(out["quantity"], float)
+    assert isinstance(out["average_price"], float)
+    assert out["average_price"] == 5280.25

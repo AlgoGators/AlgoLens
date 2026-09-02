@@ -48,13 +48,16 @@
       },
       "devDependencies": {
             "@types/node": "^26.1.2",
+            "@types/react-dom": "^19.2.5",
             "@vitejs/plugin-react-swc": "^4.3.3",
+            "typescript": "^5.9.2",
             "vite": "8.2.1",
             "vitest": "^3.2.7"
       },
       "scripts": {
             "dev": "vite",
             "build": "vite build",
-            "test": "vitest run"
+            "test": "vitest run",
+            "typecheck": "tsc --noEmit"
       }
 }

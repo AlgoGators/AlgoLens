@@ -497,6 +497,36 @@ export class PortfolioApiService {
   }
 }
 
+export interface Book {
+  portfolio_id: string;
+  name: string;
+  description: string;
+  /** false when the book exists only because a strategy sits in it. */
+  declared: boolean;
+  strategy_count: number;
+  strategies: {
+    id: string;
+    name: string;
+    strategy_type: string;
+    lifecycle: string;
+    /** true for the book strategy_registry.portfolio_id names -- what the engine reads. */
+    is_primary?: boolean;
+  }[];
+}
+
+export interface AssignmentRecord {
+  id: number;
+  strategy_id: string;
+  user_id: string | null;
+  from_portfolio_id: string | null;
+  to_portfolio_id: string | null;
+  lifecycle_at_move: string | null;
+  reason: string | null;
+  consequences: { code: string; message: string }[] | null;
+  acknowledged: boolean;
+  created_at: string;
+}
+
 export type PositionOverride = {
   id: number;
   user_id: string;

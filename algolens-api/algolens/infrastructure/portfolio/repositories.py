@@ -647,7 +647,11 @@ class PostgresPortfolioRepository:
                             after.get("average_price"),
                         ),
                     )
-                    position = dict(cursor.fetchone())
+                    # Coerced, not raw: NUMERIC columns come back as Decimal and
+                    # jsonify renders those as JSON strings. The 201 body was
+                    # returning "quantity": "20", which any client parsing it as
+                    # a number would get wrong.
+                    position = _plain_position(cursor.fetchone())
 
                     cursor.execute(
                         """
