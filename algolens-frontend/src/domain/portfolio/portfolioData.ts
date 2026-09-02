@@ -97,6 +97,14 @@ export interface Strategy {
   finalizedPositions: FinalizedPosition[];
   managers: string[];
   lastUpdate: string;
+  /**
+   * The book these positions belong to. Positions, risk limits and the traded
+   * universe are all keyed on (strategy, book), so this is not decoration --
+   * an edit has to name it.
+   */
+  portfolio_id?: string;
+  /** Every book this strategy trades in. More than one means this view is partial. */
+  books?: string[];
 }
 
 export interface PortfolioData {

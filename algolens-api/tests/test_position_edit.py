@@ -303,3 +303,65 @@ def test_the_written_position_is_returned_as_numbers_not_strings():
     assert isinstance(out["quantity"], float)
     assert isinstance(out["average_price"], float)
     assert out["average_price"] == 5280.25
+
+
+class TestBookResolution:
+    """Which book an edit lands in.
+
+    A strategy in several books has separate positions, a separate risk envelope
+    and possibly a different universe in each. Defaulting to the primary silently
+    wrote to the wrong book: a symbol existing only in another book was created
+    fresh in the primary, checked against the primary's envelope, and recorded
+    as passed.
+    """
+
+    def test_one_book_needs_no_ceremony(self):
+        from algolens.domain.portfolio.position_edit import resolve_target_book
+
+        assert resolve_target_book("carry", None, ["CONSERVATIVE"], "CONSERVATIVE") == "CONSERVATIVE"
+
+    def test_several_books_and_no_stated_book_is_refused(self):
+        from algolens.domain.portfolio.position_edit import AmbiguousBook, resolve_target_book
+
+        with pytest.raises(AmbiguousBook) as exc:
+            resolve_target_book("carry", None, ["CONSERVATIVE", "MACRO"], "CONSERVATIVE")
+        # The caller is told what to choose between rather than just refused.
+        assert sorted(exc.value.books) == ["CONSERVATIVE", "MACRO"]
+
+    def test_a_stated_book_is_honoured(self):
+        from algolens.domain.portfolio.position_edit import resolve_target_book
+
+        assert resolve_target_book("carry", "MACRO", ["CONSERVATIVE", "MACRO"], "CONSERVATIVE") == "MACRO"
+
+    def test_a_book_the_strategy_is_not_in_is_refused(self):
+        from algolens.domain.portfolio.position_edit import resolve_target_book
+
+        with pytest.raises(PositionValidationError) as exc:
+            resolve_target_book("carry", "SOMEONE_ELSES", ["CONSERVATIVE"], "CONSERVATIVE")
+        assert exc.value.code == "not_a_member_of_book"
+
+    def test_it_falls_back_to_the_primary_when_membership_is_unavailable(self):
+        # A database between migration 008 creating the table and its seed
+        # running. Refusing every edit there would be worse than using the
+        # column that has always been correct.
+        from algolens.domain.portfolio.position_edit import resolve_target_book
+
+        assert resolve_target_book("carry", None, [], "CONSERVATIVE") == "CONSERVATIVE"
+
+    def test_the_payload_accepts_and_normalises_a_book(self):
+        out = validate_position_payload(
+            {
+                "strategy_id": "carry",
+                "symbol": "es",
+                "quantity": 1,
+                "reason": "x",
+                "portfolio_id": " macro_book ",
+            }
+        )
+        assert out["portfolio_id"] == "MACRO_BOOK"
+
+    def test_an_omitted_book_stays_none_rather_than_defaulting(self):
+        out = validate_position_payload(
+            {"strategy_id": "carry", "symbol": "es", "quantity": 1, "reason": "x"}
+        )
+        assert out["portfolio_id"] is None

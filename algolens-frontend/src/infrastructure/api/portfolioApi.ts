@@ -345,6 +345,11 @@ export class PortfolioApiService {
     average_price?: number | null;
     reason: string;
     acknowledge_risk?: boolean;
+    /**
+     * Which book. Omitting it is only safe for a strategy in exactly one; the
+     * server answers 409 ambiguous_book otherwise rather than guessing.
+     */
+    portfolio_id?: string;
   }): Promise<
     | { outcome: 'saved'; risk_check: RiskCheck }
     | { outcome: 'needs_acknowledgement'; risk_check: RiskCheck }

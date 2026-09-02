@@ -48,7 +48,7 @@ from algolens.application.portfolio.use_cases import (
     StrategyNotFound,
     UpsertQtPosition,
 )
-from algolens.domain.portfolio.position_edit import PositionValidationError
+from algolens.domain.portfolio.position_edit import AmbiguousBook, PositionValidationError
 from algolens.domain.portfolio.portfolio_assignment import AssignmentValidationError
 from algolens.infrastructure.config.dependencies import create_portfolio_dependencies
 
@@ -96,6 +96,9 @@ VALIDATION_MESSAGES = {
         "is indistinguishable from an accident when read back months later"
     ),
     "quantity_not_a_number": "Field 'quantity' must be a number",
+    "portfolio_id_not_a_string": "Field 'portfolio_id' must be a string",
+    "empty_portfolio_id": "Field 'portfolio_id' must not be empty",
+    "not_a_member_of_book": "That strategy does not belong to the book named",
     "price_not_a_number": "Field 'average_price' must be a number",
     "price_negative": "Field 'average_price' must not be negative",
 }
@@ -369,6 +372,23 @@ def upsert_position():
         return jsonify({"error": message, "code": exc.code}), 400
     except StrategyNotFound:
         return jsonify({"error": "Strategy not found"}), 404
+    except AmbiguousBook as exc:
+        # 409, not 400: the request is well formed, it just cannot be resolved
+        # to one book. The client is told which books to choose between.
+        return (
+            jsonify(
+                {
+                    "error": (
+                        f"{exc.strategy_id} belongs to {len(exc.books)} books. "
+                        f"Say which one this edit is for."
+                    ),
+                    "code": "ambiguous_book",
+                    "books": exc.books,
+                    "resubmit_with": "portfolio_id",
+                }
+            ),
+            409,
+        )
     except RiskAcknowledgementRequired as exc:
         return jsonify(
             {

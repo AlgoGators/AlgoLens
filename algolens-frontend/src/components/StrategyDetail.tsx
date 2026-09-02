@@ -240,6 +240,8 @@ export function StrategyDetail({ strategy, onBack, onPositionsChanged }: Strateg
           <PositionBreakdown
             positions={strategy.positions}
             strategyId={strategy.id}
+            portfolioId={strategy.portfolio_id}
+            books={strategy.books}
             onEdited={onPositionsChanged}
           />
           {/* The audit trail sits directly under the book it describes. It was

@@ -18,6 +18,46 @@ from numbers import Real
 # merely defensive.
 QT_STREAM = "qt"
 
+# Raised when an edit does not say which book it means and the strategy is in
+# more than one. See resolve_target_book.
+class AmbiguousBook(Exception):
+    """The edit could land in more than one book, so it lands in none.
+
+    A strategy in several books has a separate set of positions, a separate risk
+    envelope and possibly a different universe in each. Defaulting to the
+    primary book silently wrote to the wrong one: a symbol that existed only in
+    another book was created fresh in the primary, checked against the primary's
+    envelope, and recorded as passed.
+    """
+
+    def __init__(self, strategy_id, books):
+        super().__init__(
+            f"{strategy_id} belongs to {len(books)} books; the edit must say which"
+        )
+        self.strategy_id = strategy_id
+        self.books = list(books)
+
+
+def resolve_target_book(strategy_id, requested, books, primary):
+    """Which book this edit is for.
+
+    Named explicitly wins, provided the strategy is actually in it. Otherwise a
+    strategy in exactly one book needs no ceremony. A strategy in several and no
+    stated book is refused rather than guessed -- the guess is unobservable in
+    the response and permanent in the ledger.
+    """
+    known = list(books) or ([primary] if primary else [])
+    if requested is not None:
+        if requested not in known:
+            raise PositionValidationError(
+                "not_a_member_of_book",
+                f"{strategy_id} does not belong to {requested}",
+            )
+        return requested
+    if len(known) == 1:
+        return known[0]
+    raise AmbiguousBook(strategy_id, known)
+
 REQUIRED_FIELDS = ("strategy_id", "symbol", "quantity", "reason")
 
 
@@ -84,6 +124,22 @@ def validate_position_payload(payload):
             "quantity_not_a_number", "Field 'quantity' must be a number"
         )
 
+    # Optional, and only meaningful once a strategy can be in several books.
+    # Validated here so a malformed value is rejected the same way as any other
+    # field rather than reaching a query.
+    raw_book = payload.get("portfolio_id")
+    portfolio_id = None
+    if raw_book is not None:
+        if not isinstance(raw_book, str):
+            raise PositionValidationError(
+                "portfolio_id_not_a_string", "Field 'portfolio_id' must be a string"
+            )
+        portfolio_id = raw_book.strip().upper()
+        if not portfolio_id:
+            raise PositionValidationError(
+                "empty_portfolio_id", "Field 'portfolio_id' must not be empty"
+            )
+
     average_price = payload.get("average_price")
     if average_price is not None:
         if isinstance(average_price, bool) or not isinstance(average_price, Real):
@@ -101,6 +157,7 @@ def validate_position_payload(payload):
         "quantity": quantity,
         "average_price": average_price,
         "reason": reason,
+        "portfolio_id": portfolio_id,
         "portfolio_type": QT_STREAM,
     }
 

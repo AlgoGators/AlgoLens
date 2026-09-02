@@ -6,6 +6,8 @@ import { PortfolioApiService } from '../infrastructure/api/portfolioApi';
 
 interface EditPositionModalProps {
   strategyId: string;
+  /** The book being edited. Sent explicitly so the write cannot land elsewhere. */
+  portfolioId?: string;
   /** null when adding a new position, in which case the symbol is editable. */
   symbol: string | null;
   existing: { quantity: number; average_price: number | null } | null;
@@ -26,6 +28,7 @@ interface EditPositionModalProps {
  */
 export function EditPositionModal({
   strategyId,
+  portfolioId,
   symbol,
   existing,
   theme,
@@ -79,6 +82,7 @@ export function EditPositionModal({
         average_price: parsedPrice,
         reason: reason.trim(),
         acknowledge_risk: acknowledging,
+        portfolio_id: portfolioId,
       });
       if (!mounted.current) return;
 
@@ -127,7 +131,14 @@ export function EditPositionModal({
               {symbol ? `Adjust ${symbol}` : 'Add position'}
             </h2>
             <p className={`text-sm ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
-              Writes the traded book and records an audit entry
+              {portfolioId ? (
+                <>
+                  Writes <span className="font-mono">{portfolioId}</span> and records an
+                  audit entry
+                </>
+              ) : (
+                'Writes the traded book and records an audit entry'
+              )}
             </p>
           </div>
           <button

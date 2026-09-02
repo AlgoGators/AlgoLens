@@ -38,6 +38,7 @@ from algolens.domain.portfolio.calculations import (
 )
 from algolens.domain.portfolio.incubation import compute_incubation_window
 from algolens.domain.portfolio.position_edit import (
+    resolve_target_book,
     with_known_price,
     evaluate_risk,
     validate_position_payload,
@@ -222,6 +223,24 @@ class GetStrategyDetail:
         detail = build_strategy_detail(cfg, rows)
         if detail is None:
             raise StrategyDataNotFound(strategy_id)
+
+        # Which book these positions are, and every book this strategy is in.
+        # The view has always shown one book's positions; it just never said so,
+        # which is how an edit could be aimed at a universe that was not on
+        # screen. The client needs both to name the book it is writing to and to
+        # tell the reader they are looking at one of several.
+        detail["portfolio_id"] = cfg["portfolio_id"]
+        books = []
+        lister = getattr(self.registry, "books_for_strategy", None)
+        if lister:
+            try:
+                books = lister(strategy_id)
+            except Exception as exc:
+                logger.error(
+                    "[STRATEGY] Membership read failed for %s: %s",
+                    strategy_id, exc, exc_info=True,
+                )
+        detail["books"] = books or [cfg["portfolio_id"]]
         return detail
 
 
@@ -342,7 +361,25 @@ class UpsertQtPosition:
             raise StrategyNotFound(normalized["strategy_id"])
 
         strategy_type = strategy["strategy_type"]
-        portfolio_id = strategy["portfolio_id"]
+        # Which book, decided explicitly. Reading strategy["portfolio_id"] here
+        # meant every edit went to the primary book regardless of which book the
+        # caller meant -- see AmbiguousBook.
+        books = []
+        lister = getattr(self.registry, "books_for_strategy", None)
+        if lister:
+            try:
+                books = lister(strategy["id"])
+            except Exception as exc:
+                logger.error(
+                    "[POSITIONS] Membership read failed for %s: %s",
+                    strategy["id"], exc, exc_info=True,
+                )
+        portfolio_id = resolve_target_book(
+            strategy["id"],
+            normalized.get("portfolio_id"),
+            books,
+            strategy["portfolio_id"],
+        )
 
         envelope = self.reader.fetch_risk_envelope(strategy_type, portfolio_id)
         book = self.reader.fetch_qt_book(strategy_type, portfolio_id)

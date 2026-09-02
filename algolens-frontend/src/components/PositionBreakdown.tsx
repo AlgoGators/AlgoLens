@@ -13,6 +13,10 @@ interface PositionBreakdownProps {
    * subscriber-facing views), the table stays exactly as it was: read-only.
    */
   strategyId?: string;
+  /** The book these positions came from. Passed to the editor so it writes there. */
+  portfolioId?: string;
+  /** Every book this strategy trades in; more than one means this table is partial. */
+  books?: string[];
   /** Called after a successful write so the caller can refetch the book. */
   onEdited?: () => void;
 }
@@ -22,7 +26,13 @@ type EditTarget = {
   existing: { quantity: number; average_price: number | null } | null;
 };
 
-export function PositionBreakdown({ positions, strategyId, onEdited }: PositionBreakdownProps) {
+export function PositionBreakdown({
+  positions,
+  strategyId,
+  portfolioId,
+  books,
+  onEdited,
+}: PositionBreakdownProps) {
   const { theme } = useTheme();
   const { user } = useAuth();
   const [editing, setEditing] = useState<EditTarget | null>(null);
@@ -48,6 +58,13 @@ export function PositionBreakdown({ positions, strategyId, onEdited }: PositionB
           theme === 'dark' ? 'text-gray-400' : 'text-gray-500'
         }`}>
           Today's Positions
+          {portfolioId && (
+            <span className={`ml-2 font-mono normal-case ${
+              theme === 'dark' ? 'text-gray-500' : 'text-gray-400'
+            }`}>
+              {portfolioId}
+            </span>
+          )}
         </h3>
         {canEdit && (
           <button
@@ -63,6 +80,26 @@ export function PositionBreakdown({ positions, strategyId, onEdited }: PositionB
           </button>
         )}
       </div>
+
+      {/* A strategy can trade a different universe in each book it belongs to.
+          This table is one book; saying so is the difference between a partial
+          view and a wrong one. */}
+      {books && books.length > 1 && (
+        <div className={`mb-4 rounded-lg border px-4 py-3 text-sm ${
+          theme === 'dark'
+            ? 'border-gray-800 bg-gray-900 text-gray-300'
+            : 'border-gray-200 bg-gray-50 text-gray-700'
+        }`}>
+          This strategy also trades in{' '}
+          {books.filter(b => b !== portfolioId).map((b, i, arr) => (
+            <span key={b}>
+              <span className="font-mono">{b}</span>
+              {i < arr.length - 1 ? ', ' : ''}
+            </span>
+          ))}
+          . Those positions, and their risk limits, are separate and are not shown here.
+        </div>
+      )}
 
       <div className={`border rounded-lg overflow-hidden ${
         theme === 'dark' ? 'border-gray-800' : 'border-gray-200'
@@ -181,6 +218,7 @@ export function PositionBreakdown({ positions, strategyId, onEdited }: PositionB
       {editing && strategyId && (
         <EditPositionModal
           strategyId={strategyId}
+          portfolioId={portfolioId}
           symbol={editing.symbol}
           existing={editing.existing}
           theme={theme}
