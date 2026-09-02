@@ -1,27 +1,34 @@
 import { useCallback, useEffect, useState } from 'react';
-import { ArrowRightLeft, BookPlus, Trash2 } from 'lucide-react';
+import { BookPlus, Plus, Trash2, X } from 'lucide-react';
 
 import { useTheme } from '../adapters/react/ThemeContext';
 import { isValidPortfolioId, normalizePortfolioId } from '../domain/portfolio/portfolioAssignment';
 import { PortfolioApiService, type Book } from '../infrastructure/api/portfolioApi';
-import { ReassignPortfolioModal } from './ReassignPortfolioModal';
+import { RemoveFromBookModal } from './RemoveFromBookModal';
 
-type MoveTarget = { strategyId: string; strategyName: string; portfolioId: string };
+type RemoveTarget = { strategyId: string; strategyName: string; portfolioId: string };
 
 /**
  * Define the books, and decide what goes in each.
  *
- * A book is a portfolio. Until now one existed only as a distinct portfolio_id
- * on the strategy registry, so an empty book could not exist — you could not
- * set one up and then decide what belongs in it. Declared books make that
- * possible; books already in use still appear, marked as such.
+ * A book is a portfolio. Declared books can exist empty, so you can set one up
+ * and then decide what belongs in it; books already in use appear too, marked
+ * "undeclared".
+ *
+ * A strategy can be in several books at once. The read side always supported
+ * this — positions, equity and results are keyed on (strategy, portfolio) pairs
+ * — so a strategy in two books simply produces two independent sets of rows.
+ *
+ * Adding is free and inline. Removing goes through a modal, because it makes
+ * that one book history discontinuous.
  */
 export function BooksScreen() {
   const { theme } = useTheme();
   const [books, setBooks] = useState<Book[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [moving, setMoving] = useState<MoveTarget | null>(null);
+  const [removing, setRemoving] = useState<RemoveTarget | null>(null);
+  const [addingTo, setAddingTo] = useState<string | null>(null);
 
   const [newId, setNewId] = useState('');
   const [newName, setNewName] = useState('');
@@ -84,7 +91,28 @@ export function BooksScreen() {
   const labelClass = `block text-xs font-medium mb-1 ${isDark ? 'text-gray-400' : 'text-gray-500'}`;
 
   const idIsValid = newId.trim() === '' || isValidPortfolioId(newId);
-  const allIds = (books ?? []).map(b => b.portfolio_id);
+
+  // Every distinct strategy across every book, so one can be added to a book it
+  // is not in yet. There is no endpoint listing strategies independent of their
+  // books, and deriving it here keeps this screen to one round trip.
+  const allStrategies = new Map<string, { id: string; name: string }>();
+  (books ?? []).forEach(b => b.strategies.forEach(st => allStrategies.set(st.id, st)));
+
+  async function handleAdd(book: Book, strategyId: string) {
+    setNotice(null);
+    const result = await PortfolioApiService.addStrategyToBook({
+      portfolio_id: book.portfolio_id,
+      strategy_id: strategyId,
+      reason: 'Added from the Books tab',
+    });
+    setAddingTo(null);
+    if (result.outcome === 'rejected') {
+      setError(result.message);
+      return;
+    }
+    setError(null);
+    await load();
+  }
 
   return (
     <div className="max-w-5xl mx-auto px-4 py-8 space-y-8">
@@ -217,11 +245,12 @@ export function BooksScreen() {
                 </div>
               </div>
 
-              {book.strategies.length === 0 ? (
+              {book.strategies.length === 0 && (
                 <div className={`px-4 py-6 text-center text-sm ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>
-                  Empty — move a strategy here from another book.
+                  Empty — add a strategy below.
                 </div>
-              ) : (
+              )}
+              {book.strategies.length > 0 && (
                 book.strategies.map(strategy => (
                   <div
                     key={strategy.id}
@@ -238,40 +267,92 @@ export function BooksScreen() {
                         )}
                       </div>
                     </div>
-                    <button
-                      aria-label={`Move ${strategy.name} to another book`}
-                      onClick={() =>
-                        setMoving({
-                          strategyId: strategy.id,
-                          strategyName: strategy.name,
-                          portfolioId: book.portfolio_id,
-                        })
-                      }
-                      className={`inline-flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs ${
-                        isDark ? 'hover:bg-gray-800' : 'hover:bg-gray-200'
-                      }`}
-                    >
-                      <ArrowRightLeft className="w-4 h-4" />
-                      Move
-                    </button>
+                    <div className="flex items-center gap-3">
+                      {strategy.is_primary && (
+                        <span
+                          className={`rounded-full px-2 py-0.5 text-[10px] uppercase tracking-wide ${
+                            isDark ? 'bg-gray-800 text-gray-400' : 'bg-gray-200 text-gray-600'
+                          }`}
+                          title="The book the engine reads where a single answer is needed"
+                        >
+                          primary
+                        </span>
+                      )}
+                      <button
+                        aria-label={`Remove ${strategy.name} from ${book.portfolio_id}`}
+                        onClick={() =>
+                          setRemoving({
+                            strategyId: strategy.id,
+                            strategyName: strategy.name,
+                            portfolioId: book.portfolio_id,
+                          })
+                        }
+                        className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs ${
+                          isDark ? 'hover:bg-gray-800' : 'hover:bg-gray-200'
+                        }`}
+                      >
+                        <X className="w-3.5 h-3.5" />
+                        Remove
+                      </button>
+                    </div>
                   </div>
                 ))
               )}
+
+              {/* Adding takes nothing away from the books a strategy is already
+                  in, so it needs no confirmation step. */}
+              <div className={`px-4 py-3 border-t ${isDark ? 'border-gray-800' : 'border-gray-200'}`}>
+                {addingTo === book.portfolio_id ? (
+                  <div className="flex items-center gap-2">
+                    <select
+                      autoFocus
+                      aria-label={`Add a strategy to ${book.portfolio_id}`}
+                      defaultValue=""
+                      onChange={e => e.target.value && handleAdd(book, e.target.value)}
+                      className={`rounded-lg border px-2 py-1.5 text-sm ${
+                        isDark ? 'bg-gray-900 border-gray-700 text-white' : 'bg-white border-gray-300'
+                      }`}
+                    >
+                      <option value="" disabled>Choose a strategy...</option>
+                      {[...allStrategies.values()]
+                        .filter(st => !book.strategies.some(existing => existing.id === st.id))
+                        .map(st => <option key={st.id} value={st.id}>{st.name}</option>)}
+                    </select>
+                    <button
+                      onClick={() => setAddingTo(null)}
+                      className={`rounded-lg px-2.5 py-1.5 text-xs ${
+                        isDark ? 'hover:bg-gray-800' : 'hover:bg-gray-200'
+                      }`}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => setAddingTo(book.portfolio_id)}
+                    className={`inline-flex items-center gap-1.5 text-xs ${
+                      isDark ? 'text-gray-400 hover:text-white' : 'text-gray-500 hover:text-black'
+                    }`}
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    Add a strategy
+                  </button>
+                )}
+              </div>
             </div>
           ))}
         </div>
       )}
 
-      {moving && (
-        <ReassignPortfolioModal
-          strategyId={moving.strategyId}
-          strategyName={moving.strategyName}
-          currentPortfolioId={moving.portfolioId}
-          knownPortfolioIds={allIds}
+      {removing && (
+        <RemoveFromBookModal
+          strategyId={removing.strategyId}
+          strategyName={removing.strategyName}
+          portfolioId={removing.portfolioId}
           theme={theme}
-          onClose={() => setMoving(null)}
-          onSaved={() => {
-            setMoving(null);
+          onClose={() => setRemoving(null)}
+          onRemoved={() => {
+            setRemoving(null);
             void load();
           }}
         />

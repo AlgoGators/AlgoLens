@@ -392,6 +392,51 @@ export class PortfolioApiService {
     return { outcome: 'rejected', message: data.error || `Request failed (${response.status})` };
   }
 
+  /**
+   * Put a strategy in a book. It keeps every book it is already in, so this
+   * takes nothing away and needs no acknowledgement.
+   */
+  static async addStrategyToBook(input: {
+    portfolio_id: string;
+    strategy_id: string;
+    reason?: string;
+  }): Promise<{ outcome: 'saved' } | { outcome: 'rejected'; message: string }> {
+    const response = await postWithAuth(
+      `${API_BASE_URL}/portfolio/books/${encodeURIComponent(input.portfolio_id)}/strategies`,
+      { strategy_id: input.strategy_id, reason: input.reason ?? '' },
+    );
+    if (response.ok) return { outcome: 'saved' };
+    const data = await response.json().catch(() => ({}));
+    return { outcome: 'rejected', message: data.error || `Request failed (${response.status})` };
+  }
+
+  /**
+   * Take a strategy out of a book. A 409 carrying assignment_check is the
+   * acknowledgeable one; last_book and a retired strategy are flat refusals.
+   */
+  static async removeStrategyFromBook(input: {
+    portfolio_id: string;
+    strategy_id: string;
+    reason: string;
+    acknowledge?: boolean;
+  }): Promise<
+    | { outcome: 'saved' }
+    | { outcome: 'needs_acknowledgement'; assignment_check: AssignmentCheck }
+    | { outcome: 'rejected'; message: string }
+  > {
+    const response = await deleteWithAuth(
+      `${API_BASE_URL}/portfolio/books/${encodeURIComponent(input.portfolio_id)}` +
+        `/strategies/${encodeURIComponent(input.strategy_id)}`,
+      { reason: input.reason, acknowledge: Boolean(input.acknowledge) },
+    );
+    const data = await response.json().catch(() => ({}));
+    if (response.ok) return { outcome: 'saved' };
+    if (response.status === 409 && data.assignment_check) {
+      return { outcome: 'needs_acknowledgement', assignment_check: data.assignment_check };
+    }
+    return { outcome: 'rejected', message: data.error || `Request failed (${response.status})` };
+  }
+
   static async getPortfolios(): Promise<PortfolioSummary[]> {
     const response = await this.fetchWithAuth(`${API_BASE_URL}/portfolio/portfolios`);
     const data = await response.json();

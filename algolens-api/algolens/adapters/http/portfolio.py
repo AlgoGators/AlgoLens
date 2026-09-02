@@ -19,11 +19,13 @@ from algolens.adapters.serializers.portfolio import (
 )
 from algolens.application.portfolio.ports import (
     IncubationError,
+    MembershipAcknowledgementRequired,
     PortfolioReassignmentAcknowledgementRequired,
     RiskAcknowledgementRequired,
     StrategyNameUnresolved,
 )
 from algolens.application.portfolio.use_cases import (
+    ChangeBookMembership,
     CreateBook,
     DeleteBook,
     GetIncubationPerformance,
@@ -62,6 +64,11 @@ ASSIGNMENT_MESSAGES = {
     ),
     "strategy_not_found": "Strategy not found",
     "book_name_too_long": "Field 'name' is too long",
+    "unknown_action": "Action must be 'add' or 'remove'",
+    "last_book": (
+        "A strategy must belong to at least one book. Add it to another book "
+        "before removing it from this one."
+    ),
     "not_an_object": "Request body must be a JSON object",
     "strategy_retired": (
         "A retired strategy cannot be reassigned: its book is closed and moving it "
@@ -524,3 +531,64 @@ def delete_book(portfolio_id):
     except Exception as exc:
         current_app.logger.error("Failed to delete book: %s", str(exc), exc_info=True)
         return jsonify({"error": "Failed to delete the book"}), 500
+
+
+@portfolio_bp.route("/books/<portfolio_id>/strategies", methods=["POST"])
+@jwt_required()
+@internal_only
+def add_strategy_to_book(portfolio_id):
+    """Put a strategy in this book. It keeps the books it is already in."""
+    return _change_book_membership(portfolio_id, "add")
+
+
+@portfolio_bp.route("/books/<portfolio_id>/strategies/<strategy_id>", methods=["DELETE"])
+@jwt_required()
+@internal_only
+def remove_strategy_from_book(portfolio_id, strategy_id):
+    """Take a strategy out of this book.
+
+    Answers 409 with the consequences unless the caller has acknowledged that
+    the book's history becomes discontinuous.
+    """
+    return _change_book_membership(portfolio_id, "remove", strategy_id)
+
+
+def _change_book_membership(portfolio_id, action, strategy_id=None):
+    payload = request.get_json(silent=True) or {}
+    if not isinstance(payload, dict):
+        return jsonify({"error": "Request body must be a JSON object"}), 400
+    strategy_id = strategy_id or payload.get("strategy_id")
+    if not strategy_id:
+        return jsonify({"error": "Missing required field: strategy_id"}), 400
+
+    try:
+        registry, _reader = _portfolio_dependencies()
+        result = ChangeBookMembership(registry).execute(
+            strategy_id,
+            portfolio_id,
+            action,
+            user_id=_request_user_id(),
+            reason=payload.get("reason"),
+            acknowledge=bool(payload.get("acknowledge")),
+        )
+        return jsonify(serialize_assignment_result(result)), 200
+    except AssignmentValidationError as exc:
+        message = ASSIGNMENT_MESSAGES.get(exc.code, "Invalid request")
+        status = 404 if exc.code == "strategy_not_found" else 400
+        return jsonify({"error": message, "code": exc.code}), status
+    except MembershipAcknowledgementRequired as exc:
+        return (
+            jsonify(
+                {
+                    "error": "Removing this strategy breaks the book's history continuity",
+                    "assignment_check": exc.verdict,
+                    "resubmit_with": "acknowledge",
+                }
+            ),
+            409,
+        )
+    except Exception as exc:
+        current_app.logger.error(
+            "Failed to %s membership for %s: %s", action, strategy_id, str(exc), exc_info=True
+        )
+        return jsonify({"error": "Failed to change book membership"}), 500

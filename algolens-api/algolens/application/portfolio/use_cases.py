@@ -7,7 +7,10 @@ from typing import Any
 
 from algolens.domain.portfolio.portfolio_assignment import (
     build_assignment_audit,
+    build_membership_audit,
     evaluate_assignment,
+    evaluate_membership_add,
+    evaluate_membership_remove,
     merge_books,
     normalize_portfolio_id,
     validate_book,
@@ -15,6 +18,7 @@ from algolens.domain.portfolio.portfolio_assignment import (
 from algolens.application.portfolio.ports import (
     IncubationError,
     IncubationPerformanceRows,
+    MembershipAcknowledgementRequired,
     PortfolioDetailRows,
     PortfolioReaderPort,
     PortfolioReassignmentAcknowledgementRequired,
@@ -506,19 +510,31 @@ class ListBooks:
 
     def execute(self) -> list[dict[str, Any]]:
         declared = self.registry.list_declared_books()
-        in_use = self.registry.list_portfolio_ids_in_use()
+        in_use = list(self.registry.list_portfolio_ids_in_use())
+        in_use += [row["portfolio_id"] for row in self.registry.list_memberships()]
         books = merge_books(declared, in_use)
+
+        # Group by membership, not by the single primary column: a strategy can
+        # be in several books and must appear under each of them.
+        memberships = self.registry.list_memberships()
+        by_strategy: dict[str, list[str]] = {}
+        for row in memberships:
+            by_strategy.setdefault(row["strategy_id"], []).append(row["portfolio_id"])
 
         occupancy = {b["portfolio_id"]: [] for b in books}
         for cfg in self.registry.list(active_only=False):
-            occupancy.setdefault(cfg["portfolio_id"], []).append(
-                {
-                    "id": cfg["id"],
-                    "name": cfg["name"],
-                    "strategy_type": cfg["strategy_type"],
-                    "lifecycle": cfg.get("lifecycle") or "live",
-                }
-            )
+            entry = {
+                "id": cfg["id"],
+                "name": cfg["name"],
+                "strategy_type": cfg["strategy_type"],
+                "lifecycle": cfg.get("lifecycle") or "live",
+            }
+            # Fall back to the primary column if memberships have not been
+            # seeded yet, so a book never looks empty when it is not.
+            for portfolio_id in by_strategy.get(cfg["id"], [cfg["portfolio_id"]]):
+                occupancy.setdefault(portfolio_id, []).append(
+                    {**entry, "is_primary": portfolio_id == cfg["portfolio_id"]}
+                )
 
         for book in books:
             book["strategies"] = occupancy.get(book["portfolio_id"], [])
@@ -542,3 +558,63 @@ class DeleteBook:
 
     def execute(self, portfolio_id: str) -> dict[str, Any]:
         return self.registry.delete_book(normalize_portfolio_id(portfolio_id))
+
+
+class ChangeBookMembership:
+    """Add a strategy to a book, or take it out of one.
+
+    Adding and removing are deliberately asymmetric. Adding takes nothing away
+    from the books the strategy is already in, so it is free. Removing makes
+    that book's history discontinuous, so it must be acknowledged -- and a
+    strategy can never be removed from its last book, because every read in this
+    app is scoped by (strategy, portfolio) and it would become unreachable.
+    """
+
+    def __init__(self, registry: StrategyRegistryPort):
+        self.registry = registry
+
+    def _lookup(self, strategy_id: str) -> dict[str, Any] | None:
+        getter = getattr(self.registry, "get_any", None)
+        return getter(strategy_id) if getter else self.registry.get(strategy_id)
+
+    def execute(
+        self,
+        strategy_id: str,
+        portfolio_id: Any,
+        action: str,
+        user_id: str,
+        reason: Any = None,
+        acknowledge: bool = False,
+    ) -> dict[str, Any]:
+        target = normalize_portfolio_id(portfolio_id)
+        strategy = self._lookup(strategy_id)
+        current_books = self.registry.books_for_strategy(strategy_id)
+
+        if action == "add":
+            verdict = evaluate_membership_add(strategy, target, current_books)
+        elif action == "remove":
+            verdict = evaluate_membership_remove(strategy, target, current_books)
+        else:
+            raise AssignmentValidationError(
+                "unknown_action", "Action must be 'add' or 'remove'"
+            )
+
+        if not verdict["changed"]:
+            return {"changed": False, "portfolio_id": target, "verdict": verdict}
+
+        if verdict["requires_acknowledgement"] and not acknowledge:
+            raise MembershipAcknowledgementRequired(verdict)
+
+        audit = build_membership_audit(
+            strategy,
+            target,
+            action,
+            user_id=user_id,
+            reason=(str(reason).strip() if reason is not None else ""),
+            acknowledged=acknowledge,
+        )
+        if action == "add":
+            self.registry.add_membership(strategy_id, target, audit)
+        else:
+            self.registry.remove_membership(strategy_id, target, audit)
+        return {"changed": True, "portfolio_id": target, "verdict": verdict}

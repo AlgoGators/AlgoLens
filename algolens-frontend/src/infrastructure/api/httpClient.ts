@@ -196,16 +196,22 @@ export async function putWithAuth(url: string, body: unknown): Promise<Response>
   return writeWithAuth('PUT', url, body);
 }
 
-export async function deleteWithAuth(url: string): Promise<Response> {
+export async function deleteWithAuth(url: string, body?: unknown): Promise<Response> {
   const csrf = readCookie('csrf_access_token');
   if (!csrf) {
     log('warn', 'No csrf_access_token cookie found; the request will likely 401');
   }
 
   log('info', `DELETE ${url}`);
+  // A DELETE carries a body here because removing a strategy from a book needs
+  // a reason and an acknowledgement, exactly like the other write paths.
   return fetch(url, {
     method: 'DELETE',
     credentials: 'include',
-    headers: { ...(csrf ? { 'X-CSRF-TOKEN': csrf } : {}) },
+    headers: {
+      ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
+      ...(csrf ? { 'X-CSRF-TOKEN': csrf } : {}),
+    },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
 }

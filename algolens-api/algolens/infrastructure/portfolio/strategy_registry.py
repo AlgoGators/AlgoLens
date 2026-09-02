@@ -145,13 +145,24 @@ class PostgresStrategyRegistry:
                 strategy_id       TEXT        NOT NULL,
                 user_id           TEXT,
                 from_portfolio_id TEXT,
-                to_portfolio_id   TEXT        NOT NULL,
+                -- Both nullable: a move has both, an add has no origin, and a
+                -- removal has no destination. Requiring a destination would
+                -- make removals unrecordable, and an unrecordable change is one
+                -- that must not happen at all.
+                to_portfolio_id   TEXT,
                 lifecycle_at_move TEXT,
                 reason            TEXT,
                 consequences      JSONB,
                 acknowledged      BOOLEAN     NOT NULL DEFAULT FALSE,
                 created_at        TIMESTAMPTZ NOT NULL DEFAULT now()
             )
+            """
+        )
+        # Tables created before membership existed have to_portfolio_id NOT NULL.
+        cursor.execute(
+            """
+            ALTER TABLE trading.portfolio_assignments
+            ALTER COLUMN to_portfolio_id DROP NOT NULL
             """
         )
 
@@ -259,6 +270,167 @@ class PostgresStrategyRegistry:
         finally:
             conn.close()
         return {"portfolio_id": portfolio_id}
+
+    # ------------------------------------------------------------------
+    # Membership: a strategy can belong to several books
+    # ------------------------------------------------------------------
+
+    def _ensure_memberships_table(self, cursor):
+        """Create the memberships table, seeded from the registry.
+
+        strategy_registry.portfolio_id remains the PRIMARY book -- the single
+        answer used where one is needed, and what the engine reads. This table
+        is additive, and is seeded from that column so every strategy starts out
+        belonging to exactly the book it already belonged to. Without the seed,
+        turning this on would appear to empty every book at once.
+
+        The canonical migration belongs in trade-ngin with 004/005.
+        """
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS trading.strategy_book_memberships (
+                strategy_id  TEXT        NOT NULL,
+                portfolio_id TEXT        NOT NULL,
+                added_by     TEXT,
+                added_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+                PRIMARY KEY (strategy_id, portfolio_id)
+            )
+            """
+        )
+        cursor.execute(
+            """
+            INSERT INTO trading.strategy_book_memberships (strategy_id, portfolio_id, added_by)
+            SELECT id, portfolio_id, 'seed'
+            FROM trading.strategy_registry
+            ON CONFLICT (strategy_id, portfolio_id) DO NOTHING
+            """
+        )
+
+    def list_memberships(self):
+        """Every (strategy_id, portfolio_id) pair."""
+        conn = self.connection_factory()
+        try:
+            with conn:
+                with conn.cursor() as cursor:
+                    self._ensure_memberships_table(cursor)
+                    cursor.execute(
+                        """
+                        SELECT strategy_id, portfolio_id
+                        FROM trading.strategy_book_memberships
+                        ORDER BY strategy_id, portfolio_id
+                        """
+                    )
+                    return [dict(row) for row in cursor.fetchall()]
+        finally:
+            conn.close()
+
+    def books_for_strategy(self, strategy_id):
+        conn = self.connection_factory()
+        try:
+            with conn:
+                with conn.cursor() as cursor:
+                    self._ensure_memberships_table(cursor)
+                    cursor.execute(
+                        """
+                        SELECT portfolio_id FROM trading.strategy_book_memberships
+                        WHERE strategy_id = %s ORDER BY portfolio_id
+                        """,
+                        (strategy_id,),
+                    )
+                    return [row["portfolio_id"] for row in cursor.fetchall()]
+        finally:
+            conn.close()
+
+    def add_membership(self, strategy_id, portfolio_id, audit):
+        """Put a strategy in a book, and record it, in one transaction."""
+        conn = self.connection_factory()
+        try:
+            with conn:
+                with conn.cursor() as cursor:
+                    self._ensure_memberships_table(cursor)
+                    self._ensure_assignment_audit_table(cursor)
+                    cursor.execute(
+                        """
+                        INSERT INTO trading.strategy_book_memberships
+                            (strategy_id, portfolio_id, added_by)
+                        VALUES (%s, %s, %s)
+                        ON CONFLICT (strategy_id, portfolio_id) DO NOTHING
+                        """,
+                        (strategy_id, portfolio_id, audit["user_id"]),
+                    )
+                    self._insert_membership_audit(cursor, audit)
+        finally:
+            conn.close()
+        return {"strategy_id": strategy_id, "portfolio_id": portfolio_id}
+
+    def remove_membership(self, strategy_id, portfolio_id, audit):
+        """Take a strategy out of a book.
+
+        If it was the primary book, the primary moves to another book the
+        strategy still belongs to -- strategy_registry.portfolio_id must always
+        name a book the strategy is actually in, or every scoped read for it
+        returns nothing.
+        """
+        conn = self.connection_factory()
+        try:
+            with conn:
+                with conn.cursor() as cursor:
+                    self._ensure_memberships_table(cursor)
+                    self._ensure_assignment_audit_table(cursor)
+                    cursor.execute(
+                        """
+                        DELETE FROM trading.strategy_book_memberships
+                        WHERE strategy_id = %s AND portfolio_id = %s
+                        """,
+                        (strategy_id, portfolio_id),
+                    )
+                    cursor.execute(
+                        """
+                        SELECT portfolio_id FROM trading.strategy_book_memberships
+                        WHERE strategy_id = %s ORDER BY portfolio_id LIMIT 1
+                        """,
+                        (strategy_id,),
+                    )
+                    remaining = cursor.fetchone()
+                    if remaining is None:
+                        # The domain refuses this, so reaching it means two
+                        # concurrent removals raced. Fail the transaction rather
+                        # than leave the strategy unreachable.
+                        raise ValueError(
+                            f"{strategy_id} would be left in no book"
+                        )
+                    cursor.execute(
+                        """
+                        UPDATE trading.strategy_registry
+                        SET portfolio_id = %s
+                        WHERE id = %s AND portfolio_id = %s
+                        """,
+                        (remaining["portfolio_id"], strategy_id, portfolio_id),
+                    )
+                    self._insert_membership_audit(cursor, audit)
+        finally:
+            conn.close()
+        return {"strategy_id": strategy_id, "portfolio_id": portfolio_id}
+
+    def _insert_membership_audit(self, cursor, audit):
+        cursor.execute(
+            """
+            INSERT INTO trading.portfolio_assignments
+                (strategy_id, user_id, from_portfolio_id, to_portfolio_id,
+                 lifecycle_at_move, reason, consequences, acknowledged)
+            VALUES (%s, %s, %s, %s, %s, %s, %s::jsonb, %s)
+            """,
+            (
+                audit["strategy_id"],
+                audit["user_id"],
+                audit["from_portfolio_id"],
+                audit["to_portfolio_id"],
+                audit["lifecycle_at_move"],
+                audit["reason"],
+                json.dumps(audit["consequences"]),
+                audit["acknowledged"],
+            ),
+        )
 
     def reassign_portfolio(self, strategy_id, portfolio_id, audit):
         """Move the strategy and record why, in one transaction.

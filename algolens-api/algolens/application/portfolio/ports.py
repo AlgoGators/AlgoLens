@@ -62,6 +62,18 @@ class PortfolioReassignmentAcknowledgementRequired(Exception):
         self.verdict = verdict
 
 
+class MembershipAcknowledgementRequired(Exception):
+    """Removing a strategy from a book breaks that book's history.
+
+    Only removal raises this. Adding a strategy to another book takes nothing
+    away from the books it is already in, so it needs no acknowledgement.
+    """
+
+    def __init__(self, verdict):
+        super().__init__("Removing this strategy breaks the book's history continuity")
+        self.verdict = verdict
+
+
 class StrategyRegistryPort(Protocol):
     def list(self, active_only: bool = True) -> list[dict[str, Any]]:
         ...

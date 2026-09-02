@@ -229,3 +229,109 @@ def merge_books(declared, in_use):
                 "declared": False,
             }
     return sorted(by_id.values(), key=lambda b: b["portfolio_id"])
+
+
+# ---------------------------------------------------------------------------
+# Membership: a strategy can be in more than one book
+#
+# The read side already supports this. positions, equity_curve and live_results
+# are all keyed on (strategy, portfolio) pairs, so the same strategy running in
+# two books produces two independent sets of rows. The only thing that forced
+# one book per strategy was the single portfolio_id column on strategy_registry.
+#
+# That column stays, as the PRIMARY book -- the one used wherever a single
+# answer is needed, and the one the engine reads. Membership is additive on top.
+#
+# The gate moves. ADDING a strategy to another book breaks nothing: the books it
+# is already in keep it, and their histories stay continuous. REMOVING it from a
+# book is the destructive half -- that book loses the strategy from today, and
+# every number it reports spans two different compositions.
+# ---------------------------------------------------------------------------
+
+
+def evaluate_membership_add(strategy, portfolio_id, current_books):
+    """Adding a strategy to a book. Free, but not always allowed."""
+    if strategy is None:
+        raise AssignmentValidationError("strategy_not_found", "Strategy not found")
+
+    lifecycle = (strategy.get("lifecycle") or "live").strip().lower()
+    if lifecycle in LIFECYCLES_FROZEN:
+        raise AssignmentValidationError(
+            "strategy_retired",
+            "A retired strategy cannot be added to a book: its book is closed and "
+            "doing so would rewrite history that has already been reported",
+        )
+
+    if portfolio_id in current_books:
+        return {"changed": False, "requires_acknowledgement": False, "consequences": []}
+
+    return {
+        "changed": True,
+        # Nothing loses anything. The engine simply starts producing a second
+        # set of rows for the new pairing.
+        "requires_acknowledgement": False,
+        "consequences": [],
+    }
+
+
+def evaluate_membership_remove(strategy, portfolio_id, current_books):
+    """Removing a strategy from a book. This is the destructive direction."""
+    if strategy is None:
+        raise AssignmentValidationError("strategy_not_found", "Strategy not found")
+
+    lifecycle = (strategy.get("lifecycle") or "live").strip().lower()
+    if lifecycle in LIFECYCLES_FROZEN:
+        raise AssignmentValidationError(
+            "strategy_retired",
+            "A retired strategy cannot be removed from a book: its book is closed "
+            "and doing so would rewrite history that has already been reported",
+        )
+
+    if portfolio_id not in current_books:
+        return {"changed": False, "requires_acknowledgement": False, "consequences": []}
+
+    # A strategy that belongs to nothing is unreachable: every read in this app
+    # is scoped by (strategy, portfolio), so it would have no rows anywhere and
+    # would simply disappear. Refuse rather than strand it.
+    if len(current_books) <= 1:
+        raise AssignmentValidationError(
+            "last_book",
+            "A strategy must belong to at least one book. Add it to another book "
+            "before removing it from this one.",
+        )
+
+    if lifecycle in LIFECYCLES_WITHOUT_HISTORY:
+        return {"changed": True, "requires_acknowledgement": False, "consequences": []}
+
+    return {
+        "changed": True,
+        "requires_acknowledgement": True,
+        "consequences": [
+            {
+                "code": "history_discontinuity",
+                "message": (
+                    f"{portfolio_id} loses this strategy's contribution from today. "
+                    f"Its cumulative return, drawdown and qt/system/benchmark "
+                    f"attribution will not be comparable across the change."
+                ),
+            }
+        ],
+    }
+
+
+def build_membership_audit(strategy, portfolio_id, action, user_id, reason, acknowledged):
+    """Append-only record of a membership change.
+
+    Reuses the assignment audit shape so both kinds of change read back from one
+    table: an add has no `from`, a removal has no `to`.
+    """
+    return {
+        "strategy_id": strategy["id"],
+        "user_id": user_id,
+        "from_portfolio_id": portfolio_id if action == "remove" else None,
+        "to_portfolio_id": portfolio_id if action == "add" else None,
+        "lifecycle_at_move": (strategy.get("lifecycle") or "live"),
+        "reason": reason,
+        "consequences": [],
+        "acknowledged": bool(acknowledged),
+    }
