@@ -18,6 +18,24 @@ jobs:
   backend:
     name: Backend (pytest)
     runs-on: ubuntu-latest
+    # The unit suite runs without a database, but it was 120+ green while the
+    # position write path was broken against Postgres in three separate ways --
+    # every one of them living in the gap between a Python float and a NUMERIC
+    # column. tests/integration runs the real write against this service.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: algolens
+          POSTGRES_PASSWORD: algolens
+          POSTGRES_DB: algolens_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - uses: actions/checkout@v7
 
@@ -38,12 +56,35 @@ jobs:
         # The suites are designed to run without a database (fail-closed guards run
         # in subprocesses; the registry/service tests stub the DB). The guard keeps
         # this green until the test-bearing PRs land, then it enforces automatically.
+        #
+        # ALGOLENS_TEST_DB switches tests/integration on. Without it those tests
+        # skip, which is what makes them safe to run locally -- but it also means
+        # a missing service here silently drops the only coverage of the write
+        # path, so the step after this one fails if they did not run.
+        env:
+          ALGOLENS_TEST_DB: postgresql://algolens:algolens@localhost:5432/algolens_test
         run: |
           if [ -d algolens-api/tests ]; then
-            cd algolens-api && python -m pytest tests -q
+            cd algolens-api && python -m pytest tests -q --junitxml=../pytest-report.xml
           else
             echo "::warning::algolens-api/tests not present yet — merge the test PRs to enable this gate"
           fi
+
+      - name: Confirm the integration tests actually ran
+        if: hashFiles('pytest-report.xml') != ''
+        run: |
+          python - <<'PY'
+          import sys, xml.etree.ElementTree as ET
+          root = ET.parse("pytest-report.xml").getroot()
+          cases = [c for c in root.iter("testcase")
+                   if "integration" in (c.get("classname") or "")]
+          ran = [c for c in cases if c.find("skipped") is None]
+          if not ran:
+              sys.exit("No integration tests ran. The Postgres service or "
+                       "ALGOLENS_TEST_DB is misconfigured, and the write path "
+                       "is currently untested.")
+          print(f"{len(ran)} integration tests ran against Postgres")
+          PY
 
   frontend:
     name: Frontend (build + vitest)
