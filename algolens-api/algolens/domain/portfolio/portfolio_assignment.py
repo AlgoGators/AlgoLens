@@ -19,7 +19,22 @@ RiskAcknowledgementRequired in the application layer.
 # A strategy that has never traded has no history to make discontinuous.
 LIFECYCLES_WITHOUT_HISTORY = frozenset({"incubating"})
 
-# Retired strategies are frozen records. Moving one rewrites a closed book.
+# Retired strategies are frozen FOR BOOK PURPOSES. Moving one rewrites which
+# book owns history that has already been reported.
+#
+# This is deliberately narrower than "retired is permanent". The incubation path
+# allows retired -> incubating, and that is not a contradiction: re-trialling a
+# strategy starts a new observation window, it does not restate the closed one.
+# The two rules answer different questions --
+#
+#   "can this strategy run again?"        yes, start a new trial
+#   "can its closed history move books?"  no, ever
+#
+# -- and once it is incubating again it has no live history to protect, so its
+# books become freely changeable like any other incubating strategy. Anyone
+# tempted to "fix" the apparent inconsistency by freezing the lifecycle too
+# would be removing the ability to retry a strategy, which is not what retiring
+# one is for.
 LIFECYCLES_FROZEN = frozenset({"retired"})
 
 MAX_PORTFOLIO_ID_LENGTH = 64

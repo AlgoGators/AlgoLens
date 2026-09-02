@@ -5,6 +5,7 @@ from algolens.domain.portfolio.portfolio_assignment import (
     build_membership_audit,
     evaluate_membership_add,
     evaluate_membership_remove,
+    LIFECYCLES_WITHOUT_HISTORY,
 )
 
 
@@ -162,3 +163,33 @@ class TestIncubationStatusMapping:
 
         exc = IncubationError("cannot promote: the backtest was not found in the archive")
         assert _incubation_error_status(exc) == 400
+
+
+class TestRetiredIsFrozenForBooksOnlyNotForever:
+    """The rule the two subsystems jointly implement.
+
+    Pinned in one place because read separately they look contradictory --
+    membership refuses a retired strategy while the incubation path happily
+    re-trials one. They are answering different questions, and a later reader
+    "reconciling" them would remove the ability to retry a strategy.
+    """
+
+    def test_a_retired_strategy_cannot_change_books(self):
+        for fn in (evaluate_membership_add, evaluate_membership_remove):
+            with pytest.raises(AssignmentValidationError) as exc:
+                fn(registry_row(lifecycle="retired"), "MACRO_BOOK",
+                   ["CONSERVATIVE_PORTFOLIO", "MACRO_BOOK"])
+            assert exc.value.code == "strategy_retired"
+
+    def test_but_re_incubating_it_is_a_lifecycle_change_not_a_book_change(self):
+        # Nothing in this module refuses it: starting a new observation window
+        # does not restate the closed one, so it is not the membership layer's
+        # business.
+        assert "retired" not in LIFECYCLES_WITHOUT_HISTORY
+
+    def test_and_once_incubating_again_its_books_move_freely(self):
+        verdict = evaluate_membership_add(
+            registry_row(lifecycle="incubating"), "MACRO_BOOK", ["AGGRESSIVE_PORTFOLIO"]
+        )
+        assert verdict["changed"] is True
+        assert verdict["requires_acknowledgement"] is False
