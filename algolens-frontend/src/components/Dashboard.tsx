@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { Header } from './Header';
 import { PortfolioOverview } from './PortfolioOverview';
 import { StrategyList } from './StrategyList';
@@ -36,44 +36,44 @@ export function Dashboard({ onLogout }: DashboardProps) {
   const { user } = useAuth();
   const isInternalMember = isInternalRole(user?.role);
 
-  // Fetch portfolio data on mount
-  useEffect(() => {
-    const fetchPortfolioData = async () => {
-      console.log('[Dashboard] === Starting fetchPortfolioData ===');
-      console.log('[Dashboard] Current URL:', window.location.href);
-      // Auth is carried by an httpOnly cookie now; JS cannot inspect it here.
+  // Hoisted out of the mount effect so a manual position edit can re-run it.
+  const fetchPortfolioData = useCallback(async () => {
+    console.log('[Dashboard] === Starting fetchPortfolioData ===');
+    console.log('[Dashboard] Current URL:', window.location.href);
+    // Auth is carried by an httpOnly cookie now; JS cannot inspect it here.
 
-      try {
-        setIsLoading(true);
-        setError(null);
-        const data = await PortfolioApplicationService.getPortfolioData();
-        console.log('[Dashboard] Portfolio data received successfully:', data);
-        setPortfolioData(data);
-      } catch (err) {
-        const errorMessage = err instanceof Error ? err.message : String(err);
-        console.error('[Dashboard] === ERROR FETCHING PORTFOLIO ===');
-        console.error('[Dashboard] Error:', err);
-        console.error('[Dashboard] Error details:', {
-          message: errorMessage,
-          type: err instanceof Error ? err.constructor.name : typeof err,
-          stack: err instanceof Error ? err.stack : 'N/A',
-        });
+    try {
+      setIsLoading(true);
+      setError(null);
+      const data = await PortfolioApplicationService.getPortfolioData();
+      console.log('[Dashboard] Portfolio data received successfully:', data);
+      setPortfolioData(data);
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      console.error('[Dashboard] === ERROR FETCHING PORTFOLIO ===');
+      console.error('[Dashboard] Error:', err);
+      console.error('[Dashboard] Error details:', {
+        message: errorMessage,
+        type: err instanceof Error ? err.constructor.name : typeof err,
+        stack: err instanceof Error ? err.stack : 'N/A',
+      });
 
-        // Provide debugging hint
-        console.error('[Dashboard] DEBUG TIP: Run this in browser console:');
-        console.error('  import("./application/portfolio/portfolioService").then(m => m.PortfolioApplicationService.testConnectivity())');
-        console.error('  Or open Network tab and look for failed requests');
+      // Provide debugging hint
+      console.error('[Dashboard] DEBUG TIP: Run this in browser console:');
+      console.error('  import("./application/portfolio/portfolioService").then(m => m.PortfolioApplicationService.testConnectivity())');
+      console.error('  Or open Network tab and look for failed requests');
 
-        // Include the actual error message for debugging
-        setError(`Failed to load portfolio data: ${errorMessage}`);
-      } finally {
-        setIsLoading(false);
-        console.log('[Dashboard] fetchPortfolioData complete');
-      }
-    };
-
-    fetchPortfolioData();
+      // Include the actual error message for debugging
+      setError(`Failed to load portfolio data: ${errorMessage}`);
+    } finally {
+      setIsLoading(false);
+      console.log('[Dashboard] fetchPortfolioData complete');
+    }
   }, []);
+
+  useEffect(() => {
+    fetchPortfolioData();
+  }, [fetchPortfolioData]);
 
   useEffect(() => {
     if (activeTab === 'incubation' && !isInternalMember) {
@@ -206,6 +206,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
             <StrategyDetail
               strategy={portfolioData.strategies.find(s => s.id === selectedStrategy)!}
               onBack={() => setSelectedStrategy(null)}
+              onPositionsChanged={fetchPortfolioData}
             />
           )}
         </div>

@@ -1,6 +1,8 @@
 """Postgres portfolio readers."""
 
+import json
 import time
+from datetime import date as _date
 
 import psycopg2
 
@@ -8,6 +10,11 @@ from algolens.application.portfolio.ports import (
     IncubationError,
     IncubationPerformanceRows,
     PortfolioDetailRows,
+    StrategyNameUnresolved,
+)
+from algolens.domain.portfolio.position_edit import (
+    QT_STREAM,
+    build_after_state,
 )
 from algolens.domain.portfolio.streams import PORTFOLIO_STREAMS, PRIMARY_STREAM
 from algolens.infrastructure.db.postgres import get_db_connection
@@ -442,5 +449,224 @@ class PostgresPortfolioRepository:
         except psycopg2.Error as exc:
             conn.rollback()
             raise IncubationError(f"Database error: {exc}") from exc
+        finally:
+            conn.close()
+
+
+    # -- qt stream writes (F2) ------------------------------------------------
+    #
+    # Restores AlgoLens PR #31, ported onto the layered package. The engine
+    # seeds trading.positions with portfolio_type='qt' as a copy of 'system';
+    # these are the only writes that make the two diverge, and every one of
+    # them lands in trading.position_overrides in the same transaction.
+
+    def fetch_risk_envelope(self, strategy_type, portfolio_id):
+        """The most recent envelope trade-ngin published for this book.
+
+        Returns None when the table does not exist yet (trade-ngin has not
+        shipped the publisher) or holds no row -- the gate reports that as
+        "not evaluated" rather than as a pass.
+        """
+        conn = self.connection_factory()
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    SELECT 1 FROM information_schema.tables
+                    WHERE table_schema = 'trading' AND table_name = 'risk_limits'
+                    """
+                )
+                if cursor.fetchone() is None:
+                    return None
+
+                cursor.execute(
+                    """
+                    SELECT limits
+                    FROM trading.risk_limits
+                    WHERE strategy_id = %s AND portfolio_id = %s
+                    ORDER BY published_at DESC
+                    LIMIT 1
+                    """,
+                    (strategy_type, portfolio_id),
+                )
+                row = cursor.fetchone()
+                return row["limits"] if row else None
+        finally:
+            conn.close()
+
+    def fetch_qt_book(self, strategy_type, portfolio_id):
+        """Today's qt positions, one row per symbol."""
+        conn = self.connection_factory()
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    SELECT DISTINCT ON (symbol)
+                           symbol, quantity, average_price
+                    FROM trading.positions
+                    WHERE strategy_id = %s
+                      AND portfolio_id = %s
+                      AND portfolio_type = %s
+                      AND quantity != 0
+                    ORDER BY symbol, updated_at DESC
+                    """,
+                    (strategy_type, portfolio_id, QT_STREAM),
+                )
+                return [dict(r) for r in cursor.fetchall()]
+        finally:
+            conn.close()
+
+    def _fetch_existing_position(self, cursor, strategy_type, portfolio_id, symbol):
+        # Lock the row for the rest of the transaction so we capture the true
+        # before_state in the audit trail. If two QT members edit the same symbol
+        # concurrently, or the engine's daily run writes between our read and
+        # write, the lock ensures we read the current row and record what it was
+        # at the moment we decided to change it. When the row does not exist there
+        # is nothing to lock; the ON CONFLICT clause still makes the insert safe.
+        cursor.execute(
+            """
+            SELECT symbol, quantity, average_price,
+                   daily_unrealized_pnl, daily_realized_pnl
+            FROM trading.positions
+            WHERE strategy_id = %s
+              AND portfolio_id = %s
+              AND portfolio_type = %s
+              AND symbol = %s
+            ORDER BY updated_at DESC
+            LIMIT 1
+            FOR UPDATE
+            """,
+            (strategy_type, portfolio_id, QT_STREAM, symbol),
+        )
+        row = cursor.fetchone()
+        return dict(row) if row else None
+
+    def _resolve_strategy_name(self, cursor, strategy_type, portfolio_id):
+        """The engine's own strategy_name for this book.
+
+        strategy_name is part of the positions primary key and the engine
+        chooses its value. Guessing it (from the registry's display name, say)
+        would write QT's edit to a different key than the engine's row -- the
+        write would appear to succeed and the engine would never see it. So take
+        the value from rows the engine already wrote.
+        """
+        cursor.execute(
+            """
+            SELECT strategy_name
+            FROM trading.positions
+            WHERE portfolio_id = %s AND strategy_id = %s
+            ORDER BY updated_at DESC
+            LIMIT 1
+            """,
+            (portfolio_id, strategy_type),
+        )
+        row = cursor.fetchone()
+        if row is None:
+            raise StrategyNameUnresolved(
+                f"No existing positions for strategy {strategy_type} in "
+                f"portfolio {portfolio_id}, so the engine's strategy_name cannot "
+                f"be determined. Refusing to guess: a wrong strategy_name writes "
+                f"a row the engine will never reconcile."
+            )
+        return row["strategy_name"]
+
+    def write_qt_position(
+        self,
+        strategy_type,
+        portfolio_id,
+        normalized,
+        user_id,
+        verdict,
+        overrode_risk,
+    ):
+        """Upsert one qt position and its audit row, atomically.
+
+        Both statements share a transaction: if the audit insert fails, the
+        position change is rolled back with it. A position that changed without
+        an audit row is the precise failure F2 exists to prevent, so it must not
+        be reachable even through a partial failure.
+        """
+        conn = self.connection_factory()
+        try:
+            with conn:  # commits on success, rolls back on exception
+                with conn.cursor() as cursor:
+                    before = self._fetch_existing_position(
+                        cursor, strategy_type, portfolio_id, normalized["symbol"]
+                    )
+                    after = build_after_state(before, normalized)
+                    strategy_name = self._resolve_strategy_name(
+                        cursor, strategy_type, portfolio_id
+                    )
+
+                    cursor.execute(
+                        """
+                        INSERT INTO trading.positions
+                            (portfolio_id, strategy_id, strategy_name, date, symbol,
+                             portfolio_type, quantity, average_price, updated_at)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, now())
+                        ON CONFLICT (portfolio_id, strategy_id, strategy_name, date,
+                                     symbol, portfolio_type)
+                        DO UPDATE SET quantity      = EXCLUDED.quantity,
+                                      average_price = EXCLUDED.average_price,
+                                      updated_at    = now()
+                        RETURNING symbol, quantity, average_price
+                        """,
+                        (
+                            portfolio_id,
+                            strategy_type,
+                            strategy_name,
+                            _date.today(),
+                            normalized["symbol"],
+                            QT_STREAM,
+                            normalized["quantity"],
+                            normalized["average_price"],
+                        ),
+                    )
+                    position = dict(cursor.fetchone())
+
+                    cursor.execute(
+                        """
+                        INSERT INTO trading.position_overrides
+                            (user_id, source_app, strategy_id, symbol,
+                             before_state, after_state, reason,
+                             risk_check_result, overrode_risk)
+                        VALUES (%s, 'algolens', %s, %s, %s, %s, %s, %s, %s)
+                        RETURNING id
+                        """,
+                        (
+                            user_id,
+                            strategy_type,
+                            normalized["symbol"],
+                            json.dumps(before or {}, default=str),
+                            json.dumps(after, default=str),
+                            normalized["reason"],
+                            json.dumps(verdict),
+                            overrode_risk,
+                        ),
+                    )
+                    override_id = cursor.fetchone()["id"]
+
+            return {"position": position, "override_id": override_id}
+        finally:
+            conn.close()
+
+    def fetch_overrides(self, strategy_type, limit=100):
+        """Recent audit entries. Read-only -- this table cannot be modified."""
+        conn = self.connection_factory()
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    SELECT id, user_id, source_app, strategy_id, symbol,
+                           before_state, after_state, reason,
+                           risk_check_result, overrode_risk, created_at
+                    FROM trading.position_overrides
+                    WHERE strategy_id = %s
+                    ORDER BY created_at DESC
+                    LIMIT %s
+                    """,
+                    (strategy_type, limit),
+                )
+                return [dict(r) for r in cursor.fetchall()]
         finally:
             conn.close()
