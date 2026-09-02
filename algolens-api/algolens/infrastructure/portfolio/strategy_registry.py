@@ -61,6 +61,16 @@ def _has_lifecycle_column(cursor):
 
 
 class PostgresStrategyRegistry:
+    """Reads and writes the strategy registry, books and membership.
+
+    This class does NOT create schema. It did briefly -- the Books tab shipped
+    before the migration existed and created its three tables lazily -- and that
+    is exactly the arrangement that lets an application and its database drift
+    apart without anyone noticing. trade-ngin owns this schema; the tables here
+    come from migration 008_books_and_membership.sql and must be applied before
+    the Books features will work.
+    """
+
     def __init__(self, connection_factory=None):
         self.connection_factory = connection_factory or get_db_connection
 
@@ -137,67 +147,12 @@ class PostgresStrategyRegistry:
                 return strategy
         return None
 
-    def _ensure_assignment_audit_table(self, cursor):
-        """Create the audit table if the migration has not run.
 
-        The canonical migration belongs in trade-ngin alongside 004/005, which
-        owns this schema. This keeps the write path honest in the meantime: an
-        assignment must never happen without its audit row, so the table being
-        absent is not a reason to skip recording.
-        """
-        cursor.execute(
-            """
-            CREATE TABLE IF NOT EXISTS trading.portfolio_assignments (
-                id                BIGSERIAL PRIMARY KEY,
-                strategy_id       TEXT        NOT NULL,
-                user_id           TEXT,
-                from_portfolio_id TEXT,
-                -- Both nullable: a move has both, an add has no origin, and a
-                -- removal has no destination. Requiring a destination would
-                -- make removals unrecordable, and an unrecordable change is one
-                -- that must not happen at all.
-                to_portfolio_id   TEXT,
-                lifecycle_at_move TEXT,
-                reason            TEXT,
-                consequences      JSONB,
-                acknowledged      BOOLEAN     NOT NULL DEFAULT FALSE,
-                created_at        TIMESTAMPTZ NOT NULL DEFAULT now()
-            )
-            """
-        )
-        # Tables created before membership existed have to_portfolio_id NOT NULL.
-        cursor.execute(
-            """
-            ALTER TABLE trading.portfolio_assignments
-            ALTER COLUMN to_portfolio_id DROP NOT NULL
-            """
-        )
-
-    def _ensure_books_table(self, cursor):
-        """Create the books table if the migration has not run.
-
-        Same reasoning as the assignment audit table: the canonical migration
-        belongs in trade-ngin, which owns this schema. Until then a book can
-        still be declared rather than only inferred from a strategy sitting in
-        one -- which is what makes an empty book possible at all.
-        """
-        cursor.execute(
-            """
-            CREATE TABLE IF NOT EXISTS trading.portfolios (
-                portfolio_id TEXT PRIMARY KEY,
-                name         TEXT        NOT NULL,
-                description  TEXT        NOT NULL DEFAULT '',
-                created_by   TEXT,
-                created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
-            )
-            """
-        )
 
     def list_declared_books(self):
         conn = self.connection_factory()
         try:
             with conn.cursor() as cursor:
-                self._ensure_books_table(cursor)
                 cursor.execute(
                     """
                     SELECT portfolio_id, name, description, created_by, created_at
@@ -232,7 +187,6 @@ class PostgresStrategyRegistry:
         try:
             with conn:
                 with conn.cursor() as cursor:
-                    self._ensure_books_table(cursor)
                     cursor.execute(
                         """
                         INSERT INTO trading.portfolios
@@ -269,7 +223,6 @@ class PostgresStrategyRegistry:
                         raise ValueError(
                             f"{portfolio_id} still holds {occupied} strategies"
                         )
-                    self._ensure_books_table(cursor)
                     cursor.execute(
                         "DELETE FROM trading.portfolios WHERE portfolio_id = %s",
                         (portfolio_id,),
@@ -282,36 +235,6 @@ class PostgresStrategyRegistry:
     # Membership: a strategy can belong to several books
     # ------------------------------------------------------------------
 
-    def _ensure_memberships_table(self, cursor):
-        """Create the memberships table, seeded from the registry.
-
-        strategy_registry.portfolio_id remains the PRIMARY book -- the single
-        answer used where one is needed, and what the engine reads. This table
-        is additive, and is seeded from that column so every strategy starts out
-        belonging to exactly the book it already belonged to. Without the seed,
-        turning this on would appear to empty every book at once.
-
-        The canonical migration belongs in trade-ngin with 004/005.
-        """
-        cursor.execute(
-            """
-            CREATE TABLE IF NOT EXISTS trading.strategy_book_memberships (
-                strategy_id  TEXT        NOT NULL,
-                portfolio_id TEXT        NOT NULL,
-                added_by     TEXT,
-                added_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
-                PRIMARY KEY (strategy_id, portfolio_id)
-            )
-            """
-        )
-        cursor.execute(
-            """
-            INSERT INTO trading.strategy_book_memberships (strategy_id, portfolio_id, added_by)
-            SELECT id, portfolio_id, 'seed'
-            FROM trading.strategy_registry
-            ON CONFLICT (strategy_id, portfolio_id) DO NOTHING
-            """
-        )
 
     def list_memberships(self):
         """Every (strategy_id, portfolio_id) pair."""
@@ -319,7 +242,6 @@ class PostgresStrategyRegistry:
         try:
             with conn:
                 with conn.cursor() as cursor:
-                    self._ensure_memberships_table(cursor)
                     cursor.execute(
                         """
                         SELECT strategy_id, portfolio_id
@@ -332,11 +254,18 @@ class PostgresStrategyRegistry:
             conn.close()
 
     def books_for_strategy(self, strategy_id):
+        """Books this strategy belongs to, primary included.
+
+        Falls back to the primary column when there are no membership rows. That
+        is the state between migration 008 creating the table and its seed
+        running, and on any database where the seed was skipped. Reporting none
+        would defeat the last-book guard: a strategy would look like it belonged
+        nowhere and could be removed from the only book it is actually in.
+        """
         conn = self.connection_factory()
         try:
             with conn:
                 with conn.cursor() as cursor:
-                    self._ensure_memberships_table(cursor)
                     cursor.execute(
                         """
                         SELECT portfolio_id FROM trading.strategy_book_memberships
@@ -344,7 +273,15 @@ class PostgresStrategyRegistry:
                         """,
                         (strategy_id,),
                     )
-                    return [row["portfolio_id"] for row in cursor.fetchall()]
+                    books = [row["portfolio_id"] for row in cursor.fetchall()]
+                    if books:
+                        return books
+                    cursor.execute(
+                        "SELECT portfolio_id FROM trading.strategy_registry WHERE id = %s",
+                        (strategy_id,),
+                    )
+                    row = cursor.fetchone()
+                    return [row["portfolio_id"]] if row else []
         finally:
             conn.close()
 
@@ -354,8 +291,6 @@ class PostgresStrategyRegistry:
         try:
             with conn:
                 with conn.cursor() as cursor:
-                    self._ensure_memberships_table(cursor)
-                    self._ensure_assignment_audit_table(cursor)
                     cursor.execute(
                         """
                         INSERT INTO trading.strategy_book_memberships
@@ -382,8 +317,6 @@ class PostgresStrategyRegistry:
         try:
             with conn:
                 with conn.cursor() as cursor:
-                    self._ensure_memberships_table(cursor)
-                    self._ensure_assignment_audit_table(cursor)
                     cursor.execute(
                         """
                         DELETE FROM trading.strategy_book_memberships
@@ -449,7 +382,6 @@ class PostgresStrategyRegistry:
         try:
             with conn:
                 with conn.cursor() as cursor:
-                    self._ensure_assignment_audit_table(cursor)
                     cursor.execute(
                         """
                         UPDATE trading.strategy_registry
@@ -486,7 +418,6 @@ class PostgresStrategyRegistry:
         conn = self.connection_factory()
         try:
             with conn.cursor() as cursor:
-                self._ensure_assignment_audit_table(cursor)
                 cursor.execute(
                     """
                     SELECT id, strategy_id, user_id, from_portfolio_id, to_portfolio_id,

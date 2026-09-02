@@ -85,11 +85,11 @@ All four are now in **`algolens-api/scripts/demo_seed.sql`**, with the schema th
 
 | # | Item | Effort | Notes |
 |---|---|---|---|
-| P0-a | Position response serialises numbers as strings: `"quantity": "20"`, `"average_price": "5280.25"` | **S** | `jsonify` stringifies Decimal. Coerce in the serializer. Any client that parses these as numbers breaks. |
-| P0-b | Add `tsc --noEmit` to frontend CI | **S** to add, **M** to clear | There is no `tsconfig.json` and no `typescript` dependency. Nothing typechecks. Today's `number \| null` widenings and placeholder shapes were verified by grep, not a compiler. |
+| ~~P0-a~~ | ~~Position response serialises numbers as strings~~ — **FIXED** | S | `jsonify` stringifies Decimal. Coerce in the serializer. Any client that parses these as numbers breaks. |
+| ~~P0-b~~ | ~~Add `tsc --noEmit` to frontend CI~~ — **FIXED**, and it immediately caught that `Book`/`AssignmentRecord` were never declared | S | There is no `tsconfig.json` and no `typescript` dependency. Nothing typechecks. Today's `number \| null` widenings and placeholder shapes were verified by grep, not a compiler. |
 | P0-c | One integration test that runs `write_qt_position` against Postgres | **M** | Would have caught 1.1, 1.2 and 1.3 outright. A `testcontainers`-style throwaway DB or the demo seed in CI. |
-| P0-d | Canonical migrations in trade-ngin for `trading.portfolios`, `strategy_book_memberships`, `portfolio_assignments` | **M** | The app creates them lazily with `CREATE TABLE IF NOT EXISTS`. trade-ngin owns this schema (migrations 004/005). Lazy creation must not survive into production. |
-| P0-e | Portfolio tab grouping ignores multi-book membership | **M** | `ListPortfolios` buckets by `registry.portfolio_id` (primary only). A strategy in two books shows under one on the Portfolio tab and under both on Books. Same data, two answers. |
+| ~~P0-d~~ | ~~Canonical migrations in trade-ngin~~ — **FIXED**: migration 008 + rollback; lazy DDL removed from the app | M | The app creates them lazily with `CREATE TABLE IF NOT EXISTS`. trade-ngin owns this schema (migrations 004/005). Lazy creation must not survive into production. |
+| ~~P0-e~~ | ~~Portfolio tab grouping ignores multi-book membership~~ — **FIXED**, and it also stopped hiding incubating strategies (P1-i) | M | `ListPortfolios` buckets by `registry.portfolio_id` (primary only). A strategy in two books shows under one on the Portfolio tab and under both on Books. Same data, two answers. |
 
 ### P1 — this week
 
@@ -103,7 +103,7 @@ All four are now in **`algolens-api/scripts/demo_seed.sql`**, with the schema th
 | P1-f | Override history endpoint exists (`GET /portfolio/overrides/<id>`); nothing renders it | **M** | The desk cannot see what has been overridden without SQL. |
 | P1-g | Incubation lifecycle has no UI — start / promote / retire are API-only | **M** | Pre-existing. The Incubation tab is read-only; verified the API transitions and audit log work. |
 | P1-h | `retired → incubating` is permitted by the incubation path, but membership treats `retired` as frozen | **D** | Two subsystems disagree about whether a retired strategy is a closed record. Decide once. |
-| P1-i | Fund headline silently excludes incubating strategies | **S** | By design (mock capital), but there is no note. Same shape as the "Excludes N…" notice already added for unpublished ones. |
+| ~~P1-i~~ | ~~Fund headline silently excludes incubating strategies~~ — **FIXED** with P0-e: listed, marked, mock capital shown and excluded from totals | S | By design (mock capital), but there is no note. Same shape as the "Excludes N…" notice already added for unpublished ones. |
 
 ### P2 — later
 

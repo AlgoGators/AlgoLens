@@ -245,31 +245,11 @@ CREATE TABLE IF NOT EXISTS trading.strategy_lifecycle_log (
     created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- Books, membership and the assignment audit are created lazily by the app if
--- absent; declared here so the shape is visible in one place.
-CREATE TABLE IF NOT EXISTS trading.portfolios (
-    portfolio_id TEXT PRIMARY KEY,
-    name         TEXT NOT NULL,
-    description  TEXT NOT NULL DEFAULT '',
-    created_by   TEXT,
-    created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-CREATE TABLE IF NOT EXISTS trading.strategy_book_memberships (
-    strategy_id  TEXT NOT NULL,
-    portfolio_id TEXT NOT NULL,
-    added_by     TEXT,
-    added_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
-    PRIMARY KEY (strategy_id, portfolio_id)
-);
-CREATE TABLE IF NOT EXISTS trading.portfolio_assignments (
-    id                BIGSERIAL PRIMARY KEY,
-    strategy_id       TEXT NOT NULL,
-    user_id           TEXT,
-    from_portfolio_id TEXT,
-    to_portfolio_id   TEXT,          -- nullable: a removal has no destination
-    lifecycle_at_move TEXT,
-    reason            TEXT,
-    consequences      JSONB,
-    acknowledged      BOOLEAN NOT NULL DEFAULT FALSE,
-    created_at        TIMESTAMPTZ NOT NULL DEFAULT now()
-);
+-- Books, membership and the assignment audit are NOT created here. They belong
+-- to trade-ngin migration 008_books_and_membership.sql, and the application no
+-- longer creates them lazily. After running this file:
+--
+--   psql ... -f ../trade-ngin/migrations/008_books_and_membership.sql
+--
+-- 008 also seeds membership from strategy_registry, so every strategy starts in
+-- the book it already names.
