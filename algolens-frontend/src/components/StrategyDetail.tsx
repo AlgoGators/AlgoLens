@@ -5,6 +5,7 @@ import type { Strategy } from '../domain/portfolio/portfolioData';
 import { useTheme } from '../adapters/react/ThemeContext';
 import { FinancialAnalysis } from './FinancialAnalysis';
 import { PositionBreakdown } from './PositionBreakdown';
+import { OverrideHistory } from './OverrideHistory';
 import { TradingActivity } from './TradingActivity';
 import { AlphaAttribution } from './AlphaAttribution';
 
@@ -235,11 +236,18 @@ export function StrategyDetail({ strategy, onBack, onPositionsChanged }: Strateg
 
       {/* Tab Content */}
       {selectedTab === 'positions' && (
-        <PositionBreakdown
-          positions={strategy.positions}
-          strategyId={strategy.id}
-          onEdited={onPositionsChanged}
-        />
+        <>
+          <PositionBreakdown
+            positions={strategy.positions}
+            strategyId={strategy.id}
+            onEdited={onPositionsChanged}
+          />
+          {/* The audit trail sits directly under the book it describes. It was
+              being written on every edit and read by nobody. */}
+          <div className="mt-8">
+            <OverrideHistory strategyId={strategy.id} />
+          </div>
+        </>
       )}
 
       {selectedTab === 'analysis' && (

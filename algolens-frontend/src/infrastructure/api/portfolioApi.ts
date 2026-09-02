@@ -364,6 +364,27 @@ export class PortfolioApiService {
     return { outcome: 'rejected', message: data.error || `Request failed (${response.status})` };
   }
 
+  /**
+   * Move a strategy through the incubation lifecycle.
+   *
+   * All three transitions take a reason and are recorded in
+   * trading.strategy_lifecycle_log. They existed on the API from the start with
+   * nothing calling them, so the trial workflow could only be driven with curl.
+   */
+  static async changeIncubation(
+    strategyId: string,
+    action: 'start' | 'promote' | 'retire',
+    body: { reason: string; mock_capital?: number },
+  ): Promise<{ outcome: 'ok' } | { outcome: 'rejected'; message: string }> {
+    const response = await postWithAuth(
+      `${API_BASE_URL}/portfolio/incubation/${encodeURIComponent(strategyId)}/${action}`,
+      body,
+    );
+    if (response.ok) return { outcome: 'ok' };
+    const data = await response.json().catch(() => ({}));
+    return { outcome: 'rejected', message: data.error || `Request failed (${response.status})` };
+  }
+
   static async getBooks(): Promise<Book[]> {
     const response = await this.fetchWithAuth(`${API_BASE_URL}/portfolio/books`);
     const data = await response.json();

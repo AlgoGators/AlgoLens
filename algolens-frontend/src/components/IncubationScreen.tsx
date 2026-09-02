@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import type {
   IncubatingStrategy,
   IncubationPerformance,
@@ -19,23 +19,24 @@ export function IncubationScreen() {
   const [isDetailLoading, setIsDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
 
-  useEffect(() => {
-    const fetchStrategies = async () => {
-      try {
-        setIsLoading(true);
-        setError(null);
-        const data = await PortfolioApplicationService.getIncubationStrategies();
-        setStrategies(data);
-      } catch (err) {
-        const errorMessage = err instanceof Error ? err.message : String(err);
-        setError(`Failed to load incubation data: ${errorMessage}`);
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    fetchStrategies();
+  // Lifted out of the effect so a promote or retire can refetch the list.
+  const loadStrategies = useCallback(async () => {
+    try {
+      setIsLoading(true);
+      setError(null);
+      const data = await PortfolioApplicationService.getIncubationStrategies();
+      setStrategies(data);
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      setError(`Failed to load incubation data: ${errorMessage}`);
+    } finally {
+      setIsLoading(false);
+    }
   }, []);
+
+  useEffect(() => {
+    void loadStrategies();
+  }, [loadStrategies]);
 
   useEffect(() => {
     if (!selectedStrategyId) {
@@ -109,6 +110,13 @@ export function IncubationScreen() {
         isLoading={isDetailLoading}
         error={detailError}
         onBack={() => setSelectedStrategyId(null)}
+        onLifecycleChanged={() => {
+          // A promoted or retired strategy is no longer incubating, so it drops
+          // out of this list entirely -- go back rather than sit on a detail
+          // view for something the screen no longer covers.
+          setSelectedStrategyId(null);
+          void loadStrategies();
+        }}
       />
     );
   }

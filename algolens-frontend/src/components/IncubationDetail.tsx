@@ -20,6 +20,7 @@ import {
   formatMockCapital,
 } from '../domain/portfolio/incubationUtils';
 import { useTheme } from '../adapters/react/ThemeContext';
+import { IncubationActions } from './IncubationActions';
 
 interface IncubationDetailProps {
   strategy: IncubatingStrategy;
@@ -27,6 +28,8 @@ interface IncubationDetailProps {
   isLoading: boolean;
   error: string | null;
   onBack: () => void;
+  /** Called after a promote or retire so the caller can refetch the list. */
+  onLifecycleChanged: () => void;
 }
 
 export function IncubationDetail({
@@ -35,6 +38,7 @@ export function IncubationDetail({
   isLoading,
   error,
   onBack,
+  onLifecycleChanged,
 }: IncubationDetailProps) {
   const [selectedPeriod, setSelectedPeriod] = useState('1M');
   const { theme } = useTheme();
@@ -138,6 +142,20 @@ export function IncubationDetail({
         </div>
       ) : (
         <>
+          {/* The decision this whole screen exists to support. Both transitions
+              were API-only until now, so a trial could be observed but not
+              concluded. */}
+          <div className="mb-6">
+            <IncubationActions
+              strategyId={strategy.id}
+              strategyName={strategy.name}
+              daysElapsed={strategy.days_elapsed}
+              windowDays={strategy.window_days}
+              theme={theme}
+              onChanged={onLifecycleChanged}
+            />
+          </div>
+
           <div className="mb-6">
             <div className="text-3xl md:text-4xl mb-2">
               {formatEquity(currentEquity)}
