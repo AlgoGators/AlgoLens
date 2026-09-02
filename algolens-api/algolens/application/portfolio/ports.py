@@ -50,11 +50,35 @@ class IncubationPerformanceRows:
     equity_curve: Sequence[Mapping[str, Any]]
 
 
+class PortfolioReassignmentAcknowledgementRequired(Exception):
+    """Moving a live strategy breaks both portfolios' histories.
+
+    Same shape as RiskAcknowledgementRequired: the caller is told what it costs
+    and must come back with an explicit acknowledgement. Maps to HTTP 409.
+    """
+
+    def __init__(self, verdict):
+        super().__init__("This reassignment breaks portfolio history continuity")
+        self.verdict = verdict
+
+
 class StrategyRegistryPort(Protocol):
     def list(self, active_only: bool = True) -> list[dict[str, Any]]:
         ...
 
     def get(self, strategy_id: str) -> dict[str, Any] | None:
+        ...
+
+    def reassign_portfolio(
+        self, strategy_id: str, portfolio_id: str, audit: "dict[str, Any]"
+    ) -> "dict[str, Any]":
+        ...
+
+    def list_assignment_history(
+        self, strategy_id: str, limit: int = 100
+    ) -> Sequence[dict[str, Any]]:
+        # Sequence, not list: `list` is a method name on this Protocol, so it no
+        # longer refers to the builtin inside this class body.
         ...
 
 

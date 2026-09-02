@@ -8,23 +8,31 @@ from flask import Blueprint, current_app, jsonify, request
 from flask_jwt_extended import get_jwt, get_jwt_identity, jwt_required
 
 from algolens.adapters.serializers.portfolio import (
+    serialize_assignment_history,
+    serialize_assignment_result,
     serialize_incubating_strategy_list,
     serialize_incubation_performance,
+    serialize_portfolio_list,
     serialize_strategy_detail,
     serialize_strategy_list,
 )
 from algolens.application.portfolio.ports import (
     IncubationError,
+    PortfolioReassignmentAcknowledgementRequired,
     RiskAcknowledgementRequired,
     StrategyNameUnresolved,
 )
 from algolens.application.portfolio.use_cases import (
     GetIncubationPerformance,
     GetStrategyDetail,
+    ListAssignmentHistory,
     ListIncubatingStrategies,
+    ListPortfolios,
     ListPositionOverrides,
     ListStrategies,
+    PreviewPortfolioAssignment,
     PromoteToLive,
+    ReassignStrategyPortfolio,
     RetireStrategy,
     StartIncubation,
     StrategyDataNotFound,
@@ -32,6 +40,7 @@ from algolens.application.portfolio.use_cases import (
     UpsertQtPosition,
 )
 from algolens.domain.portfolio.position_edit import PositionValidationError
+from algolens.domain.portfolio.portfolio_assignment import AssignmentValidationError
 from algolens.infrastructure.config.dependencies import create_portfolio_dependencies
 
 portfolio_bp = Blueprint("portfolio", __name__)
@@ -39,6 +48,21 @@ portfolio_bp = Blueprint("portfolio", __name__)
 # Rendered from PositionValidationError.code rather than from the exception
 # itself, so no exception text can reach a client (CodeQL py/stack-trace-
 # exposure). Every message here is authored, not derived.
+ASSIGNMENT_MESSAGES = {
+    "missing_portfolio_id": "Field 'portfolio_id' is required",
+    "portfolio_id_not_a_string": "Field 'portfolio_id' must be a string",
+    "empty_portfolio_id": "Field 'portfolio_id' must not be empty",
+    "portfolio_id_too_long": "Field 'portfolio_id' is too long",
+    "portfolio_id_invalid_characters": (
+        "Field 'portfolio_id' may contain only letters, digits, underscores and hyphens"
+    ),
+    "strategy_not_found": "Strategy not found",
+    "strategy_retired": (
+        "A retired strategy cannot be reassigned: its book is closed and moving it "
+        "would rewrite history that has already been reported"
+    ),
+}
+
 VALIDATION_MESSAGES = {
     "not_an_object": "Request body must be a JSON object",
     "portfolio_type_forbidden": (
@@ -352,3 +376,83 @@ def get_overrides(strategy_id):
             "Failed to fetch overrides for %s", strategy_id, exc_info=True
         )
         return jsonify({"error": "Failed to fetch overrides"}), 500
+
+
+@portfolio_bp.route("/portfolios", methods=["GET"])
+@jwt_required()
+def get_portfolios():
+    """The strategies grouped by the portfolio they belong to.
+
+    Readable by any authenticated user -- it is the same information the
+    strategy list already exposes, only grouped.
+    """
+    try:
+        registry, reader = _portfolio_dependencies()
+        return (
+            jsonify(serialize_portfolio_list(ListPortfolios(registry, reader).execute())),
+            200,
+        )
+    except Exception as exc:
+        current_app.logger.error("Failed to list portfolios: %s", str(exc), exc_info=True)
+        return jsonify({"error": "Failed to list portfolios"}), 500
+
+
+@portfolio_bp.route("/strategies/<strategy_id>/portfolio", methods=["PUT"])
+@jwt_required()
+@internal_only
+def reassign_strategy_portfolio(strategy_id):
+    """Move a strategy to another portfolio.
+
+    Returns 409 with the consequences when the move would break history
+    continuity and the caller has not acknowledged it -- the same
+    resubmit-to-acknowledge shape as a risk breach on a position edit.
+    """
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return jsonify({"error": "Request body must be a JSON object"}), 400
+
+    try:
+        registry, _reader = _portfolio_dependencies()
+        result = ReassignStrategyPortfolio(registry).execute(
+            strategy_id,
+            payload.get("portfolio_id"),
+            user_id=_request_user_id(),
+            reason=payload.get("reason"),
+            acknowledge=bool(payload.get("acknowledge")),
+        )
+        return jsonify(serialize_assignment_result(result)), 200
+    except AssignmentValidationError as exc:
+        message = ASSIGNMENT_MESSAGES.get(exc.code, "Invalid request body")
+        status = 404 if exc.code == "strategy_not_found" else 400
+        return jsonify({"error": message, "code": exc.code}), status
+    except PortfolioReassignmentAcknowledgementRequired as exc:
+        return (
+            jsonify(
+                {
+                    "error": "This reassignment breaks portfolio history continuity",
+                    "assignment_check": exc.verdict,
+                    "resubmit_with": "acknowledge",
+                }
+            ),
+            409,
+        )
+    except Exception as exc:
+        current_app.logger.error(
+            "Failed to reassign %s: %s", strategy_id, str(exc), exc_info=True
+        )
+        return jsonify({"error": "Failed to reassign the strategy"}), 500
+
+
+@portfolio_bp.route("/strategies/<strategy_id>/portfolio/history", methods=["GET"])
+@jwt_required()
+@internal_only
+def get_assignment_history(strategy_id):
+    try:
+        registry, _reader = _portfolio_dependencies()
+        history = ListAssignmentHistory(registry).execute(strategy_id)
+        return jsonify(serialize_assignment_history(history)), 200
+    except Exception as exc:
+        current_app.logger.error(
+            "Failed to read assignment history for %s: %s", strategy_id, str(exc), exc_info=True
+        )
+        return jsonify({"error": "Failed to read assignment history"}), 500

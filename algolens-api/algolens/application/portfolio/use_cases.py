@@ -5,11 +5,17 @@ from collections.abc import Mapping
 from datetime import datetime
 from typing import Any
 
+from algolens.domain.portfolio.portfolio_assignment import (
+    build_assignment_audit,
+    evaluate_assignment,
+    normalize_portfolio_id,
+)
 from algolens.application.portfolio.ports import (
     IncubationError,
     IncubationPerformanceRows,
     PortfolioDetailRows,
     PortfolioReaderPort,
+    PortfolioReassignmentAcknowledgementRequired,
     RiskAcknowledgementRequired,
     StrategyRegistryPort,
 )
@@ -343,3 +349,121 @@ class ListPositionOverrides:
         if strategy is None:
             raise StrategyNotFound(strategy_id)
         return list(self.reader.fetch_overrides(strategy["strategy_type"], limit))
+
+
+class ListPortfolios:
+    """Group the live strategies by the portfolio they belong to.
+
+    portfolio_id has always scoped every read in this app; this is the first
+    thing that surfaces the grouping rather than assuming one portfolio.
+    """
+
+    def __init__(self, registry: StrategyRegistryPort, reader: PortfolioReaderPort):
+        self.registry = registry
+        self.reader = reader
+
+    def execute(self) -> list[dict[str, Any]]:
+        buckets: dict[str, dict[str, Any]] = {}
+        for cfg in self.registry.list(active_only=True):
+            portfolio_id = cfg["portfolio_id"]
+            bucket = buckets.setdefault(
+                portfolio_id,
+                {"portfolio_id": portfolio_id, "strategies": [], "total_value": 0.0},
+            )
+            # None, not 0.0. The engine keys live_results on
+            # (strategy_type, portfolio_id), so a strategy just moved to a new
+            # portfolio has no row until the engine publishes one. Reporting 0
+            # there would read as "this strategy is worth nothing" rather than
+            # "nothing has been published for this pairing yet".
+            value = None
+            try:
+                latest = self.reader.fetch_summary_row(
+                    cfg["strategy_type"], portfolio_id
+                )
+                if latest and latest.get("current_portfolio_value") is not None:
+                    value = float(latest["current_portfolio_value"])
+            except Exception as exc:
+                # A portfolio is still worth listing when one strategy's numbers
+                # are unreadable -- it just contributes nothing to the total.
+                logger.error(
+                    "[PORTFOLIOS] Failed to read %s: %s", cfg["id"], str(exc), exc_info=True
+                )
+            bucket["strategies"].append(
+                {
+                    "id": cfg["id"],
+                    "name": cfg["name"],
+                    "strategy_type": cfg["strategy_type"],
+                    "lifecycle": cfg.get("lifecycle") or "live",
+                    "current_value": value,
+                }
+            )
+            if value is not None:
+                bucket["total_value"] += value
+
+        return sorted(buckets.values(), key=lambda b: b["portfolio_id"])
+
+
+class PreviewPortfolioAssignment:
+    """What moving this strategy would cost, without moving it."""
+
+    def __init__(self, registry: StrategyRegistryPort):
+        self.registry = registry
+
+    def _lookup(self, strategy_id: str) -> dict[str, Any] | None:
+        # get() only sees active live strategies; assignment must also see
+        # incubating ones (free to move) and retired ones (refused).
+        getter = getattr(self.registry, "get_any", None)
+        return getter(strategy_id) if getter else self.registry.get(strategy_id)
+
+    def execute(self, strategy_id: str, portfolio_id: Any) -> dict[str, Any]:
+        target = normalize_portfolio_id(portfolio_id)
+        return evaluate_assignment(self._lookup(strategy_id), target)
+
+
+class ReassignStrategyPortfolio:
+    """Move a strategy to another portfolio, with the cost acknowledged and recorded."""
+
+    def __init__(self, registry: StrategyRegistryPort):
+        self.registry = registry
+
+    def _lookup(self, strategy_id: str) -> dict[str, Any] | None:
+        # get() only sees active live strategies; assignment must also see
+        # incubating ones (free to move) and retired ones (refused).
+        getter = getattr(self.registry, "get_any", None)
+        return getter(strategy_id) if getter else self.registry.get(strategy_id)
+
+    def execute(
+        self,
+        strategy_id: str,
+        portfolio_id: Any,
+        user_id: str,
+        reason: Any = None,
+        acknowledge: bool = False,
+    ) -> dict[str, Any]:
+        target = normalize_portfolio_id(portfolio_id)
+        current = self._lookup(strategy_id)
+        verdict = evaluate_assignment(current, target)
+
+        if not verdict["changed"]:
+            return {"changed": False, "portfolio_id": target, "verdict": verdict}
+
+        if verdict["requires_acknowledgement"] and not acknowledge:
+            raise PortfolioReassignmentAcknowledgementRequired(verdict)
+
+        audit = build_assignment_audit(
+            current,
+            verdict,
+            user_id=user_id,
+            reason=(str(reason).strip() if reason is not None else ""),
+            acknowledged=acknowledge,
+        )
+        self.registry.reassign_portfolio(strategy_id, target, audit)
+        return {"changed": True, "portfolio_id": target, "verdict": verdict}
+
+
+class ListAssignmentHistory:
+    def __init__(self, registry: StrategyRegistryPort):
+        self.registry = registry
+
+    def execute(self, strategy_id: str, limit: int = 100) -> list[dict[str, Any]]:
+        return self.registry.list_assignment_history(strategy_id, limit)

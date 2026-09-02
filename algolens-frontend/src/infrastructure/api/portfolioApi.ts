@@ -1,7 +1,11 @@
 import type { Strategy, PortfolioData, HistoricalDataPoint } from '../../domain/portfolio/portfolioData';
 import type { IncubatingStrategy, IncubationPerformance } from '../../domain/portfolio/incubationData';
 import type { RiskCheck } from '../../domain/portfolio/positionEdit';
-import { API_BASE_URL, log, postWithAuth } from './httpClient';
+import type {
+  AssignmentCheck,
+  PortfolioSummary,
+} from '../../domain/portfolio/portfolioAssignment';
+import { API_BASE_URL, log, postWithAuth, putWithAuth } from './httpClient';
 
 export class PortfolioApiService {
   // Debug method to test backend connectivity (call from browser console)
@@ -271,7 +275,8 @@ export class PortfolioApiService {
       .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
     return aggregated;
-  }
+  }
+
 
   /**
    * Write one position into the qt stream.
@@ -305,6 +310,58 @@ export class PortfolioApiService {
       return { outcome: 'needs_acknowledgement', risk_check: data.risk_check };
     }
     return { outcome: 'rejected', message: data.error || `Request failed (${response.status})` };
+  }
+
+  static async getPortfolios(): Promise<PortfolioSummary[]> {
+    const response = await this.fetchWithAuth(`${API_BASE_URL}/portfolio/portfolios`);
+    const data = await response.json();
+    return data.portfolios || [];
+  }
+
+  /**
+   * Move a strategy to another portfolio.
+   *
+   * A 409 carrying assignment_check is the acknowledgeable one -- the move is
+   * allowed but breaks history continuity. Every other failure is a flat
+   * refusal (a retired strategy, a bad id) with nothing to override.
+   */
+  static async reassignPortfolio(input: {
+    strategy_id: string;
+    portfolio_id: string;
+    reason: string;
+    acknowledge?: boolean;
+  }): Promise<
+    | { outcome: 'saved'; assignment_check: AssignmentCheck }
+    | { outcome: 'needs_acknowledgement'; assignment_check: AssignmentCheck }
+    | { outcome: 'rejected'; message: string }
+  > {
+    const encodedId = encodeURIComponent(input.strategy_id);
+    const response = await putWithAuth(
+      `${API_BASE_URL}/portfolio/strategies/${encodedId}/portfolio`,
+      {
+        portfolio_id: input.portfolio_id,
+        reason: input.reason,
+        acknowledge: Boolean(input.acknowledge),
+      },
+    );
+    const data = await response.json().catch(() => ({}));
+
+    if (response.ok) {
+      return { outcome: 'saved', assignment_check: data.assignment_check };
+    }
+    if (response.status === 409 && data.assignment_check) {
+      return { outcome: 'needs_acknowledgement', assignment_check: data.assignment_check };
+    }
+    return { outcome: 'rejected', message: data.error || `Request failed (${response.status})` };
+  }
+
+  static async getAssignmentHistory(strategyId: string): Promise<AssignmentRecord[]> {
+    const encodedId = encodeURIComponent(strategyId);
+    const response = await this.fetchWithAuth(
+      `${API_BASE_URL}/portfolio/strategies/${encodedId}/portfolio/history`,
+    );
+    const data = await response.json();
+    return data.assignments || [];
   }
 
   static async getPositionOverrides(strategyId: string): Promise<PositionOverride[]> {

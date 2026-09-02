@@ -1,5 +1,6 @@
 """Postgres-backed strategy registry with a built-in fallback."""
 
+import json
 import logging
 
 import psycopg2
@@ -112,6 +113,111 @@ class PostgresStrategyRegistry:
             if strategy["id"] == strategy_id:
                 return strategy
         return None
+
+
+    # ------------------------------------------------------------------
+    # Portfolio assignment
+    # ------------------------------------------------------------------
+
+    def get_any(self, strategy_id):
+        """Look up a strategy regardless of lifecycle.
+
+        `get` only sees active, live strategies. Assignment has to reason about
+        incubating and retired ones too -- retired specifically so it can refuse.
+        """
+        for strategy in self.list(active_only=False):
+            if strategy["id"] == strategy_id:
+                return strategy
+        return None
+
+    def _ensure_assignment_audit_table(self, cursor):
+        """Create the audit table if the migration has not run.
+
+        The canonical migration belongs in trade-ngin alongside 004/005, which
+        owns this schema. This keeps the write path honest in the meantime: an
+        assignment must never happen without its audit row, so the table being
+        absent is not a reason to skip recording.
+        """
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS trading.portfolio_assignments (
+                id                BIGSERIAL PRIMARY KEY,
+                strategy_id       TEXT        NOT NULL,
+                user_id           TEXT,
+                from_portfolio_id TEXT,
+                to_portfolio_id   TEXT        NOT NULL,
+                lifecycle_at_move TEXT,
+                reason            TEXT,
+                consequences      JSONB,
+                acknowledged      BOOLEAN     NOT NULL DEFAULT FALSE,
+                created_at        TIMESTAMPTZ NOT NULL DEFAULT now()
+            )
+            """
+        )
+
+    def reassign_portfolio(self, strategy_id, portfolio_id, audit):
+        """Move the strategy and record why, in one transaction.
+
+        Both or neither: a move with no audit row is indistinguishable from a
+        database accident when someone reads it back months later.
+        """
+        conn = self.connection_factory()
+        try:
+            with conn:
+                with conn.cursor() as cursor:
+                    self._ensure_assignment_audit_table(cursor)
+                    cursor.execute(
+                        """
+                        UPDATE trading.strategy_registry
+                        SET portfolio_id = %s
+                        WHERE id = %s
+                        """,
+                        (portfolio_id, strategy_id),
+                    )
+                    if cursor.rowcount == 0:
+                        raise ValueError(f"Strategy {strategy_id} not found")
+                    cursor.execute(
+                        """
+                        INSERT INTO trading.portfolio_assignments
+                            (strategy_id, user_id, from_portfolio_id, to_portfolio_id,
+                             lifecycle_at_move, reason, consequences, acknowledged)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s::jsonb, %s)
+                        """,
+                        (
+                            audit["strategy_id"],
+                            audit["user_id"],
+                            audit["from_portfolio_id"],
+                            audit["to_portfolio_id"],
+                            audit["lifecycle_at_move"],
+                            audit["reason"],
+                            json.dumps(audit["consequences"]),
+                            audit["acknowledged"],
+                        ),
+                    )
+        finally:
+            conn.close()
+        return {"strategy_id": strategy_id, "portfolio_id": portfolio_id}
+
+    def list_assignment_history(self, strategy_id, limit=100):
+        conn = self.connection_factory()
+        try:
+            with conn.cursor() as cursor:
+                self._ensure_assignment_audit_table(cursor)
+                cursor.execute(
+                    """
+                    SELECT id, strategy_id, user_id, from_portfolio_id, to_portfolio_id,
+                           lifecycle_at_move, reason, consequences, acknowledged, created_at
+                    FROM trading.portfolio_assignments
+                    WHERE strategy_id = %s
+                    ORDER BY created_at DESC
+                    LIMIT %s
+                    """,
+                    (strategy_id, limit),
+                )
+                columns = [c[0] for c in cursor.description]
+                return [dict(zip(columns, row)) for row in cursor.fetchall()]
+        finally:
+            conn.close()
 
 
 def clear_registry_cache():

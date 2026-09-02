@@ -3,6 +3,7 @@ import { TrendingUp, TrendingDown, Beaker } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, ResponsiveContainer, Tooltip } from 'recharts';
 import type { PortfolioData } from '../domain/portfolio/portfolioData';
 import { useTheme } from '../adapters/react/ThemeContext';
+import { PortfolioGrouping } from './PortfolioGrouping';
 
 interface PortfolioOverviewProps {
   data: PortfolioData;
@@ -143,6 +144,12 @@ export function PortfolioOverview({ data, onBuilderClick }: PortfolioOverviewPro
             )}
           </button>
         ))}
+      </div>
+
+      {/* portfolio_id has always scoped every read; this is the first thing that
+          shows the grouping, and the only place it can be changed. */}
+      <div className="mb-8">
+        <PortfolioGrouping />
       </div>
 
       <div className="flex items-center justify-between mb-6">

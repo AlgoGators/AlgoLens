@@ -166,15 +166,19 @@ function readCookie(name: string): string | null {
  * 409-you-must-acknowledge apart from an outright refusal, and that decision
  * belongs to them, not here.
  */
-export async function postWithAuth(url: string, body: unknown): Promise<Response> {
+async function writeWithAuth(
+  method: 'POST' | 'PUT',
+  url: string,
+  body: unknown,
+): Promise<Response> {
   const csrf = readCookie('csrf_access_token');
   if (!csrf) {
     log('warn', 'No csrf_access_token cookie found; the request will likely 401');
   }
 
-  log('info', `POST ${url}`);
+  log('info', `${method} ${url}`);
   return fetch(url, {
-    method: 'POST',
+    method,
     credentials: 'include',
     headers: {
       'Content-Type': 'application/json',
@@ -182,4 +186,12 @@ export async function postWithAuth(url: string, body: unknown): Promise<Response
     },
     body: JSON.stringify(body),
   });
+}
+
+export async function postWithAuth(url: string, body: unknown): Promise<Response> {
+  return writeWithAuth('POST', url, body);
+}
+
+export async function putWithAuth(url: string, body: unknown): Promise<Response> {
+  return writeWithAuth('PUT', url, body);
 }

@@ -59,3 +59,53 @@ def serialize_incubation_performance(performance):
             for point in performance["equity_curve"]
         ],
     }
+
+
+def serialize_portfolio(portfolio):
+    return {
+        "portfolio_id": portfolio["portfolio_id"],
+        "total_value": _float_or_none(portfolio["total_value"]),
+        "strategy_count": len(portfolio["strategies"]),
+        "strategies": [
+            {
+                "id": s["id"],
+                "name": s["name"],
+                "strategy_type": s["strategy_type"],
+                "lifecycle": s["lifecycle"],
+                "current_value": _float_or_none(s["current_value"]),
+            }
+            for s in portfolio["strategies"]
+        ],
+    }
+
+
+def serialize_portfolio_list(portfolios):
+    return {"portfolios": [serialize_portfolio(p) for p in portfolios]}
+
+
+def serialize_assignment_result(result):
+    return {
+        "changed": result["changed"],
+        "portfolio_id": result["portfolio_id"],
+        "assignment_check": result["verdict"],
+    }
+
+
+def serialize_assignment_history(rows):
+    return {
+        "assignments": [
+            {
+                "id": row["id"],
+                "strategy_id": row["strategy_id"],
+                "user_id": row["user_id"],
+                "from_portfolio_id": row["from_portfolio_id"],
+                "to_portfolio_id": row["to_portfolio_id"],
+                "lifecycle_at_move": row["lifecycle_at_move"],
+                "reason": row["reason"],
+                "consequences": row["consequences"],
+                "acknowledged": row["acknowledged"],
+                "created_at": _isoformat(row["created_at"]),
+            }
+            for row in rows
+        ]
+    }
