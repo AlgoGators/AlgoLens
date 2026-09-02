@@ -82,6 +82,13 @@ export function PortfolioOverview({ data, onBuilderClick }: PortfolioOverviewPro
         </div>
       </div>
 
+      {/* Directly under the fund total, above the chart: the fund splits into
+          portfolios, which contain strategies. Below the chart this sat at the
+          fold and was invisible on a normal window. */}
+      <div className="mb-8">
+        <PortfolioGrouping />
+      </div>
+
       <div className="mb-4">
         <ResponsiveContainer width="100%" height={300}>
           <LineChart data={filteredData}>
@@ -144,12 +151,6 @@ export function PortfolioOverview({ data, onBuilderClick }: PortfolioOverviewPro
             )}
           </button>
         ))}
-      </div>
-
-      {/* portfolio_id has always scoped every read; this is the first thing that
-          shows the grouping, and the only place it can be changed. */}
-      <div className="mb-8">
-        <PortfolioGrouping />
       </div>
 
       <div className="flex items-center justify-between mb-6">
