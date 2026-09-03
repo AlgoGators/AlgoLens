@@ -95,9 +95,17 @@ export class PortfolioApiService {
   }
 
 
-  static async getStrategy(strategyId: string): Promise<Strategy> {
+  /**
+   * One strategy's detail, scoped to one book.
+   *
+   * Omitting `portfolioId` gets the primary book, which is what the dashboard
+   * wants. Naming a book gets that book's positions, and its risk limits --
+   * a strategy in several books has a separate ledger in each.
+   */
+  static async getStrategy(strategyId: string, portfolioId?: string): Promise<Strategy> {
     log('info', `getStrategy(${strategyId}) called`);
-    const url = `${API_BASE_URL}/portfolio/strategy/${strategyId}`;
+    const query = portfolioId ? `?portfolio_id=${encodeURIComponent(portfolioId)}` : '';
+    const url = `${API_BASE_URL}/portfolio/strategy/${strategyId}${query}`;
     log('info', `Fetching strategy from: ${url}`);
 
     const response = await fetchWithAuth(url);

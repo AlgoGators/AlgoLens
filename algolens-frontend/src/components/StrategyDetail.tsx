@@ -1,10 +1,11 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { ArrowLeft, TrendingUp, TrendingDown } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, ResponsiveContainer, Tooltip } from 'recharts';
 import type { Strategy } from '../domain/portfolio/portfolioData';
 import { useTheme } from '../adapters/react/ThemeContext';
 import { FinancialAnalysis } from './FinancialAnalysis';
 import { PositionBreakdown } from './PositionBreakdown';
+import { PortfolioApiService } from '../infrastructure/api/portfolioApi';
 import { OverrideHistory } from './OverrideHistory';
 import { TradingActivity } from './TradingActivity';
 import { AlphaAttribution } from './AlphaAttribution';
@@ -17,6 +18,53 @@ interface StrategyDetailProps {
 }
 
 export function StrategyDetail({ strategy, onBack, onPositionsChanged }: StrategyDetailProps) {
+  // Which book is on screen. A strategy can trade a different universe, with
+  // different limits, in each book it belongs to; the view used to show the
+  // primary one and offer no way to reach the others, so the rest of a
+  // strategy's positions were simply unreachable from the app.
+  const books = strategy.books ?? (strategy.portfolio_id ? [strategy.portfolio_id] : []);
+  const [book, setBook] = useState<string | undefined>(strategy.portfolio_id);
+  // The detail for `book`. Null means "use the prop", which is the primary.
+  const [bookDetail, setBookDetail] = useState<Strategy | null>(null);
+  const [bookLoading, setBookLoading] = useState(false);
+  const [bookError, setBookError] = useState<string | null>(null);
+
+  // The strategy the positions tab renders. Everything else on this screen is
+  // strategy-level and stays as it was.
+  const shown = bookDetail ?? strategy;
+
+  const loadBook = useCallback(async (target: string | undefined) => {
+    if (!target || target === strategy.portfolio_id) {
+      setBookDetail(null);
+      setBookError(null);
+      return;
+    }
+    setBookLoading(true);
+    setBookError(null);
+    try {
+      setBookDetail(await PortfolioApiService.getStrategy(strategy.id, target));
+    } catch (err) {
+      setBookDetail(null);
+      setBookError(err instanceof Error ? err.message : 'Could not load that book');
+    } finally {
+      setBookLoading(false);
+    }
+  }, [strategy.id, strategy.portfolio_id]);
+
+  // A different strategy was opened: go back to its own primary book.
+  useEffect(() => {
+    setBook(strategy.portfolio_id);
+    setBookDetail(null);
+    setBookError(null);
+  }, [strategy.id, strategy.portfolio_id]);
+
+  // An edit landed. Re-read whichever book is on screen, and let the dashboard
+  // re-read the primary.
+  const handlePositionsChanged = useCallback(() => {
+    void loadBook(book);
+    onPositionsChanged?.();
+  }, [book, loadBook, onPositionsChanged]);
+
   const [selectedPeriod, setSelectedPeriod] = useState('1M');
   const [selectedTab, setSelectedTab] = useState<'positions' | 'analysis' | 'activity'>('positions');
   const { theme } = useTheme();
@@ -237,12 +285,56 @@ export function StrategyDetail({ strategy, onBack, onPositionsChanged }: Strateg
       {/* Tab Content */}
       {selectedTab === 'positions' && (
         <>
+          {books.length > 1 && (
+            <div className="mb-4 flex flex-wrap items-center gap-3">
+              <label
+                htmlFor="book-view"
+                className={`text-xs uppercase tracking-wider ${
+                  theme === 'dark' ? 'text-gray-500' : 'text-gray-500'
+                }`}
+              >
+                Book
+              </label>
+              <select
+                id="book-view"
+                aria-label="Which book to show"
+                value={book ?? ''}
+                onChange={e => { setBook(e.target.value); void loadBook(e.target.value); }}
+                className={`rounded-lg border px-2 py-1.5 text-sm font-mono ${
+                  theme === 'dark'
+                    ? 'bg-gray-900 border-gray-700 text-white'
+                    : 'bg-white border-gray-300 text-black'
+                }`}
+              >
+                {books.map(b => (
+                  <option key={b} value={b}>
+                    {b}{b === strategy.portfolio_id ? ' (primary)' : ''}
+                  </option>
+                ))}
+              </select>
+              <span className={`text-xs ${theme === 'dark' ? 'text-gray-500' : 'text-gray-500'}`}>
+                Each book has its own positions and its own risk limits.
+              </span>
+              {bookLoading && (
+                <span className={`text-xs ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>
+                  Loading…
+                </span>
+              )}
+            </div>
+          )}
+
+          {bookError && (
+            <div className="mb-4 rounded-lg border border-red-500/50 bg-red-500/10 px-4 py-3 text-sm text-red-600 dark:text-red-400">
+              {bookError}
+            </div>
+          )}
+
           <PositionBreakdown
-            positions={strategy.positions}
+            positions={shown.positions}
             strategyId={strategy.id}
-            portfolioId={strategy.portfolio_id}
-            books={strategy.books}
-            onEdited={onPositionsChanged}
+            portfolioId={shown.portfolio_id ?? book}
+            books={books}
+            onEdited={handlePositionsChanged}
           />
           {/* The audit trail sits directly under the book it describes. It was
               being written on every edit and read by nobody. */}

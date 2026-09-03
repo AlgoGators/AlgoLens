@@ -38,13 +38,18 @@ export function Dashboard({ onLogout }: DashboardProps) {
   const isInternalMember = isInternalRole(user?.role);
 
   // Hoisted out of the mount effect so a manual position edit can re-run it.
-  const fetchPortfolioData = useCallback(async () => {
+  // `silent` re-reads without flipping the page into its loading state. A
+  // refresh after an edit used to unmount the whole strategy view and rebuild
+  // it, which threw away everything the reader had set up on screen -- most
+  // visibly, which book they were looking at. The first load still shows the
+  // spinner, because then there is genuinely nothing to look at.
+  const fetchPortfolioData = useCallback(async (opts?: { silent?: boolean }) => {
     console.log('[Dashboard] === Starting fetchPortfolioData ===');
     console.log('[Dashboard] Current URL:', window.location.href);
     // Auth is carried by an httpOnly cookie now; JS cannot inspect it here.
 
     try {
-      setIsLoading(true);
+      if (!opts?.silent) setIsLoading(true);
       setError(null);
       const data = await PortfolioApplicationService.getPortfolioData();
       console.log('[Dashboard] Portfolio data received successfully:', data);
@@ -73,7 +78,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
   }, []);
 
   useEffect(() => {
-    fetchPortfolioData();
+    void fetchPortfolioData();
   }, [fetchPortfolioData]);
 
   useEffect(() => {
@@ -217,7 +222,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
             <StrategyDetail
               strategy={portfolioData.strategies.find(s => s.id === selectedStrategy)!}
               onBack={() => setSelectedStrategy(null)}
-              onPositionsChanged={fetchPortfolioData}
+              onPositionsChanged={() => fetchPortfolioData({ silent: true })}
             />
           )}
         </div>

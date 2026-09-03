@@ -50,7 +50,18 @@ logger = logging.getLogger(__name__)
 
 
 class StrategyDataNotFound(NotFoundError):
-    """A known strategy has no live portfolio data yet."""
+    """A known strategy has no live portfolio data yet.
+
+    ``portfolio_id`` is set when the miss is scoped to one book, which is the
+    normal state for a strategy just added to a book: the pairing exists, the
+    engine has simply not produced rows for it yet. Distinguishing the two lets
+    the reader be told which it is instead of a flat "not found".
+    """
+
+    def __init__(self, strategy_id, portfolio_id=None):
+        super().__init__(strategy_id)
+        self.strategy_id = strategy_id
+        self.portfolio_id = portfolio_id
 
 
 class StrategyNotFound(NotFoundError):
@@ -216,22 +227,15 @@ class GetStrategyDetail:
         self.registry = registry
         self.reader = reader
 
-    def execute(self, strategy_id: str) -> dict[str, Any]:
+    def execute(
+        self, strategy_id: str, portfolio_id: Any = None
+    ) -> dict[str, Any]:
         cfg = self.registry.get(strategy_id)
         if cfg is None:
             raise StrategyNotFound(strategy_id)
 
-        rows = self.reader.fetch_detail_rows(cfg["strategy_type"], cfg["portfolio_id"])
-        detail = build_strategy_detail(cfg, rows)
-        if detail is None:
-            raise StrategyDataNotFound(strategy_id)
-
-        # Which book these positions are, and every book this strategy is in.
-        # The view has always shown one book's positions; it just never said so,
-        # which is how an edit could be aimed at a universe that was not on
-        # screen. The client needs both to name the book it is writing to and to
-        # tell the reader they are looking at one of several.
-        detail["portfolio_id"] = cfg["portfolio_id"]
+        # Every book this strategy is in. Read before the rows, because which
+        # book is being asked for decides which rows to fetch.
         books = []
         lister = getattr(self.registry, "books_for_strategy", None)
         if lister:
@@ -242,7 +246,39 @@ class GetStrategyDetail:
                     "[STRATEGY] Membership read failed for %s: %s",
                     strategy_id, exc, exc_info=True,
                 )
-        detail["books"] = books or [cfg["portfolio_id"]]
+        books = list(books) or [cfg["portfolio_id"]]
+
+        # Which book to show. The primary unless the caller names another one
+        # the strategy is actually in. Positions, risk limits and the traded
+        # universe are all keyed on (strategy, book), so this is the whole
+        # difference between reading one ledger and reading another.
+        target = cfg["portfolio_id"]
+        if portfolio_id is not None:
+            requested = normalize_portfolio_id(portfolio_id)
+            found = match_book(requested, books)
+            if found is None:
+                raise AssignmentValidationError(
+                    "not_a_member_of_book",
+                    f"{strategy_id} does not belong to {requested}",
+                )
+            target = found
+
+        rows = self.reader.fetch_detail_rows(cfg["strategy_type"], target)
+        detail = build_strategy_detail(cfg, rows)
+        if detail is None:
+            # A strategy freshly added to a book has no engine output for that
+            # pairing yet. That is not the same as the strategy having no data
+            # at all, and the reader must not be shown a bare failure for what
+            # is a normal, temporary state.
+            raise StrategyDataNotFound(strategy_id, target)
+
+        # Which book these positions are, and every book this strategy is in.
+        # The view has always shown one book's positions; it just never said so,
+        # which is how an edit could be aimed at a universe that was not on
+        # screen. The client needs both to name the book it is writing to and to
+        # tell the reader they are looking at one of several.
+        detail["portfolio_id"] = target
+        detail["books"] = books
         return detail
 
 

@@ -58,6 +58,7 @@ portfolio_bp = Blueprint("portfolio", __name__)
 # itself, so no exception text can reach a client (CodeQL py/stack-trace-
 # exposure). Every message here is authored, not derived.
 ASSIGNMENT_MESSAGES = {
+    "not_a_member_of_book": "That strategy does not belong to the book named",
     "missing_portfolio_id": "Field 'portfolio_id' is required",
     "portfolio_id_not_a_string": "Field 'portfolio_id' must be a string",
     "empty_portfolio_id": "Field 'portfolio_id' must not be empty",
@@ -156,7 +157,12 @@ def get_strategy(strategy_id):
     try:
         current_app.logger.info("Fetching strategy: %s", strategy_id)
         registry, reader = _portfolio_dependencies()
-        strategy = GetStrategyDetail(registry, reader).execute(strategy_id)
+        # Optional. Omitted means the primary book, which is what every
+        # existing caller gets. Named means that book, provided the strategy
+        # is in it.
+        strategy = GetStrategyDetail(registry, reader).execute(
+            strategy_id, request.args.get("portfolio_id")
+        )
         elapsed_ms = (time.perf_counter() - start) * 1000
         current_app.logger.info(
             "[PORTFOLIO_TIMING] detail strategy_id=%s elapsed_ms=%.0f",
@@ -164,9 +170,27 @@ def get_strategy(strategy_id):
             elapsed_ms,
         )
         return jsonify(serialize_strategy_detail(strategy)), 200
+    except AssignmentValidationError as exc:
+        message = ASSIGNMENT_MESSAGES.get(exc.code, str(exc))
+        return jsonify({"error": message, "code": exc.code}), 400
     except StrategyNotFound:
         return jsonify({"error": "Strategy not found"}), 404
-    except StrategyDataNotFound:
+    except StrategyDataNotFound as exc:
+        book = getattr(exc, "portfolio_id", None)
+        if book:
+            return (
+                jsonify(
+                    {
+                        "error": (
+                            f"The engine has not published any results for this "
+                            f"strategy in {book} yet."
+                        ),
+                        "code": "no_data_for_book",
+                        "portfolio_id": book,
+                    }
+                ),
+                404,
+            )
         return jsonify({"error": "No data found for strategy"}), 404
     except Exception as exc:
         current_app.logger.error(
