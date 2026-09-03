@@ -214,6 +214,7 @@ finding was verified against the code before being fixed. Ranked by what it woul
 | 7.32 | **Privacy settings claimed Two-Factor Authentication was ON for every account.** Component state seeded `true`, backed by no endpoint; a toggle the user flipped was forgotten on unmount. | All four controls show `not configured` until something real backs them. | No security state is asserted |
 | 7.33 | Incubation showed a hardcoded `120 days` observation window although `window_days` is per strategy, and folded strategies with no mock capital into the headline total as $0. `formatMockCapital(null)` returned `$0`, stating an allocation of nothing where none was set. | Window derived from the data, shown as a range when strategies disagree; the total excludes unset figures and says how many; unknown capital renders as an em dash. | 89 frontend tests |
 | 7.34 | The share column read 588% because it divided exposure by portfolio VALUE while its own footer totalled exposure. | Both use the same denominator. | Shares sum to 100% |
+| 7.35 | The bell asserted **"Daily Trading Report Available"** on a clock: any weekday after 09:30 EST, weekends and holidays included, with an unread dot indistinguishable from a real alert. Nothing checked that a report existed. | Removed. No endpoint reports whether one was generated, so the bell no longer claims one was. | Dashboard shows no unread marker |
 
 ### Reviewed and deliberately left
 

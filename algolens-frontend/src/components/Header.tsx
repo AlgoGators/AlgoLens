@@ -25,49 +25,19 @@ export function Header({
   const { theme } = useTheme();
   const { user } = useAuth();
   const [showNotification, setShowNotification] = useState(false);
-  const [hasNewNotification, setHasNewNotification] = useState(false);
   const isInternalMember = isInternalRole(user?.role);
 
   const OUTLOOK_URL = 'https://login.microsoftonline.com/common/oauth2/v2.0/authorize?client_id=9199bf20-a13f-4107-85dc-02114787ef48&scope=https%3A%2F%2Foutlook.office.com%2F.default%20openid%20profile%20offline_access&redirect_uri=https%3A%2F%2Foutlook.live.com%2Fmail%2F&client-request-id=db1c7baa-e08c-3071-7a19-53c59751400e&response_mode=fragment&client_info=1&prompt=select_account&nonce=019b9607-602c-78ec-971e-ab36297d8aed&state=eyJpZCI6IjAxOWI5NjA3LTYwMmMtNzY4MS05NGI3LTkzZDZlZDI4ZjdiZiIsIm1ldGEiOnsiaW50ZXJhY3Rpb25UeXBlIjoicmVkaXJlY3QifX0%3D%7CaHR0cHM6Ly9vdXRsb29rLmxpdmUuY29tL21haWwvMC8_ZGVlcGxpbms9bWFpbCUyRjAlMkY&claims=%7B%22access_token%22%3A%7B%22xms_cc%22%3A%7B%22values%22%3A%5B%22CP1%22%5D%7D%7D%7D&x-client-SKU=msal.js.browser&x-client-VER=4.26.0&response_type=code&code_challenge=edvy3GffheuAG3xMagQGunjdE7B2ST-J3LKoL2izw9Q&code_challenge_method=S256&cobrandid=ab0455a0-8d03-46b9-b18b-df2f57b9e44c&fl=dob,flname,wld';
 
-  // Check if it's 9:30 AM EST or later today
-  useEffect(() => {
-    const checkNotificationTime = () => {
-      const now = new Date();
-      // Convert to EST (UTC-5)
-      const estOffset = -5 * 60; // EST offset in minutes
-      const localOffset = now.getTimezoneOffset();
-      const estTime = new Date(now.getTime() + (localOffset + estOffset) * 60000);
-
-      const hours = estTime.getHours();
-      const minutes = estTime.getMinutes();
-
-      // Check if it's 9:30 AM EST or later (until end of day)
-      if (hours > 9 || (hours === 9 && minutes >= 30)) {
-        // Check if notification was already dismissed today
-        const lastDismissed = localStorage.getItem('notificationDismissed');
-        const today = estTime.toDateString();
-
-        if (lastDismissed !== today) {
-          setHasNewNotification(true);
-        }
-      }
-    };
-
-    checkNotificationTime();
-    // Check every minute
-    const interval = setInterval(checkNotificationTime, 60000);
-    return () => clearInterval(interval);
-  }, []);
+  // There was a clock here, not a data source. Any weekday after 09:30 EST it
+  // asserted "Daily Trading Report Available" -- weekends, holidays, and days
+  // no report was produced included -- with an unread dot indistinguishable
+  // from a real alert. Nothing checked that a report existed.
+  //
+  // There is no endpoint that reports whether one was generated. Until there
+  // is, the bell shows what is actually known: nothing.
 
   const handleDismissNotification = () => {
-    const now = new Date();
-    const estOffset = -5 * 60;
-    const localOffset = now.getTimezoneOffset();
-    const estTime = new Date(now.getTime() + (localOffset + estOffset) * 60000);
-
-    localStorage.setItem('notificationDismissed', estTime.toDateString());
-    setHasNewNotification(false);
     setShowNotification(false);
   };
 
@@ -164,9 +134,8 @@ export function Header({
               >
                 <Bell className={`w-5 h-5 ${theme === 'dark' ? 'text-gray-300' : 'text-gray-700'
                   }`} />
-                {hasNewNotification && (
-                  <span className="absolute top-1 right-1 w-2 h-2 bg-orange-500 rounded-full"></span>
-                )}
+                {/* No unread dot: nothing here knows whether anything is
+                    unread. It used to appear on a timer. */}
               </button>
 
               {/* Notification Dropdown */}
@@ -187,40 +156,8 @@ export function Header({
                   </div>
 
                   <div className="p-3">
-                    {hasNewNotification ? (
-                      <div className={`p-3 rounded-lg ${theme === 'dark' ? 'bg-gray-800' : 'bg-orange-50'}`}>
-                        <div className="flex items-start gap-3">
-                          <div className="w-2 h-2 bg-orange-500 rounded-full mt-2 flex-shrink-0"></div>
-                          <div className="flex-1">
-                            <p className={`text-sm font-medium ${theme === 'dark' ? 'text-white' : 'text-gray-900'}`}>
-                              Daily Trading Report Available
-                            </p>
-                            <p className={`text-xs mt-1 ${theme === 'dark' ? 'text-gray-400' : 'text-gray-600'}`}>
-                              Check your email for today's trading performance report.
-                            </p>
-                            <div className="flex items-center gap-2 mt-3">
-                              <a
-                                href={OUTLOOK_URL}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="text-xs bg-orange-500 text-white px-3 py-1.5 rounded hover:bg-orange-600 transition-colors"
-                              >
-                                Open Email
-                              </a>
-                              <button
-                                onClick={handleDismissNotification}
-                                className={`text-xs px-3 py-1.5 rounded transition-colors ${theme === 'dark'
-                                  ? 'text-gray-400 hover:text-white hover:bg-gray-700'
-                                  : 'text-gray-500 hover:text-gray-700 hover:bg-gray-100'
-                                  }`}
-                              >
-                                Dismiss
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    ) : (
+                    {(
+
                       <p className={`text-sm text-center py-4 ${theme === 'dark' ? 'text-gray-500' : 'text-gray-400'}`}>
                         No new notifications
                       </p>
