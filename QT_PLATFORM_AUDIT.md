@@ -198,6 +198,7 @@ finding was verified against the code before being fixed. Ranked by what it woul
 | 7.16 | A fund whose strategies were all still awaiting engine data was shown the **empty-portfolio screen**, so the "excludes N strategies" notice could never render. | The dashboard gate counts awaiting strategies as something to show. | `Dashboard.tsx` |
 | 7.17 | `portfolioApi.ts` carried a byte-for-byte private copy of `httpClient.fetchWithAuth`. | Deleted; nine call sites use the shared one. | `tsc` |
 | 7.18 | Cosmetic: unused `useContext` import; seed comment said pbkdf2 for a scrypt hash. | Fixed. | — |
+| 7.19 | **Every blue button added since the DDD split was invisible.** `src/index.css` was a 39KB Tailwind 4.1.3 output committed at #71, and nothing compiled Tailwind at build time, so any utility a later component used that the snapshot lacked (`bg-blue-600`, `bg-amber-600`, `disabled:opacity-40`, `bg-black/50`, `normal-case`, ...) rendered as nothing. "Add", "Create book", "Promote to live", the modal Save buttons and the modal backdrop were white on white. Found when John asked how to add a strategy to a book and the form showed only Cancel. | Tailwind 4.3.3 + `@tailwindcss/vite` compile the sheet from source; `index.css` is now `@import "tailwindcss"` plus the existing `styles/globals.css` tokens. | Add / Create book render, computed `bg` is blue and disabled opacity 0.4; add and remove driven in the browser; build 92KB CSS |
 
 ### Reviewed and deliberately left
 
@@ -210,4 +211,5 @@ finding was verified against the code before being fixed. Ranked by what it woul
 ### Verified after the fixes
 
 - 153 backend unit tests, 7 Postgres integration tests, 88 frontend tests, `tsc --noEmit` clean.
+- Tailwind is compiled at build time; the frozen stylesheet is gone. Dashboard, Books, strategy detail and the edit modal checked in the browser after the switch.
 - Demo database rebuilt from the seed plus migration 009 and back at baseline.

@@ -72,6 +72,7 @@ but give them a database of their own regardless.
 - 7 integration tests pass against a real Postgres, and CI fails if they are skipped
 - 88 frontend tests pass
 - `tsc --noEmit` is clean and runs in CI before the build
+- Tailwind is compiled from source at build time (`@tailwindcss/vite`); the repo no longer ships a frozen stylesheet
 
 ---
 
