@@ -123,7 +123,16 @@ def build_strategy_detail(
             "dailyReturn": float_or_default(latest["daily_return"]),
             "cumulativeReturn": return_percent,
             "annualizedReturn": annualized_return,
-            "grossLeverage": float_or_default(latest["gross_leverage"]),
+            # The engine stopped writing trading.live_results.gross_leverage and
+            # now puts that number in portfolio_leverage; the column it
+            # abandoned is still there, holding whatever it held on the day it
+            # was abandoned. Reading it directly reported a dead value as a
+            # current one. See the note on LIVE_RESULTS in schema_contract.py.
+            "grossLeverage": float_or_default(
+                latest["gross_leverage"]
+                if latest.get("gross_leverage") is not None
+                else latest["portfolio_leverage"]
+            ),
             "netLeverage": float_or_default(latest["net_leverage"]),
             "portfolioLeverage": float_or_default(latest["portfolio_leverage"]),
             "marginPosted": float_or_default(latest["margin_posted"]),

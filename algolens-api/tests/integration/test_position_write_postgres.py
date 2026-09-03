@@ -24,10 +24,11 @@ Pointing this at ``algolens_demo`` once wiped the seeded demo mid-session.
     ALGOLENS_TEST_DB=postgresql://algolens@127.0.0.1:55432/algolens_test pytest tests/integration
 """
 
-import os
 from decimal import Decimal
 
 import pytest
+
+from tests.integration.conftest import claim_schema, require_test_dsn
 
 psycopg2 = pytest.importorskip("psycopg2")
 pytest.importorskip("psycopg2.extras")
@@ -52,37 +53,7 @@ ES_CAP = 70000
 
 
 def _dsn():
-    dsn = os.getenv("ALGOLENS_TEST_DB")
-    if not dsn:
-        pytest.skip("ALGOLENS_TEST_DB not set; integration tests skipped")
-    return dsn
-
-
-# The fixture marks the schema it builds so it can tell its own leftovers from
-# a schema somebody else populated. A crashed run leaves the marker behind; a
-# seeded demo, a migration test bed, or production never carries it.
-_OWNERSHIP_MARK = "owned by tests/integration; safe to drop"
-
-
-def _refuse_to_clobber_a_real_schema(cur):
-    cur.execute(
-        "SELECT obj_description(oid, 'pg_namespace') FROM pg_namespace "
-        "WHERE nspname = 'trading'"
-    )
-    row = cur.fetchone()
-    if row is None or row[0] == _OWNERSHIP_MARK:
-        return
-    cur.execute(
-        "SELECT count(*) FROM pg_tables WHERE schemaname = 'trading'"
-    )
-    tables = cur.fetchone()[0]
-    if tables == 0:
-        return
-    pytest.fail(
-        f"ALGOLENS_TEST_DB points at a database whose trading schema already "
-        f"holds {tables} table(s) this suite did not create. These tests DROP "
-        f"that schema. Name a disposable database instead (see module docstring)."
-    )
+    return require_test_dsn()
 
 
 @pytest.fixture()
@@ -97,10 +68,7 @@ def db(monkeypatch):
     conn = psycopg2.connect(_dsn())
     conn.autocommit = True
     with conn.cursor() as cur:
-        _refuse_to_clobber_a_real_schema(cur)
-        cur.execute("DROP SCHEMA IF EXISTS trading CASCADE")
-        cur.execute("CREATE SCHEMA trading")
-        cur.execute("COMMENT ON SCHEMA trading IS %s", (_OWNERSHIP_MARK,))
+        claim_schema(cur)
         cur.execute(
             """
             CREATE TABLE trading.strategy_registry (
