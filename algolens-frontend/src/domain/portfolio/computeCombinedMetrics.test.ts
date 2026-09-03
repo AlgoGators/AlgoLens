@@ -115,13 +115,23 @@ describe('computeCombinedMetrics', () => {
     expect(others!.value).toBe(2000);
   });
 
-  it('value-weights volatility and takes the max drawdown', () => {
-    // 25% weight on vol=8, 75% weight on vol=4  ->  0.25*8 + 0.75*4 = 5
-    const a = strategy({ id: 'a', currentValue: 50000, metrics: metrics({ volatility: 8, maxDrawdown: 30 }) });
-    const b = strategy({ id: 'b', currentValue: 150000, metrics: metrics({ volatility: 4, maxDrawdown: 10 }) });
+  it('derives volatility and drawdown from the combined curve, not from a weighted average', () => {
+    // Two curves that move in opposite directions. Averaging their individual
+    // volatilities would report plenty of risk; the combined book is flat.
+    const up = [100, 110, 100, 110, 100].map((v, i) => ({ date: `d${i}`, value: v }));
+    const down = [100, 90, 100, 90, 100].map((v, i) => ({ date: `d${i}`, value: v }));
+    const a = strategy({ id: 'a', currentValue: 100000, historicalData: up, metrics: metrics({ volatility: 40, maxDrawdown: 9 }) });
+    const b = strategy({ id: 'b', currentValue: 100000, historicalData: down, metrics: metrics({ volatility: 40, maxDrawdown: 10 }) });
     const out = computeCombinedMetrics([a, b], ['a', 'b']);
-    expect(out.metrics.volatility).toBeCloseTo(5, 6);
-    expect(out.metrics.maxDrawdown).toBe(30); // max, not weighted
+    expect(out.metrics.volatility).toBeCloseTo(0, 6);
+    expect(out.metrics.maxDrawdown).toBeCloseTo(0, 6);
+  });
+
+  it('reports combined volatility as unknown when the curve is too short to say', () => {
+    const a = strategy({ id: 'a', currentValue: 100000, historicalData: [], metrics: metrics({ volatility: 8 }) });
+    const out = computeCombinedMetrics([a], ['a']);
+    expect(out.metrics.volatility).toBeNull();
+    expect(out.metrics.sharpeRatio).toBeNull();
   });
 
   it('sums realized PnL per symbol across strategies', () => {

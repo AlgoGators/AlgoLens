@@ -1,4 +1,5 @@
 import type { Strategy } from '../../domain/portfolio/portfolioData';
+import { formatMetric } from '../../domain/portfolio/formatMetric';
 
 interface StrategySelectionProps {
   strategies: Strategy[];
@@ -24,7 +25,7 @@ export function StrategySelection({ strategies, selectedStrategies, onToggle, th
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         {strategies.map(strategy => {
           const isSelected = selectedStrategies.includes(strategy.id);
-          const isPositive = strategy.return >= 0;
+          const isPositive = (strategy.return ?? 0) >= 0;
 
           return (
             <button
@@ -75,12 +76,12 @@ export function StrategySelection({ strategies, selectedStrategies, onToggle, th
                 <div>
                   <div className={isSelected ? 'text-gray-500' : theme === 'dark' ? 'text-gray-500' : 'text-gray-400'}>RET</div>
                   <div className={isPositive ? 'text-orange-500' : 'text-red-500'}>
-                    {isPositive ? '+' : ''}{strategy.returnPercent.toFixed(1)}%
+                    {formatMetric(strategy.returnPercent, 1, { suffix: '%', signed: true })}
                   </div>
                 </div>
                 <div>
                   <div className={isSelected ? 'text-gray-500' : theme === 'dark' ? 'text-gray-500' : 'text-gray-400'}>SR</div>
-                  <div>{strategy.metrics.sharpeRatio.toFixed(2)}</div>
+                  <div>{formatMetric(strategy.metrics.sharpeRatio, 2)}</div>
                 </div>
               </div>
               )}

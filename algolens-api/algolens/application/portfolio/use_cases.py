@@ -32,7 +32,7 @@ from algolens.domain.portfolio.calculations import (
     build_historical_data,
     compute_return_stats,
     compute_sharpe,
-    float_or_default,
+    float_or_none,
     resolve_initial_equity,
     transform_executions,
     transform_finalized,
@@ -81,8 +81,14 @@ def build_strategy_detail(
     latest = rows.latest
     initial_equity = resolve_initial_equity(rows.equity_curve, cfg["initial_equity"])
     current_value = float(latest["current_portfolio_value"])
-    total_return = current_value - initial_equity
-    return_percent = (total_return / initial_equity * 100) if initial_equity > 0 else 0
+    # No starting equity on record and no curve to read one from: the return
+    # is unknown, and is reported as unknown rather than measured from $0.
+    total_return = current_value - initial_equity if initial_equity is not None else None
+    return_percent = (
+        (total_return / initial_equity * 100)
+        if total_return is not None and initial_equity > 0
+        else None
+    )
 
     historical_data = build_historical_data(rows.equity_curve)
     equity_by_stream = {
@@ -126,7 +132,7 @@ def build_strategy_detail(
             "avgWin": stats["avg_win"],
             "avgLoss": stats["avg_loss"],
             "profitFactor": stats["profit_factor"],
-            "dailyReturn": float_or_default(latest["daily_return"]),
+            "dailyReturn": float_or_none(latest["daily_return"]),
             "cumulativeReturn": return_percent,
             "annualizedReturn": annualized_return,
             # The engine stopped writing trading.live_results.gross_leverage and
@@ -134,22 +140,22 @@ def build_strategy_detail(
             # abandoned is still there, holding whatever it held on the day it
             # was abandoned. Reading it directly reported a dead value as a
             # current one. See the note on LIVE_RESULTS in schema_contract.py.
-            "grossLeverage": float_or_default(
+            "grossLeverage": float_or_none(
                 latest["gross_leverage"]
                 if latest.get("gross_leverage") is not None
                 else latest["portfolio_leverage"]
             ),
-            "netLeverage": float_or_default(latest["net_leverage"]),
-            "portfolioLeverage": float_or_default(latest["portfolio_leverage"]),
-            "marginPosted": float_or_default(latest["margin_posted"]),
-            "equityToMarginRatio": float_or_default(latest["equity_to_margin_ratio"]),
-            "marginCushion": float_or_default(latest["margin_cushion"]),
-            "totalNotional": float_or_default(latest["gross_notional"]),
-            "unrealizedPnL": float_or_default(latest["total_unrealized_pnl"]),
-            "realizedPnL": float_or_default(latest["total_realized_pnl"]),
-            "totalCommissions": float_or_default(latest["total_transaction_costs"]),
+            "netLeverage": float_or_none(latest["net_leverage"]),
+            "portfolioLeverage": float_or_none(latest["portfolio_leverage"]),
+            "marginPosted": float_or_none(latest["margin_posted"]),
+            "equityToMarginRatio": float_or_none(latest["equity_to_margin_ratio"]),
+            "marginCushion": float_or_none(latest["margin_cushion"]),
+            "totalNotional": float_or_none(latest["gross_notional"]),
+            "unrealizedPnL": float_or_none(latest["total_unrealized_pnl"]),
+            "realizedPnL": float_or_none(latest["total_realized_pnl"]),
+            "totalCommissions": float_or_none(latest["total_transaction_costs"]),
             "netPnL": total_return,
-            "cashAvailable": float_or_default(latest["cash_available"]),
+            "cashAvailable": float_or_none(latest["cash_available"]),
             "currentPortfolioValue": current_value,
         },
     }
@@ -181,7 +187,11 @@ def build_strategy_summary(
 
     base_equity = cfg["initial_equity"]
     current_value = float(latest["current_portfolio_value"])
-    return_percent = ((current_value - base_equity) / base_equity * 100) if base_equity > 0 else 0
+    return_percent = (
+        ((current_value - base_equity) / base_equity * 100)
+        if base_equity is not None and base_equity > 0
+        else None
+    )
     volatility = float(latest["volatility"])
     annualized_return = float(latest["total_annualized_return"])
     sharpe = compute_sharpe(annualized_return, volatility)

@@ -9,7 +9,7 @@ export const INCUBATION_WINDOW_DAYS = 120;
 
 export function calculateIncubationProgress(
   daysElapsed: number,
-  windowDays: number = INCUBATION_WINDOW_DAYS
+  windowDays: number
 ): number {
   if (windowDays <= 0) return 0;
   const progress = (daysElapsed / windowDays) * 100;
@@ -18,7 +18,7 @@ export function calculateIncubationProgress(
 
 export function calculateDaysRemaining(
   daysElapsed: number,
-  windowDays: number = INCUBATION_WINDOW_DAYS
+  windowDays: number
 ): number {
   return Math.max(windowDays - daysElapsed, 0);
 }
@@ -106,14 +106,14 @@ export function formatEquity(value: number | null | undefined): string {
 
 export function isNearEndOfWindow(
   daysElapsed: number,
-  windowDays: number = INCUBATION_WINDOW_DAYS
+  windowDays: number
 ): boolean {
   return daysElapsed >= windowDays - 14;
 }
 
 export function isWindowComplete(
   daysElapsed: number,
-  windowDays: number = INCUBATION_WINDOW_DAYS
+  windowDays: number
 ): boolean {
   return daysElapsed >= windowDays;
 }

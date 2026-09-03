@@ -101,6 +101,9 @@ export function AccountSettings({ onBack }: AccountSettingsProps) {
             theme === 'dark' ? 'border-gray-800' : 'border-gray-200'
           }`}>
             <button
+              disabled
+              aria-disabled="true"
+              title="Not available yet: nothing is connected to this control"
               className={`w-full flex items-center justify-between p-4 border-b transition-colors ${
                 theme === 'dark' 
                   ? 'border-gray-800 hover:bg-gray-900' 
@@ -114,6 +117,7 @@ export function AccountSettings({ onBack }: AccountSettingsProps) {
                 }`}>
                   Update your account password
                 </div>
+                <div className="text-xs mt-1 text-amber-600 dark:text-amber-400">Not available yet</div>
               </div>
               <ChevronRight className={`w-5 h-5 ${
                 theme === 'dark' ? 'text-gray-500' : 'text-gray-400'
@@ -121,6 +125,9 @@ export function AccountSettings({ onBack }: AccountSettingsProps) {
             </button>
 
             <button
+              disabled
+              aria-disabled="true"
+              title="Not available yet: nothing is connected to this control"
               className={`w-full flex items-center justify-between p-4 border-b transition-colors ${
                 theme === 'dark' 
                   ? 'border-gray-800 hover:bg-gray-900' 
@@ -134,6 +141,7 @@ export function AccountSettings({ onBack }: AccountSettingsProps) {
                 }`}>
                   View and download tax forms
                 </div>
+                <div className="text-xs mt-1 text-amber-600 dark:text-amber-400">Not available yet</div>
               </div>
               <ChevronRight className={`w-5 h-5 ${
                 theme === 'dark' ? 'text-gray-500' : 'text-gray-400'
@@ -141,6 +149,9 @@ export function AccountSettings({ onBack }: AccountSettingsProps) {
             </button>
 
             <button
+              disabled
+              aria-disabled="true"
+              title="Not available yet: nothing is connected to this control"
               className={`w-full flex items-center justify-between p-4 border-b transition-colors ${
                 theme === 'dark' 
                   ? 'border-gray-800 hover:bg-gray-900' 
@@ -154,6 +165,7 @@ export function AccountSettings({ onBack }: AccountSettingsProps) {
                 }`}>
                   Manage linked bank accounts
                 </div>
+                <div className="text-xs mt-1 text-amber-600 dark:text-amber-400">Not available yet</div>
               </div>
               <ChevronRight className={`w-5 h-5 ${
                 theme === 'dark' ? 'text-gray-500' : 'text-gray-400'
@@ -161,6 +173,9 @@ export function AccountSettings({ onBack }: AccountSettingsProps) {
             </button>
 
             <button
+              disabled
+              aria-disabled="true"
+              title="Not available yet: nothing is connected to this control"
               className={`w-full flex items-center justify-between p-4 transition-colors ${
                 theme === 'dark' 
                   ? 'hover:bg-gray-900' 
@@ -174,6 +189,7 @@ export function AccountSettings({ onBack }: AccountSettingsProps) {
                 }`}>
                   Temporarily disable your account
                 </div>
+                <div className="text-xs mt-1 text-amber-600 dark:text-amber-400">Not available yet</div>
               </div>
               <ChevronRight className={`w-5 h-5 ${
                 theme === 'dark' ? 'text-gray-500' : 'text-gray-400'
@@ -191,6 +207,9 @@ export function AccountSettings({ onBack }: AccountSettingsProps) {
           </h3>
           <div className={`border border-red-500 rounded-lg overflow-hidden`}>
             <button
+              disabled
+              aria-disabled="true"
+              title="Not available yet: nothing is connected to this control"
               className={`w-full flex items-center justify-between p-4 transition-colors ${
                 theme === 'dark' 
                   ? 'hover:bg-red-950' 
@@ -204,6 +223,7 @@ export function AccountSettings({ onBack }: AccountSettingsProps) {
                 }`}>
                   Permanently close your account
                 </div>
+                <div className="text-xs mt-1 text-amber-600 dark:text-amber-400">Not available yet</div>
               </div>
               <ChevronRight className="w-5 h-5 text-red-500" />
             </button>

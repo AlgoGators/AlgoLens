@@ -75,7 +75,7 @@ export function IncubationDetail({
   const currentEquity =
     historicalData.length > 0
       ? historicalData[historicalData.length - 1].value
-      : strategy.mock_capital || 0;
+      : strategy.mock_capital ?? null;
   const progress = calculateIncubationProgress(
     strategy.days_elapsed,
     strategy.window_days
@@ -349,7 +349,7 @@ export function IncubationDetail({
                 >
                   <div>{formatIncubationDate(position.date)}</div>
                   <div>{position.symbol}</div>
-                  <div className="text-right">{position.quantity ?? 0}</div>
+                  <div className="text-right">{position.quantity ?? '\u2014'}</div>
                   <div className="text-right">
                     {position.entry_price === null
                       ? 'N/A'

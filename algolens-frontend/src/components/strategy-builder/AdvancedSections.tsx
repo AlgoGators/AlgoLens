@@ -1,4 +1,5 @@
 import { BarChart, Bar, Cell, XAxis, YAxis, ResponsiveContainer, Tooltip } from 'recharts';
+import { formatMetric } from '../../domain/portfolio/formatMetric';
 import { ChevronUp, ChevronDown } from 'lucide-react';
 import type { CombinedMetrics } from '../../domain/portfolio/computeCombinedMetrics';
 
@@ -101,21 +102,21 @@ export function AdvancedSections({ metrics, theme, expanded, onToggle }: Advance
               <div className={`text-xs ${theme === 'dark' ? 'text-gray-500' : 'text-gray-400'}`}>
                 PROFIT FACTOR
               </div>
-              <div className="text-base tabular-nums">{metrics.metrics.profitFactor.toFixed(2)}</div>
+              <div className="text-base tabular-nums">{formatMetric(metrics.metrics.profitFactor, 2)}</div>
             </div>
             <div className={`p-2 border ${theme === 'dark' ? 'border-gray-800' : 'border-gray-200'
               }`}>
               <div className={`text-xs ${theme === 'dark' ? 'text-gray-500' : 'text-gray-400'}`}>
                 AVG WIN
               </div>
-              <div className="text-base text-green-500 tabular-nums">${metrics.metrics.avgWin.toFixed(0)}</div>
+              <div className="text-base text-green-500 tabular-nums">{formatMetric(metrics.metrics.avgWin, 0, { prefix: '$' })}</div>
             </div>
             <div className={`p-2 border ${theme === 'dark' ? 'border-gray-800' : 'border-gray-200'
               }`}>
               <div className={`text-xs ${theme === 'dark' ? 'text-gray-500' : 'text-gray-400'}`}>
                 AVG LOSS
               </div>
-              <div className="text-base text-red-500 tabular-nums">${Math.abs(metrics.metrics.avgLoss).toFixed(0)}</div>
+              <div className="text-base text-red-500 tabular-nums">{formatMetric(metrics.metrics.avgLoss, 0, { prefix: '$', abs: true })}</div>
             </div>
           </div>
 
@@ -168,22 +169,22 @@ export function AdvancedSections({ metrics, theme, expanded, onToggle }: Advance
             <div className={`p-2 border ${theme === 'dark' ? 'border-gray-800' : 'border-gray-200'
               }`}>
               <div className={`text-xs ${theme === 'dark' ? 'text-gray-500' : 'text-gray-400'}`}>GROSS LEV</div>
-              <div className="text-base tabular-nums">{metrics.metrics.grossLeverage.toFixed(2)}x</div>
+              <div className="text-base tabular-nums">{formatMetric(metrics.metrics.grossLeverage, 2, { suffix: 'x' })}</div>
             </div>
             <div className={`p-2 border ${theme === 'dark' ? 'border-gray-800' : 'border-gray-200'
               }`}>
               <div className={`text-xs ${theme === 'dark' ? 'text-gray-500' : 'text-gray-400'}`}>NET LEV</div>
-              <div className="text-base tabular-nums">{metrics.metrics.netLeverage.toFixed(2)}x</div>
+              <div className="text-base tabular-nums">{formatMetric(metrics.metrics.netLeverage, 2, { suffix: 'x' })}</div>
             </div>
             <div className={`p-2 border ${theme === 'dark' ? 'border-gray-800' : 'border-gray-200'
               }`}>
               <div className={`text-xs ${theme === 'dark' ? 'text-gray-500' : 'text-gray-400'}`}>EQ/MARGIN</div>
-              <div className="text-base tabular-nums">{metrics.metrics.equityToMarginRatio.toFixed(2)}</div>
+              <div className="text-base tabular-nums">{formatMetric(metrics.metrics.equityToMarginRatio, 2)}</div>
             </div>
             <div className={`p-2 border ${theme === 'dark' ? 'border-gray-800' : 'border-gray-200'
               }`}>
               <div className={`text-xs ${theme === 'dark' ? 'text-gray-500' : 'text-gray-400'}`}>CUSHION</div>
-              <div className="text-base tabular-nums">{metrics.metrics.marginCushion.toFixed(1)}%</div>
+              <div className="text-base tabular-nums">{formatMetric(metrics.metrics.marginCushion, 1, { suffix: '%' })}</div>
             </div>
           </div>
         </div>

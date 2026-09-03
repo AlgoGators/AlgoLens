@@ -1,4 +1,5 @@
 import React from 'react';
+import { formatMetric } from '../domain/portfolio/formatMetric';
 import { ChevronRight, TrendingUp, TrendingDown, BarChart3 } from 'lucide-react';
 import type { Strategy } from '../domain/portfolio/portfolioData';
 import { useTheme } from '../adapters/react/ThemeContext';
@@ -14,7 +15,7 @@ export function StrategyList({ strategies, onSelectStrategy }: StrategyListProps
   return (
     <div className="grid grid-cols-1 md:grid-cols-1 gap-4">
       {strategies.map((strategy) => {
-        const isPositive = strategy.return >= 0;
+        const isPositive = (strategy.return ?? 0) >= 0;
         
         return (
           <button
@@ -94,7 +95,7 @@ export function StrategyList({ strategies, onSelectStrategy }: StrategyListProps
                       isPositive ? 'text-orange-500' : 'text-red-500'
                     }`}>
                       {isPositive ? <TrendingUp className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />}
-                      {isPositive ? '+' : ''}{strategy.returnPercent.toFixed(2)}%
+                      {formatMetric(strategy.returnPercent, 2, { suffix: '%', signed: true })}
                     </div>
                   )}
                 </div>
@@ -107,7 +108,7 @@ export function StrategyList({ strategies, onSelectStrategy }: StrategyListProps
                     Sharpe Ratio
                   </div>
                   <div className={`text-lg ${strategy.dataAvailable === false ? (theme === 'dark' ? 'text-gray-600' : 'text-gray-400') : ''}`}>
-                    {strategy.dataAvailable === false ? '—' : strategy.metrics.sharpeRatio.toFixed(2)}
+                    {strategy.dataAvailable === false ? '—' : formatMetric(strategy.metrics.sharpeRatio, 2)}
                   </div>
                 </div>
 
@@ -119,7 +120,7 @@ export function StrategyList({ strategies, onSelectStrategy }: StrategyListProps
                     Volatility
                   </div>
                   <div className={`text-lg ${strategy.dataAvailable === false ? (theme === 'dark' ? 'text-gray-600' : 'text-gray-400') : ''}`}>
-                    {strategy.dataAvailable === false ? '—' : `${strategy.metrics.volatility.toFixed(1)}%`}
+                    {strategy.dataAvailable === false ? '—' : formatMetric(strategy.metrics.volatility, 1, { suffix: '%' })}
                   </div>
                 </div>
               </div>
@@ -134,7 +135,7 @@ export function StrategyList({ strategies, onSelectStrategy }: StrategyListProps
                       isPositive ? 'bg-orange-500' : 'bg-red-500'
                     }`}
                     style={{ 
-                      width: `${Math.min(Math.abs(strategy.returnPercent) * 2, 100)}%` 
+                      width: `${Math.min(Math.abs(strategy.returnPercent ?? 0) * 2, 100)}%` 
                     }}
                   ></div>
                 </div>

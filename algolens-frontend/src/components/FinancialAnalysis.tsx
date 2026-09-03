@@ -1,5 +1,6 @@
 import React from 'react';
 import { useTheme } from '../adapters/react/ThemeContext';
+import { formatMetric } from '../domain/portfolio/formatMetric';
 import { MetricInfo } from './MetricInfo';
 import type { StrategyMetrics } from '../domain/portfolio/portfolioData';
 
@@ -12,7 +13,7 @@ export function FinancialAnalysis({ metrics }: FinancialAnalysisProps) {
 
   const MetricCard = ({ label, value, isPercentage = false, isPositive = true, info }: {
     label: string;
-    value: number;
+    value: number | null;
     isPercentage?: boolean;
     isPositive?: boolean;
     info?: { description: string; formula?: string };
@@ -31,14 +32,14 @@ export function FinancialAnalysis({ metrics }: FinancialAnalysisProps) {
         )}
       </div>
       <div className={`text-lg ${isPositive
-          ? value >= 0 ? 'text-orange-500' : 'text-red-500'
+          ? (value ?? 0) >= 0 ? 'text-orange-500' : 'text-red-500'
           : ''
         }`}>
-        {value >= 0 && isPositive && isPercentage ? '+' : ''}
-        {isPercentage
-          ? `${value.toFixed(2)}%`
-          : value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-        }
+        {value === null
+          ? '\u2014'
+          : isPercentage
+            ? `${value >= 0 && isPositive ? '+' : ''}${value.toFixed(2)}%`
+            : value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
       </div>
     </div>
   );
@@ -103,8 +104,8 @@ export function FinancialAnalysis({ metrics }: FinancialAnalysisProps) {
             value={metrics.sharpeRatio}
             isPositive={false}
             info={{
-              description: "Risk-adjusted return metric. Higher is better. Above 1 is good, above 2 is excellent.",
-              formula: "(Portfolio Return - Risk-Free Rate) / Portfolio Volatility"
+              description: "Risk-adjusted return: how much annualised return the book earned per unit of volatility.",
+              formula: "Annualised Return / Volatility, with a 0% risk-free rate (none is published)"
             }}
           />
           <MetricCard
@@ -122,8 +123,8 @@ export function FinancialAnalysis({ metrics }: FinancialAnalysisProps) {
             isPercentage
             isPositive={false}
             info={{
-              description: "Percentage of profitable trades. A 60%+ win rate is generally considered good.",
-              formula: "(Winning Trades / Total Trades) × 100"
+              description: "Share of days on which the book gained value. Computed from the equity curve, not from individual trades.",
+              formula: "(Up Days / Days) × 100"
             }}
           />
           <MetricCard
@@ -131,7 +132,7 @@ export function FinancialAnalysis({ metrics }: FinancialAnalysisProps) {
             value={metrics.profitFactor}
             isPositive={false}
             info={{
-              description: "Ratio of gross profit to gross loss. Above 1.5 is good, above 2 is excellent.",
+              description: "Ratio of gross profit to gross loss. ",
               formula: "Total Winning Trades $ / Total Losing Trades $"
             }}
           />
@@ -156,7 +157,7 @@ export function FinancialAnalysis({ metrics }: FinancialAnalysisProps) {
                 formula="(Total Long + Total Short) / Portfolio Value"
               />
             </div>
-            <div className="text-lg">{metrics.grossLeverage.toFixed(2)}x</div>
+            <div className="text-lg">{formatMetric(metrics.grossLeverage, 2, { suffix: 'x' })}</div>
           </div>
           <div className={`p-4 rounded-lg ${theme === 'dark' ? 'bg-gray-900' : 'bg-gray-50'
             }`}>
@@ -169,7 +170,7 @@ export function FinancialAnalysis({ metrics }: FinancialAnalysisProps) {
                 formula="(Total Long - Total Short) / Portfolio Value"
               />
             </div>
-            <div className="text-lg">{metrics.netLeverage.toFixed(2)}x</div>
+            <div className="text-lg">{formatMetric(metrics.netLeverage, 2, { suffix: 'x' })}</div>
           </div>
           <div className={`p-4 rounded-lg ${theme === 'dark' ? 'bg-gray-900' : 'bg-gray-50'
             }`}>
@@ -182,7 +183,7 @@ export function FinancialAnalysis({ metrics }: FinancialAnalysisProps) {
                 formula="Portfolio Value / Margin Posted"
               />
             </div>
-            <div className="text-lg">{metrics.equityToMarginRatio.toFixed(2)}x</div>
+            <div className="text-lg">{formatMetric(metrics.equityToMarginRatio, 2, { suffix: 'x' })}</div>
           </div>
           <MetricCard
             label="Margin Cushion"
@@ -210,8 +211,8 @@ export function FinancialAnalysis({ metrics }: FinancialAnalysisProps) {
               }`}>
               Unrealized P&L
             </div>
-            <div className={metrics.unrealizedPnL >= 0 ? 'text-orange-500 text-lg' : 'text-red-500 text-lg'}>
-              ${metrics.unrealizedPnL.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+            <div className={(metrics.unrealizedPnL ?? 0) >= 0 ? 'text-orange-500 text-lg' : 'text-red-500 text-lg'}>
+              {metrics.unrealizedPnL === null ? '—' : `$${metrics.unrealizedPnL.toLocaleString('en-US', { minimumFractionDigits: 2 })}`}
             </div>
           </div>
           <div className={`p-4 rounded-lg ${theme === 'dark' ? 'bg-gray-900' : 'bg-gray-50'
@@ -220,8 +221,8 @@ export function FinancialAnalysis({ metrics }: FinancialAnalysisProps) {
               }`}>
               Realized P&L
             </div>
-            <div className={metrics.realizedPnL >= 0 ? 'text-orange-500 text-lg' : 'text-red-500 text-lg'}>
-              ${metrics.realizedPnL.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+            <div className={(metrics.realizedPnL ?? 0) >= 0 ? 'text-orange-500 text-lg' : 'text-red-500 text-lg'}>
+              {metrics.realizedPnL === null ? '—' : `$${metrics.realizedPnL.toLocaleString('en-US', { minimumFractionDigits: 2 })}`}
             </div>
           </div>
           <div className={`p-4 rounded-lg ${theme === 'dark' ? 'bg-gray-900' : 'bg-gray-50'
@@ -231,7 +232,7 @@ export function FinancialAnalysis({ metrics }: FinancialAnalysisProps) {
               Total Commissions
             </div>
             <div className="text-lg">
-              ${metrics.totalCommissions.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+              {metrics.totalCommissions === null ? '—' : `$${metrics.totalCommissions.toLocaleString('en-US', { minimumFractionDigits: 2 })}`}
             </div>
           </div>
           <div className={`p-4 rounded-lg ${theme === 'dark' ? 'bg-gray-900' : 'bg-gray-50'
@@ -240,8 +241,8 @@ export function FinancialAnalysis({ metrics }: FinancialAnalysisProps) {
               }`}>
               Net P&L
             </div>
-            <div className={metrics.netPnL >= 0 ? 'text-orange-500 text-lg' : 'text-red-500 text-lg'}>
-              ${metrics.netPnL.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+            <div className={(metrics.netPnL ?? 0) >= 0 ? 'text-orange-500 text-lg' : 'text-red-500 text-lg'}>
+              {metrics.netPnL === null ? '—' : `$${metrics.netPnL.toLocaleString('en-US', { minimumFractionDigits: 2 })}`}
             </div>
           </div>
         </div>
@@ -269,7 +270,7 @@ export function FinancialAnalysis({ metrics }: FinancialAnalysisProps) {
               Avg Win
             </div>
             <div className="text-lg text-orange-500">
-              ${metrics.avgWin.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+              {metrics.avgWin === null ? '—' : `$${metrics.avgWin.toLocaleString('en-US', { minimumFractionDigits: 2 })}`}
             </div>
           </div>
           <div className={`p-4 rounded-lg ${theme === 'dark' ? 'bg-gray-900' : 'bg-gray-50'
@@ -279,7 +280,7 @@ export function FinancialAnalysis({ metrics }: FinancialAnalysisProps) {
               Avg Loss
             </div>
             <div className="text-lg text-red-500">
-              ${metrics.avgLoss.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+              {metrics.avgLoss === null ? '—' : `$${metrics.avgLoss.toLocaleString('en-US', { minimumFractionDigits: 2 })}`}
             </div>
           </div>
           <div className={`p-4 rounded-lg ${theme === 'dark' ? 'bg-gray-900' : 'bg-gray-50'
@@ -289,7 +290,7 @@ export function FinancialAnalysis({ metrics }: FinancialAnalysisProps) {
               Total Notional
             </div>
             <div className="text-lg">
-              ${metrics.totalNotional.toLocaleString('en-US', { minimumFractionDigits: 0 })}
+              {metrics.totalNotional === null ? '—' : `$${metrics.totalNotional.toLocaleString('en-US', { minimumFractionDigits: 0 })}`}
             </div>
           </div>
         </div>
@@ -309,7 +310,7 @@ export function FinancialAnalysis({ metrics }: FinancialAnalysisProps) {
               Portfolio Value
             </div>
             <div className="text-lg">
-              ${metrics.currentPortfolioValue.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+              {metrics.currentPortfolioValue === null ? '\u2014' : `$${metrics.currentPortfolioValue.toLocaleString('en-US', { minimumFractionDigits: 2 })}`}
             </div>
           </div>
           <div className={`p-4 rounded-lg ${theme === 'dark' ? 'bg-gray-900' : 'bg-gray-50'
@@ -319,7 +320,7 @@ export function FinancialAnalysis({ metrics }: FinancialAnalysisProps) {
               Cash Available
             </div>
             <div className="text-lg">
-              ${metrics.cashAvailable.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+              {metrics.cashAvailable === null ? '\u2014' : `$${metrics.cashAvailable.toLocaleString('en-US', { minimumFractionDigits: 2 })}`}
             </div>
           </div>
           <div className={`p-4 rounded-lg ${theme === 'dark' ? 'bg-gray-900' : 'bg-gray-50'
@@ -329,7 +330,7 @@ export function FinancialAnalysis({ metrics }: FinancialAnalysisProps) {
               Margin Posted
             </div>
             <div className="text-lg">
-              ${metrics.marginPosted.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+              {metrics.marginPosted === null ? '\u2014' : `$${metrics.marginPosted.toLocaleString('en-US', { minimumFractionDigits: 2 })}`}
             </div>
           </div>
         </div>

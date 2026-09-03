@@ -228,19 +228,6 @@ def build_after_state(before, normalized):
 # --------------------------------------------------------------------------
 
 
-def _notional(position):
-    # A None average_price is treated as 0.0, so a position with unknown price
-    # contributes nothing to notional limits regardless of its size. This is
-    # deliberate: we cannot compute risk for a position we do not know the price of.
-    #
-    # Coerced to float on purpose. Rows read from Postgres NUMERIC columns arrive
-    # as decimal.Decimal, the proposed position arrives as float, and Decimal
-    # refuses to add to float. That combination only appears against a real
-    # database, which is exactly where this must not fail.
-    price = float(position.get("average_price") or 0.0)
-    return abs(float(position["quantity"]) * price)
-
-
 def with_known_price(current_book, proposed):
     """The proposal as the risk check must see it.
 

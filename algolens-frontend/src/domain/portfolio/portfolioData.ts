@@ -47,30 +47,36 @@ export interface FinalizedPosition {
 }
 
 export interface StrategyMetrics {
-  volatility: number;
-  sharpeRatio: number;
-  maxDrawdown: number;
-  winRate: number;
+  /**
+   * Any of these may be null: the engine did not publish it, or it is
+   * mathematically undefined. Null is rendered as unknown, never as zero.
+   */
+  volatility: number | null;
+  /** Annualised return over volatility with a ZERO risk-free rate. */
+  sharpeRatio: number | null;
+  maxDrawdown: number | null;
+  /** Share of profitable DAYS on the equity curve, not of trades. */
+  winRate: number | null;
   totalTrades: number;
-  avgWin: number;
-  avgLoss: number;
-  profitFactor: number;
-  dailyReturn: number;
-  cumulativeReturn: number;
-  annualizedReturn: number;
-  grossLeverage: number;
-  netLeverage: number;
-  portfolioLeverage: number;
-  marginPosted: number;
-  equityToMarginRatio: number;
-  marginCushion: number;
-  totalNotional: number;
-  unrealizedPnL: number;
-  realizedPnL: number;
-  totalCommissions: number;
-  netPnL: number;
-  cashAvailable: number;
-  currentPortfolioValue: number;
+  avgWin: number | null;
+  avgLoss: number | null;
+  profitFactor: number | null;
+  dailyReturn: number | null;
+  cumulativeReturn: number | null;
+  annualizedReturn: number | null;
+  grossLeverage: number | null;
+  netLeverage: number | null;
+  portfolioLeverage: number | null;
+  marginPosted: number | null;
+  equityToMarginRatio: number | null;
+  marginCushion: number | null;
+  totalNotional: number | null;
+  unrealizedPnL: number | null;
+  realizedPnL: number | null;
+  totalCommissions: number | null;
+  netPnL: number | null;
+  cashAvailable: number | null;
+  currentPortfolioValue: number | null;
 }
 
 export interface HistoricalDataPoint {
@@ -88,10 +94,11 @@ export interface Strategy {
    * placeholder zero, not a measurement -- filter on this before aggregating.
    */
   dataAvailable?: boolean;
-  invested: number;
+  /** Starting equity. Null when none is on record and no curve supplies one. */
+  invested: number | null;
   currentValue: number;
-  return: number;
-  returnPercent: number;
+  return: number | null;
+  returnPercent: number | null;
   positions: Position[];
   historicalData: HistoricalDataPoint[];
   /**
@@ -103,8 +110,8 @@ export interface Strategy {
    * Absent until the dual-portfolio migration has run, so always guard on it.
    */
   equityByStream?: Record<string, HistoricalDataPoint[]>;
-  bestDay: number;
-  worstDay: number;
+  bestDay: number | null;
+  worstDay: number | null;
   metrics: StrategyMetrics;
   executions: Execution[];
   finalizedPositions: FinalizedPosition[];

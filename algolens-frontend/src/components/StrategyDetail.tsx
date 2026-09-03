@@ -68,7 +68,7 @@ export function StrategyDetail({ strategy, onBack, onPositionsChanged }: Strateg
   const [selectedPeriod, setSelectedPeriod] = useState('1M');
   const [selectedTab, setSelectedTab] = useState<'positions' | 'analysis' | 'activity'>('positions');
   const { theme } = useTheme();
-  const isPositive = strategy.return >= 0;
+  const isPositive = (strategy.return ?? 0) >= 0;
   const periods = ['1W', '1M', '3M', '1Y', 'ALL'];
 
   // Filter data based on selected period

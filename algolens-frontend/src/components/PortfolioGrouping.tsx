@@ -97,7 +97,9 @@ export function PortfolioGrouping() {
                 ${portfolio.total_value.toLocaleString('en-US', { maximumFractionDigits: 0 })}
               </div>
               <div className={`text-xs tabular-nums ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>
-                {(weights.get(portfolio.portfolio_id) ?? 0).toFixed(1)}% of fund
+                {weights.has(portfolio.portfolio_id)
+                  ? `${(weights.get(portfolio.portfolio_id) as number).toFixed(1)}% of fund`
+                  : 'share unknown'}
               </div>
             </div>
           </div>

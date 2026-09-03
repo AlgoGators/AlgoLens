@@ -1,31 +1,23 @@
-"""Postgres-backed strategy registry with a built-in fallback."""
+"""Postgres-backed strategy registry. Reports what it finds; invents nothing."""
 
 import json
 import logging
 
 import psycopg2
 
-from algolens.application.portfolio.ports import BookNotEmpty
+from algolens.application.portfolio.ports import IncubationStorageError, BookNotEmpty
 
 from algolens.infrastructure.db.postgres import get_db_connection
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_REGISTRY = [
-    {
-        "id": "trendfollowing",
-        "strategy_type": "LIVE_TREND_FOLLOWING",
-        "portfolio_id": "CONSERVATIVE_PORTFOLIO",
-        "name": "Trend Following",
-        "description": "Systematic trend following across multiple futures contracts",
-        "initial_equity": 500000.0,
-        "managers": ["AlgoLens System"],
-        "is_active": True,
-        "lifecycle": "live",
-        "sort_order": 0,
-        "mock_capital": None,
-    }
-]
+# There used to be a DEFAULT_REGISTRY here: one built-in "Trend Following"
+# strategy with $500,000 of initial equity, served whenever the real table was
+# empty or the read failed. It was a mock database wearing the real one's
+# clothes. A connection blip produced a strategy card with a fabricated name
+# and fabricated capital, laid over whatever live_results happened to match,
+# with nothing in the response saying so. The registry now reports what it
+# finds: an empty table is an empty list, and a failed read is an error.
 
 
 def _normalize(row):
@@ -36,9 +28,11 @@ def _normalize(row):
         "portfolio_id": row["portfolio_id"],
         "name": row["name"],
         "description": row.get("description") or "",
+        # NULL stays unknown. This used to substitute $500,000, which then
+        # became "invested" and the base of every return percentage.
         "initial_equity": float(row["initial_equity"])
         if row.get("initial_equity") is not None
-        else 500000.0,
+        else None,
         "managers": row.get("managers") or ["AlgoLens System"],
         "is_active": bool(row.get("is_active", True)),
         "lifecycle": row.get("lifecycle") or "live",
@@ -105,16 +99,12 @@ class PostgresStrategyRegistry:
 
             registry = [_normalize(row) for row in rows]
             if not registry:
-                logger.warning(
-                    "[REGISTRY] strategy_registry table is empty; using built-in default"
-                )
-                registry = list(DEFAULT_REGISTRY)
+                logger.warning("[REGISTRY] strategy_registry table is empty")
         except (psycopg2.Error, ValueError) as exc:
-            logger.warning(
-                "[REGISTRY] Could not read strategy_registry (%s); using built-in default",
-                getattr(exc, "pgcode", None) or str(exc),
+            logger.error(
+                "[REGISTRY] Could not read strategy_registry: %s", exc, exc_info=True
             )
-            registry = list(DEFAULT_REGISTRY)
+            raise IncubationStorageError("Database error") from exc
         finally:
             if conn is not None:
                 conn.close()

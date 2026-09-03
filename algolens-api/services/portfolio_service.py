@@ -9,7 +9,7 @@ from algolens.application.portfolio.use_cases import (
 from algolens.domain.portfolio.calculations import (
     build_historical_data as _build_historical_data,
     compute_return_stats as _compute_return_stats,
-    float_or_default as _f,
+    float_or_none as _f,
     resolve_initial_equity as _resolve_initial_equity,
     transform_executions as _transform_executions,
     transform_finalized as _transform_finalized,

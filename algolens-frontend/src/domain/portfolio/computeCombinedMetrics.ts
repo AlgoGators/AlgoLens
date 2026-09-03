@@ -29,7 +29,8 @@ export interface AdvancedMetrics {
   hhi: number;
   correlationMatrix: number[][];
   topHoldings: AllocationSlice[];
-  var95: number;
+  /** Null when combined volatility is unknown. */
+  var95: number | null;
 }
 
 export interface CombinedMetrics {
@@ -85,7 +86,7 @@ function emptyCombined(): CombinedMetrics {
     historicalPerformance: zeroHistorical,
     advancedMetrics: {
       sortinoRatio: null, informationRatio: null, hhi: 0, correlationMatrix: [],
-      topHoldings: [], var95: 0
+      topHoldings: [], var95: null
     }
   };
 }
@@ -124,6 +125,38 @@ function periodReturns(curve: { value: number }[]): number[] | null {
  * Sortino of 100.00 on screen for any book that simply had not had a losing day yet.
  * An undefined ratio is undefined; it is not an outstanding one.
  */
+/**
+ * Volatility, max drawdown and win rate of one equity curve.
+ *
+ * Volatility is the standard deviation of daily percentage returns annualised
+ * by sqrt(252), which is the convention the engine's own volatility figure
+ * uses. Everything is null rather than zero when the curve is too short to
+ * say anything.
+ */
+function curveStatistics(curve: { value: number }[]): {
+  volatility: number | null;
+  maxDrawdown: number | null;
+  winRate: number | null;
+} {
+  const returns = periodReturns(curve);
+  if (!returns || returns.length === 0) {
+    return { volatility: null, maxDrawdown: null, winRate: null };
+  }
+  const mean = returns.reduce((a, b) => a + b, 0) / returns.length;
+  const variance = returns.reduce((a, r) => a + (r - mean) ** 2, 0) / returns.length;
+  const volatility = Math.sqrt(variance) * Math.sqrt(252);
+
+  let peak = curve[0].value;
+  let maxDrawdown = 0;
+  for (const point of curve) {
+    if (point.value > peak) peak = point.value;
+    if (peak > 0) maxDrawdown = Math.max(maxDrawdown, ((peak - point.value) / peak) * 100);
+  }
+
+  const upDays = returns.filter(r => r > 0).length;
+  return { volatility, maxDrawdown, winRate: (upDays / returns.length) * 100 };
+}
+
 export function sortinoRatioFromCurve(
   bookCurve: { date: string; value: number }[],
   annualizedReturn: number
@@ -229,7 +262,9 @@ export function computeCombinedMetrics(
     return emptyCombined();
   }
 
-  const totalInvested = selected.reduce((sum, s) => sum + s.invested, 0);
+  // A strategy with no starting equity on record is left out of the invested
+  // total rather than counted as $0 invested.
+  const totalInvested = selected.reduce((sum, s) => sum + (s.invested ?? 0), 0);
   const totalValue = selected.reduce((sum, s) => sum + s.currentValue, 0);
   const totalReturn = totalValue - totalInvested;
   // A selection whose invested or current value sums to zero has no meaningful
@@ -348,42 +383,83 @@ export function computeCombinedMetrics(
     currentPortfolioValue: totalValue
   };
 
-  let totalWeight = 0;
-  selected.forEach(s => {
-    const weight = s.currentValue / totalValue;
-    totalWeight += weight;
+  // Value-weighted averages over the strategies that actually report each
+  // metric. A strategy whose engine row has NULL for a figure is left out of
+  // that figure's average rather than dragged in as zero; if no strategy
+  // reports it, the combined figure is unknown too.
+  const weightOf = (s: Strategy) => (totalValue > 0 ? (s.currentValue ?? 0) / totalValue : 0);
+  const weighted = (pick: (m: StrategyMetrics) => number | null): number | null => {
+    let sum = 0;
+    let weightSum = 0;
+    for (const s of selected) {
+      const v = pick(s.metrics);
+      if (v === null || v === undefined) continue;
+      const w = weightOf(s);
+      sum += v * w;
+      weightSum += w;
+    }
+    return weightSum > 0 ? sum / weightSum : null;
+  };
+  const summed = (pick: (m: StrategyMetrics) => number | null): number | null => {
+    let any = false;
+    let sum = 0;
+    for (const s of selected) {
+      const v = pick(s.metrics);
+      if (v === null || v === undefined) continue;
+      any = true;
+      sum += v;
+    }
+    return any ? sum : null;
+  };
 
-    weightedMetrics.volatility += s.metrics.volatility * weight;
-    weightedMetrics.sharpeRatio += s.metrics.sharpeRatio * weight;
-    weightedMetrics.maxDrawdown = Math.max(weightedMetrics.maxDrawdown, s.metrics.maxDrawdown);
-    weightedMetrics.winRate += s.metrics.winRate * weight;
-    weightedMetrics.totalTrades += s.metrics.totalTrades;
-    weightedMetrics.avgWin += s.metrics.avgWin * weight;
-    weightedMetrics.avgLoss += s.metrics.avgLoss * weight;
-    weightedMetrics.profitFactor += s.metrics.profitFactor * weight;
-    weightedMetrics.dailyReturn += s.metrics.dailyReturn * weight;
-    weightedMetrics.annualizedReturn += s.metrics.annualizedReturn * weight;
-    weightedMetrics.grossLeverage += s.metrics.grossLeverage * weight;
-    weightedMetrics.netLeverage += s.metrics.netLeverage * weight;
-    weightedMetrics.portfolioLeverage += s.metrics.portfolioLeverage * weight;
-    weightedMetrics.marginPosted += s.metrics.marginPosted;
-    weightedMetrics.totalNotional += s.metrics.totalNotional;
-    weightedMetrics.unrealizedPnL += s.metrics.unrealizedPnL;
-    weightedMetrics.realizedPnL += s.metrics.realizedPnL;
-    weightedMetrics.totalCommissions += s.metrics.totalCommissions;
-    weightedMetrics.netPnL += s.metrics.netPnL;
-    weightedMetrics.cashAvailable += s.metrics.cashAvailable;
-  });
+  // Volatility, Sharpe, drawdown and win rate of a COMBINED book are
+  // properties of the combined equity curve, not averages of the parts: two
+  // offsetting strategies have lower volatility together than either alone,
+  // and a weighted average of Sharpe ratios is not the Sharpe ratio of the
+  // sum. These were value-weighted averages, presented with the same labels
+  // as the real thing. They are now read off the combined curve, the same
+  // way Sortino and the information ratio already were.
+  const curveStats = curveStatistics(combinedCurve);
+  weightedMetrics.volatility = curveStats.volatility;
+  weightedMetrics.maxDrawdown = curveStats.maxDrawdown;
+  weightedMetrics.winRate = curveStats.winRate;
+  weightedMetrics.totalTrades = selected.reduce((n, s) => n + s.metrics.totalTrades, 0);
+  weightedMetrics.avgWin = weighted(m => m.avgWin);
+  weightedMetrics.avgLoss = weighted(m => m.avgLoss);
+  weightedMetrics.profitFactor = weighted(m => m.profitFactor);
+  weightedMetrics.dailyReturn = weighted(m => m.dailyReturn);
+  weightedMetrics.annualizedReturn = weighted(m => m.annualizedReturn);
+  // Same 0% risk-free convention as the per-strategy figure from the API.
+  weightedMetrics.sharpeRatio =
+    weightedMetrics.annualizedReturn !== null &&
+    curveStats.volatility !== null &&
+    curveStats.volatility > 0
+      ? weightedMetrics.annualizedReturn / curveStats.volatility
+      : null;
+  weightedMetrics.grossLeverage = weighted(m => m.grossLeverage);
+  weightedMetrics.netLeverage = weighted(m => m.netLeverage);
+  weightedMetrics.portfolioLeverage = weighted(m => m.portfolioLeverage);
+  weightedMetrics.marginPosted = summed(m => m.marginPosted);
+  weightedMetrics.totalNotional = summed(m => m.totalNotional);
+  weightedMetrics.unrealizedPnL = summed(m => m.unrealizedPnL);
+  weightedMetrics.realizedPnL = summed(m => m.realizedPnL);
+  weightedMetrics.totalCommissions = summed(m => m.totalCommissions);
+  weightedMetrics.netPnL = summed(m => m.netPnL);
+  weightedMetrics.cashAvailable = summed(m => m.cashAvailable);
 
-  weightedMetrics.equityToMarginRatio = weightedMetrics.marginPosted > 0
-    ? totalValue / weightedMetrics.marginPosted
-    : 0;
-  weightedMetrics.marginCushion = weightedMetrics.marginPosted > 0
-    ? ((totalValue - weightedMetrics.marginPosted) / totalValue) * 100
-    : 0;
+  const marginPosted = weightedMetrics.marginPosted;
+  weightedMetrics.equityToMarginRatio =
+    marginPosted !== null && marginPosted > 0 ? totalValue / marginPosted : null;
+  weightedMetrics.marginCushion =
+    marginPosted !== null && marginPosted > 0 && totalValue > 0
+      ? ((totalValue - marginPosted) / totalValue) * 100
+      : null;
 
   // Calculate advanced risk metrics (NOW weightedMetrics is available)
-  const sortinoRatio = sortinoRatioFromCurve(combinedCurve, weightedMetrics.annualizedReturn);
+  const sortinoRatio =
+    weightedMetrics.annualizedReturn === null
+      ? null
+      : sortinoRatioFromCurve(combinedCurve, weightedMetrics.annualizedReturn);
 
   // Information Ratio: active return against the benchmark stream, annualised.
   const informationRatio = informationRatioVsBenchmark(combinedCurve, selected);
@@ -401,8 +477,10 @@ export function computeCombinedMetrics(
   const correlationMatrix: number[][] = [];
 
   // Value at Risk (95% confidence, 1-day)
-  const portfolioStdDev = (weightedMetrics.volatility / 100) * totalValue / Math.sqrt(252);
-  const var95 = totalValue - (totalValue - 1.645 * portfolioStdDev);
+  const var95 =
+    weightedMetrics.volatility === null
+      ? null
+      : 1.645 * ((weightedMetrics.volatility / 100) * totalValue) / Math.sqrt(252);
 
   return {
     totalInvested,

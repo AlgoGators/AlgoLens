@@ -1,3 +1,4 @@
+import pytest
 """Tests for the data-driven strategy registry and the extracted portfolio service.
 
 The registry tests force the DB-unavailable path (so they run without a database)
@@ -12,17 +13,51 @@ from services import portfolio_service as svc
 # --- registry ----------------------------------------------------------------
 
 
-def test_registry_falls_back_to_default_on_db_error(monkeypatch):
-    # Simulate the DB being unavailable / migration not applied.
+def test_a_registry_read_failure_is_an_error_not_a_default(monkeypatch):
+    """The registry used to answer a failed read with a built-in strategy:
+    "Trend Following", $500,000, managed by "AlgoLens System". A connection
+    blip produced a fabricated strategy card with nothing in the response to
+    say so. It now fails, and the route reports a database error."""
+    from algolens.application.portfolio.ports import IncubationStorageError
+
     def boom():
         raise ValueError("no db configured")
 
     monkeypatch.setattr(reg, "get_db_connection", boom)
+    with pytest.raises(IncubationStorageError):
+        reg.get_registry()
 
-    registry = reg.get_registry()
-    assert [s["id"] for s in registry] == ["trendfollowing"]
-    assert registry[0]["strategy_type"] == "LIVE_TREND_FOLLOWING"
-    assert registry[0]["initial_equity"] == 500000.0
+
+class _FakeRegistry:
+    """What a registry answers, without a database and without inventing one.
+
+    The old tests reached these functions with no database configured and
+    relied on the built-in default strategy that used to fill the gap. That
+    default is gone -- it was a fabricated strategy with fabricated capital --
+    so the tests now say exactly what the registry holds.
+    """
+
+    ROWS = [
+        {
+            "id": "trendfollowing",
+            "strategy_type": "LIVE_TREND_FOLLOWING",
+            "portfolio_id": "CONSERVATIVE_PORTFOLIO",
+            "name": "Trend Following",
+            "description": "",
+            "initial_equity": 500000.0,
+            "managers": [],
+            "is_active": True,
+            "lifecycle": "live",
+            "sort_order": 0,
+            "mock_capital": None,
+        }
+    ]
+
+    def list(self, active_only=True):
+        return list(self.ROWS)
+
+    def get(self, strategy_id):
+        return next((r for r in self.ROWS if r["id"] == strategy_id), None)
 
 
 def test_every_registry_entry_names_a_portfolio(monkeypatch):
@@ -33,10 +68,7 @@ def test_every_registry_entry_names_a_portfolio(monkeypatch):
     strategy would make every downstream query ambiguous, silently blending
     portfolios rather than failing. See AlgoGators/AlgoLens#29.
     """
-    monkeypatch.setattr(
-        reg, "get_db_connection", lambda: (_ for _ in ()).throw(ValueError())
-    )
-
+    monkeypatch.setattr(reg, "PostgresStrategyRegistry", _FakeRegistry)
     for strategy in reg.get_registry():
         assert strategy.get("portfolio_id"), (
             f"registry entry {strategy['id']!r} does not name a portfolio_id"
@@ -44,12 +76,17 @@ def test_every_registry_entry_names_a_portfolio(monkeypatch):
 
 
 def test_get_strategy_config_known_and_unknown(monkeypatch):
-    monkeypatch.setattr(
-        reg, "get_db_connection", lambda: (_ for _ in ()).throw(ValueError())
-    )
-
+    monkeypatch.setattr(reg, "PostgresStrategyRegistry", _FakeRegistry)
     assert reg.get_strategy_config("trendfollowing")["name"] == "Trend Following"
     assert reg.get_strategy_config("does-not-exist") is None
+
+
+def test_an_empty_registry_is_an_empty_list_not_a_default(monkeypatch):
+    class _Empty(_FakeRegistry):
+        ROWS = []
+
+    monkeypatch.setattr(reg, "PostgresStrategyRegistry", _Empty)
+    assert reg.get_registry() == []
 
 
 # --- pure computation helpers ------------------------------------------------

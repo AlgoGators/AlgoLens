@@ -192,7 +192,9 @@ export class PortfolioApiService {
     log('info', 'Calculating portfolio totals...');
     const priced = strategies.filter(s => s.dataAvailable !== false);
     const strategiesAwaitingData = strategies.length - priced.length;
-    const totalInvested = priced.reduce((sum, s) => sum + s.invested, 0);
+    // A strategy with no starting equity on record adds nothing to invested;
+    // it is not counted as $0 put in.
+    const totalInvested = priced.reduce((sum, s) => sum + (s.invested ?? 0), 0);
     const totalValue = priced.reduce((sum, s) => sum + s.currentValue, 0);
     const totalReturn = totalValue - totalInvested;
     const totalReturnPercent = totalInvested > 0 ? (totalReturn / totalInvested) * 100 : 0;
