@@ -70,7 +70,7 @@ export function HoldingsModal({ metrics, theme, onClose }: HoldingsModalProps) {
               <div className="col-span-1"></div>
               <div className="col-span-5">Total ({metrics.assetAllocation.length} holdings)</div>
               <div className="col-span-3 text-right tabular-nums">
-                ${metrics.totalValue.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                ${metrics.totalValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </div>
               <div className="col-span-3 text-right text-orange-500">100.00%</div>
             </div>

@@ -41,7 +41,13 @@ export function PortfolioOverview({ data, onBuilderClick }: PortfolioOverviewPro
     }
 
     const cutoffDate = new Date(now);
+    // Midnight, not "this time of day 30 days ago". A daily bar is stamped at
+    // the start of its day, so a cutoff carrying the current clock time fell
+    // just after the oldest bar in the window and dropped it: "1M" measured 29
+    // days and reported 2.06% where the full month was 2.69%. Every period on
+    // every chart was short by one bar.
     cutoffDate.setDate(cutoffDate.getDate() - daysToShow);
+    cutoffDate.setHours(0, 0, 0, 0);
 
     return data.historicalData.filter(point => {
       const pointDate = new Date(point.date);
@@ -127,7 +133,7 @@ export function PortfolioOverview({ data, onBuilderClick }: PortfolioOverviewPro
                 fontWeight: '600',
                 padding: '12px'
               }}
-              formatter={(value: number) => [`$${value.toLocaleString('en-US', { minimumFractionDigits: 2 })}`, 'Fund Value']}
+              formatter={(value: number) => [`$${value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, 'Fund Value']}
               labelFormatter={(label) => new Date(label).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
             />
             <Line

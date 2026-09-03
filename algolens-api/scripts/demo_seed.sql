@@ -159,8 +159,26 @@ CREATE TABLE metadata.contract_metadata (
     "Tick Size"        TEXT
 );
 
--- Contract sizes as published by the exchanges, matching the fallback table in
--- trade-ngin (src/core/email_sender.cpp).
+-- Contract sizes, as PRICE MULTIPLIERS: the currency value of one full point
+-- of the quoted price. Notional is quantity x price x this, which is the
+-- formula trade-ngin uses (chart_generator.cpp).
+--
+-- That distinction matters, and getting it wrong is not subtle. For most of
+-- these the multiplier equals the contract size in underlying units, because
+-- the price is quoted per unit: crude is dollars per barrel on 1,000 barrels,
+-- gold dollars per ounce on 100 ounces. For three of them it does not:
+--
+--   ZN, ZB  quoted as a PERCENTAGE OF PAR on $100,000 of face value, so one
+--           point is $1,000, not $100,000.
+--   ZS      quoted in CENTS per bushel on 5,000 bushels, so one point (one
+--           cent) is $50, not $5,000.
+--
+-- Seeded from trade-ngin's fallback list, those three produced exposures 100x
+-- too large: forty ZN read as $449,400,000 against a $264,000 book. Note that
+-- the fallback table in trade-ngin (src/core/email_sender.cpp) holds the
+-- underlying-unit figures, so anything using it as a price multiplier for
+-- treasuries or grains inherits the same 100x error. Worth raising with the
+-- engine team; the values below are the point values.
 INSERT INTO metadata.contract_metadata
   ("Databento Symbol", "IB Symbol", "Name", "Asset Type", "Exchange", "Contract Size")
 VALUES
@@ -171,9 +189,9 @@ VALUES
   ('GC','GC','Gold','FUTURE','COMEX',100),
   ('SI','SI','Silver','FUTURE','COMEX',5000),
   ('NG','NG','Natural Gas','FUTURE','NYMEX',10000),
-  ('ZN','ZN','10-Year T-Note','FUTURE','CBOT',100000),
-  ('ZB','ZB','30-Year T-Bond','FUTURE','CBOT',100000),
-  ('ZS','ZS','Soybeans','FUTURE','CBOT',5000),
+  ('ZN','ZN','10-Year T-Note','FUTURE','CBOT',1000),
+  ('ZB','ZB','30-Year T-Bond','FUTURE','CBOT',1000),
+  ('ZS','ZS','Soybeans','FUTURE','CBOT',50),
   ('6E','6E','Euro FX','FUTURE','CME',125000);
 
 -- 30 days of daily bars for the symbols the demo holds.
@@ -237,23 +255,77 @@ VALUES
    ARRAY['Xander Robbins'], TRUE, 'live', 1),
   ('breakout', 'LIVE_BREAKOUT', 'AGGRESSIVE_PORTFOLIO',
    'Breakout', 'Short-horizon volatility breakout', 300000,
-   ARRAY['John Riley'], TRUE, 'live', 2);
+   ARRAY['John Riley'], TRUE, 'live', 2),
+  -- On mock capital, 45 days into its window. Its value must stay out of the
+  -- fund headline: nobody has put real money behind it.
+  ('meanreversion', 'LIVE_MEAN_REVERSION', 'CONSERVATIVE_PORTFOLIO',
+   'Mean Reversion', 'Short-horizon reversal on index futures', 100000,
+   ARRAY['Quant Team'], TRUE, 'incubating', 3);
 
--- Equity curves: 90 days, three streams each. qt and system are identical
--- (nothing has edited qt yet); benchmark diverges slightly so the attribution
--- chart has something real to draw.
+UPDATE trading.strategy_registry
+   SET mock_capital = 100000,
+       incubation_started_at = now() - INTERVAL '45 days'
+ WHERE id = 'meanreversion';
+
+-- The curve is generated from these same figures, so the starting equity the
+-- registry records and the curve's first point are the same number by
+-- construction. The app prefers the curve's first point when one exists; this
+-- keeps the two from ever telling different stories.
+
+-- Equity curves: 90 daily points, three streams each. qt and system are
+-- identical (nothing has edited qt yet); benchmark carries the same shocks with
+-- a lower drift, so the attribution chart has a real spread to draw.
+--
+-- The previous version was a smooth drift plus one sine wave. It looked like an
+-- equity curve but had almost no day-to-day variation, so the volatility
+-- derived from it came out near 2% annualised and the Sharpe ratio built on
+-- that came out above 12 -- a number no real book produces. A demo curve that
+-- implies impossible statistics is not a neutral placeholder; anyone reading
+-- the tiles has to know to disbelieve them.
+--
+-- This builds each curve from daily returns instead: a drift plus a shock, at a
+-- target annualised volatility per strategy. The shocks are deterministic --
+-- derived from md5 of the day index, not random() -- so the seed produces the
+-- same book every time and the same figures can be checked twice.
 INSERT INTO trading.equity_curve (strategy_id, portfolio_id, portfolio_type, timestamp, equity)
-SELECT r.strategy_type, r.portfolio_id, s.stream,
+SELECT strategy_type, portfolio_id, stream,
        (CURRENT_DATE - (89 - d))::timestamptz,
-       r.initial_equity
-         * (1 + (d * r.drift) + 0.012 * sin(d / 6.0) + CASE WHEN s.stream = 'benchmark' THEN -0.0004 * d ELSE 0 END)
-FROM (VALUES
-        ('LIVE_TREND_FOLLOWING', 'CONSERVATIVE_PORTFOLIO', 500000.0, 0.00090),
-        ('LIVE_CARRY',           'CONSERVATIVE_PORTFOLIO', 250000.0, 0.00055),
-        ('LIVE_BREAKOUT',        'AGGRESSIVE_PORTFOLIO',   300000.0, 0.00125)
-     ) AS r(strategy_type, portfolio_id, initial_equity, drift)
-CROSS JOIN (VALUES ('qt'), ('system'), ('benchmark')) AS s(stream)
-CROSS JOIN generate_series(0, 89) AS d;
+       -- Compounded, so the curve is the product of its daily returns.
+       -- Compounded, so the curve is the product of its daily returns. Day 0
+       -- carries no return, so the first point IS the starting equity the
+       -- registry records: otherwise the two disagree, and the return measured
+       -- against the curve differs from the one measured against the registry.
+       initial_equity * exp(sum(ln(1 + CASE WHEN d = 0 THEN 0 ELSE daily_return END))
+                            OVER (PARTITION BY strategy_type, portfolio_id, stream
+                                  ORDER BY d ROWS UNBOUNDED PRECEDING))
+FROM (
+    SELECT r.strategy_type, r.portfolio_id, s.stream, d, r.initial_equity,
+           -- Drift, lower for the benchmark: the spread between them is the
+           -- discretionary alpha the attribution chart reports.
+           (CASE WHEN s.stream = 'benchmark' THEN r.annual_return - 4.0
+                 ELSE r.annual_return END) / 100.0 / 252.0
+           -- Shock: three deterministic uniforms summed to approximate a
+           -- normal, scaled to the target annualised volatility.
+           -- Shock. The benchmark gets its own draws, not the same ones: if
+           -- both streams carried identical shocks they would differ by a
+           -- constant every day, tracking error would be zero, and the
+           -- information ratio built on it would divide by dust.
+           + (r.annual_vol / 100.0 / sqrt(252.0)) * 2.0 * (
+                 ((('x' || substr(md5((d * 3 + 1)::text || r.strategy_type || CASE WHEN s.stream = 'benchmark' THEN 'b' ELSE 'q' END), 1, 8))::bit(32)::bigint & 65535) / 65535.0)
+               + ((('x' || substr(md5((d * 3 + 2)::text || r.strategy_type || CASE WHEN s.stream = 'benchmark' THEN 'b' ELSE 'q' END), 1, 8))::bit(32)::bigint & 65535) / 65535.0)
+               + ((('x' || substr(md5((d * 3 + 3)::text || r.strategy_type || CASE WHEN s.stream = 'benchmark' THEN 'b' ELSE 'q' END), 1, 8))::bit(32)::bigint & 65535) / 65535.0)
+               - 1.5
+             ) AS daily_return
+    FROM (VALUES
+            -- strategy, book, starting equity, target annual return %, target annual vol %
+            ('LIVE_TREND_FOLLOWING', 'CONSERVATIVE_PORTFOLIO', 500000.0, 14.0, 12.5),
+            ('LIVE_CARRY',           'CONSERVATIVE_PORTFOLIO', 250000.0,  9.0,  7.5),
+            ('LIVE_BREAKOUT',        'AGGRESSIVE_PORTFOLIO',   300000.0, 19.0, 21.0),
+            ('LIVE_MEAN_REVERSION',  'CONSERVATIVE_PORTFOLIO', 100000.0, 11.0,  9.0)
+         ) AS r(strategy_type, portfolio_id, initial_equity, annual_return, annual_vol)
+    CROSS JOIN (VALUES ('qt'), ('system'), ('benchmark')) AS s(stream)
+    CROSS JOIN generate_series(0, 89) AS d
+) shocked;
 
 -- Open positions (qt stream = the real book)
 INSERT INTO trading.positions
@@ -268,7 +340,8 @@ VALUES
   ('LIVE_CARRY','Carry','CONSERVATIVE_PORTFOLIO','qt','6E.v.0', -22,    1.087, -640.00,   85.00, CURRENT_DATE, now(), now()),
   ('LIVE_CARRY','Carry','CONSERVATIVE_PORTFOLIO','qt','ZS.v.0',  15, 1042.25,   510.00,  -70.00, CURRENT_DATE, now(), now()),
   ('LIVE_BREAKOUT','Breakout','AGGRESSIVE_PORTFOLIO','qt','RTY.v.0', 9, 2285.60, 1980.00, 440.00, CURRENT_DATE, now(), now()),
-  ('LIVE_BREAKOUT','Breakout','AGGRESSIVE_PORTFOLIO','qt','NG.v.0', -30,    2.914, -820.00, 150.00, CURRENT_DATE, now(), now());
+  ('LIVE_BREAKOUT','Breakout','AGGRESSIVE_PORTFOLIO','qt','NG.v.0', -30,    2.914, -820.00, 150.00, CURRENT_DATE, now(), now()),
+  ('LIVE_MEAN_REVERSION','Mean Reversion','CONSERVATIVE_PORTFOLIO','qt','ES.v.0', -3, 5295.00, -410.00, 95.00, CURRENT_DATE, now(), now());
 
 -- Yesterday's snapshot, so the "finalized positions" panel has something
 INSERT INTO trading.positions
@@ -283,23 +356,113 @@ WHERE date = CURRENT_DATE;
 INSERT INTO trading.executions
   (strategy_id, portfolio_id, symbol, side, quantity, price, execution_time, commissions_fees)
 VALUES
-  ('LIVE_TREND_FOLLOWING','CONSERVATIVE_PORTFOLIO','ES','BUY',  4, 5276.00, now() - INTERVAL '3 hours',  9.20),
-  ('LIVE_TREND_FOLLOWING','CONSERVATIVE_PORTFOLIO','CL','SELL', 6,   78.62, now() - INTERVAL '6 hours', 11.40),
-  ('LIVE_CARRY','CONSERVATIVE_PORTFOLIO','ZN','BUY', 10, 111.79, now() - INTERVAL '5 hours',  7.80),
-  ('LIVE_BREAKOUT','AGGRESSIVE_PORTFOLIO','RTY','BUY', 3, 2281.10, now() - INTERVAL '2 hours', 6.10);
+  ('LIVE_TREND_FOLLOWING','CONSERVATIVE_PORTFOLIO','ES.v.0','BUY',  4, 5276.00, now() - INTERVAL '3 hours',  9.20),
+  ('LIVE_TREND_FOLLOWING','CONSERVATIVE_PORTFOLIO','CL.v.0','SELL', 6,   78.62, now() - INTERVAL '6 hours', 11.40),
+  ('LIVE_CARRY','CONSERVATIVE_PORTFOLIO','ZN.v.0','BUY', 10, 111.79, now() - INTERVAL '5 hours',  7.80),
+  ('LIVE_BREAKOUT','AGGRESSIVE_PORTFOLIO','RTY.v.0','BUY', 3, 2281.10, now() - INTERVAL '2 hours', 6.10);
 
+-- ---------------------------------------------------------------------------
+-- Engine results, DERIVED from the data above rather than typed.
+--
+-- These were hand-written literals, and they disagreed with the very series
+-- they were meant to summarise: current_portfolio_value was $3,453 away from
+-- the last point of the equity curve, and volatility claimed 12.6% where the
+-- curve's actual annualised volatility is 2.1%. The chart and the tiles beside
+-- it were describing different books.
+--
+-- Everything below is computed from the equity curve, the open positions, the
+-- market prices and the executions already seeded, so every figure on screen
+-- reconciles with the series behind it.
+--
+-- Fields the demo has no basis for -- margin posted, and the equity-to-margin
+-- and cushion ratios derived from it, and cash available -- are left NULL. The
+-- app renders NULL as "unknown", which is the truth here: no margin model
+-- exists in this data. Inventing a plausible margin figure is what produced
+-- the numbers this block replaces.
+-- ---------------------------------------------------------------------------
+WITH curve AS (
+    SELECT strategy_id, portfolio_id, timestamp, equity,
+           lag(equity) OVER (PARTITION BY strategy_id, portfolio_id ORDER BY timestamp) AS prev
+    FROM trading.equity_curve
+    WHERE portfolio_type = 'qt'
+),
+returns AS (
+    SELECT strategy_id, portfolio_id,
+           equity / prev - 1 AS r,
+           row_number() OVER (PARTITION BY strategy_id, portfolio_id ORDER BY timestamp DESC) AS recency
+    FROM curve
+    WHERE prev IS NOT NULL AND prev > 0
+),
+series AS (
+    SELECT strategy_id, portfolio_id,
+           min(equity) FILTER (WHERE rn_first = 1) AS first_equity,
+           min(equity) FILTER (WHERE rn_last = 1)  AS last_equity,
+           count(*)                                AS points
+    FROM (
+        SELECT strategy_id, portfolio_id, equity,
+               row_number() OVER (PARTITION BY strategy_id, portfolio_id ORDER BY timestamp ASC)  AS rn_first,
+               row_number() OVER (PARTITION BY strategy_id, portfolio_id ORDER BY timestamp DESC) AS rn_last
+        FROM trading.equity_curve WHERE portfolio_type = 'qt'
+    ) q GROUP BY 1, 2
+),
+stats AS (
+    SELECT strategy_id, portfolio_id,
+           stddev_samp(r) * sqrt(252) * 100 AS volatility,
+           max(r) FILTER (WHERE recency = 1) * 100 AS daily_return
+    FROM returns GROUP BY 1, 2
+),
+-- Exposure priced exactly the way the application prices it: quantity times
+-- the latest close times the contract size.
+exposure AS (
+    SELECT p.strategy_id, p.portfolio_id,
+           sum(abs(p.quantity * px.close * m."Contract Size")) AS gross_notional,
+           abs(sum(p.quantity * px.close * m."Contract Size")) AS net_notional,
+           sum(p.daily_unrealized_pnl) AS unrealized,
+           sum(p.daily_realized_pnl)   AS realized
+    FROM trading.positions p
+    JOIN LATERAL (
+        SELECT close FROM futures_data.ohlcv_1d o
+        WHERE o.symbol = p.symbol ORDER BY o.time DESC LIMIT 1
+    ) px ON TRUE
+    JOIN metadata.contract_metadata m
+      ON m."Databento Symbol" = split_part(p.symbol, '.', 1)
+    WHERE p.portfolio_type = 'qt' AND p.date = CURRENT_DATE
+    GROUP BY 1, 2
+),
+costs AS (
+    SELECT strategy_id, portfolio_id, sum(commissions_fees) AS commissions
+    FROM trading.executions GROUP BY 1, 2
+)
 INSERT INTO trading.live_results
-  (config, portfolio_id, date, current_portfolio_value, total_annualized_return, total_cumulative_return,
-   volatility, daily_return, gross_leverage, net_leverage, portfolio_leverage, margin_posted,
-   equity_to_margin_ratio, margin_cushion, gross_notional, total_unrealized_pnl, total_realized_pnl,
-   total_transaction_costs, cash_available)
-VALUES
-  ('{"strategy_type":"LIVE_TREND_FOLLOWING"}','CONSERVATIVE_PORTFOLIO',CURRENT_DATE,
-   541200, 18.40, 8.24, 12.60, 0.34, 1.82, 1.15, 1.82, 148000, 3.66, 72.7, 985000, 6330, 950, 412, 393200),
-  ('{"strategy_type":"LIVE_CARRY"}','CONSERVATIVE_PORTFOLIO',CURRENT_DATE,
-   262750, 11.20, 5.10, 7.90, 0.12, 1.24, 0.86, 1.24, 61000, 4.31, 76.8, 326000, 1290, 325, 178, 201750),
-  ('{"strategy_type":"LIVE_BREAKOUT"}','AGGRESSIVE_PORTFOLIO',CURRENT_DATE,
-   334800, 26.90, 11.60, 21.30, -0.28, 2.41, 1.63, 2.41, 96000, 3.49, 71.3, 807000, 1160, 590, 233, 238800);
+  (config, portfolio_id, date, current_portfolio_value, total_annualized_return,
+   total_cumulative_return, volatility, daily_return, gross_leverage, net_leverage,
+   portfolio_leverage, margin_posted, equity_to_margin_ratio, margin_cushion,
+   gross_notional, total_unrealized_pnl, total_realized_pnl, total_transaction_costs,
+   cash_available)
+SELECT
+    jsonb_build_object('strategy_type', se.strategy_id),
+    se.portfolio_id,
+    CURRENT_DATE,
+    se.last_equity,
+    -- Annualised from the observed growth over the observed number of points.
+    (power(se.last_equity / se.first_equity, 252.0 / se.points) - 1) * 100,
+    (se.last_equity / se.first_equity - 1) * 100,
+    st.volatility,
+    st.daily_return,
+    -- The engine no longer writes gross_leverage; it writes portfolio_leverage.
+    NULL,
+    ex.net_notional / se.last_equity,
+    ex.gross_notional / se.last_equity,
+    NULL, NULL, NULL,          -- margin posted, equity/margin, cushion: no source
+    ex.gross_notional,
+    ex.unrealized,
+    ex.realized,
+    co.commissions,
+    NULL                        -- cash available: depends on margin, no source
+FROM series se
+JOIN stats st    ON st.strategy_id = se.strategy_id AND st.portfolio_id = se.portfolio_id
+LEFT JOIN exposure ex ON ex.strategy_id = se.strategy_id AND ex.portfolio_id = se.portfolio_id
+LEFT JOIN costs co    ON co.strategy_id = se.strategy_id AND co.portfolio_id = se.portfolio_id;
 
 -- Risk envelopes, so the gate actually gates. ES is capped low on purpose:
 -- the demo book already sits near it, so a small increase trips a breach.

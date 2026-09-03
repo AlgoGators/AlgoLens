@@ -142,19 +142,32 @@ def compute_return_stats(historical_data: Sequence[Mapping[str, Any]]) -> dict[s
     }
 
 
-def transform_executions(executions: Sequence[Any]) -> list[dict[str, Any]]:
+def transform_executions(
+    executions: Sequence[Any], multipliers: Mapping[str, float] | None = None
+) -> list[dict[str, Any]]:
+    """One row per fill, with the traded value of each.
+
+    ``notional`` was ``quantity x price``, which is the same contract-size
+    omission that understated position exposure: four ES at 5,276 read as
+    $21,104 where the contracts are worth $1,055,200. Without a contract size
+    on file the value is unknown rather than understated.
+    """
+    multipliers = multipliers or {}
     transformed = []
     for execution in executions:
         exec_time = _get(execution, "execution_time")
         quantity = float(_get(execution, "quantity"))
         price = float(_get(execution, "price"))
+        symbol = _get(execution, "symbol")
+        multiplier = multipliers.get(base_symbol(symbol))
         transformed.append(
             {
-                "symbol": _get(execution, "symbol"),
+                "symbol": symbol,
                 "side": _get(execution, "side"),
                 "quantity": quantity,
                 "price": price,
-                "notional": quantity * price,
+                "notional": notional(quantity, price, multiplier),
+                "contractMultiplier": multiplier,
                 "commission": float(_get(execution, "commissions_fees")),
                 "date": exec_time.isoformat() if exec_time else None,
             }

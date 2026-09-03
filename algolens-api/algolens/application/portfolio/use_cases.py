@@ -99,7 +99,7 @@ def build_strategy_detail(
         rows.positions, current_value, prices, multipliers
     )
     stats = compute_return_stats(historical_data)
-    transformed_executions = transform_executions(rows.executions)
+    transformed_executions = transform_executions(rows.executions, multipliers)
     transformed_finalized = transform_finalized(rows.yesterday_positions, rows.positions)
 
     volatility = float(latest["volatility"])
@@ -261,11 +261,17 @@ class GetStrategyDetail:
         # than inventing them.
         self.market_data = market_data
 
-    def _market_data(self, positions):
-        """Latest prices and contract sizes for the symbols on this book."""
+    def _market_data(self, positions, executions=()):
+        """Latest prices and contract sizes for every symbol on this screen.
+
+        Executions are included, not just open positions: a fill in a symbol the
+        book no longer holds still needs a contract size to be worth anything.
+        """
         if self.market_data is None:
             return {}, {}
         symbols = [p["symbol"] for p in positions if p.get("symbol")]
+        symbols += [e["symbol"] for e in executions if e.get("symbol")]
+        symbols = list(dict.fromkeys(symbols))
         if not symbols:
             return {}, {}
         try:
@@ -317,7 +323,7 @@ class GetStrategyDetail:
             target = found
 
         rows = self.reader.fetch_detail_rows(cfg["strategy_type"], target)
-        prices, multipliers = self._market_data(rows.positions)
+        prices, multipliers = self._market_data(rows.positions, rows.executions)
         detail = build_strategy_detail(cfg, rows, prices, multipliers)
         if detail is None:
             # A strategy freshly added to a book has no engine output for that

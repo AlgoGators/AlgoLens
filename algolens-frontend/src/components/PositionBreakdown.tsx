@@ -218,7 +218,7 @@ export function PositionBreakdown({
             }`}>
               Total Notional
             </div>
-            <div>${totalNotional.toLocaleString('en-US', { minimumFractionDigits: 2 })}</div>
+            <div>${totalNotional.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
           </div>
           <div className="text-right">100.00%</div>
           {canEdit && <div />}

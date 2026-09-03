@@ -112,6 +112,10 @@ export function FinancialAnalysis({ metrics }: FinancialAnalysisProps) {
             label="Max Drawdown"
             value={metrics.maxDrawdown}
             isPercentage
+            /* A drawdown is a loss. isPositive defaults true, which prefixed it
+               with "+" and coloured it as a gain: "+4.18%" under a heading that
+               means the worst peak-to-trough fall. */
+            isPositive={false}
             info={{
               description: "Largest peak-to-trough decline. Shows worst-case loss scenario from a high point.",
               formula: "(Trough Value - Peak Value) / Peak Value × 100"
@@ -212,7 +216,7 @@ export function FinancialAnalysis({ metrics }: FinancialAnalysisProps) {
               Unrealized P&L
             </div>
             <div className={(metrics.unrealizedPnL ?? 0) >= 0 ? 'text-orange-500 text-lg' : 'text-red-500 text-lg'}>
-              {metrics.unrealizedPnL === null ? '—' : `$${metrics.unrealizedPnL.toLocaleString('en-US', { minimumFractionDigits: 2 })}`}
+              {metrics.unrealizedPnL === null ? '—' : `$${metrics.unrealizedPnL.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
             </div>
           </div>
           <div className={`p-4 rounded-lg ${theme === 'dark' ? 'bg-gray-900' : 'bg-gray-50'
@@ -222,7 +226,7 @@ export function FinancialAnalysis({ metrics }: FinancialAnalysisProps) {
               Realized P&L
             </div>
             <div className={(metrics.realizedPnL ?? 0) >= 0 ? 'text-orange-500 text-lg' : 'text-red-500 text-lg'}>
-              {metrics.realizedPnL === null ? '—' : `$${metrics.realizedPnL.toLocaleString('en-US', { minimumFractionDigits: 2 })}`}
+              {metrics.realizedPnL === null ? '—' : `$${metrics.realizedPnL.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
             </div>
           </div>
           <div className={`p-4 rounded-lg ${theme === 'dark' ? 'bg-gray-900' : 'bg-gray-50'
@@ -232,7 +236,7 @@ export function FinancialAnalysis({ metrics }: FinancialAnalysisProps) {
               Total Commissions
             </div>
             <div className="text-lg">
-              {metrics.totalCommissions === null ? '—' : `$${metrics.totalCommissions.toLocaleString('en-US', { minimumFractionDigits: 2 })}`}
+              {metrics.totalCommissions === null ? '—' : `$${metrics.totalCommissions.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
             </div>
           </div>
           <div className={`p-4 rounded-lg ${theme === 'dark' ? 'bg-gray-900' : 'bg-gray-50'
@@ -242,7 +246,7 @@ export function FinancialAnalysis({ metrics }: FinancialAnalysisProps) {
               Net P&L
             </div>
             <div className={(metrics.netPnL ?? 0) >= 0 ? 'text-orange-500 text-lg' : 'text-red-500 text-lg'}>
-              {metrics.netPnL === null ? '—' : `$${metrics.netPnL.toLocaleString('en-US', { minimumFractionDigits: 2 })}`}
+              {metrics.netPnL === null ? '—' : `$${metrics.netPnL.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
             </div>
           </div>
         </div>
@@ -270,7 +274,7 @@ export function FinancialAnalysis({ metrics }: FinancialAnalysisProps) {
               Avg Win
             </div>
             <div className="text-lg text-orange-500">
-              {metrics.avgWin === null ? '—' : `$${metrics.avgWin.toLocaleString('en-US', { minimumFractionDigits: 2 })}`}
+              {metrics.avgWin === null ? '—' : `$${metrics.avgWin.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
             </div>
           </div>
           <div className={`p-4 rounded-lg ${theme === 'dark' ? 'bg-gray-900' : 'bg-gray-50'
@@ -280,7 +284,7 @@ export function FinancialAnalysis({ metrics }: FinancialAnalysisProps) {
               Avg Loss
             </div>
             <div className="text-lg text-red-500">
-              {metrics.avgLoss === null ? '—' : `$${metrics.avgLoss.toLocaleString('en-US', { minimumFractionDigits: 2 })}`}
+              {metrics.avgLoss === null ? '—' : `$${metrics.avgLoss.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
             </div>
           </div>
           <div className={`p-4 rounded-lg ${theme === 'dark' ? 'bg-gray-900' : 'bg-gray-50'
@@ -310,7 +314,7 @@ export function FinancialAnalysis({ metrics }: FinancialAnalysisProps) {
               Portfolio Value
             </div>
             <div className="text-lg">
-              {metrics.currentPortfolioValue === null ? '\u2014' : `$${metrics.currentPortfolioValue.toLocaleString('en-US', { minimumFractionDigits: 2 })}`}
+              {metrics.currentPortfolioValue === null ? '\u2014' : `$${metrics.currentPortfolioValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
             </div>
           </div>
           <div className={`p-4 rounded-lg ${theme === 'dark' ? 'bg-gray-900' : 'bg-gray-50'
@@ -320,7 +324,7 @@ export function FinancialAnalysis({ metrics }: FinancialAnalysisProps) {
               Cash Available
             </div>
             <div className="text-lg">
-              {metrics.cashAvailable === null ? '\u2014' : `$${metrics.cashAvailable.toLocaleString('en-US', { minimumFractionDigits: 2 })}`}
+              {metrics.cashAvailable === null ? '\u2014' : `$${metrics.cashAvailable.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
             </div>
           </div>
           <div className={`p-4 rounded-lg ${theme === 'dark' ? 'bg-gray-900' : 'bg-gray-50'
@@ -330,7 +334,7 @@ export function FinancialAnalysis({ metrics }: FinancialAnalysisProps) {
               Margin Posted
             </div>
             <div className="text-lg">
-              {metrics.marginPosted === null ? '\u2014' : `$${metrics.marginPosted.toLocaleString('en-US', { minimumFractionDigits: 2 })}`}
+              {metrics.marginPosted === null ? '\u2014' : `$${metrics.marginPosted.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
             </div>
           </div>
         </div>

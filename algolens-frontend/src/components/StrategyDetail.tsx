@@ -95,7 +95,13 @@ export function StrategyDetail({ strategy, onBack, onPositionsChanged }: Strateg
     }
 
     const cutoffDate = new Date(now);
+    // Midnight, not "this time of day 30 days ago". A daily bar is stamped at
+    // the start of its day, so a cutoff carrying the current clock time fell
+    // just after the oldest bar in the window and dropped it: "1M" measured 29
+    // days and reported 2.06% where the full month was 2.69%. Every period on
+    // every chart was short by one bar.
     cutoffDate.setDate(cutoffDate.getDate() - daysToShow);
+    cutoffDate.setHours(0, 0, 0, 0);
 
     return strategy.historicalData.filter(point => {
       const pointDate = new Date(point.date);
@@ -180,7 +186,7 @@ export function StrategyDetail({ strategy, onBack, onPositionsChanged }: Strateg
                 boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)',
                 color: theme === 'dark' ? '#fff' : '#000'
               }}
-              formatter={(value: number) => [`$${value.toLocaleString('en-US', { minimumFractionDigits: 2 })}`, 'Value']}
+              formatter={(value: number) => [`$${value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, 'Value']}
               labelFormatter={(label) => new Date(label).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
             />
             <Line

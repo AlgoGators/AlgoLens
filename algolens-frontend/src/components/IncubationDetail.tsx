@@ -58,7 +58,13 @@ export function IncubationDetail({
     const daysToShow =
       selectedPeriod === '1W' ? 7 : selectedPeriod === '1M' ? 30 : 90;
     const cutoffDate = new Date();
+    // Midnight, not "this time of day 30 days ago". A daily bar is stamped at
+    // the start of its day, so a cutoff carrying the current clock time fell
+    // just after the oldest bar in the window and dropped it: "1M" measured 29
+    // days and reported 2.06% where the full month was 2.69%. Every period on
+    // every chart was short by one bar.
     cutoffDate.setDate(cutoffDate.getDate() - daysToShow);
+    cutoffDate.setHours(0, 0, 0, 0);
 
     return historicalData.filter(point => new Date(point.date) >= cutoffDate);
   }, [historicalData, selectedPeriod]);

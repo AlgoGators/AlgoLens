@@ -33,7 +33,8 @@ export interface Execution {
   side: 'BUY' | 'SELL';
   quantity: number;
   price: number;
-  notional: number;
+  /** Traded value: quantity x price x contract size. Null without a size. */
+  notional: number | null;
   commission: number;
   date?: string;
 }

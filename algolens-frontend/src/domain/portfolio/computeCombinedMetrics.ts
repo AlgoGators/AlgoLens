@@ -231,7 +231,12 @@ export function informationRatioVsBenchmark(
   const variance =
     active.reduce((sum, r) => sum + (r - mean) * (r - mean), 0) / active.length;
   const trackingError = Math.sqrt(variance);
-  if (trackingError === 0) return null;
+  // Not just an exact zero. When the two curves differ by a near-constant drift
+  // the dispersion is floating-point dust, and dividing by it produced an
+  // information ratio of 37,874 -- a number with the shape of a measurement and
+  // none of the meaning. Anything under a basis point of daily tracking error
+  // is treated as no tracking error at all.
+  if (!Number.isFinite(trackingError) || trackingError < 1e-4) return null;
 
   return (mean * Math.sqrt(252)) / trackingError;
 }
@@ -284,11 +289,16 @@ export function computeCombinedMetrics(
   });
 
   // Convert to array and sort by value
+  // Share of total EXPOSURE, not of portfolio equity. These values are
+  // notional -- quantity x price x contract size -- and a futures book carries
+  // many times its equity in exposure, so dividing by equity produced weights
+  // like 407% in a column headed WEIGHT that is meant to sum to 100.
+  const totalExposure = Object.values(assetValues).reduce((sum, v) => sum + v, 0);
   const assetAllocation = Object.entries(assetValues)
     .map(([symbol, value]) => ({
       symbol,
       value,
-      percentage: share(value, totalValue)
+      percentage: share(value, totalExposure)
     }))
     .sort((a, b) => b.value - a.value);
 
@@ -303,7 +313,7 @@ export function computeCombinedMetrics(
     pieData.push({
       symbol: 'Others',
       value: othersTotal,
-      percentage: share(othersTotal, totalValue)
+      percentage: share(othersTotal, totalExposure)
     });
   }
 

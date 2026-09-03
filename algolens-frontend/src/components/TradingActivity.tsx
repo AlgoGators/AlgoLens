@@ -10,7 +10,11 @@ interface TradingActivityProps {
 export function TradingActivity({ executions, finalizedPositions }: TradingActivityProps) {
   const { theme } = useTheme();
 
-  const totalNotional = executions.reduce((sum, exec) => sum + exec.notional, 0);
+  // Only fills whose contract size is known contribute to the total, and the
+  // count below says how many were left out rather than adding them as zero.
+  const priced = executions.filter(e => e.notional != null);
+  const unpricedFills = executions.length - priced.length;
+  const totalNotional = priced.reduce((sum, exec) => sum + (exec.notional as number), 0);
   const totalCommissions = executions.reduce((sum, exec) => sum + exec.commission, 0);
 
   return (
@@ -72,10 +76,10 @@ export function TradingActivity({ executions, finalizedPositions }: TradingActiv
               </div>
               <div className="text-right">{execution.quantity}</div>
               <div className="text-right">
-                ${execution.price.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                ${execution.price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </div>
               <div className="text-right">
-                ${execution.notional.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                {execution.notional == null ? '—' : `$${execution.notional.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
               </div>
               <div className="text-right">
                 ${execution.commission.toFixed(2)}
@@ -96,7 +100,7 @@ export function TradingActivity({ executions, finalizedPositions }: TradingActiv
               }`}>
                 Total
               </div>
-              <div>${totalNotional.toLocaleString('en-US', { minimumFractionDigits: 2 })}</div>
+              <div>${totalNotional.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
             </div>
             <div className="text-right">
               ${totalCommissions.toFixed(2)}
@@ -154,7 +158,7 @@ export function TradingActivity({ executions, finalizedPositions }: TradingActiv
               <div className={`text-right ${
                 position.realizedPnL >= 0 ? 'text-orange-500' : 'text-red-500'
               }`}>
-                ${position.realizedPnL.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                ${position.realizedPnL.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </div>
             </div>
           ))}
@@ -177,7 +181,7 @@ export function TradingActivity({ executions, finalizedPositions }: TradingActiv
                   ? 'text-orange-500' 
                   : 'text-red-500'
               }>
-                ${finalizedPositions.reduce((sum, pos) => sum + pos.realizedPnL, 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                ${finalizedPositions.reduce((sum, pos) => sum + pos.realizedPnL, 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </div>
             </div>
           </div>
