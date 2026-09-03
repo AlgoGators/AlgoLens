@@ -83,9 +83,12 @@ export function Dashboard({ onLogout }: DashboardProps) {
     }
   }, [activeTab, isInternalMember]);
 
-  // Check if portfolio has any positions
+  // Something to show: an open position anywhere, or a strategy the engine has
+  // not published yet. The second case matters -- a fund whose strategies are
+  // all still awaiting data is not an empty fund, and the overview is where the
+  // "excludes N strategies" notice lives.
   const hasPositions = portfolioData?.strategies && portfolioData.strategies.length > 0 &&
-    portfolioData.strategies.some(s => s.positions.length > 0);
+    portfolioData.strategies.some(s => s.positions.length > 0 || s.dataAvailable === false);
 
   const handleTabChange = (tab: string) => {
     if (tab === 'incubation' && !isInternalMember) {

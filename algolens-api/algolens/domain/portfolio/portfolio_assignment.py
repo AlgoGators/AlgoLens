@@ -264,6 +264,25 @@ def merge_books(declared, in_use):
 # ---------------------------------------------------------------------------
 
 
+def match_book(requested, books):
+    """The stored spelling of ``requested`` among ``books``, or None.
+
+    Book ids are upper-cased on the way in, but rows written by hand before
+    that convention existed are not, and nothing in the schema forces it. A
+    comparison that is case-sensitive would report a member as a stranger and
+    then write a second row under the other spelling. Compare without case and
+    hand back the spelling the database actually holds, so the statement that
+    follows hits the row that exists.
+    """
+    if requested is None:
+        return None
+    wanted = str(requested).strip().upper()
+    for book in books:
+        if str(book).strip().upper() == wanted:
+            return book
+    return None
+
+
 def evaluate_membership_add(strategy, portfolio_id, current_books):
     """Adding a strategy to a book. Free, but not always allowed."""
     if strategy is None:
@@ -277,7 +296,7 @@ def evaluate_membership_add(strategy, portfolio_id, current_books):
             "doing so would rewrite history that has already been reported",
         )
 
-    if portfolio_id in current_books:
+    if match_book(portfolio_id, current_books) is not None:
         return {"changed": False, "requires_acknowledgement": False, "consequences": []}
 
     return {
@@ -302,7 +321,7 @@ def evaluate_membership_remove(strategy, portfolio_id, current_books):
             "and doing so would rewrite history that has already been reported",
         )
 
-    if portfolio_id not in current_books:
+    if match_book(portfolio_id, current_books) is None:
         return {"changed": False, "requires_acknowledgement": False, "consequences": []}
 
     # A strategy that belongs to nothing is unreachable: every read in this app

@@ -93,6 +93,44 @@ class StrategyRegistryPort(Protocol):
         # longer refers to the builtin inside this class body.
         ...
 
+    # -- lifecycle-blind read ------------------------------------------------
+    def get_any(self, strategy_id: str) -> dict[str, Any] | None:
+        """Like get, but incubating and retired strategies are visible too."""
+        ...
+
+    # -- books ---------------------------------------------------------------
+    def list_declared_books(self) -> Sequence[dict[str, Any]]:
+        ...
+
+    def list_portfolio_ids_in_use(self) -> Sequence[str]:
+        ...
+
+    def create_book(self, book: dict[str, Any], user_id: str) -> dict[str, Any]:
+        ...
+
+    def delete_book(self, portfolio_id: str) -> dict[str, Any]:
+        """Raises BookNotEmpty while any strategy is still a member."""
+        ...
+
+    # -- membership ----------------------------------------------------------
+    def list_memberships(self) -> Sequence[dict[str, Any]]:
+        ...
+
+    def books_for_strategy(self, strategy_id: str) -> Sequence[str]:
+        """Every book the strategy is in; the primary alone if none recorded."""
+        ...
+
+    def add_membership(
+        self, strategy_id: str, portfolio_id: str, audit: dict[str, Any]
+    ) -> None:
+        ...
+
+    def remove_membership(
+        self, strategy_id: str, portfolio_id: str, audit: dict[str, Any]
+    ) -> None:
+        """Repoints the primary if the removed book was it."""
+        ...
+
 
 class PortfolioReaderPort(Protocol):
     def fetch_summary_row(

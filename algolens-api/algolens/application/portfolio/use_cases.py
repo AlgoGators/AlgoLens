@@ -6,11 +6,13 @@ from datetime import datetime
 from typing import Any
 
 from algolens.domain.portfolio.portfolio_assignment import (
+    AssignmentValidationError,
     build_assignment_audit,
     build_membership_audit,
     evaluate_assignment,
     evaluate_membership_add,
     evaluate_membership_remove,
+    match_book,
     merge_books,
     normalize_portfolio_id,
     validate_book,
@@ -411,7 +413,11 @@ class ListPositionOverrides:
         self.reader = reader
 
     def execute(self, strategy_id: str, limit: int = 100) -> list[dict[str, Any]]:
-        strategy = self.registry.get(strategy_id)
+        # get_any, not get: the audit trail of a retired strategy is exactly the
+        # kind of thing someone comes back to read. Hiding it with the strategy
+        # would make retirement a way to lose the record of what was done.
+        getter = getattr(self.registry, "get_any", None)
+        strategy = getter(strategy_id) if getter else self.registry.get(strategy_id)
         if strategy is None:
             raise StrategyNotFound(strategy_id)
         return list(self.reader.fetch_overrides(strategy["strategy_type"], limit))
@@ -672,6 +678,11 @@ class ChangeBookMembership:
         target = normalize_portfolio_id(portfolio_id)
         strategy = self._lookup(strategy_id)
         current_books = self.registry.books_for_strategy(strategy_id)
+        # Write with the spelling the database holds, when it holds one, so a
+        # removal deletes the row that exists rather than a row that does not.
+        stored = match_book(target, current_books)
+        if stored is not None:
+            target = stored
 
         if action == "add":
             verdict = evaluate_membership_add(strategy, target, current_books)
@@ -696,8 +707,18 @@ class ChangeBookMembership:
             reason=(str(reason).strip() if reason is not None else ""),
             acknowledged=acknowledge,
         )
+        new_primary = None
         if action == "add":
             self.registry.add_membership(strategy_id, target, audit)
         else:
-            self.registry.remove_membership(strategy_id, target, audit)
-        return {"changed": True, "portfolio_id": target, "verdict": verdict}
+            outcome = self.registry.remove_membership(strategy_id, target, audit)
+            if isinstance(outcome, dict):
+                new_primary = outcome.get("primary_portfolio_id")
+        return {
+            "changed": True,
+            "portfolio_id": target,
+            "verdict": verdict,
+            # Set only when the removed book was the primary and the registry
+            # moved it. None otherwise, and absent for reassignments.
+            "primary_portfolio_id": new_primary,
+        }

@@ -48,6 +48,9 @@ export function EditPositionModal({
     existing?.average_price != null ? String(existing.average_price) : '',
   );
   const [reason, setReason] = useState('');
+  // Only used when the server answered "which book?". A strategy in one book
+  // never reaches that state, and a caller that names the book never does.
+  const [bookChoice, setBookChoice] = useState('');
 
   // Captured at RENDER time, deliberately. On the first click the phase is
   // 'idle' so this is false; on the resubmit the previous render left it
@@ -82,12 +85,17 @@ export function EditPositionModal({
         average_price: parsedPrice,
         reason: reason.trim(),
         acknowledge_risk: acknowledging,
-        portfolio_id: portfolioId,
+        portfolio_id: portfolioId ?? (bookChoice || undefined),
       });
       if (!mounted.current) return;
 
       if (result.outcome === 'needs_acknowledgement') {
         dispatch({ type: 'breach', risk_check: result.risk_check });
+        return;
+      }
+      if (result.outcome === 'needs_book') {
+        setBookChoice(result.books[0] ?? '');
+        dispatch({ type: 'ambiguous', books: result.books });
         return;
       }
       if (result.outcome === 'rejected') {
@@ -106,7 +114,12 @@ export function EditPositionModal({
   }
 
   const submitting = state.phase === 'submitting';
-  const disabled = submitting || !canSubmit(reason, quantity) || symbolInput.trim() === '';
+  const choosingBook = state.phase === 'needs_book';
+  const disabled =
+    submitting ||
+    !canSubmit(reason, quantity) ||
+    symbolInput.trim() === '' ||
+    (choosingBook && bookChoice === '');
   const inputClass = `w-full px-3 py-2 rounded-lg border text-sm ${
     isDark
       ? 'bg-gray-900 border-gray-700 text-white placeholder-gray-500'
@@ -233,6 +246,29 @@ export function EditPositionModal({
             </div>
           )}
 
+          {choosingBook && (
+            <div
+              className={`rounded-lg border px-4 py-3 text-sm ${
+                isDark ? 'border-gray-800 bg-gray-900' : 'border-gray-200 bg-gray-50'
+              }`}
+            >
+              <p className="mb-2">
+                This strategy trades in {state.books.length} books, each with its own
+                positions and limits. Which one is this edit for?
+              </p>
+              <select
+                aria-label="Book"
+                className={inputClass}
+                value={bookChoice}
+                onChange={e => setBookChoice(e.target.value)}
+              >
+                {state.books.map(book => (
+                  <option key={book} value={book}>{book}</option>
+                ))}
+              </select>
+            </div>
+          )}
+
           {state.phase === 'error' && state.message && (
             <div className="rounded-lg border border-red-500/50 bg-red-500/10 px-4 py-3 text-sm text-red-600 dark:text-red-400">
               {state.message}
@@ -264,7 +300,9 @@ export function EditPositionModal({
               ? 'Saving…'
               : acknowledging
                 ? 'Override and save'
-                : 'Save'}
+                : choosingBook
+                  ? `Save to ${bookChoice || '…'}`
+                  : 'Save'}
           </button>
         </div>
       </div>

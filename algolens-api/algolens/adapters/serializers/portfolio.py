@@ -86,11 +86,16 @@ def serialize_portfolio_list(portfolios):
 
 
 def serialize_assignment_result(result):
-    return {
+    out = {
         "changed": result["changed"],
         "portfolio_id": result["portfolio_id"],
         "assignment_check": result["verdict"],
     }
+    if "primary_portfolio_id" in result:
+        # Only membership removals carry this. A client that removed the
+        # primary book needs to know where the primary went without a refetch.
+        out["primary_portfolio_id"] = result["primary_portfolio_id"]
+    return out
 
 
 def serialize_assignment_history(rows):

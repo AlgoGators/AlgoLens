@@ -106,18 +106,24 @@ CREATE TABLE trading.live_results (
     cash_available          NUMERIC
 );
 
--- From trade-ngin migration 004
+-- From trade-ngin migration 004, constraints included. The first version of
+-- this seed left every column nullable and untyped, which meant a write that
+-- production would refuse (a NULL before_state, a blank reason, a non-numeric
+-- user id) sailed through here. The point of a demo schema is to be refused
+-- by the same things.
 CREATE TABLE trading.position_overrides (
     id                BIGSERIAL PRIMARY KEY,
-    user_id           TEXT,
-    source_app        TEXT,
+    user_id           INTEGER NOT NULL,
+    source_app        TEXT NOT NULL
+                      CHECK (source_app IN ('algolens', 'manual_db_edit')),
     strategy_id       TEXT NOT NULL,
     symbol            TEXT NOT NULL,
-    before_state      JSONB,
-    after_state       JSONB,
-    reason            TEXT,
-    risk_check_result JSONB,
-    overrode_risk     BOOLEAN DEFAULT FALSE,
+    before_state      JSONB NOT NULL,
+    after_state       JSONB NOT NULL,
+    reason            TEXT NOT NULL
+                      CHECK (length(btrim(reason)) > 0),
+    risk_check_result JSONB NOT NULL,
+    overrode_risk     BOOLEAN NOT NULL DEFAULT FALSE,
     created_at        TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
@@ -217,7 +223,7 @@ INSERT INTO trading.risk_limits (strategy_id, portfolio_id, limits) VALUES
   ('LIVE_BREAKOUT','AGGRESSIVE_PORTFOLIO',
    '{"max_gross_notional": 900000, "max_position_count": 8}'::jsonb);
 
--- admin login (werkzeug pbkdf2 hash of 'admin')
+-- admin login (werkzeug scrypt hash of 'admin')
 INSERT INTO auth.users (email, password_hash, first_name, last_name, role)
 VALUES ('admin@admin.com', 'scrypt:32768:8:1$iZQP0LmCyyfY1MEI$975dc2232135c7f701b49a07425efb426d141f09256d3fd1a650e2bfa043e0989256e2319a30f8489cb96792098966a1bc913e423411a000d6df389e1f599339', 'Local', 'Admin', 'admin');
 
@@ -246,10 +252,10 @@ CREATE TABLE IF NOT EXISTS trading.strategy_lifecycle_log (
 );
 
 -- Books, membership and the assignment audit are NOT created here. They belong
--- to trade-ngin migration 008_books_and_membership.sql, and the application no
+-- to trade-ngin migration 009_books_and_membership.sql, and the application no
 -- longer creates them lazily. After running this file:
 --
---   psql ... -f ../trade-ngin/migrations/008_books_and_membership.sql
+--   psql ... -f ../trade-ngin/migrations/009_books_and_membership.sql
 --
--- 008 also seeds membership from strategy_registry, so every strategy starts in
+-- 009 also seeds membership from strategy_registry, so every strategy starts in
 -- the book it already names.

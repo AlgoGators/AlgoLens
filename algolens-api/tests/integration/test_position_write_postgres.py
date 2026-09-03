@@ -14,8 +14,14 @@ any of them:
 
 Each assertion below fails against the code as it stood before those fixes.
 
-Skipped unless ``ALGOLENS_TEST_DB`` names a reachable database. CI provides one;
-locally, point it at the throwaway cluster used by ``scripts/demo_seed.sql``.
+Skipped unless ``ALGOLENS_TEST_DB`` names a reachable database. CI provides one.
+Locally, name a database of its own on the throwaway cluster -- NOT the demo
+database. Every test here drops and recreates the ``trading`` schema, so the
+fixture refuses to start if that schema already holds tables it did not create.
+Pointing this at ``algolens_demo`` once wiped the seeded demo mid-session.
+
+    createdb -h 127.0.0.1 -p 55432 -U algolens algolens_test
+    ALGOLENS_TEST_DB=postgresql://algolens@127.0.0.1:55432/algolens_test pytest tests/integration
 """
 
 import os
@@ -52,18 +58,49 @@ def _dsn():
     return dsn
 
 
+# The fixture marks the schema it builds so it can tell its own leftovers from
+# a schema somebody else populated. A crashed run leaves the marker behind; a
+# seeded demo, a migration test bed, or production never carries it.
+_OWNERSHIP_MARK = "owned by tests/integration; safe to drop"
+
+
+def _refuse_to_clobber_a_real_schema(cur):
+    cur.execute(
+        "SELECT obj_description(oid, 'pg_namespace') FROM pg_namespace "
+        "WHERE nspname = 'trading'"
+    )
+    row = cur.fetchone()
+    if row is None or row[0] == _OWNERSHIP_MARK:
+        return
+    cur.execute(
+        "SELECT count(*) FROM pg_tables WHERE schemaname = 'trading'"
+    )
+    tables = cur.fetchone()[0]
+    if tables == 0:
+        return
+    pytest.fail(
+        f"ALGOLENS_TEST_DB points at a database whose trading schema already "
+        f"holds {tables} table(s) this suite did not create. These tests DROP "
+        f"that schema. Name a disposable database instead (see module docstring)."
+    )
+
+
 @pytest.fixture()
 def db(monkeypatch):
-    """A connection factory pointed at an isolated schema.
+    """A connection factory pointed at a ``trading`` schema this test owns.
 
-    Everything is created and dropped per test, so this can run against any
-    database the caller is willing to name without touching its other schemas.
+    The application's SQL names ``trading.`` explicitly, so the schema cannot be
+    renamed per test; it is dropped and recreated instead. That makes the target
+    database disposable by definition, and the guard below is what stops the
+    drop from landing on one that is not.
     """
     conn = psycopg2.connect(_dsn())
     conn.autocommit = True
     with conn.cursor() as cur:
+        _refuse_to_clobber_a_real_schema(cur)
         cur.execute("DROP SCHEMA IF EXISTS trading CASCADE")
         cur.execute("CREATE SCHEMA trading")
+        cur.execute("COMMENT ON SCHEMA trading IS %s", (_OWNERSHIP_MARK,))
         cur.execute(
             """
             CREATE TABLE trading.strategy_registry (
@@ -92,12 +129,40 @@ def db(monkeypatch):
                 portfolio_id TEXT NOT NULL, limits JSONB NOT NULL,
                 published_at TIMESTAMPTZ NOT NULL DEFAULT now()
             );
+            -- As migration 004 defines it, constraints included, so a write
+            -- production would refuse is refused here too.
             CREATE TABLE trading.position_overrides (
-                id BIGSERIAL PRIMARY KEY, user_id TEXT, source_app TEXT,
+                id BIGSERIAL PRIMARY KEY,
+                user_id INTEGER NOT NULL,
+                source_app TEXT NOT NULL
+                    CHECK (source_app IN ('algolens', 'manual_db_edit')),
                 strategy_id TEXT NOT NULL, symbol TEXT NOT NULL,
-                before_state JSONB, after_state JSONB, reason TEXT,
-                risk_check_result JSONB, overrode_risk BOOLEAN DEFAULT FALSE,
+                before_state JSONB NOT NULL, after_state JSONB NOT NULL,
+                reason TEXT NOT NULL CHECK (length(btrim(reason)) > 0),
+                risk_check_result JSONB NOT NULL,
+                overrode_risk BOOLEAN NOT NULL DEFAULT FALSE,
                 created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            );
+            -- As migration 009 defines them, for the book tests below.
+            CREATE TABLE trading.portfolios (
+                portfolio_id TEXT PRIMARY KEY, name TEXT NOT NULL,
+                description TEXT NOT NULL DEFAULT '', created_by TEXT,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            );
+            CREATE TABLE trading.strategy_book_memberships (
+                strategy_id TEXT NOT NULL, portfolio_id TEXT NOT NULL,
+                added_by TEXT, added_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                PRIMARY KEY (strategy_id, portfolio_id)
+            );
+            CREATE TABLE trading.portfolio_assignments (
+                id BIGSERIAL PRIMARY KEY, strategy_id TEXT NOT NULL,
+                user_id TEXT, from_portfolio_id TEXT, to_portfolio_id TEXT,
+                lifecycle_at_move TEXT, reason TEXT,
+                consequences JSONB NOT NULL DEFAULT '[]'::jsonb,
+                acknowledged BOOLEAN NOT NULL DEFAULT FALSE,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                CONSTRAINT portfolio_assignments_has_a_side
+                    CHECK (from_portfolio_id IS NOT NULL OR to_portfolio_id IS NOT NULL)
             );
             """
         )
@@ -243,7 +308,8 @@ def test_the_audit_row_records_the_override_and_the_carried_price(db):
     finally:
         conn.close()
 
-    assert audit["user_id"] == "42"
+    # INTEGER in the real schema, so it comes back as one.
+    assert audit["user_id"] == 42
     assert audit["source_app"] == "algolens"
     assert audit["overrode_risk"] is True
     assert audit["risk_check_result"]["passed"] is False
@@ -266,3 +332,76 @@ def test_an_edit_inside_the_cap_needs_no_acknowledgement(db):
     assert result["risk_check"]["evaluated"] is True
     assert result["risk_check"]["passed"] is True
     assert float(_row(db)["quantity"]) == 5.0
+
+
+# ---------------------------------------------------------------------------
+# Books. These need the real tables because the rules live partly in SQL: what
+# "in this book" means to delete_book, and where the primary goes on removal.
+# ---------------------------------------------------------------------------
+
+from algolens.application.portfolio.ports import BookNotEmpty  # noqa: E402
+from algolens.domain.portfolio.portfolio_assignment import build_membership_audit  # noqa: E402
+from algolens.infrastructure.portfolio.strategy_registry import PostgresStrategyRegistry  # noqa: E402
+
+
+def _put_in_two_books(db, primary):
+    conn = db()
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "INSERT INTO trading.portfolios (portfolio_id, name) VALUES (%s, %s)",
+                    ("MACRO_BOOK", "Macro"),
+                )
+                cur.executemany(
+                    "INSERT INTO trading.strategy_book_memberships (strategy_id, portfolio_id)"
+                    " VALUES (%s, %s)",
+                    [(STRATEGY_ID, primary), (STRATEGY_ID, "MACRO_BOOK")],
+                )
+    finally:
+        conn.close()
+
+
+def test_a_book_holding_a_non_primary_member_cannot_be_deleted(db):
+    registry = PostgresStrategyRegistry(connection_factory=db)
+    primary = registry.get_any(STRATEGY_ID)["portfolio_id"]
+    assert primary != "MACRO_BOOK"
+    _put_in_two_books(db, primary)
+
+    # The strategy's primary is elsewhere. It is still IN MACRO_BOOK, with rows
+    # keyed on that pairing; the first version only counted primaries and
+    # would have deleted the book out from under them.
+    with pytest.raises(BookNotEmpty):
+        registry.delete_book("MACRO_BOOK")
+    assert "MACRO_BOOK" in registry.books_for_strategy(STRATEGY_ID)
+
+
+def test_removing_the_primary_book_repoints_it_and_says_so(db):
+    registry = PostgresStrategyRegistry(connection_factory=db)
+    strategy = registry.get_any(STRATEGY_ID)
+    primary = strategy["portfolio_id"]
+    _put_in_two_books(db, primary)
+
+    audit = build_membership_audit(
+        strategy, primary, "remove", user_id="1", reason="consolidating", acknowledged=True
+    )
+    outcome = registry.remove_membership(STRATEGY_ID, primary, audit)
+
+    assert outcome["primary_portfolio_id"] == "MACRO_BOOK"
+    assert registry.get_any(STRATEGY_ID)["portfolio_id"] == "MACRO_BOOK"
+    assert registry.books_for_strategy(STRATEGY_ID) == ["MACRO_BOOK"]
+
+
+def test_removing_a_non_primary_book_leaves_the_primary_alone(db):
+    registry = PostgresStrategyRegistry(connection_factory=db)
+    strategy = registry.get_any(STRATEGY_ID)
+    primary = strategy["portfolio_id"]
+    _put_in_two_books(db, primary)
+
+    audit = build_membership_audit(
+        strategy, "MACRO_BOOK", "remove", user_id="1", reason="done", acknowledged=True
+    )
+    outcome = registry.remove_membership(STRATEGY_ID, "MACRO_BOOK", audit)
+
+    assert outcome["primary_portfolio_id"] is None
+    assert registry.get_any(STRATEGY_ID)["portfolio_id"] == primary

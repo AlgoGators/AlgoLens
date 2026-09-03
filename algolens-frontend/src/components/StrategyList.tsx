@@ -87,12 +87,16 @@ export function StrategyList({ strategies, onSelectStrategy }: StrategyListProps
                   }`}>
                     Total Return
                   </div>
-                  <div className={`text-lg flex items-center gap-1 ${
-                    isPositive ? 'text-orange-500' : 'text-red-500'
-                  }`}>
-                    {isPositive ? <TrendingUp className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />}
-                    {isPositive ? '+' : ''}{strategy.returnPercent.toFixed(2)}%
-                  </div>
+                  {strategy.dataAvailable === false ? (
+                    <div className={`text-lg ${theme === 'dark' ? 'text-gray-600' : 'text-gray-400'}`}>—</div>
+                  ) : (
+                    <div className={`text-lg flex items-center gap-1 ${
+                      isPositive ? 'text-orange-500' : 'text-red-500'
+                    }`}>
+                      {isPositive ? <TrendingUp className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />}
+                      {isPositive ? '+' : ''}{strategy.returnPercent.toFixed(2)}%
+                    </div>
+                  )}
                 </div>
 
                 {/* Sharpe Ratio */}
@@ -102,8 +106,8 @@ export function StrategyList({ strategies, onSelectStrategy }: StrategyListProps
                   }`}>
                     Sharpe Ratio
                   </div>
-                  <div className="text-lg">
-                    {strategy.metrics.sharpeRatio.toFixed(2)}
+                  <div className={`text-lg ${strategy.dataAvailable === false ? (theme === 'dark' ? 'text-gray-600' : 'text-gray-400') : ''}`}>
+                    {strategy.dataAvailable === false ? '—' : strategy.metrics.sharpeRatio.toFixed(2)}
                   </div>
                 </div>
 
@@ -114,8 +118,8 @@ export function StrategyList({ strategies, onSelectStrategy }: StrategyListProps
                   }`}>
                     Volatility
                   </div>
-                  <div className="text-lg">
-                    {strategy.metrics.volatility.toFixed(1)}%
+                  <div className={`text-lg ${strategy.dataAvailable === false ? (theme === 'dark' ? 'text-gray-600' : 'text-gray-400') : ''}`}>
+                    {strategy.dataAvailable === false ? '—' : `${strategy.metrics.volatility.toFixed(1)}%`}
                   </div>
                 </div>
               </div>

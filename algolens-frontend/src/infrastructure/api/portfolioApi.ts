@@ -5,7 +5,7 @@ import type {
   AssignmentCheck,
   PortfolioSummary,
 } from '../../domain/portfolio/portfolioAssignment';
-import { API_BASE_URL, deleteWithAuth, log, postWithAuth, putWithAuth } from './httpClient';
+import { API_BASE_URL, deleteWithAuth, fetchWithAuth, log, postWithAuth, putWithAuth } from './httpClient';
 
 /**
  * A strategy the engine has published nothing for.
@@ -94,105 +94,13 @@ export class PortfolioApiService {
     log('info', '=== CONNECTIVITY TEST COMPLETE ===');
   }
 
-  private static async fetchWithAuth(url: string): Promise<Response> {
-    log('info', `fetchWithAuth called for URL: ${url}`);
-
-    // Auth now travels in an httpOnly cookie, sent automatically by the browser
-    // when `credentials: 'include'` is set. There is no token for JS to read or
-    // attach; a missing/expired cookie simply comes back as 401 (handled below).
-    log('info', `Making credentialed fetch request to: ${url}`);
-
-    try {
-      const startTime = performance.now();
-      const response = await fetch(url, {
-        credentials: 'include',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      });
-      const elapsed = (performance.now() - startTime).toFixed(2);
-
-      log('info', `Response received in ${elapsed}ms`);
-      log('info', `Response status: ${response.status} ${response.statusText}`);
-      log('info', `Response headers:`, Object.fromEntries(response.headers.entries()));
-      log('info', `Content-Type: ${response.headers.get('content-type')}`);
-
-      // Check if we got HTML instead of JSON (common proxy misconfiguration)
-      const contentType = response.headers.get('content-type') || '';
-      if (contentType.includes('text/html')) {
-        const htmlBody = await response.clone().text();
-        log('error', '=== RECEIVED HTML INSTEAD OF JSON ===');
-        log('error', 'This usually means nginx/proxy is NOT forwarding this route to Flask');
-        log('error', `URL attempted: ${url}`);
-        log('error', `HTML preview: ${htmlBody.substring(0, 200)}...`);
-        log('error', '>>> FIX: Update your nginx config to proxy /portfolio/* to Flask backend');
-        throw new Error(`Server returned HTML instead of JSON. Your nginx/proxy is not forwarding /portfolio routes to Flask. Check nginx config.`);
-      }
-
-      if (!response.ok) {
-        // Handle 401 Unauthorized or 422 JWT decode errors (e.g., expired/invalid cookie)
-        if (response.status === 401 || response.status === 422) {
-          log('warn', `Session error (${response.status}) - redirecting to login`);
-          // The cookie is httpOnly, so there is nothing for JS to clear; a full
-          // navigation re-runs AuthContext's /verify check, which will find no
-          // session and render the login view.
-          window.location.href = '/login';
-          throw new Error('Session expired or invalid. Please log in again.');
-        }
-
-        // Try to get error body for more details
-        let errorBody = '';
-        try {
-          errorBody = await response.clone().text();
-          log('error', `Error response body: ${errorBody}`);
-        } catch (e) {
-          log('warn', 'Could not read error response body');
-        }
-        throw new Error(`API request failed: ${response.status} ${response.statusText}. Body: ${errorBody}`);
-      }
-
-      return response;
-    } catch (error) {
-      log('error', '=== FETCH ERROR DETAILS ===');
-      log('error', `Error type: ${error instanceof Error ? error.constructor.name : typeof error}`);
-      log('error', `Error message: ${error instanceof Error ? error.message : String(error)}`);
-
-      if (error instanceof TypeError) {
-        log('error', 'TypeError detected - analyzing possible causes...');
-
-        // Check for specific error patterns
-        const errMsg = error.message.toLowerCase();
-
-        if (errMsg.includes('failed to fetch') || errMsg.includes('networkerror')) {
-          log('error', '>>> DIAGNOSIS: Network/CORS error');
-          log('error', 'Possible causes:');
-          log('error', '  1. Backend server not running or unreachable');
-          log('error', '  2. CORS not configured for this origin on backend');
-          log('error', '  3. Mixed content (HTTPS page calling HTTP API)');
-          log('error', '  4. Firewall/security group blocking the request');
-          log('error', '  5. DNS resolution failed for API host');
-          log('error', `  Current origin: ${window.location.origin}`);
-          log('error', `  API target: ${url}`);
-
-          throw new Error(`Network error: Cannot reach ${API_BASE_URL}. Possible CORS issue or backend not running. Check browser Network tab for details.`);
-        }
-
-        if (errMsg.includes('cors')) {
-          log('error', '>>> DIAGNOSIS: Explicit CORS error');
-          throw new Error(`CORS error: Backend at ${API_BASE_URL} is not allowing requests from ${window.location.origin}`);
-        }
-      }
-
-      throw error;
-    }
-  }
 
   static async getStrategy(strategyId: string): Promise<Strategy> {
     log('info', `getStrategy(${strategyId}) called`);
     const url = `${API_BASE_URL}/portfolio/strategy/${strategyId}`;
     log('info', `Fetching strategy from: ${url}`);
 
-    const response = await this.fetchWithAuth(url);
+    const response = await fetchWithAuth(url);
     const data = await response.json();
 
     log('info', `Strategy ${strategyId} response:`, {
@@ -208,20 +116,20 @@ export class PortfolioApiService {
   }
 
   static async getAllStrategies(): Promise<Strategy[]> {
-    const response = await this.fetchWithAuth(`${API_BASE_URL}/portfolio/strategies`);
+    const response = await fetchWithAuth(`${API_BASE_URL}/portfolio/strategies`);
     const data = await response.json();
     return data.strategies;
   }
 
   static async getIncubationStrategies(): Promise<IncubatingStrategy[]> {
-    const response = await this.fetchWithAuth(`${API_BASE_URL}/portfolio/incubation`);
+    const response = await fetchWithAuth(`${API_BASE_URL}/portfolio/incubation`);
     const data = await response.json();
     return data.incubating_strategies || [];
   }
 
   static async getIncubationPerformance(strategyId: string): Promise<IncubationPerformance> {
     const encodedId = encodeURIComponent(strategyId);
-    const response = await this.fetchWithAuth(`${API_BASE_URL}/portfolio/incubation/${encodedId}/performance`);
+    const response = await fetchWithAuth(`${API_BASE_URL}/portfolio/incubation/${encodedId}/performance`);
     const data = await response.json();
     return {
       positions: data.positions || [],
@@ -234,7 +142,7 @@ export class PortfolioApiService {
 
     // Fetch all strategies
     log('info', `Fetching strategies from: ${API_BASE_URL}/portfolio/strategies`);
-    const strategiesResponse = await this.fetchWithAuth(`${API_BASE_URL}/portfolio/strategies`);
+    const strategiesResponse = await fetchWithAuth(`${API_BASE_URL}/portfolio/strategies`);
 
     log('info', 'Parsing strategies response JSON...');
     const strategiesData = await strategiesResponse.json();
@@ -353,6 +261,7 @@ export class PortfolioApiService {
   }): Promise<
     | { outcome: 'saved'; risk_check: RiskCheck }
     | { outcome: 'needs_acknowledgement'; risk_check: RiskCheck }
+    | { outcome: 'needs_book'; books: string[] }
     | { outcome: 'rejected'; message: string }
   > {
     const response = await postWithAuth(`${API_BASE_URL}/portfolio/positions`, input);
@@ -365,6 +274,12 @@ export class PortfolioApiService {
     // (an unresolvable strategy_name) has no risk_check and is a flat refusal.
     if (response.status === 409 && data.risk_check) {
       return { outcome: 'needs_acknowledgement', risk_check: data.risk_check };
+    }
+    // The third 409: the strategy is in several books and the request did not
+    // say which. Not a refusal -- the server hands back the choices so the
+    // caller can ask, rather than guess and write into the wrong universe.
+    if (response.status === 409 && data.code === 'ambiguous_book' && Array.isArray(data.books)) {
+      return { outcome: 'needs_book', books: data.books as string[] };
     }
     return { outcome: 'rejected', message: data.error || `Request failed (${response.status})` };
   }
@@ -391,7 +306,7 @@ export class PortfolioApiService {
   }
 
   static async getBooks(): Promise<Book[]> {
-    const response = await this.fetchWithAuth(`${API_BASE_URL}/portfolio/books`);
+    const response = await fetchWithAuth(`${API_BASE_URL}/portfolio/books`);
     const data = await response.json();
     return data.books || [];
   }
@@ -464,7 +379,7 @@ export class PortfolioApiService {
   }
 
   static async getPortfolios(): Promise<PortfolioSummary[]> {
-    const response = await this.fetchWithAuth(`${API_BASE_URL}/portfolio/portfolios`);
+    const response = await fetchWithAuth(`${API_BASE_URL}/portfolio/portfolios`);
     const data = await response.json();
     return data.portfolios || [];
   }
@@ -508,7 +423,7 @@ export class PortfolioApiService {
 
   static async getAssignmentHistory(strategyId: string): Promise<AssignmentRecord[]> {
     const encodedId = encodeURIComponent(strategyId);
-    const response = await this.fetchWithAuth(
+    const response = await fetchWithAuth(
       `${API_BASE_URL}/portfolio/strategies/${encodedId}/portfolio/history`,
     );
     const data = await response.json();
@@ -517,7 +432,7 @@ export class PortfolioApiService {
 
   static async getPositionOverrides(strategyId: string): Promise<PositionOverride[]> {
     const encodedId = encodeURIComponent(strategyId);
-    const response = await this.fetchWithAuth(`${API_BASE_URL}/portfolio/overrides/${encodedId}`);
+    const response = await fetchWithAuth(`${API_BASE_URL}/portfolio/overrides/${encodedId}`);
     const data = await response.json();
     return data.overrides || [];
   }

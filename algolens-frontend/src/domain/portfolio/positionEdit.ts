@@ -27,24 +27,28 @@ export type SubmitPhase =
   | 'idle'
   | 'submitting'
   | 'needs_acknowledgement'
+  | 'needs_book'
   | 'error'
   | 'done';
 
 export type SubmitState = {
   phase: SubmitPhase;
   breaches: RiskBreach[];
+  /** The books to choose between when the server could not pick one. */
+  books: string[];
   message: string | null;
 };
 
 export type SubmitEvent =
   | { type: 'submit' }
   | { type: 'breach'; risk_check: RiskCheck }
+  | { type: 'ambiguous'; books: string[] }
   | { type: 'rejected'; message: string }
   | { type: 'succeeded' }
   | { type: 'edited' };
 
 export function initialState(): SubmitState {
-  return { phase: 'idle', breaches: [], message: null };
+  return { phase: 'idle', breaches: [], books: [], message: null };
 }
 
 export function reduce(state: SubmitState, event: SubmitEvent): SubmitState {
@@ -59,13 +63,20 @@ export function reduce(state: SubmitState, event: SubmitEvent): SubmitState {
       return {
         phase: 'needs_acknowledgement',
         breaches: event.risk_check.breaches,
+        books: [],
         message: null,
       };
+
+    case 'ambiguous':
+      // The write did not happen. The server could not tell which book the
+      // edit was for and returned the candidates instead of guessing; the
+      // form must ask before it resubmits.
+      return { phase: 'needs_book', breaches: [], books: event.books, message: null };
 
     case 'rejected':
       // NOT acknowledgeable. This is the other 409 (and 400/403/500): the write
       // is refused outright, so there is nothing for the user to override.
-      return { phase: 'error', breaches: [], message: event.message };
+      return { phase: 'error', breaches: [], books: [], message: event.message };
 
     case 'succeeded':
       // Only transition to done from submitting. If this event arrived out of
@@ -74,7 +85,7 @@ export function reduce(state: SubmitState, event: SubmitEvent): SubmitState {
       // done must always pass through submitting, so an out-of-order success
       // cannot mark a breaching write as committed.
       if (state.phase === 'submitting') {
-        return { phase: 'done', breaches: [], message: null };
+        return { phase: 'done', breaches: [], books: [], message: null };
       }
       return state;
 

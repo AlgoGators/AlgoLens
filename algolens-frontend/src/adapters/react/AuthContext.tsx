@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import React, { createContext, useState, useEffect, ReactNode } from 'react';
 import { IdentityApplicationService } from '../../application/identity/authService';
 import type { User } from '../../domain/identity/user';
 

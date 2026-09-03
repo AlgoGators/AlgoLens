@@ -232,7 +232,10 @@ export function computeCombinedMetrics(
   const totalInvested = selected.reduce((sum, s) => sum + s.invested, 0);
   const totalValue = selected.reduce((sum, s) => sum + s.currentValue, 0);
   const totalReturn = totalValue - totalInvested;
-  const returnPercent = (totalReturn / totalInvested) * 100;
+  // A selection whose invested or current value sums to zero has no meaningful
+  // share to report. 0, not NaN or Infinity, which would otherwise render.
+  const share = (part: number, whole: number) => (whole > 0 ? (part / whole) * 100 : 0);
+  const returnPercent = share(totalReturn, totalInvested);
 
   // Combine all positions for asset allocation
   const assetValues: { [key: string]: number } = {};
@@ -247,7 +250,7 @@ export function computeCombinedMetrics(
     .map(([symbol, value]) => ({
       symbol,
       value,
-      percentage: (value / totalValue) * 100
+      percentage: share(value, totalValue)
     }))
     .sort((a, b) => b.value - a.value);
 
@@ -262,7 +265,7 @@ export function computeCombinedMetrics(
     pieData.push({
       symbol: 'Others',
       value: othersTotal,
-      percentage: (othersTotal / totalValue) * 100
+      percentage: share(othersTotal, totalValue)
     });
   }
 
@@ -270,7 +273,7 @@ export function computeCombinedMetrics(
   const strategyAllocation = selected.map(s => ({
     name: s.name,
     value: s.currentValue,
-    percentage: (s.currentValue / totalValue) * 100
+    percentage: share(s.currentValue, totalValue)
   }));
 
   // Combined equity curve: sum each selected strategy's REAL historical equity by

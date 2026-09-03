@@ -10,7 +10,7 @@ import {
 
 describe('submit state machine', () => {
   it('starts idle with nothing to acknowledge', () => {
-    expect(initialState()).toEqual({ phase: 'idle', breaches: [], message: null });
+    expect(initialState()).toEqual({ phase: 'idle', breaches: [], books: [], message: null });
   });
 
   it('keeps the breach banner on screen while resubmitting to acknowledge it', () => {
@@ -46,6 +46,7 @@ describe('submit state machine', () => {
     // from a stale promise must not mark a breaching write as committed.
     const breached: SubmitState = {
       phase: 'needs_acknowledgement',
+      books: [],
       breaches: [
         { limit: 'max_gross_notional', limit_value: 1, actual: 2, message: 'over' },
       ],
@@ -71,6 +72,54 @@ describe('submit state machine', () => {
     });
 
     expect(reduce(breached, { type: 'edited' })).toEqual(initialState());
+  });
+});
+
+describe('ambiguous book', () => {
+  it('holds the candidate books and waits for a choice', () => {
+    const asked = reduce(reduce(initialState(), { type: 'submit' }), {
+      type: 'ambiguous',
+      books: ['CONSERVATIVE_PORTFOLIO', 'MACRO_BOOK'],
+    });
+
+    expect(asked.phase).toBe('needs_book');
+    expect(asked.books).toEqual(['CONSERVATIVE_PORTFOLIO', 'MACRO_BOOK']);
+    expect(asked.breaches).toEqual([]);
+  });
+
+  it('is not an error: nothing was written, so nothing is reported as refused', () => {
+    const asked = reduce(initialState(), { type: 'ambiguous', books: ['A', 'B'] });
+    expect(asked.message).toBeNull();
+  });
+
+  it('resubmitting with a chosen book passes through submitting before done', () => {
+    const asked = reduce(initialState(), { type: 'ambiguous', books: ['A', 'B'] });
+
+    // An out-of-order success while still asking must not commit anything.
+    expect(reduce(asked, { type: 'succeeded' }).phase).toBe('needs_book');
+
+    const resubmitting = reduce(asked, { type: 'submit' });
+    expect(resubmitting.phase).toBe('submitting');
+    expect(reduce(resubmitting, { type: 'succeeded' }).phase).toBe('done');
+  });
+
+  it('a breach after choosing a book replaces the question with the warning', () => {
+    const asked = reduce(initialState(), { type: 'ambiguous', books: ['A', 'B'] });
+    const breached = reduce(reduce(asked, { type: 'submit' }), {
+      type: 'breach',
+      risk_check: {
+        evaluated: true,
+        passed: false,
+        breaches: [{ limit: 'max_symbol_notional', limit_value: 1, actual: 2, message: 'over' }],
+      },
+    });
+    expect(breached.phase).toBe('needs_acknowledgement');
+    expect(breached.books).toEqual([]);
+  });
+
+  it('editing a field after the question forgets the candidates', () => {
+    const asked = reduce(initialState(), { type: 'ambiguous', books: ['A', 'B'] });
+    expect(reduce(asked, { type: 'edited' })).toEqual(initialState());
   });
 });
 

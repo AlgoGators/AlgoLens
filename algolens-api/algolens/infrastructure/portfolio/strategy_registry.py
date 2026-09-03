@@ -69,7 +69,7 @@ class PostgresStrategyRegistry:
     before the migration existed and created its three tables lazily -- and that
     is exactly the arrangement that lets an application and its database drift
     apart without anyone noticing. trade-ngin owns this schema; the tables here
-    come from migration 008_books_and_membership.sql and must be applied before
+    come from migration 009_books_and_membership.sql and must be applied before
     the Books features will work.
     """
 
@@ -215,10 +215,22 @@ class PostgresStrategyRegistry:
         try:
             with conn:
                 with conn.cursor() as cursor:
+                    # Both sources of "in this book". A strategy whose primary is
+                    # elsewhere but which is a member here still has positions,
+                    # limits and a history keyed on this book; deleting the
+                    # declaration would leave those rows naming a book that no
+                    # longer exists.
                     cursor.execute(
-                        "SELECT count(*) AS occupied FROM trading.strategy_registry"
-                        " WHERE portfolio_id = %s",
-                        (portfolio_id,),
+                        """
+                        SELECT count(*) AS occupied FROM (
+                            SELECT id AS strategy_id FROM trading.strategy_registry
+                            WHERE portfolio_id = %s
+                            UNION
+                            SELECT strategy_id FROM trading.strategy_book_memberships
+                            WHERE portfolio_id = %s
+                        ) AS members
+                        """,
+                        (portfolio_id, portfolio_id),
                     )
                     occupied = cursor.fetchone()["occupied"]
                     if occupied:
@@ -257,7 +269,7 @@ class PostgresStrategyRegistry:
         """Books this strategy belongs to, primary included.
 
         Falls back to the primary column when there are no membership rows. That
-        is the state between migration 008 creating the table and its seed
+        is the state between migration 009 creating the table and its seed
         running, and on any database where the seed was skipped. Reporting none
         would defeat the last-book guard: a strategy would look like it belonged
         nowhere and could be removed from the only book it is actually in.
@@ -347,10 +359,18 @@ class PostgresStrategyRegistry:
                         """,
                         (remaining["portfolio_id"], strategy_id, portfolio_id),
                     )
+                    # rowcount is 1 only when the removed book WAS the primary.
+                    # The caller is told, because a primary that moved silently
+                    # is a change nobody asked for and nobody can see.
+                    new_primary = remaining["portfolio_id"] if cursor.rowcount else None
                     self._insert_membership_audit(cursor, audit)
         finally:
             conn.close()
-        return {"strategy_id": strategy_id, "portfolio_id": portfolio_id}
+        return {
+            "strategy_id": strategy_id,
+            "portfolio_id": portfolio_id,
+            "primary_portfolio_id": new_primary,
+        }
 
     def _insert_membership_audit(self, cursor, audit):
         cursor.execute(

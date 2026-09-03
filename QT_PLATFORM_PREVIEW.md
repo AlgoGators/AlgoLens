@@ -13,7 +13,8 @@ This file exists only on this branch.
 
 ## What is in it
 
-`AlgoLens/qt-platform-preview` = `main` + these two, merged:
+`AlgoLens/qt-platform-preview` = `main` + these two, merged, plus the work listed under
+"Built on the branch" below:
 
 | PR | Branch | What it adds |
 |---|---|---|
@@ -22,32 +23,55 @@ This file exists only on this branch.
 
 The engine half is a **separate branch in a separate repo**, because the platform spans both:
 
-`trade-ngin/qt-platform-preview` = `main` + [#56](https://github.com/AlgoGators/trade-ngin/pull/56) (which already contains [#55](https://github.com/AlgoGators/trade-ngin/pull/55)).
+`trade-ngin/qt-platform-preview` = `main` + [#56](https://github.com/AlgoGators/trade-ngin/pull/56) (which already contains [#55](https://github.com/AlgoGators/trade-ngin/pull/55)) + migration `009_books_and_membership.sql`.
 
-That is what publishes the risk limits this app checks edits against, and what writes the
-three portfolio streams.
+That is what publishes the risk limits this app checks edits against, writes the three
+portfolio streams, and owns the schema behind the Books tab.
+
+### Built on the branch
+
+These were built directly on the preview after the PRs merged, driven by what the demo
+exposed. Each will be cut into its own PR after review.
+
+- **Books tab.** Define a book, put strategies in it, take them out. Every change takes a
+  reason and lands in an append-only audit table.
+- **A strategy can be in several books.** `strategy_registry.portfolio_id` is now the
+  *primary* book; membership is additive on top of it.
+- **Portfolio grouping** on the Portfolio tab, collapsible and read-only. It marks
+  incubating strategies, strategies that are "also here" from another book, and mock
+  capital that is deliberately excluded from fund totals.
+- **Book-aware position edits.** The editor names the book it writes to. A strategy in
+  several books with no book named gets `409 ambiguous_book` and a picker, never a guess.
+- **Incubation promote / retire** from the UI, with a warning when the observation window
+  is not complete.
+- **Override history** rendered on the strategy detail view, with a three-state risk
+  column: passed / overridden / not checked.
+- **Honest nulls.** A strategy the engine has not published yet shows "awaiting engine
+  data", not zeros, and is excluded from every aggregate.
 
 ## Audit and local database
 
-**Read [`QT_PLATFORM_AUDIT.md`](QT_PLATFORM_AUDIT.md) before relying on this branch.** It lists
-seven bugs found and fixed by driving every feature against a real Postgres -- three of
-them would have broken or silently bypassed the risk gate on first use -- and everything
-still open, ordered by urgency.
+**Read [`QT_PLATFORM_AUDIT.md`](QT_PLATFORM_AUDIT.md) before relying on this branch.** It
+records two passes: the first found seven bugs by driving every feature against a real
+Postgres, three of which would have broken or silently bypassed the risk gate on first
+use. The second, an independent review of everything the first pass built, found another
+set — including one that would have wiped the demo database from the test suite. All are
+fixed; the two decisions that are genuinely the team's are listed at the end of that file.
 
 To run against a local database with realistic data, use
-`algolens-api/scripts/demo_seed.sql`. It carries four schema pieces the first seed lacked,
-each of which produced a 500 that looked like an app bug. Login is `admin@admin.com` /
-`admin`, local only.
+`algolens-api/scripts/demo_seed.sql`, then apply trade-ngin migration 009. Login is
+`admin@admin.com` / `admin`, local only.
+
+**Do not point `ALGOLENS_TEST_DB` at the demo database.** The integration tests drop and
+recreate the `trading` schema. They now refuse to run against a schema they did not create,
+but give them a database of their own regardless.
 
 ## Verified on this branch
 
-- 126 backend tests pass
-- 82 frontend tests pass
-- Production frontend build clean
-
-Note that `npm run build` does **not** typecheck — there is no `tsconfig.json` and no
-`typescript` dependency in `algolens-frontend`, so nothing in CI typechecks this project.
-That is pre-existing and worth fixing separately.
+- 153 backend unit tests pass
+- 7 integration tests pass against a real Postgres, and CI fails if they are skipped
+- 88 frontend tests pass
+- `tsc --noEmit` is clean and runs in CI before the build
 
 ---
 
@@ -63,7 +87,11 @@ You need the trade-ngin migrations applied to whatever database you point at. In
 005_risk_limits.sql
 006_run_inputs_and_rebench_stream.sql
 007_benchmark_frozen_shadow_stream.sql
+009_books_and_membership.sql
 ```
+
+`008` is `008_strategy_config.sql` on trade-ngin PR #60's branch, which is why the books
+migration is `009`. Neither depends on the other.
 
 Then:
 
@@ -99,8 +127,10 @@ trade-ngin #56, which is not merged. Until then `evaluate_risk` returns
 `{"evaluated": false}` and the audit row records that the check did not run.
 
 That is the intended behaviour: an unreachable risk envelope must be visible in the audit
-trail as "not checked", never as "checked and fine". But it does mean **the gate is not
-actually gating anything yet.** To see the gate work, seed a row by hand:
+trail as "not checked", never as "checked and fine". A *published* envelope with no limits
+in it is different: that is a check that found nothing to breach, and reads as "passed".
+
+To see the gate work, seed a row by hand:
 
 ```sql
 INSERT INTO trading.risk_limits (strategy_id, portfolio_id, limits) VALUES
@@ -122,20 +152,48 @@ different and false claim.
 
 ---
 
+## How strategies map to books now
+
+`portfolio_id` scopes **every** query in the portfolio repositories — equity curves,
+positions, executions, risk limits. Two strategies with different books genuinely have
+separate ledgers, and one strategy in two books has two.
+
+- **Primary book.** `strategy_registry.portfolio_id`. The single answer wherever one is
+  needed, and what the engine reads. It must always name a book the strategy is actually
+  in; the platform repoints it when the primary book is removed and tells you where it went.
+- **Membership.** `trading.strategy_book_memberships`, additive over the primary. Adding a
+  strategy to a book takes nothing away and needs only a reason. Removing it from a book
+  makes that book's history discontinuous from today, so it asks for an acknowledgement
+  first, and it refuses to remove the last book outright.
+- **Retired strategies are frozen for book changes.** Their books are closed; moving them
+  would rewrite history already reported. Their audit trail stays readable.
+- **Deleting a book** is refused while any strategy is in it, primary or not.
+- **Editing a position** names the book. The positions table says which book it is showing
+  and warns when the strategy also trades elsewhere. An edit that cannot be resolved to one
+  book is refused with the list of candidates, and the editor asks.
+
+Book ids are upper-cased on the way in. Rows that predate that convention are matched
+without regard to case, and written back with the spelling the database already holds.
+
+---
+
 ## What we most want feedback on
 
 1. **The breach flow.** A breaching edit returns 409 and the UI stops and waits — you have to
    click "Override and save" a second time. Is one extra click the right amount of friction,
    or too much / too little?
-2. **Is "reason" doing its job?** It is mandatory and free-text. Read a few back and see
-   whether they will still mean anything in six months, or whether this should be a
-   structured dropdown.
+2. **Is "reason" doing its job?** It is mandatory and free-text, on position edits and on
+   every book change. Read a few back and see whether they will still mean anything in six
+   months, or whether this should be a structured dropdown.
 3. **The diff panel** shows quantity and average price before/after. Is anything missing that
    you would want to see before committing a change?
 4. **Blank average price means "leave it alone", not "clear it".** Is that what you expect?
-5. **Anything the audit trail should record that it does not.** Right now:
+5. **One strategy, several books.** Is the primary-book model right, or should a strategy
+   in two books be two registry rows? The per-book positions and limits already work either
+   way; the question is what the desk finds natural.
+6. **Anything the audit trail should record that it does not.** Right now:
    who, when, strategy, symbol, before, after, reason, risk verdict, and whether the verdict
-   was acknowledged.
+   was acknowledged; and for book changes, from, to, lifecycle at the time, and consequences.
 
 Open a PR comment on #80, or just tell John.
 
@@ -145,42 +203,11 @@ Open a PR comment on #80, or just tell John.
 
 - The gate is advisory. Per DECISION-1 a breach never hard-blocks — it forces an
   acknowledgement and records it. That decision is still formally open.
-- No override *history* view in the UI yet. `GET /portfolio/overrides/<strategy_id>` returns
-  it; nothing renders it.
+- Attribution across a book change is stated and acknowledged, not repaired. The options
+  are in `QT_PLATFORM_AUDIT.md` §6.
 - The `refactor/models-range-filter` branch deletes the three-stream read side (220 lines,
   including all of `AlphaAttribution.tsx`). If that lands, it removes the other half of this
   feature. Nobody has confirmed whether that deletion is intended — it needs an answer before
   it goes anywhere near `main`.
-
----
-
-## There is no UI for assigning strategies to portfolios
-
-This one is worth stating plainly, because the data model implies a feature the app does not
-have, and it is easy to assume from a demo that the feature exists.
-
-`portfolio_id` is real. It is a column on `trading.strategy_registry` and it scopes **every**
-query in the portfolio repositories — equity curves, positions, executions, risk limits, the
-lot. Two strategies with different `portfolio_id`s genuinely have separate books.
-
-What does not exist is any way to see or change that mapping from the app:
-
-- **The API serialises `portfolio_id` in exactly one place** — the incubation list
-  (`adapters/serializers/portfolio.py`). Nowhere else sends it to the client.
-- **The frontend references it in exactly one place** — `IncubationList.tsx`. The main
-  dashboard and the Strategy Builder group by *strategy*, never by portfolio. Looking at the
-  screen you cannot tell that two strategies share a portfolio and a third does not.
-- **Nothing writes it.** The only three `UPDATE trading.strategy_registry` statements in the
-  codebase set `lifecycle`, `mock_capital` and `incubation_started_at` — the incubation
-  promote/retire flow. No code path anywhere assigns or reassigns `portfolio_id`.
-
-So today a strategy is assigned to a portfolio by someone editing a database row by hand.
-
-Making this a real feature is net-new work, not a wiring-up job: it needs an endpoint, a UI,
-and a decision on whether reassignment is permitted on a live book at all. Moving a strategy
-between portfolios mid-life makes both portfolios' histories discontinuous, which directly
-corrupts the attribution numbers this branch just fixed. "Assign at creation, never move"
-may well be the right answer — but it is a decision someone has to make, not a default to
-fall into.
-
-Verified by source inspection on this branch, 2026-09-02 — not inferred from the running app.
+- Component-level React tests do not exist; the pure state machines are tested, the wiring
+  is verified by driving the app. Adding React Testing Library is a separate decision.

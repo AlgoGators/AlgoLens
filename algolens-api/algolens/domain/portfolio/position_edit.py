@@ -16,6 +16,8 @@ from numbers import Real
 # Set by the service, never by the caller. See
 # test_portfolio_type_cannot_be_overridden_by_the_caller for why this is not
 # merely defensive.
+from algolens.domain.portfolio.portfolio_assignment import match_book
+
 QT_STREAM = "qt"
 
 # Raised when an edit does not say which book it means and the strategy is in
@@ -47,13 +49,22 @@ def resolve_target_book(strategy_id, requested, books, primary):
     the response and permanent in the ledger.
     """
     known = list(books) or ([primary] if primary else [])
+    if not known:
+        # A registry row with a blank primary and no memberships. There is no
+        # candidate at all, which is a different failure from too many: the
+        # client cannot fix it by naming one.
+        raise PositionValidationError(
+            "strategy_has_no_book",
+            f"{strategy_id} is not in any book, so there is nothing to write into",
+        )
     if requested is not None:
-        if requested not in known:
+        found = match_book(requested, known)
+        if found is None:
             raise PositionValidationError(
                 "not_a_member_of_book",
                 f"{strategy_id} does not belong to {requested}",
             )
-        return requested
+        return found
     if len(known) == 1:
         return known[0]
     raise AmbiguousBook(strategy_id, known)
@@ -235,9 +246,14 @@ def _projected_book(current_book, proposed):
 
 def evaluate_risk(envelope, current_book, proposed):
     """Verdict on a single proposed position change."""
-    if not envelope:
+    if envelope is None:
         # Explicitly NOT a pass. An unreachable envelope must be visible in the
         # audit trail as "not checked", never as "checked and fine".
+        #
+        # `is None`, not falsiness: a published envelope with no limits in it
+        # ({}) IS reachable and IS a check, one that finds nothing to breach.
+        # Recording that as "not checked" would misreport a deliberate
+        # no-limits configuration as an outage.
         return {"evaluated": False, "passed": True, "breaches": []}
 
     projected = _projected_book(current_book, proposed)

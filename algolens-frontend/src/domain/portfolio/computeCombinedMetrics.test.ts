@@ -68,6 +68,20 @@ describe('computeCombinedMetrics', () => {
     expect(out.returnPercent).toBeCloseTo(5, 6); // 10000 / 200000
   });
 
+  it('reports 0%, not NaN or Infinity, when nothing is invested', () => {
+    const s = strategy({
+      id: 'fresh',
+      invested: 0,
+      currentValue: 0,
+      positions: [pos('ES', 0)],
+    });
+    const out = computeCombinedMetrics([s], ['fresh']);
+
+    expect(out.returnPercent).toBe(0);
+    expect(out.assetAllocation.every(a => Number.isFinite(a.percentage))).toBe(true);
+    expect(out.strategyAllocation.every(a => Number.isFinite(a.percentage))).toBe(true);
+  });
+
   it('only aggregates the selected subset', () => {
     const a = strategy({ id: 'a', currentValue: 100000 });
     const b = strategy({ id: 'b', currentValue: 999999 });

@@ -90,7 +90,7 @@ All four are now in **`algolens-api/scripts/demo_seed.sql`**, with the schema th
 | ~~P0-a~~ | ~~Position response serialises numbers as strings~~ — **FIXED** | S | `jsonify` stringifies Decimal. Coerce in the serializer. Any client that parses these as numbers breaks. |
 | ~~P0-b~~ | ~~Add `tsc --noEmit` to frontend CI~~ — **FIXED**, and it immediately caught that `Book`/`AssignmentRecord` were never declared | S | There is no `tsconfig.json` and no `typescript` dependency. Nothing typechecks. Today's `number \| null` widenings and placeholder shapes were verified by grep, not a compiler. |
 | ~~P0-c~~ | ~~Integration test against Postgres~~ — **FIXED**: `tests/integration`, 4 cases driving the real write, plus a CI guard that fails if they silently skip | M | Would have caught 1.1, 1.2 and 1.3 outright. |
-| ~~P0-d~~ | ~~Canonical migrations in trade-ngin~~ — **FIXED**: migration 008 + rollback; lazy DDL removed from the app | M | The app creates them lazily with `CREATE TABLE IF NOT EXISTS`. trade-ngin owns this schema (migrations 004/005). Lazy creation must not survive into production. |
+| ~~P0-d~~ | ~~Canonical migrations in trade-ngin~~ — **FIXED**: migration 009 + rollback; lazy DDL removed from the app | M | The app creates them lazily with `CREATE TABLE IF NOT EXISTS`. trade-ngin owns this schema (migrations 004/005). Lazy creation must not survive into production. |
 | ~~P0-e~~ | ~~Portfolio tab grouping ignores multi-book membership~~ — **FIXED**, and it also stopped hiding incubating strategies (P1-i) | M | `ListPortfolios` buckets by `registry.portfolio_id` (primary only). A strategy in two books shows under one on the Portfolio tab and under both on Books. Same data, two answers. |
 
 ### P1 — this week
@@ -168,3 +168,46 @@ Option 3 is what ships today. It is a reasonable answer, but it should be a chos
 That branch is still on the remote and removes 220 lines: the stream constants and the whole of `AlphaAttribution.tsx`. When the edit surface was going to live in another repo, losing AlgoLens's read side was survivable. It is not now — merging it would delete the three-stream comparison that the position edit path exists to make meaningful.
 
 Nobody has confirmed whether the deletion was intended or fell out of an unrelated models refactor. That needs an answer from whoever wrote it before it goes near `main`.
+
+---
+
+## 7. Second pass — an independent review of everything §1–§5 built
+
+Everything above was written by the same hands that wrote the code. This pass had four
+separate reviewers read the branch cold against the stated design intent — domain and
+application, infrastructure and HTTP, frontend, and docs/CI/migrations — and then every
+finding was verified against the code before being fixed. Ranked by what it would have cost.
+
+| # | Finding | Fixed by | Proof |
+|---|---|---|---|
+| 7.1 | **The integration suite drops the `trading` schema of whatever database it is pointed at, and its own docstring said to point it at the demo cluster.** It did exactly that mid-session and wiped the seeded demo. | Fixture marks the schema it builds and refuses to drop one it did not create; docstring now says to use a database of its own. | Pointed at `algolens_demo`: refused, 11 tables and 3 strategies intact. Pointed at `algolens_test`: 7 pass. |
+| 7.2 | `delete_book` counted only primaries, so a book holding a strategy's **non-primary** membership could be deleted out from under its positions and limits. | Occupancy is the union of primaries and memberships. | `test_a_book_holding_a_non_primary_member_cannot_be_deleted` (Postgres) |
+| 7.3 | `ChangeBookMembership` raised `AssignmentValidationError` for an unknown action **without importing it** — a `NameError` masked as a generic 500. No test had ever called the use case. | Import added; `tests/test_book_membership_use_case.py` drives the use case through every branch. | 8 new tests |
+| 7.4 | The `409 ambiguous_book` reply was handled by nothing in the UI: the `books` list was discarded and the user saw a raw error with no way to answer. | `savePosition` returns `needs_book`; the editor gains a `needs_book` phase and a book picker, and resubmits with the choice. | State-machine tests; `tsc` clean |
+| 7.5 | Strategy cards showed **+0.00% return, 0.00 Sharpe, 0.0% volatility** for a strategy the engine had not published, next to "awaiting engine data" for its value. | All four tiles honour `dataAvailable === false`. | `StrategyList.tsx` |
+| 7.6 | Migration **`008` collides**: `feat/config-from-database` already reserved `008_strategy_config.sql`, and the trade-ngin README described that file rather than the one on this branch. | Renumbered to `009_books_and_membership.sql`; README lists both; every reference updated. | `git mv`; grep for `008` |
+| 7.7 | `QT_PLATFORM_PREVIEW.md` still said there was no assignment UI, no override history view, and no typechecking — all false for six commits. | Rewritten to describe the branch as it is. | — |
+| 7.8 | `resolve_target_book` with a blank primary and no memberships raised `AmbiguousBook` with **zero** candidates, telling the client to choose between nothing. | Distinct `strategy_has_no_book` validation error. | `TestBookResolutionEdges` |
+| 7.9 | Book names were compared **case-sensitively** against rows nothing forces to upper case, so a hand-written `macro_book` row would be reported as not-a-member and then duplicated under `MACRO_BOOK`. | `match_book` compares without case and returns the stored spelling; every membership and edit path writes with that spelling. | Domain + use-case tests |
+| 7.10 | `evaluate_risk` treated a **published envelope with no limits** (`{}`) as "not checked", the same as an outage. | `is None`, not falsiness. `{}` is a check that found nothing. | `TestEmptyEnvelope` |
+| 7.11 | The demo seed and the integration fixture declared `position_overrides` with **every constraint stripped** (nullable `before_state`, untyped `user_id`, no `CHECK`s), so a write production would refuse passed here. | Both now carry migration 004's constraints verbatim. The write path passes against them. | 7 integration tests |
+| 7.12 | Removing a strategy's primary book repointed the primary **silently**; the caller learned nothing. | `remove_membership` reports `primary_portfolio_id`; the use case and serialiser pass it through. | `test_removing_the_primary_book_repoints_it_and_says_so` |
+| 7.13 | `StrategyRegistryPort` declared 4 methods; the use cases called 13. | Port now declares every method the application layer calls. | `ports.py` |
+| 7.14 | The audit trail of a **retired** strategy was unreadable: `ListPositionOverrides` used the live-only lookup. | Uses `get_any`. Retirement must not lose the record of what was done. | `use_cases.py` |
+| 7.15 | `computeCombinedMetrics` divided by `totalInvested` / `totalValue` unguarded; a zero-invested selection rendered `NaN%`. | `share()` helper, 0 when the denominator is 0. | New vitest case |
+| 7.16 | A fund whose strategies were all still awaiting engine data was shown the **empty-portfolio screen**, so the "excludes N strategies" notice could never render. | The dashboard gate counts awaiting strategies as something to show. | `Dashboard.tsx` |
+| 7.17 | `portfolioApi.ts` carried a byte-for-byte private copy of `httpClient.fetchWithAuth`. | Deleted; nine call sites use the shared one. | `tsc` |
+| 7.18 | Cosmetic: unused `useContext` import; seed comment said pbkdf2 for a scrypt hash. | Fixed. | — |
+
+### Reviewed and deliberately left
+
+- **Position edits on retired strategies are refused** (the live-only `get`). A retired strategy has no capital to edit; only its audit trail needs to stay readable, and now does.
+- **Book and position writers let raw `psycopg2` errors propagate** to the route's generic 500, rather than wrapping them as the incubation writers do. The client never sees database text either way; unifying the pattern is a refactor, not a fix.
+- **The HTTP adapter imports the dependency factory and two domain exception classes.** `test_domain_boundaries.py` permits both and they are the composition root's job. Tightening the rule is a team decision.
+- **`services/` under `algolens-api` is dead code with passing tests**, present on `main` since the DDD split (#71). Out of scope here; worth deleting in its own PR.
+- **No React component tests.** The state machines that make the acknowledge-once gate safe are tested; the component wiring is verified by driving the app. Adding React Testing Library is a dependency decision.
+
+### Verified after the fixes
+
+- 153 backend unit tests, 7 Postgres integration tests, 88 frontend tests, `tsc --noEmit` clean.
+- Demo database rebuilt from the seed plus migration 009 and back at baseline.

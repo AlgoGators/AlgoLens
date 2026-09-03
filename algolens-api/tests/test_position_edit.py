@@ -19,6 +19,7 @@ from algolens.domain.portfolio.position_edit import (
     PositionValidationError,
     build_after_state,
     evaluate_risk,
+    resolve_target_book,
     validate_position_payload,
 )
 
@@ -365,3 +366,38 @@ class TestBookResolution:
             {"strategy_id": "carry", "symbol": "es", "quantity": 1, "reason": "x"}
         )
         assert out["portfolio_id"] is None
+
+
+class TestBookResolutionEdges:
+    """The two inputs the first version got wrong."""
+
+    def test_a_strategy_in_no_book_at_all_is_not_ambiguous_it_is_broken(self):
+        # A blank primary and no memberships. AmbiguousBook here would tell the
+        # client to choose between zero options.
+        with pytest.raises(PositionValidationError) as excinfo:
+            resolve_target_book("tf", None, [], "")
+        assert excinfo.value.code == "strategy_has_no_book"
+
+    def test_a_requested_book_matches_the_stored_spelling_without_case(self):
+        # The row says macro_book; the client, normalised, says MACRO_BOOK.
+        # The write must go to the row that exists, spelled as it exists.
+        assert resolve_target_book("tf", "MACRO_BOOK", ["CONSERVATIVE_PORTFOLIO", "macro_book"], "CONSERVATIVE_PORTFOLIO") == "macro_book"
+
+    def test_a_requested_book_that_matches_nothing_is_still_refused(self):
+        with pytest.raises(PositionValidationError) as excinfo:
+            resolve_target_book("tf", "GROWTH", ["CONSERVATIVE_PORTFOLIO"], "CONSERVATIVE_PORTFOLIO")
+        assert excinfo.value.code == "not_a_member_of_book"
+
+
+class TestEmptyEnvelope:
+    def test_a_published_envelope_with_no_limits_counts_as_checked(self):
+        # {} is a reachable envelope that finds nothing to breach. Only None
+        # (table missing, or no row) means the check did not run.
+        verdict = evaluate_risk({}, [], {"symbol": "ES", "quantity": 1, "average_price": 1.0})
+        assert verdict["evaluated"] is True
+        assert verdict["passed"] is True
+        assert verdict["breaches"] == []
+
+    def test_no_envelope_at_all_is_recorded_as_not_checked(self):
+        verdict = evaluate_risk(None, [], {"symbol": "ES", "quantity": 1, "average_price": 1.0})
+        assert verdict["evaluated"] is False
