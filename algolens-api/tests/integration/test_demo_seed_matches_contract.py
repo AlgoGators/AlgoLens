@@ -79,15 +79,15 @@ def seeded(monkeypatch):
         # The seed builds the schema itself, so this only has to make sure the
         # schema it is about to replace is one this suite may destroy.
         refuse_to_clobber_a_real_schema(cur)
-        cur.execute("DROP SCHEMA IF EXISTS trading CASCADE")
-        cur.execute("DROP SCHEMA IF EXISTS auth CASCADE")
+        for schema in ("trading", "auth", "futures_data", "metadata"):
+            cur.execute(f"DROP SCHEMA IF EXISTS {schema} CASCADE")
         cur.execute(_seed_body())
         cur.execute(BOOKS_TABLES)
         cur.execute("COMMENT ON SCHEMA trading IS %s", (OWNERSHIP_MARK,))
     yield conn
     with conn.cursor() as cur:
-        cur.execute("DROP SCHEMA IF EXISTS trading CASCADE")
-        cur.execute("DROP SCHEMA IF EXISTS auth CASCADE")
+        for schema in ("trading", "auth", "futures_data", "metadata"):
+            cur.execute(f"DROP SCHEMA IF EXISTS {schema} CASCADE")
     conn.close()
 
 

@@ -119,6 +119,80 @@ CREATE TABLE trading.live_results (
     cash_available          NUMERIC
 );
 
+-- ---------------------------------------------------------------------------
+-- Market data, owned by data-ngin.
+--
+-- futures_data.ohlcv_1d is where the price pipeline writes daily bars, and
+-- metadata.contract_metadata is where contract sizes live. AlgoLens reads both
+-- with the same queries trade-ngin uses. Without them the position view has no
+-- market price and no contract size, and says so rather than falling back to
+-- the entry price -- which is what it used to do under a column labelled
+-- "Market Price".
+--
+-- Symbols carry the continuous-contract suffix (ES.v.0) exactly as data-ngin
+-- writes them and trading.positions stores them.
+-- ---------------------------------------------------------------------------
+CREATE SCHEMA IF NOT EXISTS futures_data;
+CREATE SCHEMA IF NOT EXISTS metadata;
+
+CREATE TABLE futures_data.ohlcv_1d (
+    time   TIMESTAMPTZ      NOT NULL,
+    symbol TEXT             NOT NULL,
+    open   DOUBLE PRECISION NOT NULL,
+    high   DOUBLE PRECISION NOT NULL,
+    low    DOUBLE PRECISION NOT NULL,
+    close  DOUBLE PRECISION NOT NULL,
+    volume BIGINT           NOT NULL,
+    PRIMARY KEY (time, symbol)
+);
+
+-- Quoted, mixed-case column names, because that is how the table is really
+-- spelled: trade-ngin's InstrumentRegistry reads "Contract Size" keyed on
+-- "Databento Symbol".
+CREATE TABLE metadata.contract_metadata (
+    "Databento Symbol" TEXT PRIMARY KEY,
+    "IB Symbol"        TEXT,
+    "Name"             TEXT,
+    "Asset Type"       TEXT,
+    "Exchange"         TEXT,
+    "Contract Size"    DOUBLE PRECISION,
+    "Tick Size"        TEXT
+);
+
+-- Contract sizes as published by the exchanges, matching the fallback table in
+-- trade-ngin (src/core/email_sender.cpp).
+INSERT INTO metadata.contract_metadata
+  ("Databento Symbol", "IB Symbol", "Name", "Asset Type", "Exchange", "Contract Size")
+VALUES
+  ('ES','ES','E-mini S&P 500','FUTURE','CME',50),
+  ('NQ','NQ','E-mini Nasdaq 100','FUTURE','CME',20),
+  ('RTY','RTY','E-mini Russell 2000','FUTURE','CME',50),
+  ('CL','CL','Crude Oil','FUTURE','NYMEX',1000),
+  ('GC','GC','Gold','FUTURE','COMEX',100),
+  ('SI','SI','Silver','FUTURE','COMEX',5000),
+  ('NG','NG','Natural Gas','FUTURE','NYMEX',10000),
+  ('ZN','ZN','10-Year T-Note','FUTURE','CBOT',100000),
+  ('ZB','ZB','30-Year T-Bond','FUTURE','CBOT',100000),
+  ('ZS','ZS','Soybeans','FUTURE','CBOT',5000),
+  ('6E','6E','Euro FX','FUTURE','CME',125000);
+
+-- 30 days of daily bars for the symbols the demo holds.
+INSERT INTO futures_data.ohlcv_1d (time, symbol, open, high, low, close, volume)
+SELECT (CURRENT_DATE - d)::timestamptz,
+       m.sym,
+       m.px * (1 + 0.002 * sin(d / 3.0)),
+       m.px * (1 + 0.006 * sin(d / 3.0)),
+       m.px * (1 - 0.006 * sin(d / 3.0)),
+       m.px * (1 + 0.004 * sin(d / 4.0)),
+       100000 + d * 37
+FROM generate_series(0, 29) d
+CROSS JOIN (VALUES
+    ('ES.v.0', 5310.75), ('NQ.v.0', 18512.25), ('CL.v.0', 79.10),
+    ('GC.v.0', 2437.60), ('ZN.v.0', 112.35), ('6E.v.0', 1.0915),
+    ('ZS.v.0', 1051.50), ('RTY.v.0', 2298.40), ('NG.v.0', 2.958),
+    ('ZB.v.0', 119.20), ('SI.v.0', 31.85)
+) AS m(sym, px);
+
 -- From trade-ngin migration 004, constraints included. The first version of
 -- this seed left every column nullable and untyped, which meant a write that
 -- production would refuse (a NULL before_state, a blank reason, a non-numeric
@@ -186,15 +260,15 @@ INSERT INTO trading.positions
   (strategy_id, strategy_name, portfolio_id, portfolio_type, symbol, quantity, average_price,
    daily_unrealized_pnl, daily_realized_pnl, date, last_update, updated_at)
 VALUES
-  ('LIVE_TREND_FOLLOWING','Trend Following','CONSERVATIVE_PORTFOLIO','qt','ES',  12, 5280.25,  4210.00,  980.00, CURRENT_DATE, now(), now()),
-  ('LIVE_TREND_FOLLOWING','Trend Following','CONSERVATIVE_PORTFOLIO','qt','NQ',   5,18420.50,  2380.00, -410.00, CURRENT_DATE, now(), now()),
-  ('LIVE_TREND_FOLLOWING','Trend Following','CONSERVATIVE_PORTFOLIO','qt','CL', -18,   78.40, -1150.00,  260.00, CURRENT_DATE, now(), now()),
-  ('LIVE_TREND_FOLLOWING','Trend Following','CONSERVATIVE_PORTFOLIO','qt','GC',   7, 2418.90,   890.00,  120.00, CURRENT_DATE, now(), now()),
-  ('LIVE_CARRY','Carry','CONSERVATIVE_PORTFOLIO','qt','ZN',  40,  111.85,  1420.00,  310.00, CURRENT_DATE, now(), now()),
-  ('LIVE_CARRY','Carry','CONSERVATIVE_PORTFOLIO','qt','6E', -22,    1.087, -640.00,   85.00, CURRENT_DATE, now(), now()),
-  ('LIVE_CARRY','Carry','CONSERVATIVE_PORTFOLIO','qt','ZS',  15, 1042.25,   510.00,  -70.00, CURRENT_DATE, now(), now()),
-  ('LIVE_BREAKOUT','Breakout','AGGRESSIVE_PORTFOLIO','qt','RTY', 9, 2285.60, 1980.00, 440.00, CURRENT_DATE, now(), now()),
-  ('LIVE_BREAKOUT','Breakout','AGGRESSIVE_PORTFOLIO','qt','NG', -30,    2.914, -820.00, 150.00, CURRENT_DATE, now(), now());
+  ('LIVE_TREND_FOLLOWING','Trend Following','CONSERVATIVE_PORTFOLIO','qt','ES.v.0',  12, 5280.25,  4210.00,  980.00, CURRENT_DATE, now(), now()),
+  ('LIVE_TREND_FOLLOWING','Trend Following','CONSERVATIVE_PORTFOLIO','qt','NQ.v.0',   5,18420.50,  2380.00, -410.00, CURRENT_DATE, now(), now()),
+  ('LIVE_TREND_FOLLOWING','Trend Following','CONSERVATIVE_PORTFOLIO','qt','CL.v.0', -18,   78.40, -1150.00,  260.00, CURRENT_DATE, now(), now()),
+  ('LIVE_TREND_FOLLOWING','Trend Following','CONSERVATIVE_PORTFOLIO','qt','GC.v.0',   7, 2418.90,   890.00,  120.00, CURRENT_DATE, now(), now()),
+  ('LIVE_CARRY','Carry','CONSERVATIVE_PORTFOLIO','qt','ZN.v.0',  40,  111.85,  1420.00,  310.00, CURRENT_DATE, now(), now()),
+  ('LIVE_CARRY','Carry','CONSERVATIVE_PORTFOLIO','qt','6E.v.0', -22,    1.087, -640.00,   85.00, CURRENT_DATE, now(), now()),
+  ('LIVE_CARRY','Carry','CONSERVATIVE_PORTFOLIO','qt','ZS.v.0',  15, 1042.25,   510.00,  -70.00, CURRENT_DATE, now(), now()),
+  ('LIVE_BREAKOUT','Breakout','AGGRESSIVE_PORTFOLIO','qt','RTY.v.0', 9, 2285.60, 1980.00, 440.00, CURRENT_DATE, now(), now()),
+  ('LIVE_BREAKOUT','Breakout','AGGRESSIVE_PORTFOLIO','qt','NG.v.0', -30,    2.914, -820.00, 150.00, CURRENT_DATE, now(), now());
 
 -- Yesterday's snapshot, so the "finalized positions" panel has something
 INSERT INTO trading.positions
@@ -229,13 +303,25 @@ VALUES
 
 -- Risk envelopes, so the gate actually gates. ES is capped low on purpose:
 -- the demo book already sits near it, so a small increase trips a breach.
+-- Leverage here is NOTIONAL leverage on futures, where gross exposure is many
+-- times equity by design, so the limits are set well above 1x. The per-symbol
+-- contract cap is the one tuned to trip in the demo.
+-- The shape the engine actually publishes, per trade-ngin's store_risk_limits:
+-- per-symbol caps in CONTRACTS, and leverage ratios. It deliberately does NOT
+-- publish max_gross_notional or max_position_count, because it does not enforce
+-- them. This seed used to invent exactly those two keys plus a
+-- max_symbol_notional, which made a gate that checks keys the engine never
+-- writes look like it was working.
 INSERT INTO trading.risk_limits (strategy_id, portfolio_id, limits) VALUES
   ('LIVE_TREND_FOLLOWING','CONSERVATIVE_PORTFOLIO',
-   '{"max_gross_notional": 1200000, "max_position_count": 12, "max_symbol_notional": {"ES": 70000, "NQ": 120000}}'::jsonb),
+   '{"max_symbol_position_contracts": {"ES": 10, "NQ": 8},
+     "max_gross_leverage": 20.0, "max_net_leverage": 20.0}'::jsonb),
   ('LIVE_CARRY','CONSERVATIVE_PORTFOLIO',
-   '{"max_gross_notional": 500000, "max_position_count": 10}'::jsonb),
+   '{"max_symbol_position_contracts": {"ZN": 50},
+     "max_gross_leverage": 20.0, "max_net_leverage": 20.0}'::jsonb),
   ('LIVE_BREAKOUT','AGGRESSIVE_PORTFOLIO',
-   '{"max_gross_notional": 900000, "max_position_count": 8}'::jsonb);
+   '{"max_symbol_position_contracts": {"RTY": 12, "NG": 40},
+     "max_gross_leverage": 25.0, "max_net_leverage": 25.0}'::jsonb);
 
 -- admin login (werkzeug scrypt hash of 'admin')
 INSERT INTO auth.users (email, password_hash, first_name, last_name, role)

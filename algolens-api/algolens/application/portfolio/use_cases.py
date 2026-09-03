@@ -39,6 +39,7 @@ from algolens.domain.portfolio.calculations import (
     transform_positions,
 )
 from algolens.domain.portfolio.incubation import compute_incubation_window
+from algolens.domain.portfolio.instruments import base_symbol, notional
 from algolens.domain.portfolio.position_edit import (
     resolve_target_book,
     with_known_price,
@@ -69,7 +70,10 @@ class StrategyNotFound(NotFoundError):
 
 
 def build_strategy_detail(
-    cfg: Mapping[str, Any], rows: PortfolioDetailRows
+    cfg: Mapping[str, Any],
+    rows: PortfolioDetailRows,
+    prices: Mapping[str, float] | None = None,
+    multipliers: Mapping[str, float] | None = None,
 ) -> dict[str, Any] | None:
     if not rows.latest:
         return None
@@ -85,7 +89,9 @@ def build_strategy_detail(
         stream: build_historical_data(stream_rows)
         for stream, stream_rows in rows.equity_by_stream.items()
     }
-    transformed_positions = transform_positions(rows.positions, current_value)
+    transformed_positions = transform_positions(
+        rows.positions, current_value, prices, multipliers
+    )
     stats = compute_return_stats(historical_data)
     transformed_executions = transform_executions(rows.executions)
     transformed_finalized = transform_finalized(rows.yesterday_positions, rows.positions)
@@ -232,9 +238,37 @@ def _require_mock_capital(mock_capital: float) -> float:
 
 
 class GetStrategyDetail:
-    def __init__(self, registry: StrategyRegistryPort, reader: PortfolioReaderPort):
+    def __init__(
+        self,
+        registry: StrategyRegistryPort,
+        reader: PortfolioReaderPort,
+        market_data=None,
+    ):
         self.registry = registry
         self.reader = reader
+        # Optional so every existing caller and test keeps working. Without it
+        # prices and contract sizes are unknown, and the view says so rather
+        # than inventing them.
+        self.market_data = market_data
+
+    def _market_data(self, positions):
+        """Latest prices and contract sizes for the symbols on this book."""
+        if self.market_data is None:
+            return {}, {}
+        symbols = [p["symbol"] for p in positions if p.get("symbol")]
+        if not symbols:
+            return {}, {}
+        try:
+            prices = self.market_data.latest_prices(symbols)
+            multipliers = self.market_data.contract_multipliers(
+                [base_symbol(s) for s in symbols]
+            )
+            return prices, multipliers
+        except Exception as exc:
+            # Market data is a read of somebody else's pipeline. It failing must
+            # not take down the position view; the view degrades to unknown.
+            logger.error("[MARKET_DATA] lookup failed: %s", exc, exc_info=True)
+            return {}, {}
 
     def execute(
         self, strategy_id: str, portfolio_id: Any = None
@@ -273,7 +307,8 @@ class GetStrategyDetail:
             target = found
 
         rows = self.reader.fetch_detail_rows(cfg["strategy_type"], target)
-        detail = build_strategy_detail(cfg, rows)
+        prices, multipliers = self._market_data(rows.positions)
+        detail = build_strategy_detail(cfg, rows, prices, multipliers)
         if detail is None:
             # A strategy freshly added to a book has no engine output for that
             # pairing yet. That is not the same as the strategy having no data
@@ -391,9 +426,58 @@ class UpsertQtPosition:
     that a breach requires an explicit acknowledgement rather than blocking.
     """
 
-    def __init__(self, registry: StrategyRegistryPort, reader: PortfolioReaderPort):
+    def __init__(self, registry: StrategyRegistryPort, reader: PortfolioReaderPort, market_data=None):
         self.registry = registry
         self.reader = reader
+        # Optional: without it prices are unknown and the gate says so.
+        self.market_data = market_data
+
+    def _price_for_risk(self, book, proposal):
+        """The book and the proposed row, each carrying a real exposure.
+
+        A row whose price or contract size is unknown keeps notional None, and
+        evaluate_risk refuses to run a leverage check on a partial sum rather
+        than comparing a smaller number against the same limit.
+        """
+        if self.market_data is None:
+            return book, proposal
+        symbols = [p["symbol"] for p in book if p.get("symbol")]
+        symbols.append(proposal["symbol"])
+        try:
+            prices = self.market_data.latest_prices(symbols)
+            multipliers = self.market_data.contract_multipliers(
+                [base_symbol(s) for s in symbols]
+            )
+        except Exception as exc:
+            logger.error("[POSITIONS] Market data lookup failed: %s", exc, exc_info=True)
+            return book, proposal
+
+        def priced(row):
+            symbol = row["symbol"]
+            price = prices.get(symbol) or prices.get(base_symbol(symbol))
+            return {
+                **row,
+                "notional": notional(
+                    row.get("quantity"), price, multipliers.get(base_symbol(symbol))
+                ),
+            }
+
+        return [priced(p) for p in book], priced(proposal)
+
+    def _portfolio_value(self, strategy_type, portfolio_id):
+        """The book's value, needed to turn exposure into leverage."""
+        try:
+            row = self.reader.fetch_summary_row(strategy_type, portfolio_id)
+        except Exception as exc:
+            logger.error("[POSITIONS] Portfolio value read failed: %s", exc, exc_info=True)
+            return None
+        if not row:
+            return None
+        value = row.get("current_portfolio_value") if hasattr(row, "get") else None
+        try:
+            return float(value) if value is not None else None
+        except (TypeError, ValueError):
+            return None
 
     def execute(
         self,
@@ -431,10 +515,20 @@ class UpsertQtPosition:
         envelope = self.reader.fetch_risk_envelope(strategy_type, portfolio_id)
         book = self.reader.fetch_qt_book(strategy_type, portfolio_id)
 
+        # Price the book at the market, so the gate compares exposures the same
+        # way trade-ngin does: quantity x price x contract size. Without this
+        # every leverage limit the engine publishes is uncheckable, and the
+        # verdict would record "not checked" for the limits that matter most.
+        proposal = with_known_price(book, normalized)
+        priced_book, priced_proposal = self._price_for_risk(book, proposal)
+        portfolio_value = self._portfolio_value(strategy_type, portfolio_id)
+
         # The verdict describes the book at gate-evaluation time, not at commit
         # time. That is acceptable because the gate is advisory by design: a
         # breach never blocks, it only requires acknowledgement.
-        verdict = evaluate_risk(envelope, book, with_known_price(book, normalized))
+        verdict = evaluate_risk(
+            envelope, priced_book, priced_proposal, portfolio_value
+        )
 
         if not verdict["passed"] and not acknowledge_risk:
             raise RiskAcknowledgementRequired(verdict)

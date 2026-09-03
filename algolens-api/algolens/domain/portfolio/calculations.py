@@ -3,6 +3,8 @@
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+from algolens.domain.portfolio.instruments import base_symbol, notional
+
 
 def _get(row: Any, key: str, default: Any = None) -> Any:
     if isinstance(row, Mapping):
@@ -24,32 +26,67 @@ def build_historical_data(equity_curve: Sequence[Any]) -> list[dict[str, Any]]:
     ]
 
 
-def transform_positions(positions: Sequence[Any], current_value: float) -> list[dict[str, Any]]:
+def transform_positions(
+    positions: Sequence[Any],
+    current_value: float,
+    prices: Mapping[str, float] | None = None,
+    multipliers: Mapping[str, float] | None = None,
+) -> list[dict[str, Any]]:
+    """One row per position, priced at the market.
+
+    ``prices`` is the latest close per symbol from the market data pipeline and
+    ``multipliers`` the contract size per root symbol. Both may be missing
+    entries, and a missing entry produces an explicit unknown rather than a
+    substitute:
+
+    * ``marketPrice`` used to be the average entry price under a column
+      labelled "Market Price". It is now the market price, or None.
+    * ``notional`` used to be ``quantity x entry price``, omitting the contract
+      size, which understated every futures exposure by the size of the
+      contract. It is now ``quantity x price x contract size``, or None.
+
+    ``costBasis`` remains the average entry price, which is what it always was.
+    """
+    prices = prices or {}
+    multipliers = multipliers or {}
     transformed = []
     for pos in positions:
         quantity = float(_get(pos, "quantity"))
-        # A NULL price must not take the whole detail view down. Treated as 0.0
-        # for the notional maths and flagged, so the row still renders and the
-        # UI can say the price is unknown rather than showing a fabricated one.
         raw_price = _get(pos, "average_price")
-        average_price = float(raw_price) if raw_price is not None else 0.0
-        notional = abs(quantity * average_price)
+        average_price = float(raw_price) if raw_price is not None else None
+
+        symbol = _get(pos, "symbol")
+        root = base_symbol(symbol)
+        market_price = prices.get(symbol)
+        if market_price is None:
+            market_price = prices.get(root)
+        multiplier = multipliers.get(root)
+
+        exposure = notional(quantity, market_price, multiplier)
         transformed.append(
             {
-                "symbol": _get(pos, "symbol"),
-                "name": _get(pos, "symbol").replace(".v.0", ""),
+                "symbol": symbol,
+                "name": root,
                 "shares": quantity,
                 "quantity": quantity,
                 "costBasis": average_price,
-                "priceUnknown": raw_price is None,
-                "currentValue": notional,
-                "marketPrice": average_price,
-                "notional": notional,
-                "percentOfTotal": (notional / current_value * 100) if current_value > 0 else 0,
+                "priceUnknown": average_price is None,
+                # Named for what they are. None means "not known", and every
+                # consumer renders that as unknown rather than as zero.
+                "marketPrice": market_price,
+                "marketPriceUnknown": market_price is None,
+                "contractMultiplier": multiplier,
+                "multiplierUnknown": multiplier is None,
+                "notional": exposure,
+                "currentValue": exposure,
+                "percentOfTotal": (
+                    (exposure / current_value * 100)
+                    if exposure is not None and current_value > 0
+                    else None
+                ),
             }
         )
     return transformed
-
 
 def compute_return_stats(historical_data: Sequence[Mapping[str, Any]]) -> dict[str, float]:
     """Best/worst day, drawdown, win rate, and win/loss aggregates."""

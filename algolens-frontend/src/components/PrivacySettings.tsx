@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { ArrowLeft, ChevronRight, Shield, Lock, Eye, Fingerprint, Smartphone, Key } from 'lucide-react';
 import { useTheme } from '../adapters/react/ThemeContext';
 
@@ -8,25 +8,15 @@ interface PrivacySettingsProps {
 
 export function PrivacySettings({ onBack }: PrivacySettingsProps) {
   const { theme } = useTheme();
-  const [twoFactorEnabled, setTwoFactorEnabled] = useState(true);
-  const [biometricEnabled, setBiometricEnabled] = useState(false);
-  const [emailNotifications, setEmailNotifications] = useState(true);
-  const [pushNotifications, setPushNotifications] = useState(true);
+  // These four used to be component state seeded with plausible defaults, and
+  // Two-Factor Authentication was seeded ON for every account. Nothing read the
+  // account's real setting and nothing saved a change, so the screen told every
+  // member that a security control was active when no such control exists, and
+  // a toggle they flipped was forgotten on unmount.
+  //
+  // There is no endpoint behind any of these. Until there is, the controls are
+  // shown as unavailable rather than shown as on.
 
-  const Toggle = ({ enabled, onChange }: { enabled: boolean; onChange: () => void }) => (
-    <button
-      onClick={onChange}
-      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-        enabled ? 'bg-orange-500' : theme === 'dark' ? 'bg-gray-700' : 'bg-gray-300'
-      }`}
-    >
-      <span
-        className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-          enabled ? 'translate-x-6' : 'translate-x-1'
-        }`}
-      />
-    </button>
-  );
 
   return (
     <div className="h-full flex flex-col">
@@ -77,7 +67,12 @@ export function PrivacySettings({ onBack }: PrivacySettingsProps) {
                   </div>
                 </div>
               </div>
-              <Toggle enabled={twoFactorEnabled} onChange={() => setTwoFactorEnabled(!twoFactorEnabled)} />
+              <span
+                className={`text-sm ${theme === 'dark' ? 'text-gray-500' : 'text-gray-400'}`}
+                title="This setting is not connected to an account service yet"
+              >
+                not configured
+              </span>
             </div>
 
             <div
@@ -100,7 +95,12 @@ export function PrivacySettings({ onBack }: PrivacySettingsProps) {
                   </div>
                 </div>
               </div>
-              <Toggle enabled={biometricEnabled} onChange={() => setBiometricEnabled(!biometricEnabled)} />
+              <span
+                className={`text-sm ${theme === 'dark' ? 'text-gray-500' : 'text-gray-400'}`}
+                title="This setting is not connected to an account service yet"
+              >
+                not configured
+              </span>
             </div>
 
             <button
@@ -262,7 +262,12 @@ export function PrivacySettings({ onBack }: PrivacySettingsProps) {
                   Receive updates via email
                 </div>
               </div>
-              <Toggle enabled={emailNotifications} onChange={() => setEmailNotifications(!emailNotifications)} />
+              <span
+                className={`text-sm ${theme === 'dark' ? 'text-gray-500' : 'text-gray-400'}`}
+                title="This setting is not connected to an account service yet"
+              >
+                not configured
+              </span>
             </div>
 
             <div
@@ -280,7 +285,12 @@ export function PrivacySettings({ onBack }: PrivacySettingsProps) {
                   Receive alerts on your device
                 </div>
               </div>
-              <Toggle enabled={pushNotifications} onChange={() => setPushNotifications(!pushNotifications)} />
+              <span
+                className={`text-sm ${theme === 'dark' ? 'text-gray-500' : 'text-gray-400'}`}
+                title="This setting is not connected to an account service yet"
+              >
+                not configured
+              </span>
             </div>
 
             <button

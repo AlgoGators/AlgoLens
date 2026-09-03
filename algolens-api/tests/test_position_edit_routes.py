@@ -131,7 +131,7 @@ def test_unknown_strategy_is_not_found(client, monkeypatch):
 
 def test_a_breach_returns_409_then_succeeds_when_acknowledged(client, monkeypatch):
     """The gate is advisory: it forces an explicit acknowledgement, not a block."""
-    reader = FakeReader(envelope={"max_symbol_notional": {"ES": 1.0}})
+    reader = FakeReader(envelope={"max_symbol_position_contracts": {"ES": 1}})
     _patch(monkeypatch, FakeRegistry(), reader)
     csrf = _set_jwt_cookie(client)
 

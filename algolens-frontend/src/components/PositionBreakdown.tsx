@@ -42,14 +42,15 @@ export function PositionBreakdown({
   const canEdit = Boolean(strategyId) && isInternalRole(user?.role);
   const columns = canEdit ? 'grid-cols-6' : 'grid-cols-5';
 
-  // Positions with no known price contribute a placeholder zero, so they are
-  // excluded rather than quietly dragging the total down.
-  const pricedPositions = positions.filter(p => !p.priceUnknown);
+  // Only rows whose exposure could actually be computed contribute to the
+  // total. A row missing a price or a contract size is counted as missing, not
+  // as zero, and the banner below says how many.
+  const pricedPositions = positions.filter(p => p.notional != null);
+  const unpricedCount = positions.length - pricedPositions.length;
   const totalNotional = pricedPositions.reduce(
-    (sum, pos) => sum + (pos.notional || pos.currentValue),
+    (sum, pos) => sum + (pos.notional as number),
     0,
   );
-  const unpricedCount = positions.length - pricedPositions.length;
 
   return (
     <div>
@@ -120,9 +121,17 @@ export function PositionBreakdown({
 
         {/* Positions */}
         {positions.map((position, index) => {
-          const notional = position.notional || position.currentValue;
-          const percentOfTotal = position.percentOfTotal || (notional / totalNotional) * 100;
-          const marketPrice = position.marketPrice || position.currentValue / position.shares;
+          // No derived fallbacks. Each of these is either published or unknown;
+          // computing a stand-in here is how a placeholder becomes a figure
+          // somebody trades on.
+          const notional = position.notional ?? null;
+          // Share of the book's total exposure, which is what the footer
+          // totals to 100%. The API's percentOfTotal is a share of portfolio
+          // VALUE, a different denominator entirely -- using it here printed
+          // 588% under a column header that sums to 100%.
+          const percentOfTotal =
+            notional != null && totalNotional > 0 ? (notional / totalNotional) * 100 : null;
+          const marketPrice = position.marketPrice ?? null;
 
           return (
             <div
@@ -150,17 +159,17 @@ export function PositionBreakdown({
                   of the book all meaningless. Showing $0.00 would state that
                   the position is worthless. */}
               <div className="text-right">
-                {position.priceUnknown
+                {marketPrice == null
                   ? '—'
                   : `$${marketPrice.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
               </div>
               <div className="text-right">
-                {position.priceUnknown
+                {notional == null
                   ? '—'
                   : `$${notional.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
               </div>
               <div className="text-right">
-                {position.priceUnknown ? '—' : `${percentOfTotal.toFixed(2)}%`}
+                {percentOfTotal == null ? '—' : `${percentOfTotal.toFixed(2)}%`}
               </div>
               {canEdit && (
                 <div className="text-right">
@@ -171,7 +180,8 @@ export function PositionBreakdown({
                         symbol: position.symbol,
                         existing: {
                           quantity: position.shares,
-                          average_price: position.marketPrice ?? null,
+                          // The editor edits cost basis, not the market price.
+                          average_price: position.costBasis ?? null,
                         },
                       })
                     }

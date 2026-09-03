@@ -50,7 +50,10 @@ from algolens.application.portfolio.use_cases import (
 )
 from algolens.domain.portfolio.position_edit import AmbiguousBook, PositionValidationError
 from algolens.domain.portfolio.portfolio_assignment import AssignmentValidationError
-from algolens.infrastructure.config.dependencies import create_portfolio_dependencies
+from algolens.infrastructure.config.dependencies import (
+    create_market_data,
+    create_portfolio_dependencies,
+)
 
 portfolio_bp = Blueprint("portfolio", __name__)
 
@@ -164,7 +167,7 @@ def get_strategy(strategy_id):
         # Optional. Omitted means the primary book, which is what every
         # existing caller gets. Named means that book, provided the strategy
         # is in it.
-        strategy = GetStrategyDetail(registry, reader).execute(
+        strategy = GetStrategyDetail(registry, reader, create_market_data()).execute(
             strategy_id, request.args.get("portfolio_id")
         )
         elapsed_ms = (time.perf_counter() - start) * 1000
@@ -392,7 +395,7 @@ def upsert_position():
 
     try:
         registry, reader = _portfolio_dependencies()
-        result = UpsertQtPosition(registry, reader).execute(
+        result = UpsertQtPosition(registry, reader, create_market_data()).execute(
             payload, user_id=user_id, acknowledge_risk=acknowledge
         )
         return jsonify(result), 201

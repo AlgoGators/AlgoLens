@@ -96,8 +96,33 @@ def test_transform_positions_percent_of_total():
     ]
     out = svc._transform_positions(positions, current_value=400)
     assert out[0]["name"] == "ES"  # ".v.0" stripped
-    assert out[0]["notional"] == 200.0
-    assert out[0]["percentOfTotal"] == 50.0
+    # Without a market price and a contract size, exposure is unknown. It used
+    # to be quantity x entry price, which omitted the contract size entirely.
+    assert out[0]["notional"] is None
+    assert out[0]["percentOfTotal"] is None
+
+
+def test_transform_positions_prices_at_the_market_when_it_can():
+    positions = [
+        {
+            "symbol": "ES.v.0",
+            "quantity": 2,
+            "average_price": 100,
+            "daily_unrealized_pnl": 0,
+            "daily_realized_pnl": 0,
+        }
+    ]
+    out = svc._transform_positions(
+        positions,
+        current_value=400,
+        prices={"ES.v.0": 110.0},
+        multipliers={"ES": 50.0},
+    )
+    # 2 x 110 x 50, not 2 x 100. Entry price is cost basis, not exposure.
+    assert out[0]["marketPrice"] == 110.0
+    assert out[0]["contractMultiplier"] == 50.0
+    assert out[0]["notional"] == 11000.0
+    assert out[0]["costBasis"] == 100.0
 
 
 def test_transform_finalized_only_changed_positions():

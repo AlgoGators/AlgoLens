@@ -49,7 +49,10 @@ STRATEGY_NAME = "Integration Trend"
 # The gap between the two is the whole point: a quantity-only edit has to be
 # priced from the existing row to land on the wrong side of this number.
 ES_PRICE = Decimal("5280.25")
-ES_CAP = 70000
+# In CONTRACTS, which is the unit the engine publishes caps in. This used to
+# be a dollar cap under a key trade-ngin never writes, so these tests proved
+# the gate worked against a limit that does not exist in production.
+ES_CAP = 10
 
 
 def _dsn():
@@ -160,7 +163,8 @@ def db(monkeypatch):
         cur.execute(
             "INSERT INTO trading.risk_limits (strategy_id, portfolio_id, limits)"
             " VALUES (%s, %s, %s::jsonb)",
-            (STRATEGY_TYPE, PORTFOLIO_ID, '{"max_symbol_notional": {"ES": %d}}' % ES_CAP),
+            (STRATEGY_TYPE, PORTFOLIO_ID,
+             '{"max_symbol_position_contracts": {"ES": %d}}' % ES_CAP),
         )
     conn.close()
 
@@ -231,9 +235,11 @@ def test_a_quantity_only_edit_is_priced_from_the_book_and_trips_the_cap(db):
     assert verdict["evaluated"] is True
     assert verdict["passed"] is False
     breach = verdict["breaches"][0]
-    assert breach["limit"] == "max_symbol_notional"
-    # 20 * 5280.25, priced from the existing row rather than treated as zero.
-    assert breach["actual"] == pytest.approx(105605.0)
+    assert breach["limit"] == "max_symbol_position_contracts"
+    # 20 contracts against a cap of 10. The unit is contracts, because that is
+    # the unit the engine publishes the cap in.
+    assert breach["actual"] == pytest.approx(20.0)
+    assert breach["limit_value"] == pytest.approx(float(ES_CAP))
 
     # Nothing was written: the gate stopped before the write.
     assert float(_row(db)["quantity"]) == 12.0

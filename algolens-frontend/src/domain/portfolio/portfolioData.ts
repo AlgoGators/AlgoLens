@@ -2,17 +2,30 @@ export interface Position {
   symbol: string;
   name: string;
   shares: number;
-  costBasis: number;
-  currentValue: number;
+  /** Average entry price. Null when the engine has not published one. */
+  costBasis: number | null;
+  /** Exposure at the market, or null when it cannot be computed. */
+  currentValue: number | null;
   quantity?: number;
-  marketPrice?: number;
+  /**
+   * The latest close from the market data pipeline. Null when that pipeline
+   * has no bar for this symbol. It used to be the entry price under a column
+   * labelled "Market Price".
+   */
+  marketPrice?: number | null;
   /**
    * true when the engine has no average_price for this row. Every price and
    * notional derived from it is then a placeholder, not a measurement.
    */
   priceUnknown?: boolean;
-  notional?: number;
-  percentOfTotal?: number;
+  /** true when the market data pipeline has no price for this symbol. */
+  marketPriceUnknown?: boolean;
+  /** Contract size. A futures notional is quantity x price x this. */
+  contractMultiplier?: number | null;
+  /** true when no contract size is on file, so exposure cannot be computed. */
+  multiplierUnknown?: boolean;
+  notional?: number | null;
+  percentOfTotal?: number | null;
 }
 
 export interface Execution {

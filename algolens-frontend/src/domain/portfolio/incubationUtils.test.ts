@@ -70,9 +70,15 @@ describe('incubationUtils', () => {
       expect(formatMockCapital(250000)).toBe('$250,000');
     });
 
-    it('returns $0 for nullish input', () => {
-      expect(formatMockCapital(null)).toBe('$0');
-      expect(formatMockCapital(undefined)).toBe('$0');
+    it('marks a capital figure that was never set as unknown, not as zero', () => {
+      // "$0" reads as "this strategy was allocated nothing", which is a claim.
+      // An unset figure is not a claim, and must not look like one.
+      expect(formatMockCapital(null)).toBe('—');
+      expect(formatMockCapital(undefined)).toBe('—');
+    });
+
+    it('still formats a real zero as a real zero', () => {
+      expect(formatMockCapital(0)).toBe('$0');
     });
   });
 

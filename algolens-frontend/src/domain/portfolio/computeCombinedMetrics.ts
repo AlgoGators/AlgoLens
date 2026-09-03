@@ -241,6 +241,9 @@ export function computeCombinedMetrics(
   const assetValues: { [key: string]: number } = {};
   selected.forEach(strategy => {
     strategy.positions.forEach(pos => {
+      // A position whose exposure could not be computed contributes nothing to
+      // the allocation rather than a zero that would shrink every other slice.
+      if (pos.currentValue == null) return;
       assetValues[pos.symbol] = (assetValues[pos.symbol] || 0) + pos.currentValue;
     });
   });

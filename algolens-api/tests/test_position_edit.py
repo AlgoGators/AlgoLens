@@ -115,36 +115,104 @@ def test_missing_envelope_is_reported_as_not_evaluated_not_as_a_pass():
     assert verdict["breaches"] == []
 
 
-def test_symbol_notional_breach_is_reported():
-    envelope = {"max_symbol_notional": {"ES": 1000.0}}
-    proposed = {"symbol": "ES", "quantity": 10, "average_price": 500.0}
+def test_a_per_symbol_contract_cap_is_the_limit_the_engine_publishes():
+    # trade-ngin publishes max_symbol_position_contracts, in CONTRACTS. This is
+    # the limit that actually exists; the dollar caps below are legacy.
+    envelope = {"max_symbol_position_contracts": {"ES": 10}}
+    proposed = {"symbol": "ES", "quantity": 14, "average_price": 500.0}
     verdict = evaluate_risk(envelope, [], proposed)
     assert verdict["passed"] is False
-    assert verdict["breaches"][0]["limit"] == "max_symbol_notional"
+    assert verdict["breaches"][0]["limit"] == "max_symbol_position_contracts"
+    assert verdict["checked"] == ["max_symbol_position_contracts"]
+
+
+def test_a_contract_cap_is_matched_on_the_root_of_a_rolled_symbol():
+    # The book holds ES.v.0; the limit is filed under ES.
+    envelope = {"max_symbol_position_contracts": {"ES": 10}}
+    proposed = {"symbol": "ES.v.0", "quantity": 14, "average_price": 500.0}
+    assert evaluate_risk(envelope, [], proposed)["passed"] is False
+
+
+def test_a_position_inside_the_contract_cap_passes():
+    envelope = {"max_symbol_position_contracts": {"ES": 10}}
+    proposed = {"symbol": "ES.v.0", "quantity": 8, "average_price": 500.0}
+    verdict = evaluate_risk(envelope, [], proposed)
+    assert verdict["passed"] is True
+    assert verdict["evaluated"] is True
+
+
+def test_a_short_position_is_capped_on_its_size_not_its_sign():
+    envelope = {"max_symbol_position_contracts": {"ES": 10}}
+    proposed = {"symbol": "ES", "quantity": -14, "average_price": 500.0}
+    assert evaluate_risk(envelope, [], proposed)["passed"] is False
+
+
+def test_gross_leverage_is_checked_against_the_value_of_the_book():
+    envelope = {"max_gross_leverage": 2.0}
+    book = [{"symbol": "NQ", "quantity": 1, "notional": 100_000.0}]
+    proposed = {"symbol": "ES", "quantity": 1, "notional": 150_000.0}
+    verdict = evaluate_risk(envelope, book, proposed, portfolio_value=100_000.0)
+    # 250,000 of exposure against a 100,000 book is 2.5x, over the 2.0x limit.
+    assert verdict["passed"] is False
+    assert verdict["breaches"][0]["limit"] == "max_gross_leverage"
+
+
+def test_leverage_is_not_checked_when_an_exposure_is_unknown():
+    # A partial sum compared against the same limit is a quietly weaker gate.
+    envelope = {"max_gross_leverage": 2.0}
+    book = [{"symbol": "NQ", "quantity": 1, "notional": None}]
+    proposed = {"symbol": "ES", "quantity": 1, "notional": 150_000.0}
+    verdict = evaluate_risk(envelope, book, proposed, portfolio_value=100_000.0)
+    assert verdict["evaluated"] is False
+    assert verdict["breaches"] == []
+
+
+def test_leverage_is_not_checked_without_the_value_of_the_book():
+    envelope = {"max_gross_leverage": 2.0}
+    proposed = {"symbol": "ES", "quantity": 1, "notional": 150_000.0}
+    assert evaluate_risk(envelope, [], proposed)["evaluated"] is False
+
+
+def test_an_envelope_of_only_unrecognised_limits_is_not_a_pass():
+    # The failure this whole rewrite is about: the code used to look for keys
+    # the engine never publishes, find none, and record "passed".
+    envelope = {"some_future_limit": 3, "another": {"ES": 1}}
+    verdict = evaluate_risk(envelope, [], {"symbol": "ES", "quantity": 99})
+    assert verdict["evaluated"] is False
+    assert verdict["checked"] == []
+
+
+def test_the_verdict_names_which_limits_were_actually_compared():
+    envelope = {"max_symbol_position_contracts": {"ES": 10}, "max_gross_leverage": 5.0}
+    proposed = {"symbol": "ES", "quantity": 2, "notional": 10_000.0}
+    verdict = evaluate_risk(envelope, [], proposed, portfolio_value=1_000_000.0)
+    assert verdict["checked"] == ["max_gross_leverage", "max_symbol_position_contracts"]
 
 
 def test_the_edited_symbol_replaces_its_row_rather_than_adding_to_it():
     """Adding would double-count and report a breach on almost any edit."""
     envelope = {"max_gross_notional": 6000.0}
-    book = [{"symbol": "ES", "quantity": 10, "average_price": 500.0}]
-    proposed = {"symbol": "ES", "quantity": 1, "average_price": 500.0}
+    book = [{"symbol": "ES", "quantity": 10, "notional": 5000.0}]
+    proposed = {"symbol": "ES", "quantity": 1, "notional": 500.0}
     assert evaluate_risk(envelope, book, proposed)["passed"] is True
 
 
 def test_closing_a_position_removes_it_from_the_projected_book():
     envelope = {"max_position_count": 1}
     book = [
-        {"symbol": "ES", "quantity": 1, "average_price": 1.0},
-        {"symbol": "NQ", "quantity": 1, "average_price": 1.0},
+        {"symbol": "ES", "quantity": 1, "notional": 1.0},
+        {"symbol": "NQ", "quantity": 1, "notional": 1.0},
     ]
-    proposed = {"symbol": "NQ", "quantity": 0, "average_price": 1.0}
+    proposed = {"symbol": "NQ", "quantity": 0, "notional": 1.0}
     assert evaluate_risk(envelope, book, proposed)["passed"] is True
 
 
-def test_unknown_price_contributes_nothing_to_notional():
+def test_a_legacy_dollar_cap_is_not_checked_without_a_real_exposure():
+    # It used to be checked against quantity x entry price, which omits the
+    # contract size and so understated every futures exposure.
     envelope = {"max_gross_notional": 1.0}
-    proposed = {"symbol": "ES", "quantity": 10_000, "average_price": None}
-    assert evaluate_risk(envelope, [], proposed)["passed"] is True
+    proposed = {"symbol": "ES", "quantity": 10_000, "notional": None}
+    assert evaluate_risk(envelope, [], proposed)["evaluated"] is False
 
 
 # --- use case ----------------------------------------------------------------
@@ -202,7 +270,7 @@ def test_a_clean_edit_is_written_with_its_verdict():
 
 
 def test_a_breach_is_refused_until_it_is_acknowledged():
-    reader = _Reader(envelope={"max_symbol_notional": {"ES": 1.0}})
+    reader = _Reader(envelope={"max_symbol_position_contracts": {"ES": 1}})
     with pytest.raises(RiskAcknowledgementRequired) as excinfo:
         UpsertQtPosition(_Registry(_STRATEGY), reader).execute(
             _payload(average_price=500.0), user_id="7"
@@ -212,7 +280,7 @@ def test_a_breach_is_refused_until_it_is_acknowledged():
 
 
 def test_an_acknowledged_breach_is_written_and_recorded_as_an_override():
-    reader = _Reader(envelope={"max_symbol_notional": {"ES": 1.0}})
+    reader = _Reader(envelope={"max_symbol_position_contracts": {"ES": 1}})
     UpsertQtPosition(_Registry(_STRATEGY), reader).execute(
         _payload(average_price=500.0), user_id="7", acknowledge_risk=True
     )
@@ -245,7 +313,7 @@ def test_evaluate_risk_accepts_decimal_rows_from_the_database():
 
     book = [{"symbol": "NQ", "quantity": Decimal("5"), "average_price": Decimal("18420.50")}]
     proposed = {"symbol": "ES", "quantity": 20, "average_price": 5280.25}
-    envelope = {"max_gross_notional": 1000.0}
+    envelope = {"max_symbol_position_contracts": {"ES": 1}}
     verdict = evaluate_risk(envelope, book, proposed)
     assert verdict["evaluated"] is True
     assert verdict["passed"] is False
@@ -262,10 +330,10 @@ def test_a_quantity_only_edit_is_risk_checked_at_the_existing_price():
     priced = with_known_price(book, proposed)
     assert priced["average_price"] == 5280.25
 
-    envelope = {"max_symbol_notional": {"ES": 70000}}
+    envelope = {"max_symbol_position_contracts": {"ES": 10}}
     verdict = evaluate_risk(envelope, book, priced)
     assert verdict["passed"] is False
-    assert verdict["breaches"][0]["limit"] == "max_symbol_notional"
+    assert verdict["breaches"][0]["limit"] == "max_symbol_position_contracts"
 
 
 def test_a_new_symbol_with_no_price_still_cannot_be_priced():
@@ -390,12 +458,11 @@ class TestBookResolutionEdges:
 
 
 class TestEmptyEnvelope:
-    def test_a_published_envelope_with_no_limits_counts_as_checked(self):
-        # {} is a reachable envelope that finds nothing to breach. Only None
-        # (table missing, or no row) means the check did not run.
+    def test_an_envelope_with_no_limits_in_it_compares_nothing(self):
+        # Reachable, but it declares no limit, so nothing was compared. Saying
+        # "passed" here would report zero checks as a clean bill of health.
         verdict = evaluate_risk({}, [], {"symbol": "ES", "quantity": 1, "average_price": 1.0})
-        assert verdict["evaluated"] is True
-        assert verdict["passed"] is True
+        assert verdict["evaluated"] is False
         assert verdict["breaches"] == []
 
     def test_no_envelope_at_all_is_recorded_as_not_checked(self):

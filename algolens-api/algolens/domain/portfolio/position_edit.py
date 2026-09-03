@@ -16,6 +16,7 @@ from numbers import Real
 # Set by the service, never by the caller. See
 # test_portfolio_type_cannot_be_overridden_by_the_caller for why this is not
 # merely defensive.
+from algolens.domain.portfolio.instruments import base_symbol
 from algolens.domain.portfolio.portfolio_assignment import match_book
 
 QT_STREAM = "qt"
@@ -85,6 +86,17 @@ class PositionValidationError(Exception):
         self.code = code
 
 
+def _normalize_symbol(raw):
+    """``es.v.0`` -> ``ES.v.0``. Root upper-cased, roll suffix left alone."""
+    text = str(raw).strip()
+    for marker in (".v.", ".c.", ".n."):
+        index = text.lower().find(marker)
+        if index != -1:
+            # Keep the suffix exactly as the pipeline writes it.
+            return text[:index].upper() + text[index:].lower()
+    return text.upper()
+
+
 def validate_position_payload(payload):
     """Normalize and check a proposed position edit.
 
@@ -108,7 +120,13 @@ def validate_position_payload(payload):
                 f"missing_{field}", f"Missing required field: {field}"
             )
 
-    symbol = str(payload["symbol"]).strip().upper()
+    # Upper-case the root only. Continuous-contract symbols carry a lower-case
+    # roll marker -- data-ngin writes ES.v.0 and trading.positions stores it
+    # verbatim -- so upper-casing the whole string produced ES.V.0, which
+    # matches no existing row. An edit to a held position was therefore read as
+    # opening a new one, and would have written a second row for the same
+    # contract under a symbol the engine never uses.
+    symbol = _normalize_symbol(payload["symbol"])
     if not symbol:
         raise PositionValidationError(
             "empty_symbol", "Field 'symbol' must not be empty"
@@ -253,64 +271,169 @@ def _projected_book(current_book, proposed):
     return projected
 
 
-def evaluate_risk(envelope, current_book, proposed):
-    """Verdict on a single proposed position change."""
+# The limits the engine actually publishes. trade-ngin's own header
+# (postgres_database.hpp, store_risk_limits) states these and states, as
+# deliberate policy, that max_gross_notional and max_position_count are NOT
+# published, because the engine constrains leverage ratios and per-symbol
+# contract counts, not dollar caps.
+#
+# AlgoLens used to check exactly the two keys the engine refuses to publish,
+# plus a max_symbol_notional it never published either. Against a real envelope
+# it would find none of them, report no breaches, and record "passed" -- a
+# green light derived from limits nobody had ever set. It only appeared to work
+# because the demo seed invented the keys the code was looking for.
+ENGINE_LIMIT_KEYS = (
+    "max_symbol_position_contracts",
+    "max_gross_leverage",
+    "max_net_leverage",
+)
+
+# Retained because an envelope published before the engine settled on the above
+# may still carry them, and a limit someone did set should still be honoured.
+LEGACY_LIMIT_KEYS = (
+    "max_symbol_notional",
+    "max_gross_notional",
+    "max_position_count",
+)
+
+
+def _gross_notional(book):
+    """Sum of exposures, or None if any position's exposure is unknown.
+
+    Deliberately all-or-nothing: a leverage check run against a partial sum
+    silently compares a smaller number to the same limit, which is the same
+    class of error as omitting the contract size in the first place.
+    """
+    total = 0.0
+    for position in book:
+        value = position.get("notional")
+        if value is None:
+            return None
+        total += float(value)
+    return total
+
+
+def evaluate_risk(envelope, current_book, proposed, portfolio_value=None):
+    """Verdict on a single proposed position change.
+
+    Checks the limits trade-ngin publishes. Anything it cannot evaluate is
+    reported as not evaluated rather than quietly passed, so the audit trail
+    never shows a check that did not happen as one that did.
+    """
     if envelope is None:
         # Explicitly NOT a pass. An unreachable envelope must be visible in the
         # audit trail as "not checked", never as "checked and fine".
-        #
-        # `is None`, not falsiness: a published envelope with no limits in it
-        # ({}) IS reachable and IS a check, one that finds nothing to breach.
-        # Recording that as "not checked" would misreport a deliberate
-        # no-limits configuration as an outage.
-        return {"evaluated": False, "passed": True, "breaches": []}
+        return {"evaluated": False, "passed": True, "breaches": [], "checked": []}
+
+    known = [k for k in ENGINE_LIMIT_KEYS + LEGACY_LIMIT_KEYS if envelope.get(k) is not None]
+    if not known:
+        # A published envelope carrying only limits this code does not
+        # understand is not a clean bill of health. Saying "passed" here is how
+        # a limit nobody checked becomes a limit everybody trusts.
+        return {"evaluated": False, "passed": True, "breaches": [], "checked": []}
 
     projected = _projected_book(current_book, proposed)
     breaches = []
+    checked = []
 
-    symbol_caps = envelope.get("max_symbol_notional") or {}
-    cap = symbol_caps.get(proposed["symbol"])
+    # -- per-symbol cap, in CONTRACTS. This is what the engine enforces. ------
+    contract_caps = envelope.get("max_symbol_position_contracts") or {}
+    cap = contract_caps.get(proposed["symbol"])
+    if cap is None:
+        cap = contract_caps.get(base_symbol(proposed["symbol"]))
     if cap is not None:
-        actual = _notional(proposed)
-        if actual > cap:
-            breaches.append(
-                {
+        checked.append("max_symbol_position_contracts")
+        actual = abs(float(proposed["quantity"]))
+        if actual > float(cap):
+            breaches.append({
+                "limit": "max_symbol_position_contracts",
+                "limit_value": float(cap),
+                "actual": actual,
+                "message": (
+                    f"{proposed['symbol']} would be {actual:,.0f} contracts, over its "
+                    f"cap of {float(cap):,.0f}"
+                ),
+            })
+
+    # -- leverage, which needs exposure and the value of the book ------------
+    gross = _gross_notional(projected)
+    for key, label in (("max_gross_leverage", "Gross"), ("max_net_leverage", "Net")):
+        limit = envelope.get(key)
+        if limit is None:
+            continue
+        if gross is None or not portfolio_value:
+            # Cannot be computed. Not a pass; the caller is told what was and
+            # was not looked at via "checked".
+            continue
+        checked.append(key)
+        actual = gross / float(portfolio_value)
+        if actual > float(limit):
+            breaches.append({
+                "limit": key,
+                "limit_value": float(limit),
+                "actual": actual,
+                "message": (
+                    f"{label} leverage would be {actual:,.2f}x, over the limit of "
+                    f"{float(limit):,.2f}x"
+                ),
+            })
+
+    # -- legacy dollar caps, honoured only if actually present ---------------
+    symbol_caps = envelope.get("max_symbol_notional") or {}
+    dollar_cap = symbol_caps.get(proposed["symbol"])
+    if dollar_cap is not None:
+        proposed_notional = proposed.get("notional")
+        if proposed_notional is not None:
+            checked.append("max_symbol_notional")
+            if float(proposed_notional) > float(dollar_cap):
+                breaches.append({
                     "limit": "max_symbol_notional",
-                    "limit_value": cap,
-                    "actual": actual,
+                    "limit_value": float(dollar_cap),
+                    "actual": float(proposed_notional),
                     "message": (
-                        f"{proposed['symbol']} notional {actual:,.0f} exceeds its cap of {cap:,.0f}"
+                        f"{proposed['symbol']} exposure {float(proposed_notional):,.0f} "
+                        f"exceeds its cap of {float(dollar_cap):,.0f}"
                     ),
-                }
-            )
+                })
 
     max_gross = envelope.get("max_gross_notional")
-    if max_gross is not None:
-        actual = sum(_notional(p) for p in projected)
-        if actual > max_gross:
-            breaches.append(
-                {
-                    "limit": "max_gross_notional",
-                    "limit_value": max_gross,
-                    "actual": actual,
-                    "message": (
-                        f"Gross notional {actual:,.0f} exceeds the portfolio cap of "
-                        f"{max_gross:,.0f}"
-                    ),
-                }
-            )
+    if max_gross is not None and gross is not None:
+        checked.append("max_gross_notional")
+        if gross > float(max_gross):
+            breaches.append({
+                "limit": "max_gross_notional",
+                "limit_value": float(max_gross),
+                "actual": gross,
+                "message": (
+                    f"Gross exposure {gross:,.0f} exceeds the portfolio cap of "
+                    f"{float(max_gross):,.0f}"
+                ),
+            })
 
     max_count = envelope.get("max_position_count")
     if max_count is not None:
+        checked.append("max_position_count")
         actual = len(projected)
-        if actual > max_count:
-            breaches.append(
-                {
-                    "limit": "max_position_count",
-                    "limit_value": max_count,
-                    "actual": actual,
-                    "message": (f"{actual} open positions exceeds the limit of {max_count}"),
-                }
-            )
+        if actual > float(max_count):
+            breaches.append({
+                "limit": "max_position_count",
+                "limit_value": float(max_count),
+                "actual": actual,
+                "message": (
+                    f"{actual} open positions exceeds the cap of {float(max_count):,.0f}"
+                ),
+            })
 
-    return {"evaluated": True, "passed": not breaches, "breaches": breaches}
+    if not checked:
+        # Limits were published but none could be evaluated -- an exposure was
+        # unknown, or the book's value was not available.
+        return {"evaluated": False, "passed": True, "breaches": [], "checked": []}
+
+    return {
+        "evaluated": True,
+        "passed": not breaches,
+        "breaches": breaches,
+        # Which limits were actually compared. Written into the audit trail so
+        # "passed" can be read as "passed these", not "passed everything".
+        "checked": sorted(set(checked)),
+    }
