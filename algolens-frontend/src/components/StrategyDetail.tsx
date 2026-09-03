@@ -137,7 +137,7 @@ export function StrategyDetail({ strategy, onBack, onPositionsChanged }: Strateg
             </p>
             <div className={`text-sm mt-2 ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'
               }`}>
-              Managed by {strategy.managers.join(' & ')} • {strategy.lastUpdate}
+              {strategy.lastUpdate}
             </div>
           </div>
         </div>

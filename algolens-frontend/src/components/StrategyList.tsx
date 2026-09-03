@@ -46,8 +46,6 @@ export function StrategyList({ strategies, onSelectStrategy }: StrategyListProps
                 <div className={`text-sm flex items-center gap-3 ${
                   theme === 'dark' ? 'text-gray-500' : 'text-gray-500'
                 }`}>
-                  <span>Managed by {strategy.managers.join(' & ')}</span>
-                  <span>•</span>
                   <span>{strategy.positions.length} Holdings</span>
                 </div>
               </div>
