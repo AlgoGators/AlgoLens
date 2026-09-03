@@ -185,6 +185,15 @@ def build_after_state(before, normalized):
     after["quantity"] = normalized["quantity"]
     if normalized["average_price"] is not None:
         after["average_price"] = normalized["average_price"]
+    elif before is None:
+        # Opening a position with no cost basis. "Leave the price alone" has
+        # nothing to leave alone here, and average_price is NOT NULL in the
+        # schema the engine ships -- so this reached the database as a
+        # constraint violation and a 500. Refuse it where it can be explained.
+        raise PositionValidationError(
+            "price_required_for_new_position",
+            "A new position needs an average price; there is no existing one to keep",
+        )
     return after
 
 

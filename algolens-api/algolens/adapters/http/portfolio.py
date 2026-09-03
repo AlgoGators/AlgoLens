@@ -101,6 +101,10 @@ VALIDATION_MESSAGES = {
     "empty_portfolio_id": "Field 'portfolio_id' must not be empty",
     "not_a_member_of_book": "That strategy does not belong to the book named",
     "strategy_has_no_book": "That strategy is not in any book; nothing to write into",
+    "price_required_for_new_position": (
+        "Enter an average price: this symbol is not in the book yet, so there is "
+        "no existing price to keep"
+    ),
     "price_not_a_number": "Field 'average_price' must be a number",
     "price_negative": "Field 'average_price' must not be negative",
 }

@@ -49,26 +49,39 @@ CREATE TABLE trading.strategy_registry (
 );
 
 CREATE TABLE trading.equity_curve (
-    id             BIGSERIAL PRIMARY KEY,
-    strategy_id    TEXT NOT NULL,
-    portfolio_id   TEXT NOT NULL,
-    portfolio_type TEXT NOT NULL DEFAULT 'qt',
-    timestamp      TIMESTAMPTZ NOT NULL,
-    equity         NUMERIC NOT NULL
+    id             SERIAL           PRIMARY KEY,
+    strategy_id    VARCHAR          NOT NULL,
+    timestamp      TIMESTAMPTZ      NOT NULL,
+    equity         DOUBLE PRECISION NOT NULL,
+    portfolio_id   VARCHAR,
+    portfolio_type TEXT             NOT NULL DEFAULT 'system',
+    CONSTRAINT trading_equity_curve_unique
+        UNIQUE (portfolio_id, strategy_id, "timestamp", portfolio_type)
 );
 
+-- The shape trade-ngin actually ships: the baseline in
+-- trade-ngin/migrations/test_001_migration.sh, plus what migrations 001 and 003
+-- do to it. This used to be a looser invention -- nullable price, no
+-- last_update, no PnL columns -- and the difference silently hid a write path
+-- that could not insert a row into the real thing at all.
 CREATE TABLE trading.positions (
-    id                   BIGSERIAL PRIMARY KEY,
-    strategy_id          TEXT NOT NULL,
-    strategy_name        TEXT,
-    portfolio_id         TEXT NOT NULL,
-    portfolio_type       TEXT NOT NULL DEFAULT 'qt',
-    symbol               TEXT NOT NULL,
-    quantity             NUMERIC NOT NULL,
-    average_price        NUMERIC,
-    daily_unrealized_pnl NUMERIC DEFAULT 0,
-    daily_realized_pnl   NUMERIC DEFAULT 0,
-    updated_at           TIMESTAMPTZ NOT NULL DEFAULT now()
+    symbol               VARCHAR     NOT NULL,
+    quantity             NUMERIC     NOT NULL,
+    average_price        NUMERIC     NOT NULL,
+    daily_unrealized_pnl NUMERIC     NOT NULL,
+    daily_realized_pnl   NUMERIC     NOT NULL,
+    last_update          TIMESTAMPTZ NOT NULL,
+    updated_at           TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    strategy_id          VARCHAR     NOT NULL,
+    strategy_name        VARCHAR     NOT NULL,
+    date                 DATE        NOT NULL,
+    portfolio_id         VARCHAR     NOT NULL,
+    portfolio_type       TEXT        NOT NULL DEFAULT 'system',
+    CONSTRAINT positions_portfolio_type_check
+        CHECK (portfolio_type IN ('system','qt','benchmark',
+                                  'benchmark_rebench','benchmark_frozen_shadow')),
+    CONSTRAINT positions_pkey
+        PRIMARY KEY (portfolio_id, strategy_id, strategy_name, date, symbol, portfolio_type)
 );
 
 CREATE TABLE trading.executions (
@@ -171,26 +184,27 @@ CROSS JOIN generate_series(0, 89) AS d;
 -- Open positions (qt stream = the real book)
 INSERT INTO trading.positions
   (strategy_id, strategy_name, portfolio_id, portfolio_type, symbol, quantity, average_price,
-   daily_unrealized_pnl, daily_realized_pnl, updated_at)
+   daily_unrealized_pnl, daily_realized_pnl, date, last_update, updated_at)
 VALUES
-  ('LIVE_TREND_FOLLOWING','Trend Following','CONSERVATIVE_PORTFOLIO','qt','ES',  12, 5280.25,  4210.00,  980.00, now()),
-  ('LIVE_TREND_FOLLOWING','Trend Following','CONSERVATIVE_PORTFOLIO','qt','NQ',   5,18420.50,  2380.00, -410.00, now()),
-  ('LIVE_TREND_FOLLOWING','Trend Following','CONSERVATIVE_PORTFOLIO','qt','CL', -18,   78.40, -1150.00,  260.00, now()),
-  ('LIVE_TREND_FOLLOWING','Trend Following','CONSERVATIVE_PORTFOLIO','qt','GC',   7, 2418.90,   890.00,  120.00, now()),
-  ('LIVE_CARRY','Carry','CONSERVATIVE_PORTFOLIO','qt','ZN',  40,  111.85,  1420.00,  310.00, now()),
-  ('LIVE_CARRY','Carry','CONSERVATIVE_PORTFOLIO','qt','6E', -22,    1.087, -640.00,   85.00, now()),
-  ('LIVE_CARRY','Carry','CONSERVATIVE_PORTFOLIO','qt','ZS',  15, 1042.25,   510.00,  -70.00, now()),
-  ('LIVE_BREAKOUT','Breakout','AGGRESSIVE_PORTFOLIO','qt','RTY', 9, 2285.60, 1980.00, 440.00, now()),
-  ('LIVE_BREAKOUT','Breakout','AGGRESSIVE_PORTFOLIO','qt','NG', -30,    2.914, -820.00, 150.00, now());
+  ('LIVE_TREND_FOLLOWING','Trend Following','CONSERVATIVE_PORTFOLIO','qt','ES',  12, 5280.25,  4210.00,  980.00, CURRENT_DATE, now(), now()),
+  ('LIVE_TREND_FOLLOWING','Trend Following','CONSERVATIVE_PORTFOLIO','qt','NQ',   5,18420.50,  2380.00, -410.00, CURRENT_DATE, now(), now()),
+  ('LIVE_TREND_FOLLOWING','Trend Following','CONSERVATIVE_PORTFOLIO','qt','CL', -18,   78.40, -1150.00,  260.00, CURRENT_DATE, now(), now()),
+  ('LIVE_TREND_FOLLOWING','Trend Following','CONSERVATIVE_PORTFOLIO','qt','GC',   7, 2418.90,   890.00,  120.00, CURRENT_DATE, now(), now()),
+  ('LIVE_CARRY','Carry','CONSERVATIVE_PORTFOLIO','qt','ZN',  40,  111.85,  1420.00,  310.00, CURRENT_DATE, now(), now()),
+  ('LIVE_CARRY','Carry','CONSERVATIVE_PORTFOLIO','qt','6E', -22,    1.087, -640.00,   85.00, CURRENT_DATE, now(), now()),
+  ('LIVE_CARRY','Carry','CONSERVATIVE_PORTFOLIO','qt','ZS',  15, 1042.25,   510.00,  -70.00, CURRENT_DATE, now(), now()),
+  ('LIVE_BREAKOUT','Breakout','AGGRESSIVE_PORTFOLIO','qt','RTY', 9, 2285.60, 1980.00, 440.00, CURRENT_DATE, now(), now()),
+  ('LIVE_BREAKOUT','Breakout','AGGRESSIVE_PORTFOLIO','qt','NG', -30,    2.914, -820.00, 150.00, CURRENT_DATE, now(), now());
 
 -- Yesterday's snapshot, so the "finalized positions" panel has something
 INSERT INTO trading.positions
   (strategy_id, strategy_name, portfolio_id, portfolio_type, symbol, quantity, average_price,
-   daily_unrealized_pnl, daily_realized_pnl, updated_at)
+   daily_unrealized_pnl, daily_realized_pnl, date, last_update, updated_at)
 SELECT strategy_id, strategy_name, portfolio_id, portfolio_type, symbol,
        quantity, average_price, daily_unrealized_pnl, daily_realized_pnl,
-       now() - INTERVAL '1 day'
-FROM trading.positions;
+       CURRENT_DATE - 1, now() - INTERVAL '1 day', now() - INTERVAL '1 day'
+FROM trading.positions
+WHERE date = CURRENT_DATE;
 
 INSERT INTO trading.executions
   (strategy_id, portfolio_id, symbol, side, quantity, price, execution_time, commissions_fees)
@@ -234,10 +248,8 @@ VALUES ('admin@admin.com', 'scrypt:32768:8:1$iZQP0LmCyyfY1MEI$975dc2232135c7f701
 
 -- write_qt_position upserts on this exact key. Without the index Postgres
 -- rejects the ON CONFLICT clause outright.
-ALTER TABLE trading.positions ADD COLUMN IF NOT EXISTS date DATE NOT NULL DEFAULT CURRENT_DATE;
-UPDATE trading.positions SET date = updated_at::date;
-CREATE UNIQUE INDEX IF NOT EXISTS positions_book_row_uq
-  ON trading.positions (portfolio_id, strategy_id, strategy_name, date, symbol, portfolio_type);
+-- The primary key above already is the uniqueness the ON CONFLICT clause
+-- targets, so no extra index is needed here any more.
 
 -- Incubation start/promote/retire touch updated_at and the lifecycle log.
 ALTER TABLE trading.strategy_registry ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now();

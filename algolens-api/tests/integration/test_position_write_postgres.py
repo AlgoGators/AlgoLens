@@ -112,18 +112,26 @@ def db(monkeypatch):
                 incubation_started_at TIMESTAMPTZ,
                 updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
             );
+            -- The shape trade-ngin ships (its own test_001_migration.sh
+            -- baseline, plus migrations 001 and 003). The looser invention this
+            -- replaced is what let a write path that cannot insert into the
+            -- real table pass every test in this file.
             CREATE TABLE trading.positions (
-                id BIGSERIAL PRIMARY KEY, strategy_id TEXT NOT NULL,
-                strategy_name TEXT, portfolio_id TEXT NOT NULL,
-                portfolio_type TEXT NOT NULL DEFAULT 'qt',
-                date DATE NOT NULL DEFAULT CURRENT_DATE, symbol TEXT NOT NULL,
-                quantity NUMERIC NOT NULL, average_price NUMERIC,
-                daily_unrealized_pnl NUMERIC DEFAULT 0,
-                daily_realized_pnl NUMERIC DEFAULT 0,
-                updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                symbol VARCHAR NOT NULL, quantity NUMERIC NOT NULL,
+                average_price NUMERIC NOT NULL,
+                daily_unrealized_pnl NUMERIC NOT NULL,
+                daily_realized_pnl NUMERIC NOT NULL,
+                last_update TIMESTAMPTZ NOT NULL,
+                updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+                strategy_id VARCHAR NOT NULL, strategy_name VARCHAR NOT NULL,
+                date DATE NOT NULL, portfolio_id VARCHAR NOT NULL,
+                portfolio_type TEXT NOT NULL DEFAULT 'system',
+                CONSTRAINT positions_portfolio_type_check
+                    CHECK (portfolio_type IN ('system','qt','benchmark',
+                                              'benchmark_rebench','benchmark_frozen_shadow')),
+                CONSTRAINT positions_pkey PRIMARY KEY
+                    (portfolio_id, strategy_id, strategy_name, date, symbol, portfolio_type)
             );
-            CREATE UNIQUE INDEX positions_book_row_uq ON trading.positions
-                (portfolio_id, strategy_id, strategy_name, date, symbol, portfolio_type);
             CREATE TABLE trading.risk_limits (
                 id BIGSERIAL PRIMARY KEY, strategy_id TEXT NOT NULL,
                 portfolio_id TEXT NOT NULL, limits JSONB NOT NULL,
@@ -176,8 +184,9 @@ def db(monkeypatch):
         cur.execute(
             "INSERT INTO trading.positions"
             " (strategy_id, strategy_name, portfolio_id, portfolio_type, symbol,"
-            "  quantity, average_price)"
-            " VALUES (%s, %s, %s, 'qt', 'ES', 12, %s)",
+            "  quantity, average_price, daily_unrealized_pnl, daily_realized_pnl,"
+            "  date, last_update)"
+            " VALUES (%s, %s, %s, 'qt', 'ES', 12, %s, 0, 0, CURRENT_DATE, now())",
             (STRATEGY_TYPE, STRATEGY_NAME, PORTFOLIO_ID, ES_PRICE),
         )
         cur.execute(

@@ -624,8 +624,19 @@ class PostgresPortfolioRepository:
                         """
                         INSERT INTO trading.positions
                             (portfolio_id, strategy_id, strategy_name, date, symbol,
-                             portfolio_type, quantity, average_price, updated_at)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, now())
+                             portfolio_type, quantity, average_price,
+                             daily_unrealized_pnl, daily_realized_pnl,
+                             last_update, updated_at)
+                        -- The three constants are not padding. In the schema
+                        -- trade-ngin actually ships, daily_unrealized_pnl,
+                        -- daily_realized_pnl and last_update are NOT NULL with
+                        -- no default, so omitting them made every manual write
+                        -- fail outright. A position created by hand this second
+                        -- has accrued no PnL, and it was last touched now.
+                        -- On conflict none of the three is overwritten: they
+                        -- belong to the engine, and an edit to quantity is not
+                        -- a claim about PnL.
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 0, 0, now(), now())
                         ON CONFLICT (portfolio_id, strategy_id, strategy_name, date,
                                      symbol, portfolio_type)
                         DO UPDATE SET quantity      = EXCLUDED.quantity,
