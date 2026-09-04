@@ -353,45 +353,131 @@ UPDATE trading.strategy_registry
 -- target annualised volatility per strategy. The shocks are deterministic --
 -- derived from md5 of the day index, not random() -- so the seed produces the
 -- same book every time and the same figures can be checked twice.
+-- ---------------------------------------------------------------------------
+-- The equity curve.
+--
+-- Two things this got wrong, both of which showed up as Sharpe ratios nobody
+-- should believe: 4.67 for Trend Following, 0.05 for Carry, sitting next to
+-- each other on the same screen.
+--
+-- FIRST, the curve ran on CALENDAR days. Ninety consecutive dates, twenty-six
+-- of them Saturdays and Sundays, each carrying a return. Futures markets are
+-- shut then and the engine writes no equity point at all, so a third of the
+-- history was days that never happened. It also made the annualisation wrong
+-- twice over: the drift was scaled per trading day and then applied ninety
+-- times across a span holding only about sixty-four of them, and both
+-- sqrt(252) and the 252/n exponent assume the points ARE trading days.
+--
+-- SECOND, and worse, the shocks were never centred. Ninety draws with a
+-- standard deviation of one leave a sample mean that misses zero by about a
+-- tenth of a standard deviation, and compounded over the window that swamped
+-- the drift it was added to:
+--
+--     Trend Following   seeded +4.9%   realised +18.5%   luck +13.5%
+--     Carry             seeded +3.2%   realised  +0.1%   luck  -3.0%
+--     Breakout          seeded +6.7%   realised +15.8%   luck  +9.1%
+--     Mean Reversion    seeded +3.9%   realised  -6.0%   luck  -9.9%
+--
+-- Every strategy's return was two to three times more dice than drift. Then
+-- annualising a lucky quarter -- raising it to the power 252/n -- turned Trend
+-- Following's +18.5% into +60.8% a year against 13% volatility, and the ratio
+-- of those two is 4.67. Nothing was miscalculated; the number faithfully
+-- reported a coin that had come up heads.
+--
+-- The shocks are now demeaned across the window, so the realised return over
+-- the window IS the seeded drift and the realised Sharpe is the ratio of the
+-- two targets below -- a number chosen on purpose and defensible on sight.
+-- The daily path keeps its noise; only the endpoint is pinned.
+-- ---------------------------------------------------------------------------
 INSERT INTO trading.equity_curve (strategy_id, portfolio_id, portfolio_type, timestamp, equity)
-SELECT strategy_type, portfolio_id, stream,
-       (CURRENT_DATE - (89 - d))::timestamptz,
-       -- Compounded, so the curve is the product of its daily returns.
-       -- Compounded, so the curve is the product of its daily returns. Day 0
-       -- carries no return, so the first point IS the starting equity the
-       -- registry records: otherwise the two disagree, and the return measured
-       -- against the curve differs from the one measured against the registry.
-       initial_equity * exp(sum(ln(1 + CASE WHEN d = 0 THEN 0 ELSE daily_return END))
-                            OVER (PARTITION BY strategy_type, portfolio_id, stream
-                                  ORDER BY d ROWS UNBOUNDED PRECEDING))
-FROM (
-    SELECT r.strategy_type, r.portfolio_id, s.stream, d, r.initial_equity,
-           -- Drift, lower for the benchmark: the spread between them is the
+WITH trading_days AS (
+    -- The last 90 weekdays, oldest first. The engine writes one point per
+    -- trading day, so the demo must too.
+    SELECT day, row_number() OVER (ORDER BY day) - 1 AS i
+    FROM (
+        SELECT d::date AS day
+        FROM generate_series(CURRENT_DATE - 200, CURRENT_DATE, INTERVAL '1 day') AS d
+        WHERE extract(isodow FROM d) <= 5
+        ORDER BY d DESC
+        LIMIT 90
+    ) recent
+),
+params AS (
+    SELECT * FROM (VALUES
+        -- strategy, book, starting equity, target annual return %, target annual vol %
+        --
+        -- The ratio of the last two columns IS the Sharpe ratio the dashboard
+        -- will show, so these are picked to be plausible for systematic
+        -- futures rather than picked independently and left to collide:
+        --   Trend Following 1.12   Carry 0.67   Breakout 0.90
+        --   Mean Reversion -0.67 -- a trial that is not working, which is a
+        --   thing an incubating strategy is allowed to be
+        ('LIVE_TREND_FOLLOWING', 'CONSERVATIVE_PORTFOLIO', 500000.0, 14.0, 12.5),
+        ('LIVE_CARRY',           'CONSERVATIVE_PORTFOLIO', 250000.0,  5.0,  7.5),
+        ('LIVE_BREAKOUT',        'AGGRESSIVE_PORTFOLIO',   300000.0, 19.0, 21.0),
+        ('LIVE_MEAN_REVERSION',  'CONSERVATIVE_PORTFOLIO', 100000.0, -6.0,  9.0)
+    ) AS r(strategy_type, portfolio_id, initial_equity, annual_return, annual_vol)
+),
+raw AS (
+    -- One row per return, so day 0 is excluded: it is the starting equity and
+    -- carries no return. Ninety points give eighty-nine returns.
+    SELECT p.strategy_type, p.portfolio_id, s.stream, t.i, t.day, p.initial_equity,
+           p.annual_vol,
+           -- Drift as a daily LOG return, so compounding it 252 times gives
+           -- back the target exactly. Dividing the simple rate by 252 instead
+           -- compounds to e^r - 1: a 14% target realised as 15.03%.
+           --
+           -- Lower for the benchmark: the spread between them is the
            -- discretionary alpha the attribution chart reports.
-           (CASE WHEN s.stream = 'benchmark' THEN r.annual_return - 4.0
-                 ELSE r.annual_return END) / 100.0 / 252.0
+           ln(1 + (CASE WHEN s.stream = 'benchmark' THEN p.annual_return - 4.0
+                        ELSE p.annual_return END) / 100.0) / 252.0 AS drift,
            -- Shock: three deterministic uniforms summed to approximate a
-           -- normal, scaled to the target annualised volatility.
-           -- Shock. The benchmark gets its own draws, not the same ones: if
-           -- both streams carried identical shocks they would differ by a
-           -- constant every day, tracking error would be zero, and the
-           -- information ratio built on it would divide by dust.
-           + (r.annual_vol / 100.0 / sqrt(252.0)) * 2.0 * (
-                 ((('x' || substr(md5((d * 3 + 1)::text || r.strategy_type || CASE WHEN s.stream = 'benchmark' THEN 'b' ELSE 'q' END), 1, 8))::bit(32)::bigint & 65535) / 65535.0)
-               + ((('x' || substr(md5((d * 3 + 2)::text || r.strategy_type || CASE WHEN s.stream = 'benchmark' THEN 'b' ELSE 'q' END), 1, 8))::bit(32)::bigint & 65535) / 65535.0)
-               + ((('x' || substr(md5((d * 3 + 3)::text || r.strategy_type || CASE WHEN s.stream = 'benchmark' THEN 'b' ELSE 'q' END), 1, 8))::bit(32)::bigint & 65535) / 65535.0)
+           -- normal, scaled to the target annualised volatility. The benchmark
+           -- draws its own, not the same ones: identical shocks would leave
+           -- the two streams differing by a constant, tracking error would be
+           -- zero, and the information ratio built on it would divide by dust.
+           (p.annual_vol / 100.0 / sqrt(252.0)) * 2.0 * (
+                 ((('x' || substr(md5((t.i * 3 + 1)::text || p.strategy_type || CASE WHEN s.stream = 'benchmark' THEN 'b' ELSE 'q' END), 1, 8))::bit(32)::bigint & 65535) / 65535.0)
+               + ((('x' || substr(md5((t.i * 3 + 2)::text || p.strategy_type || CASE WHEN s.stream = 'benchmark' THEN 'b' ELSE 'q' END), 1, 8))::bit(32)::bigint & 65535) / 65535.0)
+               + ((('x' || substr(md5((t.i * 3 + 3)::text || p.strategy_type || CASE WHEN s.stream = 'benchmark' THEN 'b' ELSE 'q' END), 1, 8))::bit(32)::bigint & 65535) / 65535.0)
                - 1.5
-             ) AS daily_return
-    FROM (VALUES
-            -- strategy, book, starting equity, target annual return %, target annual vol %
-            ('LIVE_TREND_FOLLOWING', 'CONSERVATIVE_PORTFOLIO', 500000.0, 14.0, 12.5),
-            ('LIVE_CARRY',           'CONSERVATIVE_PORTFOLIO', 250000.0,  9.0,  7.5),
-            ('LIVE_BREAKOUT',        'AGGRESSIVE_PORTFOLIO',   300000.0, 19.0, 21.0),
-            ('LIVE_MEAN_REVERSION',  'CONSERVATIVE_PORTFOLIO', 100000.0, 11.0,  9.0)
-         ) AS r(strategy_type, portfolio_id, initial_equity, annual_return, annual_vol)
+           ) AS shock
+    FROM params p
     CROSS JOIN (VALUES ('qt'), ('system'), ('benchmark')) AS s(stream)
-    CROSS JOIN generate_series(0, 89) AS d
-) shocked;
+    CROSS JOIN trading_days t
+    WHERE t.i > 0
+),
+centred AS (
+    -- Demeaned, so the shocks cancel exactly across the window and what is
+    -- left is the drift. In log space, so the compounded total is exact.
+    SELECT strategy_type, portfolio_id, stream, i, day, initial_equity,
+           drift
+           -- Standardised, then rescaled to the target. Demeaning alone left
+           -- the realised volatility wherever the draws happened to land --
+           -- Breakout's 21% target came out at 19.79% -- and volatility is
+           -- the denominator of the Sharpe ratio on screen. Both moments are
+           -- now pinned, so the ratio is the one chosen above rather than the
+           -- one the dice produced. The daily path keeps its shape; only its
+           -- mean and spread are calibrated.
+           + ((shock - avg(shock) OVER w)
+              / nullif(stddev_pop(shock) OVER w, 0))
+             * (annual_vol / 100.0 / sqrt(252.0))
+           AS log_return
+    FROM raw
+    WINDOW w AS (PARTITION BY strategy_type, portfolio_id, stream)
+)
+SELECT strategy_type, portfolio_id, stream, day::timestamptz,
+       initial_equity * exp(sum(log_return) OVER (PARTITION BY strategy_type, portfolio_id, stream
+                                                  ORDER BY i ROWS UNBOUNDED PRECEDING))
+FROM centred
+UNION ALL
+-- Day zero: the starting equity itself, so the curve's first point and the
+-- registry's initial_equity are the same number by construction.
+SELECT p.strategy_type, p.portfolio_id, s.stream, t.day::timestamptz, p.initial_equity
+FROM params p
+CROSS JOIN (VALUES ('qt'), ('system'), ('benchmark')) AS s(stream)
+CROSS JOIN trading_days t
+WHERE t.i = 0;
 
 -- Open positions (qt stream = the real book)
 INSERT INTO trading.positions
@@ -556,8 +642,12 @@ costs AS (
 ),
 annualised AS (
     SELECT se.*,
-           (power(se.last_equity / se.first_equity, 252.0 / se.points) - 1) * 100 AS ann_return
+           -- points - 1, because n points are n-1 returns. Annualising over
+           -- the point count stretched the exponent by a ninetieth and left
+           -- the realised return a shade under its target.
+           (power(se.last_equity / se.first_equity, 252.0 / (se.points - 1)) - 1) * 100 AS ann_return
     FROM series se
+    WHERE se.points > 1
 )
 INSERT INTO trading.live_results
   (strategy_id, config, portfolio_id, date,
