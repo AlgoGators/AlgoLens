@@ -2,6 +2,7 @@ import React from 'react';
 import { useTheme } from '../adapters/react/ThemeContext';
 import type { Execution, FinalizedPosition } from '../domain/portfolio/portfolioData';
 import { formatMetric } from '../domain/portfolio/formatMetric';
+import { formatPrice } from '../domain/portfolio/formatPrice';
 
 interface TradingActivityProps {
   executions: Execution[];
@@ -84,7 +85,7 @@ export function TradingActivity({ executions, finalizedPositions }: TradingActiv
               </div>
               <div className="text-right">{execution.quantity}</div>
               <div className="text-right">
-                ${execution.price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                {formatPrice(execution.price)}
               </div>
               <div className="text-right">
                 {execution.notional == null ? '—' : `$${execution.notional.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
@@ -158,12 +159,12 @@ export function TradingActivity({ executions, finalizedPositions }: TradingActiv
               <div>{position.symbol}</div>
               <div className="text-right">{position.quantity.toFixed(2)}</div>
               <div className="text-right">
-                {formatMetric(position.entryPrice, 2, { prefix: '$' })}
+                {position.entryPrice == null ? '\u2014' : formatPrice(position.entryPrice)}
               </div>
               {/* A lot that is gone today exited at a price nothing here
                   records. Unknown, not yesterday's entry price. */}
               <div className="text-right">
-                {formatMetric(position.exitPrice, 2, { prefix: '$' })}
+                {position.exitPrice == null ? '\u2014' : formatPrice(position.exitPrice)}
               </div>
               <div className={`text-right ${
                 position.realizedPnL == null

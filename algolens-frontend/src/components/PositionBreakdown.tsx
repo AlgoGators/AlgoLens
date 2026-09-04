@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { formatPrice } from '../domain/portfolio/formatPrice';
 import { Pencil, Plus } from 'lucide-react';
 import { useTheme } from '../adapters/react/ThemeContext';
 import { useAuth } from '../adapters/react/useAuth';
@@ -161,7 +162,7 @@ export function PositionBreakdown({
               <div className="text-right">
                 {marketPrice == null
                   ? '—'
-                  : `$${marketPrice.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                  : formatPrice(marketPrice)}
               </div>
               <div className="text-right">
                 {notional == null

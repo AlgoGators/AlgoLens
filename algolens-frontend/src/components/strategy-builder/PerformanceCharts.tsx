@@ -1,4 +1,5 @@
 import { LineChart, Line, BarChart, Bar, Cell, XAxis, YAxis, ResponsiveContainer, Tooltip } from 'recharts';
+import { formatAxisDollars } from '../../domain/portfolio/formatPrice';
 import type { CombinedMetrics } from '../../domain/portfolio/computeCombinedMetrics';
 
 interface PerformanceChartsProps {
@@ -29,7 +30,7 @@ export function PerformanceCharts({ metrics, theme }: PerformanceChartsProps) {
             />
             <YAxis
               tick={{ fill: theme === 'dark' ? '#6b7280' : '#9ca3af', fontSize: 10 }}
-              tickFormatter={(value) => `${(value / 1000).toFixed(0)}k`}
+              tickFormatter={formatAxisDollars}
             />
             <Tooltip
               contentStyle={{

@@ -1,5 +1,6 @@
 import { BarChart, Bar, Cell, XAxis, YAxis, ResponsiveContainer, Tooltip } from 'recharts';
 import { formatMetric } from '../../domain/portfolio/formatMetric';
+import { formatAxisDollars } from '../../domain/portfolio/formatPrice';
 import { ChevronUp, ChevronDown } from 'lucide-react';
 import type { CombinedMetrics } from '../../domain/portfolio/computeCombinedMetrics';
 
@@ -128,7 +129,7 @@ export function AdvancedSections({ metrics, theme, expanded, onToggle }: Advance
               <XAxis
                 type="number"
                 tick={{ fill: theme === 'dark' ? '#6b7280' : '#9ca3af', fontSize: 10 }}
-                tickFormatter={(value) => `$${(value / 1000).toFixed(0)}k`}
+                tickFormatter={formatAxisDollars}
               />
               <YAxis
                 dataKey="symbol"

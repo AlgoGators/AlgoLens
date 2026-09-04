@@ -17,6 +17,23 @@ import { PortfolioApiService } from '../infrastructure/api/portfolioApi';
  *
  * Collapsed by default so it does not crowd the fund summary.
  */
+/**
+ * A book's total, built from the figures actually printed on its rows.
+ *
+ * The API's own total is the exact sum and is what the fund weights use. This
+ * is only for display, where every row has already been rounded to whole
+ * dollars and a reader can add the column up.
+ *
+ * Incubating strategies trade mock capital and are excluded here for the same
+ * reason the API excludes them: it is not fund capital.
+ */
+function displayedBookTotal(portfolio: PortfolioSummary): number {
+  return portfolio.strategies.reduce((sum, s) => {
+    if (s.lifecycle === 'incubating' || s.current_value === null) return sum;
+    return sum + Math.round(s.current_value);
+  }, 0);
+}
+
 export function PortfolioGrouping() {
   const { theme } = useTheme();
   const [portfolios, setPortfolios] = useState<PortfolioSummary[] | null>(null);
@@ -93,8 +110,13 @@ export function PortfolioGrouping() {
               </span>
             </div>
             <div className="text-right">
+              {/* Summed from the same rounded figures shown on the rows
+                  below, so the column adds up. Rounding each row and the true
+                  total independently left this header a dollar short of its
+                  own contents: $592,406 + $250,360 under a heading that said
+                  $842,765. */}
               <div className="text-sm tabular-nums">
-                ${portfolio.total_value.toLocaleString('en-US', { maximumFractionDigits: 0 })}
+                ${displayedBookTotal(portfolio).toLocaleString('en-US')}
               </div>
               <div className={`text-xs tabular-nums ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>
                 {weights.has(portfolio.portfolio_id)
