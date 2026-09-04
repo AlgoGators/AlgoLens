@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react';
+import { formatPrice } from '../domain/portfolio/formatPrice';
 import { periodReturn } from '../domain/portfolio/periodReturn';
 import { ArrowLeft, Clock, TrendingDown, TrendingUp } from 'lucide-react';
 import {
@@ -367,12 +368,12 @@ export function IncubationDetail({
                   <div>{position.symbol}</div>
                   <div className="text-right">{position.quantity ?? '\u2014'}</div>
                   <div className="text-right">
+                    {/* Two decimals is equities precision. Natural gas trades
+                        at 2.958 and Euro FX at 1.0915; rounding those to cents
+                        misstates the entry. */}
                     {position.entry_price === null
-                      ? 'N/A'
-                      : `$${position.entry_price.toLocaleString('en-US', {
-                          minimumFractionDigits: 2,
-                          maximumFractionDigits: 2,
-                        })}`}
+                      ? '\u2014'
+                      : formatPrice(position.entry_price)}
                   </div>
                 </div>
               ))}

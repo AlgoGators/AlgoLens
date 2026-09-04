@@ -147,7 +147,7 @@ export function AlphaAttribution({ equityByStream, theme }: Props) {
                     />
                     <YAxis
                         tick={{ fontSize: 11, fill: dark ? '#6b7280' : '#9ca3af' }}
-                        domain={['dataMin - 500', 'dataMax + 500']}
+                        domain={['auto', 'auto']}
                         tickFormatter={money}
                         width={70}
                     />

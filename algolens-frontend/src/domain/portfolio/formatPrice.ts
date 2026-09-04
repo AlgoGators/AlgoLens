@@ -33,3 +33,16 @@ export function formatAxisDollars(value: number): string {
   if (Math.abs(value) >= 1000) return `$${(value / 1000).toFixed(1)}k`;
   return `$${Math.round(value)}`;
 }
+
+/**
+ * A percentage for a chart axis.
+ *
+ * Whole percent is right for a chart spanning tens of points and useless for
+ * one spanning less than a point, where every tick rounds to the same number.
+ */
+export function formatAxisPercent(value: number): string {
+  if (!Number.isFinite(value)) return '';
+  if (Math.abs(value) >= 10) return `${value.toFixed(0)}%`;
+  if (Math.abs(value) >= 1) return `${value.toFixed(1)}%`;
+  return `${value.toFixed(2)}%`;
+}

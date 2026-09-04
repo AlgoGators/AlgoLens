@@ -1,5 +1,5 @@
 import { LineChart, Line, BarChart, Bar, Cell, XAxis, YAxis, ResponsiveContainer, Tooltip } from 'recharts';
-import { formatAxisDollars } from '../../domain/portfolio/formatPrice';
+import { formatAxisDollars, formatAxisPercent } from '../../domain/portfolio/formatPrice';
 import type { CombinedMetrics } from '../../domain/portfolio/computeCombinedMetrics';
 
 interface PerformanceChartsProps {
@@ -69,9 +69,12 @@ export function PerformanceCharts({ metrics, theme }: PerformanceChartsProps) {
               }}
               interval="preserveStartEnd"
             />
+            {/* Whole percent hid the whole axis on a book whose 90-day range
+                is under a point: every tick read "0%". Same fault as the P&L
+                axis that read "$0k $0k $0k". */}
             <YAxis
               tick={{ fill: theme === 'dark' ? '#6b7280' : '#9ca3af', fontSize: 10 }}
-              tickFormatter={(value) => `${value.toFixed(0)}%`}
+              tickFormatter={formatAxisPercent}
             />
             <Tooltip
               contentStyle={{

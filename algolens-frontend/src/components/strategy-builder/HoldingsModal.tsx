@@ -9,6 +9,10 @@ interface HoldingsModalProps {
 }
 
 export function HoldingsModal({ metrics, theme, onClose }: HoldingsModalProps) {
+  // Summed from the rows on screen, so the column adds up.
+  const totalExposure = metrics.holdings.reduce((sum, a) => sum + a.value, 0);
+  const totalWeight = metrics.holdings.reduce((sum, a) => sum + a.percentage, 0);
+
   return (
     <div className="fixed inset-0 z-[100] overflow-hidden">
       <div className={`h-full overflow-y-auto ${theme === 'dark' ? 'bg-black text-white' : 'bg-white text-black'}`}>
@@ -69,10 +73,18 @@ export function HoldingsModal({ metrics, theme, onClose }: HoldingsModalProps) {
             <div className={`grid grid-cols-12 gap-4 p-4 font-semibold ${theme === 'dark' ? 'bg-gray-900 text-white' : 'bg-gray-50 text-black'}`}>
               <div className="col-span-1"></div>
               <div className="col-span-5">Total ({metrics.holdings.length} holdings)</div>
+              {/* The rows above are notional exposure; this used to foot them
+                  with metrics.totalValue, which is portfolio EQUITY -- nine
+                  rows adding to $18.4m under a total of $1.2m. And the weight
+                  was the literal string "100.00%", so it would have claimed a
+                  complete book even with holdings missing. Both are now summed
+                  from the rows. */}
               <div className="col-span-3 text-right tabular-nums">
-                ${metrics.totalValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                ${totalExposure.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </div>
-              <div className="col-span-3 text-right text-orange-500">100.00%</div>
+              <div className="col-span-3 text-right text-orange-500">
+                {totalWeight.toFixed(2)}%
+              </div>
             </div>
           </div>
 
