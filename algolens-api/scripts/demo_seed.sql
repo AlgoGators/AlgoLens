@@ -96,27 +96,93 @@ CREATE TABLE trading.executions (
     commissions_fees NUMERIC DEFAULT 0
 );
 
+-- This table used to be a reconstruction: the columns AlgoLens reads, and
+-- nothing else, guessed at from the reads. It is no longer a guess. The
+-- engine's two writers name every column explicitly, and this DDL is their
+-- union:
+--
+--   trade-ngin/src/data/postgres_database.cpp
+--       store_live_results() -- the fixed INSERT, and the ON CONFLICT target
+--       (portfolio_id, strategy_id, date) that gives the table its real key
+--   trade-ngin/src/data/postgres_database_extensions.cpp
+--       store_live_results_complete() -- builds its column list from the
+--       metric maps the runner passes it
+--   trade-ngin/apps/strategies/live_portfolio_runner.cpp:2930
+--       the metric maps themselves, which is where the column NAMES come from
+--   trade-ngin/src/live/live_data_loader.cpp:167
+--       the engine's own SELECT, which reads them back
+--
+-- Two things this exposes that the reconstruction hid:
+--
+--   strategy_id is a real column and part of the table's uniqueness. AlgoLens
+--   reads config->>'strategy_type' instead and never touches it, so the
+--   reconstruction dropped it entirely -- and with it the constraint that
+--   stops two rows existing for one strategy-book-day.
+--
+--   The engine publishes sharpe_ratio, sortino_ratio, max_drawdown, win_rate,
+--   avg_win, avg_loss, profit_factor, best_day and worst_day. AlgoLens
+--   recomputes all nine from the equity curve. They are seeded here so the two
+--   can be compared instead of only one of them existing.
 CREATE TABLE trading.live_results (
     id                      BIGSERIAL PRIMARY KEY,
+    strategy_id             TEXT,
     config                  JSONB NOT NULL,
     portfolio_id            TEXT NOT NULL,
     date                    DATE NOT NULL,
+    -- Value and return
     current_portfolio_value NUMERIC,
+    total_return            NUMERIC,
     total_annualized_return NUMERIC,
     total_cumulative_return NUMERIC,
-    volatility              NUMERIC,
     daily_return            NUMERIC,
-    gross_leverage          NUMERIC,
+    -- Risk
+    volatility              NUMERIC,
+    downside_deviation      NUMERIC,
+    sharpe_ratio            NUMERIC,
+    sortino_ratio           NUMERIC,
+    max_drawdown            NUMERIC,
+    portfolio_var           NUMERIC,
+    max_correlation         NUMERIC,
+    jump_risk               NUMERIC,
+    risk_scale              NUMERIC,
+    -- Day statistics
+    win_rate                NUMERIC,
+    avg_win                 NUMERIC,
+    avg_loss                NUMERIC,
+    profit_factor           NUMERIC,
+    gross_profit            NUMERIC,
+    gross_loss              NUMERIC,
+    best_day                NUMERIC,
+    worst_day               NUMERIC,
+    winning_days            INTEGER,
+    losing_days             INTEGER,
+    total_days              INTEGER,
+    -- Exposure and leverage
+    gross_notional          NUMERIC,
+    net_notional            NUMERIC,
     net_leverage            NUMERIC,
     portfolio_leverage      NUMERIC,
+    margin_leverage         NUMERIC,
+    active_positions        INTEGER,
+    -- The column the engine abandoned. Kept because it is still there in the
+    -- real database, holding whatever it held the day it stopped being
+    -- written. AlgoLens must not read it in preference to portfolio_leverage.
+    gross_leverage          NUMERIC,
+    -- P&L
+    total_pnl               NUMERIC,
+    total_unrealized_pnl    NUMERIC,
+    total_realized_pnl      NUMERIC,
+    daily_pnl               NUMERIC,
+    daily_realized_pnl      NUMERIC,
+    daily_unrealized_pnl    NUMERIC,
+    -- Costs and margin
+    total_transaction_costs NUMERIC,
+    daily_transaction_costs NUMERIC,
     margin_posted           NUMERIC,
     equity_to_margin_ratio  NUMERIC,
     margin_cushion          NUMERIC,
-    gross_notional          NUMERIC,
-    total_unrealized_pnl    NUMERIC,
-    total_realized_pnl      NUMERIC,
-    total_transaction_costs NUMERIC,
-    cash_available          NUMERIC
+    cash_available          NUMERIC,
+    UNIQUE (portfolio_id, strategy_id, date)
 );
 
 -- ---------------------------------------------------------------------------
@@ -343,15 +409,37 @@ VALUES
   ('LIVE_BREAKOUT','Breakout','AGGRESSIVE_PORTFOLIO','qt','NG.v.0', -30,    2.914, -820.00, 150.00, CURRENT_DATE, now(), now()),
   ('LIVE_MEAN_REVERSION','Mean Reversion','CONSERVATIVE_PORTFOLIO','qt','ES.v.0', -3, 5295.00, -410.00, 95.00, CURRENT_DATE, now(), now());
 
--- Yesterday's snapshot, so the "finalized positions" panel has something
+-- Yesterday's snapshot.
+--
+-- This copied today's rows verbatim, which meant every lot matched and the
+-- "Yesterday's Finalized Position Results" panel was permanently empty --
+-- a "Total P&L $0.00" over no rows at all. It also meant the demo never
+-- exercised the closed-lot path, where a lot that is gone today has no exit
+-- price on record.
+--
+-- Yesterday now genuinely differs from today in the two ways the engine's
+-- data can differ:
+--
+--   ZB.v.0  held yesterday, gone today. Nothing in this data says what it
+--           exited at, so the app reports the exit price as unknown.
+--   RTY.v.0 six yesterday, nine today. The lot changed size.
 INSERT INTO trading.positions
   (strategy_id, strategy_name, portfolio_id, portfolio_type, symbol, quantity, average_price,
    daily_unrealized_pnl, daily_realized_pnl, date, last_update, updated_at)
 SELECT strategy_id, strategy_name, portfolio_id, portfolio_type, symbol,
-       quantity, average_price, daily_unrealized_pnl, daily_realized_pnl,
+       CASE WHEN symbol = 'RTY.v.0' THEN 6 ELSE quantity END,
+       CASE WHEN symbol = 'RTY.v.0' THEN 2279.40 ELSE average_price END,
+       daily_unrealized_pnl, daily_realized_pnl,
        CURRENT_DATE - 1, now() - INTERVAL '1 day', now() - INTERVAL '1 day'
 FROM trading.positions
 WHERE date = CURRENT_DATE;
+
+INSERT INTO trading.positions
+  (strategy_id, strategy_name, portfolio_id, portfolio_type, symbol, quantity, average_price,
+   daily_unrealized_pnl, daily_realized_pnl, date, last_update, updated_at)
+VALUES
+  ('LIVE_TREND_FOLLOWING','Trend Following','CONSERVATIVE_PORTFOLIO','qt','ZB.v.0', 8, 119.50,
+   0.00, 640.00, CURRENT_DATE - 1, now() - INTERVAL '1 day', now() - INTERVAL '1 day');
 
 INSERT INTO trading.executions
   (strategy_id, portfolio_id, symbol, side, quantity, price, execution_time, commissions_fees)
@@ -382,16 +470,28 @@ VALUES
 -- ---------------------------------------------------------------------------
 WITH curve AS (
     SELECT strategy_id, portfolio_id, timestamp, equity,
-           lag(equity) OVER (PARTITION BY strategy_id, portfolio_id ORDER BY timestamp) AS prev
+           lag(equity) OVER (PARTITION BY strategy_id, portfolio_id ORDER BY timestamp) AS prev,
+           max(equity) OVER (PARTITION BY strategy_id, portfolio_id ORDER BY timestamp
+                             ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS peak
     FROM trading.equity_curve
     WHERE portfolio_type = 'qt'
 ),
+-- Daily returns in PERCENT and daily P&L in DOLLARS, which is the pair the
+-- engine's LiveHistoricalMetricsCalculator works from: percentage returns for
+-- volatility, win rate, best/worst day and the average win and loss; dollar
+-- P&L for gross profit, gross loss and the profit factor.
 returns AS (
     SELECT strategy_id, portfolio_id,
-           equity / prev - 1 AS r,
+           (equity / prev - 1) * 100 AS r_pct,
+           equity - prev             AS pnl,
            row_number() OVER (PARTITION BY strategy_id, portfolio_id ORDER BY timestamp DESC) AS recency
     FROM curve
     WHERE prev IS NOT NULL AND prev > 0
+),
+drawdown AS (
+    SELECT strategy_id, portfolio_id,
+           max((peak - equity) / peak) * 100 AS max_drawdown
+    FROM curve WHERE peak > 0 GROUP BY 1, 2
 ),
 series AS (
     SELECT strategy_id, portfolio_id,
@@ -407,8 +507,28 @@ series AS (
 ),
 stats AS (
     SELECT strategy_id, portfolio_id,
-           stddev_samp(r) * sqrt(252) * 100 AS volatility,
-           max(r) FILTER (WHERE recency = 1) * 100 AS daily_return
+           -- POPULATION standard deviation, divided by n. The engine's
+           -- calculate_annualized_volatility divides by n, not n-1; this was
+           -- stddev_samp, which is a different number on a 90-point curve.
+           stddev_pop(r_pct) * sqrt(252)                        AS volatility,
+           -- Downside deviation over the NEGATIVE returns only, which is the
+           -- engine's convention (calculate_annualized_downside_deviation
+           -- divides by the count of negatives, not by the count of all days).
+           CASE WHEN count(*) FILTER (WHERE r_pct < 0) >= 2
+                THEN sqrt(sum(r_pct * r_pct) FILTER (WHERE r_pct < 0)
+                          / count(*) FILTER (WHERE r_pct < 0)) * sqrt(252)
+           END                                                  AS downside_deviation,
+           max(r_pct) FILTER (WHERE recency = 1)                AS daily_return,
+           max(pnl)   FILTER (WHERE recency = 1)                AS daily_pnl,
+           max(r_pct)                                           AS best_day,
+           min(r_pct)                                           AS worst_day,
+           count(*) FILTER (WHERE r_pct > 0)                    AS winning_days,
+           count(*) FILTER (WHERE r_pct < 0)                    AS losing_days,
+           count(*)                                             AS total_days,
+           avg(r_pct)      FILTER (WHERE r_pct > 0)             AS avg_win,
+           abs(avg(r_pct)  FILTER (WHERE r_pct < 0))            AS avg_loss,
+           coalesce(sum(pnl) FILTER (WHERE pnl > 0), 0)         AS gross_profit,
+           abs(coalesce(sum(pnl) FILTER (WHERE pnl < 0), 0))    AS gross_loss
     FROM returns GROUP BY 1, 2
 ),
 -- Exposure priced exactly the way the application prices it: quantity times
@@ -418,7 +538,8 @@ exposure AS (
            sum(abs(p.quantity * px.close * m."Contract Size")) AS gross_notional,
            abs(sum(p.quantity * px.close * m."Contract Size")) AS net_notional,
            sum(p.daily_unrealized_pnl) AS unrealized,
-           sum(p.daily_realized_pnl)   AS realized
+           sum(p.daily_realized_pnl)   AS realized,
+           count(*)                    AS active_positions
     FROM trading.positions p
     JOIN LATERAL (
         SELECT close FROM futures_data.ohlcv_1d o
@@ -432,35 +553,84 @@ exposure AS (
 costs AS (
     SELECT strategy_id, portfolio_id, sum(commissions_fees) AS commissions
     FROM trading.executions GROUP BY 1, 2
+),
+annualised AS (
+    SELECT se.*,
+           (power(se.last_equity / se.first_equity, 252.0 / se.points) - 1) * 100 AS ann_return
+    FROM series se
 )
 INSERT INTO trading.live_results
-  (config, portfolio_id, date, current_portfolio_value, total_annualized_return,
-   total_cumulative_return, volatility, daily_return, gross_leverage, net_leverage,
-   portfolio_leverage, margin_posted, equity_to_margin_ratio, margin_cushion,
-   gross_notional, total_unrealized_pnl, total_realized_pnl, total_transaction_costs,
-   cash_available)
+  (strategy_id, config, portfolio_id, date,
+   current_portfolio_value, total_return, total_annualized_return,
+   total_cumulative_return, daily_return,
+   volatility, downside_deviation, sharpe_ratio, sortino_ratio, max_drawdown,
+   portfolio_var, max_correlation, jump_risk, risk_scale,
+   win_rate, avg_win, avg_loss, profit_factor, gross_profit, gross_loss,
+   best_day, worst_day, winning_days, losing_days, total_days,
+   gross_notional, net_notional, net_leverage, portfolio_leverage,
+   margin_leverage, active_positions, gross_leverage,
+   total_pnl, total_unrealized_pnl, total_realized_pnl,
+   daily_pnl, daily_realized_pnl, daily_unrealized_pnl,
+   total_transaction_costs, daily_transaction_costs,
+   margin_posted, equity_to_margin_ratio, margin_cushion, cash_available)
 SELECT
+    se.strategy_id,
     jsonb_build_object('strategy_type', se.strategy_id),
     se.portfolio_id,
     CURRENT_DATE,
     se.last_equity,
-    -- Annualised from the observed growth over the observed number of points.
-    (power(se.last_equity / se.first_equity, 252.0 / se.points) - 1) * 100,
-    (se.last_equity / se.first_equity - 1) * 100,
-    st.volatility,
-    st.daily_return,
-    -- The engine no longer writes gross_leverage; it writes portfolio_leverage.
+    -- total_return is only written by the engine's legacy fixed INSERT, and
+    -- its units are not determinable from the call site. Left unset rather
+    -- than guessed at.
     NULL,
+    se.ann_return,
+    (se.last_equity / se.first_equity - 1) * 100,
+    st.daily_return,
+    st.volatility,
+    st.downside_deviation,
+    -- The engine's own formulas: annualised return over volatility, and over
+    -- downside deviation. Both with a ZERO risk-free rate, which is what
+    -- live_historical_metrics.cpp does.
+    CASE WHEN st.volatility > 0 THEN se.ann_return / st.volatility END,
+    CASE WHEN st.downside_deviation > 0 THEN se.ann_return / st.downside_deviation END,
+    dd.max_drawdown,
+    NULL, NULL, NULL, NULL,     -- VaR, max correlation, jump risk, risk scale: no source
+    CASE WHEN st.total_days > 0
+         THEN st.winning_days::numeric / st.total_days * 100 END,
+    st.avg_win,
+    st.avg_loss,
+    -- Engine convention is 999.99 for a book with gains and no losses. Left
+    -- NULL here instead: an undefined ratio is not a very large one, and the
+    -- app renders NULL as unknown. Flagged for the engine team.
+    CASE WHEN st.gross_loss > 0 THEN st.gross_profit / st.gross_loss END,
+    st.gross_profit,
+    st.gross_loss,
+    st.best_day,
+    st.worst_day,
+    st.winning_days,
+    st.losing_days,
+    st.total_days,
+    ex.gross_notional,
+    ex.net_notional,
     ex.net_notional / se.last_equity,
     ex.gross_notional / se.last_equity,
-    NULL, NULL, NULL,          -- margin posted, equity/margin, cushion: no source
-    ex.gross_notional,
+    NULL,                        -- margin leverage: depends on margin, no source
+    ex.active_positions,
+    -- The abandoned column stays empty, so anything reading it in preference
+    -- to portfolio_leverage shows unknown rather than a stale number.
+    NULL,
+    ex.unrealized + ex.realized,
     ex.unrealized,
     ex.realized,
+    st.daily_pnl,
+    ex.realized,                 -- positions carry DAILY realised P&L
+    ex.unrealized,               -- and DAILY unrealised P&L
     co.commissions,
-    NULL                        -- cash available: depends on margin, no source
-FROM series se
-JOIN stats st    ON st.strategy_id = se.strategy_id AND st.portfolio_id = se.portfolio_id
+    co.commissions,              -- every seeded fill is today's
+    NULL, NULL, NULL, NULL       -- margin posted, equity/margin, cushion, cash: no source
+FROM annualised se
+JOIN stats st         ON st.strategy_id = se.strategy_id AND st.portfolio_id = se.portfolio_id
+LEFT JOIN drawdown dd ON dd.strategy_id = se.strategy_id AND dd.portfolio_id = se.portfolio_id
 LEFT JOIN exposure ex ON ex.strategy_id = se.strategy_id AND ex.portfolio_id = se.portfolio_id
 LEFT JOIN costs co    ON co.strategy_id = se.strategy_id AND co.portfolio_id = se.portfolio_id;
 

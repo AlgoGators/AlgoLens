@@ -263,9 +263,12 @@ export function FinancialAnalysis({ metrics }: FinancialAnalysisProps) {
             }`}>
             <div className={`text-sm mb-1 ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'
               }`}>
-              Total Trades
+              Fills Today
             </div>
-            <div className="text-lg">{metrics.totalTrades}</div>
+            {/* This was "Total Trades" over a count of TODAY's executions.
+                trading.live_results carries no lifetime trade count -- the
+                engine removed total_trades pending closing-trade logic. */}
+            <div className="text-lg">{metrics.executionsToday}</div>
           </div>
           <div className={`p-4 rounded-lg ${theme === 'dark' ? 'bg-gray-900' : 'bg-gray-50'
             }`}>
@@ -273,8 +276,12 @@ export function FinancialAnalysis({ metrics }: FinancialAnalysisProps) {
               }`}>
               Avg Win
             </div>
+            {/* Mean daily percentage return on winning days, which is what
+                the engine publishes. It was rendered with a "$" against a
+                locally computed mean dollar change -- a different quantity
+                under the same label. */}
             <div className="text-lg text-orange-500">
-              {metrics.avgWin === null ? '—' : `$${metrics.avgWin.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+              {formatMetric(metrics.avgWin, 2, { suffix: '%' })}
             </div>
           </div>
           <div className={`p-4 rounded-lg ${theme === 'dark' ? 'bg-gray-900' : 'bg-gray-50'
@@ -284,7 +291,7 @@ export function FinancialAnalysis({ metrics }: FinancialAnalysisProps) {
               Avg Loss
             </div>
             <div className="text-lg text-red-500">
-              {metrics.avgLoss === null ? '—' : `$${metrics.avgLoss.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+              {formatMetric(metrics.avgLoss, 2, { suffix: '%', abs: true })}
             </div>
           </div>
           <div className={`p-4 rounded-lg ${theme === 'dark' ? 'bg-gray-900' : 'bg-gray-50'
@@ -294,7 +301,7 @@ export function FinancialAnalysis({ metrics }: FinancialAnalysisProps) {
               Total Notional
             </div>
             <div className="text-lg">
-              {metrics.totalNotional === null ? '—' : `$${metrics.totalNotional.toLocaleString('en-US', { minimumFractionDigits: 0 })}`}
+              {metrics.totalNotional === null ? '—' : `$${metrics.totalNotional.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`}
             </div>
           </div>
         </div>

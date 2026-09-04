@@ -1,6 +1,7 @@
 import React from 'react';
 import { useTheme } from '../adapters/react/ThemeContext';
 import type { Execution, FinalizedPosition } from '../domain/portfolio/portfolioData';
+import { formatMetric } from '../domain/portfolio/formatMetric';
 
 interface TradingActivityProps {
   executions: Execution[];
@@ -16,6 +17,13 @@ export function TradingActivity({ executions, finalizedPositions }: TradingActiv
   const unpricedFills = executions.length - priced.length;
   const totalNotional = priced.reduce((sum, exec) => sum + (exec.notional as number), 0);
   const totalCommissions = executions.reduce((sum, exec) => sum + exec.commission, 0);
+
+  // Only lots whose realised P&L the engine actually published contribute to
+  // the total, and the count below says how many were left out. Summing an
+  // unknown as zero would report a partial total as a complete one.
+  const settled = finalizedPositions.filter(p => p.realizedPnL != null);
+  const unsettledLots = finalizedPositions.length - settled.length;
+  const totalRealized = settled.reduce((sum, p) => sum + (p.realizedPnL as number), 0);
 
   return (
     <div className="space-y-6">
@@ -150,15 +158,21 @@ export function TradingActivity({ executions, finalizedPositions }: TradingActiv
               <div>{position.symbol}</div>
               <div className="text-right">{position.quantity.toFixed(2)}</div>
               <div className="text-right">
-                ${position.entryPrice.toFixed(2)}
+                {formatMetric(position.entryPrice, 2, { prefix: '$' })}
               </div>
+              {/* A lot that is gone today exited at a price nothing here
+                  records. Unknown, not yesterday's entry price. */}
               <div className="text-right">
-                ${position.exitPrice.toFixed(2)}
+                {formatMetric(position.exitPrice, 2, { prefix: '$' })}
               </div>
               <div className={`text-right ${
-                position.realizedPnL >= 0 ? 'text-orange-500' : 'text-red-500'
+                position.realizedPnL == null
+                  ? ''
+                  : position.realizedPnL >= 0 ? 'text-orange-500' : 'text-red-500'
               }`}>
-                ${position.realizedPnL.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                {position.realizedPnL == null
+                  ? '\u2014'
+                  : `$${position.realizedPnL.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
               </div>
             </div>
           ))}
@@ -169,19 +183,31 @@ export function TradingActivity({ executions, finalizedPositions }: TradingActiv
               ? 'bg-gray-900 border-gray-800' 
               : 'bg-gray-50 border-gray-200'
           }`}>
-            <div className="col-span-4">Total Positions: {finalizedPositions.length}</div>
+            <div className="col-span-4">
+              Total Positions: {finalizedPositions.length}
+              {unsettledLots > 0 && (
+                <span className={`ml-2 text-sm ${
+                  theme === 'dark' ? 'text-amber-400' : 'text-amber-600'
+                }`}>
+                  ({unsettledLots} with no realised P&L on record, not in the total)
+                </span>
+              )}
+            </div>
             <div className="text-right">
               <div className={`text-sm ${
                 theme === 'dark' ? 'text-gray-400' : 'text-gray-500'
               }`}>
                 Total P&L
               </div>
+              {/* Only lots the engine published a realised P&L for are in
+                  this total. Counting an unknown as zero would report a
+                  partial figure as a complete one. */}
               <div className={
-                finalizedPositions.reduce((sum, pos) => sum + pos.realizedPnL, 0) >= 0 
-                  ? 'text-orange-500' 
-                  : 'text-red-500'
+                settled.length === 0 ? '' : totalRealized >= 0 ? 'text-orange-500' : 'text-red-500'
               }>
-                ${finalizedPositions.reduce((sum, pos) => sum + pos.realizedPnL, 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                {settled.length === 0
+                  ? '\u2014'
+                  : `$${totalRealized.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
               </div>
             </div>
           </div>

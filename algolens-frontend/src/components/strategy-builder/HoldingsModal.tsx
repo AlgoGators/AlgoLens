@@ -18,7 +18,7 @@ export function HoldingsModal({ metrics, theme, onClose }: HoldingsModalProps) {
             <div>
               <h2 className="text-xl font-semibold">All Holdings</h2>
               <p className={`text-sm ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>
-                {metrics.assetAllocation.length} total positions
+                {metrics.holdings.length} total positions
               </p>
             </div>
             <button
@@ -43,7 +43,7 @@ export function HoldingsModal({ metrics, theme, onClose }: HoldingsModalProps) {
             </div>
 
             {/* Holdings List */}
-            {metrics.assetAllocation.map((asset, index) => (
+            {metrics.holdings.map((asset, index) => (
               <div
                 key={asset.symbol}
                 className={`grid grid-cols-12 gap-4 p-4 border-b transition-colors ${theme === 'dark' ? 'border-gray-800 hover:bg-gray-900' : 'border-gray-100 hover:bg-gray-50'}`}
@@ -68,7 +68,7 @@ export function HoldingsModal({ metrics, theme, onClose }: HoldingsModalProps) {
             {/* Summary Footer */}
             <div className={`grid grid-cols-12 gap-4 p-4 font-semibold ${theme === 'dark' ? 'bg-gray-900 text-white' : 'bg-gray-50 text-black'}`}>
               <div className="col-span-1"></div>
-              <div className="col-span-5">Total ({metrics.assetAllocation.length} holdings)</div>
+              <div className="col-span-5">Total ({metrics.holdings.length} holdings)</div>
               <div className="col-span-3 text-right tabular-nums">
                 ${metrics.totalValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </div>

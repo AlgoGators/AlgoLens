@@ -235,6 +235,20 @@ finding was verified against the code before being fixed. Ranked by what it woul
 | 7.53 | **Top Holdings weights reached 407%** under a column headed WEIGHT. Asset values are notional exposure; the denominator was portfolio equity. | Share of total exposure, so the column sums to 100. | Weights now 24.5%, 17.3%, 16.3% |
 | 7.54 | **The information ratio read 37,874.** The benchmark stream differed from the book by a constant drift, so tracking error was floating-point dust and the ratio divided by it. | The ratio refuses a tracking error under a basis point. The seed gives the benchmark its own shocks, so it has real tracking error; qt and system stay identical, because nothing has edited qt. | Ratio now 1.73; qt and system verified identical |
 | 7.55 | Max Drawdown rendered as **"+4.18%"**, prefixed and coloured as a gain, under a heading that means the worst peak-to-trough fall. Currency figures rendered with three decimals ($58,338.552) because the format set a minimum but no maximum. | Drawdown carries no gain styling; 18 currency formats pinned to cents. | Reads 4.18% and $58,338.55 |
+| 7.56 | **"Today's Positions" showed every symbol the strategy had ever held.** The query took the latest row per symbol with no date predicate. `trading.positions` holds one row per open position per day, and the engine writes nothing at all for a position that closed -- not even a zero-quantity row -- so a closed lot stayed in the view forever, frozen at the last day it was open. The `quantity != 0` guard did nothing: there is no row to be zero. Total notional, every position weight, and the current book the risk gate checks an edit against all inherited it. | Both position queries read a dated snapshot: the latest `date` for that strategy and book, and for the comparison, the one before it. | Postgres integration tests; a lot closed yesterday leaves the view |
+| 7.57 | The finalized-positions panel asked for `CURRENT_DATE - 1` literally, so it had nothing to compare against every Monday and after every holiday -- markets shut, the engine writes no rows, and the panel went blank with no explanation. | "The previous snapshot", which is the question the panel is actually asking. | Integration test across a weekend gap |
+| 7.58 | **`FinalizedPosition` was typed with non-null prices while the API already sent null**, and three renders called `.toFixed` on them. The first lot to close without a published exit price would have thrown and taken the Trading tab down; the P&L total and the per-symbol chart would have gone `NaN` first. The demo never caught it because yesterday's positions were a verbatim copy of today's, so the panel was permanently empty -- "Total P&L $0.00" over no rows. | Types match the wire. Unknown renders as an em dash, the total counts only settled lots and says how many it left out. The seed now closes one lot and resizes another, so the path is exercised. | Frontend + backend tests; ZB renders "—" for its exit |
+| 7.59 | **AlgoLens recomputed nine metrics the engine already publishes** -- Sharpe, Sortino, max drawdown, win rate, average win, average loss, profit factor, best day, worst day -- from a 90-point equity curve, and showed the results under the same names. The dashboard could disagree with the engine about the engine's own book with nothing on screen saying which number the reader had. | The published figure wins; the local computation is the fallback for a row written before the engine published that column. Sortino and downside deviation, which the engine publishes and AlgoLens never showed, are now available. | `published_or_computed` tests; tiles match `trading.live_results` row for row |
+| 7.60 | `avg_win` and `avg_loss` are the engine's mean daily **percentage** return on winning and losing days. AlgoLens computed a mean daily **dollar** change and rendered it with a currency symbol -- a different quantity wearing the same label. | The engine's definition, rendered as a percentage. | Reads 0.78% / 0.55%, matching the row |
+| 7.61 | **"Net P&L" was the return since inception**, sitting as the fourth card of a P&L Breakdown whose other three are unrealised P&L, realised P&L and commissions -- a layout that invites the reader to add them. On the demo book it read $92,405.72 next to three figures summing to $7,259.40. | Net P&L is those three. The return since inception keeps its home in the header beside the chart. | Reads $7,259.40 = $6,330.00 + $950.00 - $20.60 |
+| 7.62 | "Total Trades" was a count of **today's fills**. `trading.live_results` carries no lifetime trade count; the engine removed `total_trades` pending closing-trade logic. The Strategy Builder also captioned a day-based win rate with it, inviting it to be read as a share of winning trades. | Renamed "Fills Today" everywhere. The win rate is captioned "of daily returns". | Reads "Fills Today 2" |
+| 7.63 | **`trading.live_results` was a reconstruction** guessed at from AlgoLens's reads: the app's own columns and nothing else. It omitted `strategy_id`, which is a real column and part of the engine's `ON CONFLICT (portfolio_id, strategy_id, date)` key, along with twenty-odd figures the engine publishes every run. | The table is no longer a guess. Its shape is the union of the engine's two writers, and the schema contract cites them by file and line. | `check_schema.py` satisfied; seed derives every published metric with the engine's own formulas |
+| 7.64 | The seed computed volatility with `stddev_samp` where the engine's `calculate_annualized_volatility` divides by n, and computed downside deviation over all days where the engine divides by the count of negative days. Different numbers under the same names. | Population standard deviation; downside deviation over negatives only. | Matches the engine's formulas |
+| 7.65 | **The Strategy Builder reported the whole portfolio as profit** when any selected strategy had no starting equity on record: the invested total skipped it while the value total kept it, and the header rendered `returnPercent.toFixed(2)` with no null handling. The comment said the strategy was "left out"; arithmetically it was left in at zero. | A selection with any unknown basis has an unknown return, and says so. | Test: a null-basis strategy makes the combined return null |
+| 7.66 | **The Strategy Builder invented 91 days of history when nothing was selected**: a flat 0% line across three months and 31 empty P&L bars, every point stamped with a real date and none of it in any table. Its metrics were zeros, not unknowns. | An empty selection has no series and no measurements. | Test asserts both series are empty |
+| 7.67 | **"Others" was counted as an instrument.** The holdings table, the holdings count and the top-3 weight all read the grouped pie data, so the sub-3% bucket appeared as a row with a colour dot beside real contracts, and a book of nine instruments reported six holdings. | `holdings` (ungrouped) drives anything that counts or lists; `assetAllocation` stays the chart's. | Reads 9 holdings; "Others" absent from the table |
+| 7.68 | A strategy the engine has published nothing for carried zeros in every metric, relying on every caller to check `dataAvailable` first; a zero that slips past that check reads as a measurement. | Nulls, which render as em dashes wherever they land. | tsc |
+| 7.69 | The information ratio's caption read "vs system alone" while the computation uses the **benchmark** stream. A strategy summary printed `$592,405.719` -- three decimals on a dollar figure, from a format with a minimum and no maximum. | Caption names the series it uses; every remaining currency format pinned. | Reads "vs benchmark stream" and $592,406 |
 
 ### Reviewed and deliberately left
 
@@ -246,6 +260,30 @@ finding was verified against the code before being fixed. Ranked by what it woul
 
 ### Verified after the fixes
 
-- 153 backend unit tests, 7 Postgres integration tests, 88 frontend tests, `tsc --noEmit` clean.
+- 192 backend unit tests, 13 Postgres integration tests, 94 frontend tests, `tsc --noEmit` clean.
+- `check_schema.py` reports the contract satisfied against the rebuilt demo database.
 - Tailwind is compiled at build time; the frozen stylesheet is gone. Dashboard, Books, strategy detail and the edit modal checked in the browser after the switch.
 - Demo database rebuilt from the seed plus migration 009 and back at baseline.
+
+Reconciled against SQL after the last pass:
+
+| On screen | Source |
+| --- | --- |
+| Fund total $1,190,191.75 | Sum of the three live strategies' `current_portfolio_value`, exact |
+| Top Holdings ZN 24.5% / ES 17.3% / 6E 16.3% | Share of total exposure; SQL gives 24.46 / 17.34 / 16.34 |
+| HHI 1487, 9 holdings, top-3 weight 58% | Sum of squared exposure shares over the ungrouped list |
+| Trend Following notional $8,167,795.00 | Equals `live_results.gross_notional`, and the four position rows sum to it exactly |
+| Sharpe 4.67, drawdown 3.56%, win rate 56.18%, profit factor 1.79 | Read from `trading.live_results`, not recomputed |
+| Avg win 0.78% / avg loss 0.55% | `live_results.avg_win` / `avg_loss`, the engine's percentages |
+| Net P&L $7,259.40 | $6,330.00 unrealised + $950.00 realised - $20.60 commissions |
+| Combined return +13.35% ($140.2k) | $1,190,191.75 against $1,050,000 of registry starting equity |
+| VaR (95%) $9.8k | 1.645 x (7.94% x $1,190,191.75) / sqrt(252) |
+| ES fill $1,055,200.00 | 4 x 5,276.00 x 50 |
+| ZB closed lot, exit "—" | Held yesterday, no row today; nothing records the exit |
+
+One thing the browser could not confirm: the two pie charts and the daily-P&L
+bars render no geometry in the preview pane, because the pane reports
+`document.visibilityState === "hidden"` and recharts drives its entry animation
+from `requestAnimationFrame`. The axes and their domains come from the same
+data, and that data reconciles above; the line chart, which animates by stroke
+rather than geometry, draws normally. Worth a glance in a real browser.

@@ -7,7 +7,7 @@ interface PerformanceOverviewProps {
 }
 
 export function PerformanceOverview({ metrics, theme }: PerformanceOverviewProps) {
-  const isPositive = metrics.totalReturn >= 0;
+  const isPositive = (metrics.totalReturn ?? 0) >= 0;
 
   return (
     <div className="mb-4">
@@ -20,15 +20,24 @@ export function PerformanceOverview({ metrics, theme }: PerformanceOverviewProps
               }`}>
               PORTFOLIO VALUE
             </div>
-            <div className="text-2xl">${(metrics.totalValue / 1000).toFixed(1)}k</div>
-            <div className={`flex items-center gap-1 text-sm mt-1 ${isPositive ? 'text-orange-500' : 'text-red-500'
-              }`}>
-              {isPositive ? '▲' : '▼'}
-              <span>{isPositive ? '+' : ''}{metrics.returnPercent.toFixed(2)}%</span>
-              <span className={`text-xs ${theme === 'dark' ? 'text-gray-500' : 'text-gray-400'}`}>
-                (${Math.abs(metrics.totalReturn / 1000).toFixed(1)}k)
-              </span>
-            </div>
+            <div className="text-2xl">{formatThousands(metrics.totalValue)}</div>
+            {/* A selection containing a strategy with no starting equity on
+                record has no return to report. It used to report the whole
+                market value as profit at +0.00%. */}
+            {metrics.returnPercent === null ? (
+              <div className={`text-sm mt-1 ${theme === 'dark' ? 'text-gray-500' : 'text-gray-400'}`}>
+                Return unknown &mdash; no starting equity on record
+              </div>
+            ) : (
+              <div className={`flex items-center gap-1 text-sm mt-1 ${isPositive ? 'text-orange-500' : 'text-red-500'
+                }`}>
+                {isPositive ? '▲' : '▼'}
+                <span>{formatMetric(metrics.returnPercent, 2, { suffix: '%', signed: true })}</span>
+                <span className={`text-xs ${theme === 'dark' ? 'text-gray-500' : 'text-gray-400'}`}>
+                  ({formatThousands(metrics.totalReturn === null ? null : Math.abs(metrics.totalReturn))})
+                </span>
+              </div>
+            )}
           </div>
 
           <div>
@@ -52,7 +61,10 @@ export function PerformanceOverview({ metrics, theme }: PerformanceOverviewProps
           <div>
             <div className={`text-xs mb-1 ${theme === 'dark' ? 'text-gray-500' : 'text-gray-400'}`}>WIN RATE</div>
             <div className="text-lg">{formatMetric(metrics.metrics.winRate, 1, { suffix: '%' })}</div>
-            <div className={`text-xs mt-1 ${theme === 'dark' ? 'text-gray-600' : 'text-gray-400'}`}>{metrics.metrics.totalTrades} trades</div>
+            {/* This is the share of profitable DAYS on the equity curve. It used to
+                be captioned with a trade count, which invited reading it as a
+                share of profitable trades. */}
+            <div className={`text-xs mt-1 ${theme === 'dark' ? 'text-gray-600' : 'text-gray-400'}`}>of daily returns</div>
           </div>
         </div>
       </div>
@@ -73,7 +85,7 @@ export function PerformanceOverview({ metrics, theme }: PerformanceOverviewProps
           <div className={`text-xs ${theme === 'dark' ? 'text-gray-600' : 'text-gray-400'}`}>
             {metrics.advancedMetrics.sortinoRatio === null
               ? 'No measurable downside'
-              : 'Downside only'}
+              : 'Combined book'}
           </div>
         </div>
 
@@ -91,7 +103,7 @@ export function PerformanceOverview({ metrics, theme }: PerformanceOverviewProps
           <div className={`text-xs ${theme === 'dark' ? 'text-gray-600' : 'text-gray-400'}`}>
             {metrics.advancedMetrics.informationRatio === null
               ? 'Needs a benchmark stream'
-              : 'vs system alone'}
+              : 'vs benchmark stream'}
           </div>
         </div>
 

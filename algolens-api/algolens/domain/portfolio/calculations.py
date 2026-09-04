@@ -204,6 +204,39 @@ def transform_finalized(yesterday_positions: Sequence[Any], positions: Sequence[
     return transformed
 
 
+def net_pnl(
+    unrealized: float | None, realized: float | None, commissions: float | None
+) -> float | None:
+    """Unrealised plus realised, less costs. Unknown if any part is unknown.
+
+    Summing what is known and calling the result "net" would report a partial
+    figure as a complete one, which is the error this function exists to stop.
+    """
+    if unrealized is None or realized is None or commissions is None:
+        return None
+    return unrealized + realized - commissions
+
+
+def published_or_computed(published: Any, computed: float | None) -> float | None:
+    """The engine's own figure when it published one, else AlgoLens's.
+
+    trade-ngin writes sharpe_ratio, sortino_ratio, max_drawdown, win_rate,
+    avg_win, avg_loss, profit_factor, best_day and worst_day into
+    trading.live_results every run (live_portfolio_runner.cpp:2930). AlgoLens
+    computed all nine again, from the equity curve, and showed the results
+    under the same names -- so the dashboard could disagree with the engine
+    about the engine's own book, and nothing on screen would say which number
+    the reader was looking at.
+
+    The published value wins. The local computation stays as the fallback for
+    a row written before the engine published that column, which is why it is
+    not simply deleted.
+    """
+    if published is not None:
+        return float(published)
+    return computed
+
+
 def float_or_none(value: Any) -> float | None:
     """A NULL from the engine stays unknown.
 

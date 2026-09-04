@@ -93,9 +93,9 @@ export function AdvancedSections({ metrics, theme, expanded, onToggle }: Advance
             <div className={`p-2 border ${theme === 'dark' ? 'border-gray-800' : 'border-gray-200'
               }`}>
               <div className={`text-xs ${theme === 'dark' ? 'text-gray-500' : 'text-gray-400'}`}>
-                TRADES
+                FILLS TODAY
               </div>
-              <div className="text-base tabular-nums">{metrics.metrics.totalTrades}</div>
+              <div className="text-base tabular-nums">{metrics.metrics.executionsToday}</div>
             </div>
             <div className={`p-2 border ${theme === 'dark' ? 'border-gray-800' : 'border-gray-200'
               }`}>
@@ -109,14 +109,16 @@ export function AdvancedSections({ metrics, theme, expanded, onToggle }: Advance
               <div className={`text-xs ${theme === 'dark' ? 'text-gray-500' : 'text-gray-400'}`}>
                 AVG WIN
               </div>
-              <div className="text-base text-green-500 tabular-nums">{formatMetric(metrics.metrics.avgWin, 0, { prefix: '$' })}</div>
+              {/* The engine's avg_win is the mean daily PERCENTAGE return on
+                  winning days. This rendered it with a "$". */}
+              <div className="text-base text-green-500 tabular-nums">{formatMetric(metrics.metrics.avgWin, 2, { suffix: '%' })}</div>
             </div>
             <div className={`p-2 border ${theme === 'dark' ? 'border-gray-800' : 'border-gray-200'
               }`}>
               <div className={`text-xs ${theme === 'dark' ? 'text-gray-500' : 'text-gray-400'}`}>
                 AVG LOSS
               </div>
-              <div className="text-base text-red-500 tabular-nums">{formatMetric(metrics.metrics.avgLoss, 0, { prefix: '$', abs: true })}</div>
+              <div className="text-base text-red-500 tabular-nums">{formatMetric(metrics.metrics.avgLoss, 2, { suffix: '%', abs: true })}</div>
             </div>
           </div>
 

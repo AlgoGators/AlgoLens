@@ -10,9 +10,10 @@ import { API_BASE_URL, deleteWithAuth, fetchWithAuth, log, postWithAuth, putWith
 /**
  * A strategy the engine has published nothing for.
  *
- * Every numeric field is zero and `dataAvailable` is false; nothing that reads
- * this should treat the zeros as measurements -- they exist so the shape stays
- * valid for components that index into it. Callers filter on dataAvailable.
+ * Every measured field is null and `dataAvailable` is false. It used to be
+ * zeros, which relied on every caller remembering to check the flag -- and a
+ * zero that leaks past that check reads as a measurement ("0.00x leverage",
+ * "$0 margin posted"). A null renders as an em dash wherever it lands.
  */
 function placeholderStrategy(summary: { id: string; name: string }): Strategy {
   return {
@@ -20,21 +21,24 @@ function placeholderStrategy(summary: { id: string; name: string }): Strategy {
     name: summary.name,
     description: '',
     dataAvailable: false,
-    invested: 0,
+    invested: null,
     currentValue: 0,
-    return: 0,
-    returnPercent: 0,
+    return: null,
+    returnPercent: null,
     positions: [],
     historicalData: [],
-    bestDay: 0,
-    worstDay: 0,
+    bestDay: null,
+    worstDay: null,
     metrics: {
-      volatility: 0, sharpeRatio: 0, maxDrawdown: 0, winRate: 0, totalTrades: 0,
-      avgWin: 0, avgLoss: 0, profitFactor: 0, dailyReturn: 0, cumulativeReturn: 0,
-      annualizedReturn: 0, grossLeverage: 0, netLeverage: 0, portfolioLeverage: 0,
-      marginPosted: 0, equityToMarginRatio: 0, marginCushion: 0, totalNotional: 0,
-      unrealizedPnL: 0, realizedPnL: 0, totalCommissions: 0, netPnL: 0,
-      cashAvailable: 0, currentPortfolioValue: 0,
+      volatility: null, sharpeRatio: null, sortinoRatio: null,
+      downsideDeviation: null, maxDrawdown: null, winRate: null,
+      executionsToday: 0,
+      avgWin: null, avgLoss: null, profitFactor: null, dailyReturn: null,
+      cumulativeReturn: null, annualizedReturn: null, grossLeverage: null,
+      netLeverage: null, portfolioLeverage: null, marginPosted: null,
+      equityToMarginRatio: null, marginCushion: null, totalNotional: null,
+      unrealizedPnL: null, realizedPnL: null, totalCommissions: null,
+      netPnL: null, cashAvailable: null, currentPortfolioValue: null,
     },
     executions: [],
     finalizedPositions: [],

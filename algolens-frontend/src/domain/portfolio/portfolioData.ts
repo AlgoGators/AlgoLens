@@ -42,9 +42,16 @@ export interface Execution {
 export interface FinalizedPosition {
   symbol: string;
   quantity: number;
-  entryPrice: number;
-  exitPrice: number;
-  realizedPnL: number;
+  /** Yesterday's average price, or null when the engine published none. */
+  entryPrice: number | null;
+  /**
+   * Today's average price for a lot that changed size, and null for a lot
+   * that is gone: nothing in the engine's data says what it exited at. This
+   * was typed `number` while the API already sent null, so the table called
+   * .toFixed on null and took the Trading tab down with it.
+   */
+  exitPrice: number | null;
+  realizedPnL: number | null;
 }
 
 export interface StrategyMetrics {
@@ -55,11 +62,23 @@ export interface StrategyMetrics {
   volatility: number | null;
   /** Annualised return over volatility with a ZERO risk-free rate. */
   sharpeRatio: number | null;
+  /** Annualised return over downside deviation, from the engine. */
+  sortinoRatio: number | null;
+  /** Annualised deviation of negative daily returns, from the engine. */
+  downsideDeviation: number | null;
   maxDrawdown: number | null;
   /** Share of profitable DAYS on the equity curve, not of trades. */
   winRate: number | null;
-  totalTrades: number;
+  /**
+   * Fills recorded for TODAY. It was called totalTrades and shown as "Total
+   * Trades", which it has never been -- there is no lifetime trade count in
+   * live_results, and the engine's own comment says total_trades was removed
+   * pending closing-trade logic.
+   */
+  executionsToday: number;
+  /** Mean daily percentage return on winning days. Percent, not dollars. */
   avgWin: number | null;
+  /** Mean daily percentage loss on losing days, positive. Percent. */
   avgLoss: number | null;
   profitFactor: number | null;
   dailyReturn: number | null;
@@ -78,6 +97,8 @@ export interface StrategyMetrics {
   netPnL: number | null;
   cashAvailable: number | null;
   currentPortfolioValue: number | null;
+  /** Return since inception. Distinct from netPnL -- see the API comment. */
+  totalReturn?: number | null;
 }
 
 export interface HistoricalDataPoint {

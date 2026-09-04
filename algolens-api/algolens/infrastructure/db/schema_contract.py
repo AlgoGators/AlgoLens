@@ -92,8 +92,16 @@ EQUITY_CURVE = TableContract(
 
 LIVE_RESULTS = TableContract(
     name="trading.live_results",
-    source="the engine's own INSERT, trade-ngin/src/data/postgres_database.cpp "
-           "(PostgresDatabase::store_live_results)",
+    source=(
+        "the engine's own writers. The live path is "
+        "trade-ngin/src/data/postgres_database_extensions.cpp "
+        "(PostgresDatabase::store_live_results_complete), which builds its "
+        "column list from the metric maps assembled in "
+        "trade-ngin/apps/strategies/live_portfolio_runner.cpp:2930; the legacy "
+        "fixed INSERT is PostgresDatabase::store_live_results in "
+        "postgres_database.cpp:2096. The engine reads them back in "
+        "trade-ngin/src/live/live_data_loader.cpp:167."
+    ),
     reads=(
         "date", "portfolio_id", "config", "current_portfolio_value",
         "total_annualized_return", "total_cumulative_return", "volatility",
@@ -101,6 +109,11 @@ LIVE_RESULTS = TableContract(
         "equity_to_margin_ratio", "margin_cushion", "gross_notional",
         "total_unrealized_pnl", "total_realized_pnl", "total_transaction_costs",
         "cash_available",
+        # Published by the engine and read here since the audit; AlgoLens used
+        # to recompute all of these from the equity curve instead.
+        "sharpe_ratio", "sortino_ratio", "downside_deviation", "max_drawdown",
+        "win_rate", "avg_win", "avg_loss", "profit_factor",
+        "best_day", "worst_day",
     ),
     notes=(
         "The engine keys rows on (portfolio_id, strategy_id, date). AlgoLens "
@@ -109,8 +122,17 @@ LIVE_RESULTS = TableContract(
         "gross_leverage still exists but the engine stopped writing it; its "
         "value now goes to portfolio_leverage. Reading gross_leverage directly "
         "returns a dead column.",
+        "avg_win and avg_loss are mean daily PERCENTAGE returns on winning and "
+        "losing days, not dollar amounts. AlgoLens computed a mean dollar "
+        "change under the same names and rendered it with a currency symbol.",
+        "The engine reports a profit factor of 999.99 for a book with gains "
+        "and no losses (live_historical_metrics.cpp). That is a sentinel, not "
+        "a measurement; treat it as undefined.",
+        "total_return and margin_leverage are written only by the legacy fixed "
+        "INSERT, never by the live path. Do not read them.",
     ),
 )
+
 
 EXECUTIONS = TableContract(
     name="trading.executions",

@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import { periodReturn } from '../domain/portfolio/periodReturn';
 import { ArrowLeft, TrendingUp, TrendingDown } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, ResponsiveContainer, Tooltip } from 'recharts';
 import type { Strategy } from '../domain/portfolio/portfolioData';
@@ -110,14 +111,12 @@ export function StrategyDetail({ strategy, onBack, onPositionsChanged }: Strateg
   }, [selectedPeriod, strategy.historicalData]);
 
   // Calculate period-specific return
-  const periodReturn = useMemo(() => {
-    if (filteredData.length < 2) return { value: 0, percent: 0 };
-    const startValue = filteredData[0].value;
-    const endValue = filteredData[filteredData.length - 1].value;
-    const returnValue = endValue - startValue;
-    const returnPercent = startValue > 0 ? (returnValue / startValue) * 100 : 0;
-    return { value: returnValue, percent: returnPercent };
+  const windowReturn = useMemo(() => {
+    return periodReturn(filteredData);
   }, [filteredData]);
+  // The window's direction, for chart colours. An unknown window is
+  // drawn in the neutral-positive colour rather than not drawn at all.
+  const gaining = (windowReturn?.value ?? 0) >= 0;
 
   const periodLabel = selectedPeriod === 'ALL' ? 'All Time' : selectedPeriod;
 
@@ -153,12 +152,21 @@ export function StrategyDetail({ strategy, onBack, onPositionsChanged }: Strateg
         <div className="text-3xl md:text-4xl mb-2">
           ${strategy.currentValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
         </div>
-        <div className={`flex items-center gap-2 text-lg ${periodReturn.value >= 0 ? 'text-orange-500' : 'text-red-500'}`}>
-          {periodReturn.value >= 0 ? <TrendingUp className="w-5 h-5" /> : <TrendingDown className="w-5 h-5" />}
-          <span>
-            ${Math.abs(periodReturn.value).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ({periodReturn.percent >= 0 ? '+' : ''}{periodReturn.percent.toFixed(2)}%) {periodLabel}
-          </span>
-        </div>
+        {/* Null means the window holds fewer than two points, so there is no
+            return to state. This used to state "$0.00 (+0.00%)" -- a flat
+            period, rather than a period nothing is known about. */}
+        {windowReturn === null ? (
+          <div className={`text-lg ${theme === 'dark' ? 'text-gray-500' : 'text-gray-400'}`}>
+            &mdash; no data for {periodLabel}
+          </div>
+        ) : (
+          <div className={`flex items-center gap-2 text-lg ${gaining ? 'text-orange-500' : 'text-red-500'}`}>
+            {gaining ? <TrendingUp className="w-5 h-5" /> : <TrendingDown className="w-5 h-5" />}
+            <span>
+              ${Math.abs(windowReturn.value).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ({windowReturn.percent >= 0 ? '+' : ''}{windowReturn.percent.toFixed(2)}%) {periodLabel}
+            </span>
+          </div>
+        )}
       </div>
 
       <div className="mb-4">
@@ -166,8 +174,8 @@ export function StrategyDetail({ strategy, onBack, onPositionsChanged }: Strateg
           <LineChart data={filteredData}>
             <defs>
               <linearGradient id="stratLineGradient" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor={periodReturn.value >= 0 ? "#f97316" : "#ef4444"} stopOpacity={theme === 'dark' ? 0.2 : 0.1} />
-                <stop offset="100%" stopColor={periodReturn.value >= 0 ? "#f97316" : "#ef4444"} stopOpacity={0} />
+                <stop offset="0%" stopColor={gaining ? "#f97316" : "#ef4444"} stopOpacity={theme === 'dark' ? 0.2 : 0.1} />
+                <stop offset="100%" stopColor={gaining ? "#f97316" : "#ef4444"} stopOpacity={0} />
               </linearGradient>
             </defs>
             <XAxis
@@ -192,7 +200,7 @@ export function StrategyDetail({ strategy, onBack, onPositionsChanged }: Strateg
             <Line
               type="linear"
               dataKey="value"
-              stroke={periodReturn.value >= 0 ? "#f97316" : "#ef4444"}
+              stroke={gaining ? "#f97316" : "#ef4444"}
               strokeWidth={2}
               dot={false}
               fill="url(#stratLineGradient)"

@@ -36,6 +36,8 @@ from algolens.domain.portfolio.calculations import (
     resolve_initial_equity,
     transform_executions,
     transform_finalized,
+    net_pnl,
+    published_or_computed,
     transform_positions,
 )
 from algolens.domain.portfolio.incubation import compute_incubation_window
@@ -104,7 +106,11 @@ def build_strategy_detail(
 
     volatility = float(latest["volatility"])
     annualized_return = float(latest["total_annualized_return"])
-    sharpe = compute_sharpe(annualized_return, volatility)
+    # The engine publishes its own Sharpe. compute_sharpe is the fallback for
+    # a row that predates the column, not the primary source it used to be.
+    sharpe = published_or_computed(
+        latest.get("sharpe_ratio"), compute_sharpe(annualized_return, volatility)
+    )
 
     return {
         "id": cfg["id"],
@@ -117,8 +123,8 @@ def build_strategy_detail(
         "positions": transformed_positions,
         "historicalData": historical_data,
         "equityByStream": equity_by_stream,
-        "bestDay": stats["best_day"],
-        "worstDay": stats["worst_day"],
+        "bestDay": published_or_computed(latest.get("best_day"), stats["best_day"]),
+        "worstDay": published_or_computed(latest.get("worst_day"), stats["worst_day"]),
         "executions": transformed_executions,
         "finalizedPositions": transformed_finalized,
         "managers": cfg["managers"],
@@ -126,12 +132,29 @@ def build_strategy_detail(
         "metrics": {
             "volatility": volatility,
             "sharpeRatio": sharpe,
-            "maxDrawdown": stats["max_drawdown"],
-            "winRate": stats["win_rate"],
-            "totalTrades": len(transformed_executions),
-            "avgWin": stats["avg_win"],
-            "avgLoss": stats["avg_loss"],
-            "profitFactor": stats["profit_factor"],
+            # The engine publishes a Sortino ratio and AlgoLens never showed
+            # it, so the one downside-risk figure the platform actually
+            # produces was invisible.
+            "sortinoRatio": float_or_none(latest.get("sortino_ratio")),
+            "downsideDeviation": float_or_none(latest.get("downside_deviation")),
+            "maxDrawdown": published_or_computed(
+                latest.get("max_drawdown"), stats["max_drawdown"]
+            ),
+            "winRate": published_or_computed(latest.get("win_rate"), stats["win_rate"]),
+            # Fills recorded for THIS day, not trades since inception. The UI
+            # labelled this "Total Trades", which it has never been.
+            "executionsToday": len(transformed_executions),
+            # The engine's avg_win and avg_loss are the mean daily PERCENTAGE
+            # return on winning and losing days. AlgoLens computed a mean
+            # daily DOLLAR change instead and rendered it with a "$" under the
+            # same name, so the two were different quantities wearing one
+            # label. The engine's definition wins; the UI now says "%".
+            "avgWin": published_or_computed(latest.get("avg_win"), None),
+            "avgLoss": published_or_computed(latest.get("avg_loss"), None),
+            # Same dollar-P&L definition in both, so the fallback is safe.
+            "profitFactor": published_or_computed(
+                latest.get("profit_factor"), stats["profit_factor"]
+            ),
             "dailyReturn": float_or_none(latest["daily_return"]),
             "cumulativeReturn": return_percent,
             "annualizedReturn": annualized_return,
@@ -154,7 +177,19 @@ def build_strategy_detail(
             "unrealizedPnL": float_or_none(latest["total_unrealized_pnl"]),
             "realizedPnL": float_or_none(latest["total_realized_pnl"]),
             "totalCommissions": float_or_none(latest["total_transaction_costs"]),
-            "netPnL": total_return,
+            # Net P&L sits beside unrealised P&L, realised P&L and
+            # commissions, and a reader adds those three to check it. It held
+            # current value minus starting equity -- the return since
+            # inception -- which on the demo book is $92,405.72 next to three
+            # figures that sum to $7,259.40. It is now what its label says.
+            "netPnL": net_pnl(
+                float_or_none(latest["total_unrealized_pnl"]),
+                float_or_none(latest["total_realized_pnl"]),
+                float_or_none(latest["total_transaction_costs"]),
+            ),
+            # The return since inception, which is what netPnL used to hold.
+            # It already has a home on the page: the header beside the chart.
+            "totalReturn": total_return,
             "cashAvailable": float_or_none(latest["cash_available"]),
             "currentPortfolioValue": current_value,
         },
@@ -194,7 +229,11 @@ def build_strategy_summary(
     )
     volatility = float(latest["volatility"])
     annualized_return = float(latest["total_annualized_return"])
-    sharpe = compute_sharpe(annualized_return, volatility)
+    # Same rule as the detail view: the engine's own Sharpe when it published
+    # one. The list and the detail page must not disagree about a strategy.
+    sharpe = published_or_computed(
+        latest.get("sharpe_ratio"), compute_sharpe(annualized_return, volatility)
+    )
 
     return {
         "id": cfg["id"],

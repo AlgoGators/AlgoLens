@@ -7,7 +7,8 @@ import type { Strategy, StrategyMetrics, Position, FinalizedPosition } from './p
 
 function metrics(overrides: Partial<StrategyMetrics> = {}): StrategyMetrics {
   return {
-    volatility: 0, sharpeRatio: 0, maxDrawdown: 0, winRate: 0, totalTrades: 0,
+    volatility: 0, sharpeRatio: 0, sortinoRatio: 0, downsideDeviation: 0,
+    maxDrawdown: 0, winRate: 0, executionsToday: 0,
     avgWin: 0, avgLoss: 0, profitFactor: 0, dailyReturn: 0, cumulativeReturn: 0, annualizedReturn: 0,
     grossLeverage: 0, netLeverage: 0, portfolioLeverage: 0, marginPosted: 0,
     equityToMarginRatio: 0, marginCushion: 0, totalNotional: 0, unrealizedPnL: 0,
@@ -46,16 +47,79 @@ function strategy(over: Partial<Strategy> & { id: string }): Strategy {
 }
 
 describe('computeCombinedMetrics', () => {
-  it('returns a zeroed model when nothing is selected', () => {
+  it('invents no series at all when nothing is selected', () => {
+    // This used to generate 91 dated points at exactly 0% and 31 at exactly
+    // $0, and recharts drew them: a flat three-month line and a row of empty
+    // bars, every point stamped with a real date and none of it in any table.
     const s = strategy({ id: 'a' });
     const out = computeCombinedMetrics([s], []);
     expect(out.totalValue).toBe(0);
     expect(out.totalInvested).toBe(0);
     expect(out.strategies).toEqual([]);
     expect(out.assetAllocation).toEqual([]);
-    // The empty branch still supplies placeholder series for the charts.
-    expect(out.historicalPerformance).toHaveLength(91);
-    expect(out.dailyPnL).toHaveLength(31);
+    expect(out.holdings).toEqual([]);
+    expect(out.historicalPerformance).toEqual([]);
+    expect(out.dailyPnL).toEqual([]);
+  });
+
+  it('reports an empty selection\u2019s metrics as unknown, not as zero', () => {
+    const out = computeCombinedMetrics([strategy({ id: 'a' })], []);
+    expect(out.metrics.volatility).toBeNull();
+    expect(out.metrics.grossLeverage).toBeNull();
+    expect(out.metrics.marginPosted).toBeNull();
+    expect(out.returnPercent).toBeNull();
+  });
+
+  it('reports the return as unknown when any selected basis is unknown', () => {
+    // The invested total skipped a strategy with no starting equity while the
+    // value total kept it, so its entire market value was reported as profit.
+    const known = strategy({ id: 'known', invested: 100000, currentValue: 110000 });
+    const unknown = strategy({ id: 'unknown', invested: null, currentValue: 250000 });
+
+    const both = computeCombinedMetrics([known, unknown], ['known', 'unknown']);
+    expect(both.totalValue).toBe(360000);
+    expect(both.totalReturn).toBeNull();
+    expect(both.returnPercent).toBeNull();
+
+    // With a basis for everything selected, it measures normally.
+    const one = computeCombinedMetrics([known, unknown], ['known']);
+    expect(one.totalReturn).toBe(10000);
+    expect(one.returnPercent).toBeCloseTo(10, 6);
+  });
+
+  it('counts instruments, not pie slices, as holdings', () => {
+    // assetAllocation collapses everything under 3% into one "Others" row for
+    // the chart. The holdings table, the holdings count and the top-3 weight
+    // all read it, so "Others" was listed as an instrument and counted as one.
+    const s = strategy({
+      id: 'a',
+      currentValue: 100000,
+      positions: [
+        pos('ES', 500000), pos('NQ', 400000),
+        pos('CL', 10000), pos('GC', 9000), pos('ZN', 8000),
+      ],
+    });
+    const out = computeCombinedMetrics([s], ['a']);
+
+    expect(out.assetAllocation.map(a => a.symbol)).toContain('Others');
+    expect(out.holdings.map(a => a.symbol)).not.toContain('Others');
+    expect(out.holdings).toHaveLength(5);
+    expect(out.holdings.map(a => a.symbol)).toEqual(['ES', 'NQ', 'CL', 'GC', 'ZN']);
+  });
+
+  it('leaves a lot with no realised P&L out of the per-symbol totals', () => {
+    // realizedPnL is nullable on the wire, and summing a null produced NaN,
+    // which recharts renders as a bar of no height with no warning.
+    const s = strategy({
+      id: 'a',
+      finalizedPositions: [
+        fin('ES', 1200),
+        { symbol: 'ZB', quantity: 8, entryPrice: 119.5, exitPrice: null, realizedPnL: null },
+      ],
+    });
+    const out = computeCombinedMetrics([s], ['a']);
+    expect(out.symbolPnL.every(x => Number.isFinite(x.pnl))).toBe(true);
+    expect(out.symbolPnL.map(x => x.symbol)).toEqual(['ES']);
   });
 
   it('sums invested/value/return across the selected strategies', () => {
@@ -68,7 +132,7 @@ describe('computeCombinedMetrics', () => {
     expect(out.returnPercent).toBeCloseTo(5, 6); // 10000 / 200000
   });
 
-  it('reports 0%, not NaN or Infinity, when nothing is invested', () => {
+  it('reports an unknown return, not NaN or Infinity, when nothing is invested', () => {
     const s = strategy({
       id: 'fresh',
       invested: 0,
@@ -77,7 +141,7 @@ describe('computeCombinedMetrics', () => {
     });
     const out = computeCombinedMetrics([s], ['fresh']);
 
-    expect(out.returnPercent).toBe(0);
+    expect(out.returnPercent).toBeNull();
     expect(out.assetAllocation.every(a => Number.isFinite(a.percentage))).toBe(true);
     expect(out.strategyAllocation.every(a => Number.isFinite(a.percentage))).toBe(true);
   });

@@ -39,7 +39,7 @@ export function PerformanceCharts({ metrics, theme }: PerformanceChartsProps) {
                 fontSize: '12px',
                 color: theme === 'dark' ? '#fff' : '#000'
               }}
-              formatter={(value: number) => [`$${value.toLocaleString('en-US', { minimumFractionDigits: 0 })}`, 'P&L']}
+              formatter={(value: number) => [`$${value.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`, 'P&L']}
             />
             <Bar dataKey="pnl">
               {metrics.dailyPnL.map((entry, index) => (

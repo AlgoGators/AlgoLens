@@ -45,7 +45,9 @@ export function StrategySummary({ metrics, theme }: StrategySummaryProps) {
                 </div>
                 <div className="text-right">
                   <div className="text-lg">
-                    ${strategy.currentValue.toLocaleString('en-US', { minimumFractionDigits: 0 })}
+                    {/* Without a maximum, toLocaleString defaults to three
+                        decimals: "$592,405.719". */}
+                    ${strategy.currentValue.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
                   </div>
                 </div>
               </div>

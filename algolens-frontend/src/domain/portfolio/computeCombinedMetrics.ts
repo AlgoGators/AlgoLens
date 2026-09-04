@@ -36,54 +36,67 @@ export interface AdvancedMetrics {
 export interface CombinedMetrics {
   totalInvested: number;
   totalValue: number;
-  totalReturn: number;
-  returnPercent: number;
+  /** Null when any selected strategy has no starting equity on record. */
+  totalReturn: number | null;
+  /** Null for the same reason. */
+  returnPercent: number | null;
   metrics: StrategyMetrics;
   symbolPnL: SymbolPnL[];
   dailyPnL: { date: string; pnl: number }[];
   strategies: Strategy[];
+  /**
+   * For the pie chart: sub-3% slices collapsed into one "Others" row. Do not
+   * count these -- "Others" is not an instrument.
+   */
   assetAllocation: AllocationSlice[];
+  /** Every instrument, ungrouped. This is what a holdings count means. */
+  holdings: AllocationSlice[];
   strategyAllocation: StrategySlice[];
   historicalPerformance: { date: string; return: number }[];
   advancedMetrics: AdvancedMetrics;
 }
 
+/**
+ * Every metric of an empty selection is unknown, not zero. "0.00x leverage"
+ * and "$0 margin posted" are claims about a book; there is no book here.
+ * executionsToday is a count, and a count of nothing really is nothing.
+ */
 function zeroMetrics(): StrategyMetrics {
   return {
-    volatility: 0, sharpeRatio: 0, maxDrawdown: 0, winRate: 0, totalTrades: 0,
-    avgWin: 0, avgLoss: 0, profitFactor: 0, dailyReturn: 0, cumulativeReturn: 0, annualizedReturn: 0,
-    grossLeverage: 0, netLeverage: 0, portfolioLeverage: 0, marginPosted: 0,
-    equityToMarginRatio: 0, marginCushion: 0, totalNotional: 0, unrealizedPnL: 0,
-    realizedPnL: 0, totalCommissions: 0, netPnL: 0, cashAvailable: 0, currentPortfolioValue: 0
+    volatility: null, sharpeRatio: null, sortinoRatio: null, downsideDeviation: null,
+    maxDrawdown: null, winRate: null, executionsToday: 0,
+    avgWin: null, avgLoss: null, profitFactor: null, dailyReturn: null,
+    cumulativeReturn: null, annualizedReturn: null,
+    grossLeverage: null, netLeverage: null, portfolioLeverage: null, marginPosted: null,
+    equityToMarginRatio: null, marginCushion: null, totalNotional: null, unrealizedPnL: null,
+    realizedPnL: null, totalCommissions: null, netPnL: null, cashAvailable: null,
+    currentPortfolioValue: null
   };
 }
 
+/**
+ * The view model for "nothing is selected".
+ *
+ * This used to generate 91 dates ending today, each with a return of exactly
+ * 0%, and 31 more with a P&L of exactly $0. Recharts drew them: a flat line
+ * across three months, and a row of empty bars, both stamped with real dates.
+ * Nothing in any table said any of it. An empty selection has no series, so
+ * there is no series here and the charts render their own empty state.
+ */
 function emptyCombined(): CombinedMetrics {
-  const today = new Date();
-  const zeroHistorical = Array.from({ length: 91 }, (_, i) => {
-    const date = new Date(today);
-    date.setDate(date.getDate() - (90 - i));
-    return { date: date.toISOString().split('T')[0], return: 0 };
-  });
-
-  const zeroDaily = Array.from({ length: 31 }, (_, i) => {
-    const date = new Date(today);
-    date.setDate(date.getDate() - (30 - i));
-    return { date: date.toISOString().split('T')[0], pnl: 0 };
-  });
-
   return {
     totalInvested: 0,
     totalValue: 0,
-    totalReturn: 0,
-    returnPercent: 0,
+    totalReturn: null,
+    returnPercent: null,
     metrics: zeroMetrics(),
     symbolPnL: [],
-    dailyPnL: zeroDaily,
+    dailyPnL: [],
     strategies: [],
     assetAllocation: [],
+    holdings: [],
     strategyAllocation: [],
-    historicalPerformance: zeroHistorical,
+    historicalPerformance: [],
     advancedMetrics: {
       sortinoRatio: null, informationRatio: null, hhi: 0, correlationMatrix: [],
       topHoldings: [], var95: null
@@ -267,15 +280,20 @@ export function computeCombinedMetrics(
     return emptyCombined();
   }
 
-  // A strategy with no starting equity on record is left out of the invested
-  // total rather than counted as $0 invested.
+  // A strategy with no starting equity on record makes the SELECTION's return
+  // unknown, not smaller. Skipping it from the invested total while its value
+  // stayed in the value total reported its entire market value as profit --
+  // the comment here said it was "left out", and arithmetically it was left
+  // in at zero.
+  const anyBasisUnknown = selected.some(s => s.invested == null);
   const totalInvested = selected.reduce((sum, s) => sum + (s.invested ?? 0), 0);
   const totalValue = selected.reduce((sum, s) => sum + s.currentValue, 0);
-  const totalReturn = totalValue - totalInvested;
+  const totalReturn = anyBasisUnknown ? null : totalValue - totalInvested;
   // A selection whose invested or current value sums to zero has no meaningful
   // share to report. 0, not NaN or Infinity, which would otherwise render.
   const share = (part: number, whole: number) => (whole > 0 ? (part / whole) * 100 : 0);
-  const returnPercent = share(totalReturn, totalInvested);
+  const returnPercent =
+    totalReturn === null || totalInvested <= 0 ? null : share(totalReturn, totalInvested);
 
   // Combine all positions for asset allocation
   const assetValues: { [key: string]: number } = {};
@@ -347,6 +365,9 @@ export function computeCombinedMetrics(
   const symbolPnL: { [key: string]: number } = {};
   selected.forEach(strategy => {
     strategy.finalizedPositions.forEach(pos => {
+      // A lot whose realised P&L the engine has not published contributes
+      // nothing rather than turning the whole bar into NaN.
+      if (pos.realizedPnL == null) return;
       symbolPnL[pos.symbol] = (symbolPnL[pos.symbol] || 0) + pos.realizedPnL;
     });
   });
@@ -369,9 +390,11 @@ export function computeCombinedMetrics(
   const weightedMetrics: StrategyMetrics = {
     volatility: 0,
     sharpeRatio: 0,
+    sortinoRatio: null,
+    downsideDeviation: null,
     maxDrawdown: 0,
     winRate: 0,
-    totalTrades: 0,
+    executionsToday: 0,
     avgWin: 0,
     avgLoss: 0,
     profitFactor: 0,
@@ -433,7 +456,8 @@ export function computeCombinedMetrics(
   weightedMetrics.volatility = curveStats.volatility;
   weightedMetrics.maxDrawdown = curveStats.maxDrawdown;
   weightedMetrics.winRate = curveStats.winRate;
-  weightedMetrics.totalTrades = selected.reduce((n, s) => n + s.metrics.totalTrades, 0);
+  weightedMetrics.executionsToday = selected.reduce(
+    (n, s) => n + (s.metrics.executionsToday ?? 0), 0);
   weightedMetrics.avgWin = weighted(m => m.avgWin);
   weightedMetrics.avgLoss = weighted(m => m.avgLoss);
   weightedMetrics.profitFactor = weighted(m => m.profitFactor);
@@ -502,6 +526,7 @@ export function computeCombinedMetrics(
     dailyPnL,
     strategies: selected,
     assetAllocation: pieData,
+    holdings: assetAllocation,
     strategyAllocation,
     historicalPerformance,
     advancedMetrics: {

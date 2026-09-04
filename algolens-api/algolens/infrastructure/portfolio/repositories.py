@@ -153,6 +153,20 @@ class PostgresPortfolioRepository:
                 by_stream[stream] = rows
         return by_stream
 
+    # trading.positions holds one row per open position PER DAY. The engine
+    # deletes the day's rows and rewrites them each run
+    # (postgres_database.cpp, PostgresDatabase::store_positions), and a
+    # position that closed simply gets no row for that day -- the engine never
+    # writes a zero-quantity row to mark the close.
+    #
+    # Both queries below therefore work from a snapshot DATE. Picking the
+    # latest row per symbol regardless of date, which is what the current
+    # positions query used to do, returned every symbol the strategy had ever
+    # held, each frozen at the last day it was open, under a heading that says
+    # "Today's Positions". The `quantity != 0` guard did nothing about it: a
+    # closed position has no row to be zero. Every figure downstream inherited
+    # the error -- total notional, the position weights, and the current book
+    # the risk gate checks a proposed edit against.
     def _fetch_current_positions(self, cursor, strategy_type, portfolio_id):
         cursor.execute(
             """
@@ -164,11 +178,15 @@ class PostgresPortfolioRepository:
                 WHERE strategy_id = %s
                 AND portfolio_id = %s
                 AND quantity != 0
+                AND date = (
+                    SELECT max(date) FROM trading.positions
+                    WHERE strategy_id = %s AND portfolio_id = %s
+                )
                 ORDER BY symbol, updated_at DESC
             ) AS latest_positions
             ORDER BY ABS(quantity * average_price) DESC
             """,
-            (strategy_type, portfolio_id),
+            (strategy_type, portfolio_id, strategy_type, portfolio_id),
         )
         return cursor.fetchall()
 
@@ -188,6 +206,14 @@ class PostgresPortfolioRepository:
         return cursor.fetchall()
 
     def _fetch_yesterday_positions(self, cursor, strategy_type, portfolio_id):
+        """The snapshot before the latest one.
+
+        This asked for CURRENT_DATE - 1 literally, so the comparison had
+        nothing to compare against every Monday and after every holiday --
+        markets are shut, the engine writes no rows, and the panel went blank
+        with no explanation. "The previous snapshot" is the question the panel
+        is actually asking.
+        """
         cursor.execute(
             """
             SELECT DISTINCT ON (symbol)
@@ -196,10 +222,18 @@ class PostgresPortfolioRepository:
             FROM trading.positions
             WHERE strategy_id = %s
             AND portfolio_id = %s
-            AND updated_at::date = (CURRENT_DATE - INTERVAL '1 day')::date
+            AND date = (
+                SELECT max(date) FROM trading.positions
+                WHERE strategy_id = %s AND portfolio_id = %s
+                AND date < (
+                    SELECT max(date) FROM trading.positions
+                    WHERE strategy_id = %s AND portfolio_id = %s
+                )
+            )
             ORDER BY symbol, updated_at DESC
             """,
-            (strategy_type, portfolio_id),
+            (strategy_type, portfolio_id, strategy_type, portfolio_id,
+             strategy_type, portfolio_id),
         )
         return cursor.fetchall()
 

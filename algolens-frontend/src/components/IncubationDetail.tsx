@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react';
+import { periodReturn } from '../domain/portfolio/periodReturn';
 import { ArrowLeft, Clock, TrendingDown, TrendingUp } from 'lucide-react';
 import {
   Line,
@@ -69,14 +70,12 @@ export function IncubationDetail({
     return historicalData.filter(point => new Date(point.date) >= cutoffDate);
   }, [historicalData, selectedPeriod]);
 
-  const periodReturn = useMemo(() => {
-    if (filteredData.length < 2) return { value: 0, percent: 0 };
-    const startValue = filteredData[0].value;
-    const endValue = filteredData[filteredData.length - 1].value;
-    const returnValue = endValue - startValue;
-    const returnPercent = startValue > 0 ? (returnValue / startValue) * 100 : 0;
-    return { value: returnValue, percent: returnPercent };
+  const windowReturn = useMemo(() => {
+    return periodReturn(filteredData);
   }, [filteredData]);
+  // The window's direction, for chart colours. An unknown window is
+  // drawn in the neutral-positive colour rather than not drawn at all.
+  const gaining = (windowReturn?.value ?? 0) >= 0;
 
   const currentEquity =
     historicalData.length > 0
@@ -177,26 +176,37 @@ export function IncubationDetail({
               >
                 No trading days recorded yet
               </div>
+            ) : windowReturn === null ? (
+              /* Points exist, but fewer than two fall inside the selected
+                 window, so there is no return to state for it. This used to
+                 state "$0.00 (+0.00%)" -- a measured flat period. */
+              <div
+                className={`text-lg ${
+                  theme === 'dark' ? 'text-gray-500' : 'text-gray-400'
+                }`}
+              >
+                &mdash; no data for {periodLabel}
+              </div>
             ) : (
-            <div
-              className={`flex items-center gap-2 text-lg ${
-                periodReturn.value >= 0 ? 'text-orange-500' : 'text-red-500'
-              }`}
-            >
-              {periodReturn.value >= 0 ? (
-                <TrendingUp className="w-5 h-5" />
-              ) : (
-                <TrendingDown className="w-5 h-5" />
-              )}
-              <span>
-                ${Math.abs(periodReturn.value).toLocaleString('en-US', {
-                  minimumFractionDigits: 2,
-                  maximumFractionDigits: 2,
-                })}{' '}
-                ({periodReturn.percent >= 0 ? '+' : ''}
-                {periodReturn.percent.toFixed(2)}%) {periodLabel}
-              </span>
-            </div>
+              <div
+                className={`flex items-center gap-2 text-lg ${
+                  gaining ? 'text-orange-500' : 'text-red-500'
+                }`}
+              >
+                {gaining ? (
+                  <TrendingUp className="w-5 h-5" />
+                ) : (
+                  <TrendingDown className="w-5 h-5" />
+                )}
+                <span>
+                  ${Math.abs(windowReturn.value).toLocaleString('en-US', {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  })}{' '}
+                  ({windowReturn.percent >= 0 ? '+' : ''}
+                  {windowReturn.percent.toFixed(2)}%) {periodLabel}
+                </span>
+              </div>
             )}
           </div>
 
@@ -244,7 +254,7 @@ export function IncubationDetail({
                 <Line
                   type="linear"
                   dataKey="value"
-                  stroke={periodReturn.value >= 0 ? '#f97316' : '#ef4444'}
+                  stroke={gaining ? '#f97316' : '#ef4444'}
                   strokeWidth={2}
                   dot={false}
                 />

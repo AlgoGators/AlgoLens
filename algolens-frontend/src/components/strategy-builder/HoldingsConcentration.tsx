@@ -35,7 +35,10 @@ export function HoldingsConcentration({ metrics, theme, onShowAll }: HoldingsCon
             <div className="col-span-3 text-right">WEIGHT</div>
           </div>
 
-          {metrics.assetAllocation.slice(0, 6).map((asset, index) => (
+          {/* Instruments, not pie slices. This read the grouped allocation,
+              so an "Others" bucket appeared in a table of holdings with a
+              colour dot beside it, indistinguishable from a real contract. */}
+          {metrics.holdings.slice(0, 6).map((asset, index) => (
             <div
               key={asset.symbol}
               className={`grid grid-cols-12 gap-2 py-2 border-b text-sm ${theme === 'dark' ? 'border-gray-900' : 'border-gray-100'
@@ -108,7 +111,7 @@ export function HoldingsConcentration({ metrics, theme, onShowAll }: HoldingsCon
                 HOLDINGS
               </div>
               <div className="text-xl tabular-nums">
-                {metrics.assetAllocation.length}
+                {metrics.holdings.length}
               </div>
             </div>
             <div className={`p-2 border ${theme === 'dark' ? 'border-gray-800' : 'border-gray-200'
@@ -117,7 +120,7 @@ export function HoldingsConcentration({ metrics, theme, onShowAll }: HoldingsCon
                 TOP 3 WT
               </div>
               <div className="text-xl tabular-nums text-orange-500">
-                {metrics.assetAllocation.slice(0, 3).reduce((sum, a) => sum + a.percentage, 0).toFixed(0)}%
+                {metrics.holdings.slice(0, 3).reduce((sum, a) => sum + a.percentage, 0).toFixed(0)}%
               </div>
             </div>
           </div>
