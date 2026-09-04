@@ -1,4 +1,4 @@
-import type { Strategy, PortfolioData, HistoricalDataPoint } from '../../domain/portfolio/portfolioData';
+import type { Strategy, PortfolioData, HistoricalDataPoint, HeldCorrelations } from '../../domain/portfolio/portfolioData';
 import type { IncubatingStrategy, IncubationPerformance } from '../../domain/portfolio/incubationData';
 import type { RiskCheck } from '../../domain/portfolio/positionEdit';
 import type {
@@ -131,6 +131,24 @@ export class PortfolioApiService {
     const response = await fetchWithAuth(`${API_BASE_URL}/portfolio/strategies`);
     const data = await response.json();
     return data.strategies;
+  }
+
+  /**
+   * Correlations between the instruments the fund currently holds.
+   *
+   * Computed by the API from futures_data.ohlcv_1d -- the same table every
+   * market price on the site comes from -- so a correlation and the price
+   * beside it cannot disagree.
+   */
+  static async getCorrelations(): Promise<HeldCorrelations> {
+    const response = await fetchWithAuth(`${API_BASE_URL}/portfolio/correlations`);
+    const data = await response.json();
+    return {
+      symbols: data.symbols ?? [],
+      matrix: data.matrix ?? [],
+      observations: data.observations ?? 0,
+      symbolsWithoutPrices: data.symbolsWithoutPrices ?? [],
+    };
   }
 
   static async getIncubationStrategies(): Promise<IncubatingStrategy[]> {

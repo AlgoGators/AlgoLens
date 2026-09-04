@@ -82,6 +82,41 @@ class PostgresMarketData:
                 prices[symbol] = float(close)
         return prices
 
+    def close_series(self, symbols, lookback_days=180):
+        """{symbol: [(date, close), ...]} in ascending date order.
+
+        The history behind the correlation matrix. Same table as
+        ``latest_prices``, so a correlation and the market price beside it are
+        computed from one series rather than two sources that can disagree.
+
+        Bounded by date rather than by row count: a LIMIT would take the newest
+        N rows across ALL symbols together, so a symbol with denser history
+        would crowd the others out of the window and the pairs would no longer
+        share dates.
+        """
+        wanted = [s for s in dict.fromkeys(symbols) if s]
+        if not wanted:
+            return {}
+        rows = self._query(
+            f"""
+            SELECT symbol, time::date AS day, close
+            FROM {PRICE_TABLE}
+            WHERE symbol = ANY(%s)
+              AND time >= (CURRENT_DATE - %s * INTERVAL '1 day')
+              AND close IS NOT NULL
+            ORDER BY symbol, time
+            """,
+            (wanted, lookback_days),
+            PRICE_TABLE,
+        )
+        series = {}
+        for row in rows:
+            symbol = row["symbol"] if isinstance(row, dict) else row[0]
+            day = row["day"] if isinstance(row, dict) else row[1]
+            close = row["close"] if isinstance(row, dict) else row[2]
+            series.setdefault(symbol, []).append((day, float(close)))
+        return series
+
     def contract_multipliers(self, base_symbols):
         """{root symbol: contract size}.
 

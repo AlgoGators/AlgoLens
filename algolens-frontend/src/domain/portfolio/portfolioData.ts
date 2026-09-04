@@ -101,6 +101,23 @@ export interface StrategyMetrics {
   totalReturn?: number | null;
 }
 
+/**
+ * Correlations between the instruments the fund currently holds.
+ *
+ * `matrix[i][j]` is the correlation of `symbols[i]` with `symbols[j]`, or null
+ * where it could not be measured -- too few overlapping returns, or a series
+ * that never moved. `observations` is the count behind the THINNEST pair, so a
+ * caller can state how firm the whole matrix is rather than implying every
+ * cell rests on the same amount of data.
+ */
+export interface HeldCorrelations {
+  symbols: string[];
+  matrix: (number | null)[][];
+  observations: number;
+  /** Held, but the price pipeline has no bars for them. Left out, not zeroed. */
+  symbolsWithoutPrices: string[];
+}
+
 export interface HistoricalDataPoint {
   date: string;
   value: number;

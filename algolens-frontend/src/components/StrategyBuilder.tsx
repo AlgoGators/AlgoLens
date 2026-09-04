@@ -1,4 +1,6 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
+import { PortfolioApiService } from '../infrastructure/api/portfolioApi';
+import type { HeldCorrelations } from '../domain/portfolio/portfolioData';
 import { useTheme } from '../adapters/react/ThemeContext';
 import type { Strategy } from '../domain/portfolio/portfolioData';
 import { computeCombinedMetrics } from '../domain/portfolio/computeCombinedMetrics';
@@ -20,6 +22,10 @@ export function StrategyBuilder({ strategies, onClose }: StrategyBuilderProps) {
   const { theme } = useTheme();
   const [selectedStrategies, setSelectedStrategies] = useState<string[]>(strategies.map(s => s.id));
   const [showHoldingsModal, setShowHoldingsModal] = useState(false);
+  // Fund-wide correlations, computed by the API from the price pipeline. Null
+  // until they arrive, and left null if the request fails -- the panel then
+  // says the matrix is unavailable, which is true, rather than drawing zeros.
+  const [correlations, setCorrelations] = useState<HeldCorrelations | null>(null);
   const [expandedSections, setExpandedSections] = useState<ExpandedSections>({
     diversification: false,
     trading: false,
@@ -42,10 +48,18 @@ export function StrategyBuilder({ strategies, onClose }: StrategyBuilderProps) {
     });
   };
 
+  useEffect(() => {
+    let cancelled = false;
+    PortfolioApiService.getCorrelations()
+      .then(result => { if (!cancelled) setCorrelations(result); })
+      .catch(() => { if (!cancelled) setCorrelations(null); });
+    return () => { cancelled = true; };
+  }, []);
+
   // Derive the combined view model from the selected strategies' real data.
   const combinedMetrics = useMemo(
-    () => computeCombinedMetrics(strategies, selectedStrategies),
-    [selectedStrategies, strategies]
+    () => computeCombinedMetrics(strategies, selectedStrategies, correlations),
+    [selectedStrategies, strategies, correlations]
   );
 
   return (

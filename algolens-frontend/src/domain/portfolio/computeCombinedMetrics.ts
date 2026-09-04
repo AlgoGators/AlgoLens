@@ -1,4 +1,4 @@
-import type { Strategy, StrategyMetrics } from './portfolioData';
+import type { HeldCorrelations, Strategy, StrategyMetrics } from './portfolioData';
 
 // Shapes of the derived data the StrategyBuilder view renders. Extracted verbatim
 // from the old inline useMemo so the computation can live (and be tested) apart
@@ -27,7 +27,15 @@ export interface AdvancedMetrics {
   /** null when it cannot be computed honestly -- see informationRatioVsBenchmark. */
   informationRatio: number | null;
   hhi: number;
-  correlationMatrix: number[][];
+  /**
+   * Correlations between the top holdings, in the order `topHoldings` lists
+   * them. A cell is null where the pair could not be measured. Empty when the
+   * API supplied nothing -- which the panel reports as unavailable rather than
+   * drawing an empty grid.
+   */
+  correlationMatrix: (number | null)[][];
+  /** Overlapping returns behind the thinnest pair in the matrix. */
+  correlationObservations: number;
   topHoldings: AllocationSlice[];
   /** Null when combined volatility is unknown. */
   var95: number | null;
@@ -99,7 +107,7 @@ function emptyCombined(): CombinedMetrics {
     historicalPerformance: [],
     advancedMetrics: {
       sortinoRatio: null, informationRatio: null, hhi: 0, correlationMatrix: [],
-      topHoldings: [], var95: null
+      topHoldings: [], var95: null, correlationObservations: 0
     }
   };
 }
@@ -266,7 +274,8 @@ export function informationRatioVsBenchmark(
  */
 export function computeCombinedMetrics(
   strategies: Strategy[],
-  selectedStrategyIds: string[]
+  selectedStrategyIds: string[],
+  correlations?: HeldCorrelations | null,
 ): CombinedMetrics {
   // A strategy with dataAvailable === false carries placeholder zeros, not
   // measurements. It must not reach the maths: a zero-value strategy would show
@@ -503,12 +512,33 @@ export function computeCombinedMetrics(
     sum + Math.pow(asset.percentage, 2), 0
   );
 
-  // Correlation Matrix (top 5 holdings). A real correlation needs per-symbol price
-  // history, which the API does not expose today (we only have current positions and
-  // the portfolio-level equity curve). Rather than fabricate values with Math.random,
-  // leave it empty so the UI shows an honest "unavailable" state. See issue #56.
+  // Correlation matrix for the top 5 holdings, sliced out of the fund-wide
+  // matrix the API computes from futures_data.ohlcv_1d.
+  //
+  // This used to be hardcoded empty, and the panel explained the gap as
+  // "the API does not expose per-symbol price history". It always did: that is
+  // the table every market price on the site already comes from. Nothing read
+  // it. Before that it was filled with Math.random, which is how a panel of
+  // invented numbers ended up shipping in the first place.
   const topHoldings = assetAllocation.slice(0, 5);
-  const correlationMatrix: number[][] = [];
+  const correlationIndex = new Map(
+    (correlations?.symbols ?? []).map((symbol, i) => [symbol, i]),
+  );
+  // Only build the grid if every holding on it is one the API measured. A
+  // matrix with a missing row is a matrix whose labels no longer line up with
+  // its cells, which is worse than no matrix.
+  const covered = topHoldings.every(h => correlationIndex.has(h.symbol));
+  const correlationMatrix: (number | null)[][] =
+    covered && topHoldings.length > 0
+      ? topHoldings.map(row =>
+          topHoldings.map(
+            column =>
+              correlations!.matrix[correlationIndex.get(row.symbol)!]?.[
+                correlationIndex.get(column.symbol)!
+              ] ?? null,
+          ),
+        )
+      : [];
 
   // Value at Risk (95% confidence, 1-day)
   const var95 =
@@ -534,6 +564,9 @@ export function computeCombinedMetrics(
       informationRatio,
       hhi,
       correlationMatrix,
+      correlationObservations: correlationMatrix.length > 0
+        ? correlations?.observations ?? 0
+        : 0,
       topHoldings,
       var95
     }

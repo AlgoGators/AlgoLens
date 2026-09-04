@@ -190,6 +190,43 @@ class PostgresPortfolioRepository:
         )
         return cursor.fetchall()
 
+    def held_symbols(self, portfolio_ids):
+        """Every symbol the named books hold in their most recent snapshot.
+
+        Scoped to that snapshot for the same reason the position view is: a
+        symbol closed months ago is not something the fund holds, and
+        correlating it would describe a book nobody has.
+
+        Scoped to the named books because every read of a portfolio-keyed table
+        is (tests/test_portfolio_queries.py). The caller passes the books the
+        fund actually reports on, so a stray row for some other portfolio
+        cannot put an instrument on screen that no reported book holds.
+        """
+        books = [b for b in dict.fromkeys(portfolio_ids) if b]
+        if not books:
+            return []
+        conn = self.connection_factory()
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    SELECT DISTINCT symbol
+                    FROM trading.positions
+                    WHERE portfolio_id = ANY(%s)
+                      AND quantity != 0
+                      AND date = (
+                          SELECT max(date) FROM trading.positions
+                          WHERE portfolio_id = ANY(%s)
+                      )
+                    ORDER BY symbol
+                    """,
+                    (books, books),
+                )
+                rows = cursor.fetchall()
+        finally:
+            conn.close()
+        return [row["symbol"] if isinstance(row, dict) else row[0] for row in rows]
+
     def _fetch_recent_executions(self, cursor, strategy_type, portfolio_id):
         cursor.execute(
             """

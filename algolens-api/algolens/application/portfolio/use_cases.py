@@ -28,6 +28,7 @@ from algolens.application.portfolio.ports import (
     StrategyRegistryPort,
 )
 from algolens.application.shared.errors import NotFoundError
+from algolens.domain.portfolio.correlation import build_matrix
 from algolens.domain.portfolio.calculations import (
     build_historical_data,
     compute_return_stats,
@@ -194,6 +195,58 @@ def build_strategy_detail(
             "currentPortfolioValue": current_value,
         },
     }
+
+
+class GetHeldCorrelations:
+    """Correlations between the instruments the fund currently holds.
+
+    The Strategy Builder rendered "Correlation data unavailable -- a real
+    correlation matrix needs per-symbol price history, which the API does not
+    expose yet". The history was never missing: it is futures_data.ohlcv_1d,
+    the table every market price on the site already comes from. Nothing read
+    it, and the panel described that gap as a property of the data.
+
+    Missing prices stay missing. A symbol the pipeline has no bars for is left
+    out of the matrix entirely rather than correlated against a gap, and the
+    response says how many symbols were dropped so the caller can say so.
+    """
+
+    #: Roughly nine months of trading days. Long enough for a correlation to
+    #: mean something, short enough that it describes the current regime.
+    LOOKBACK_DAYS = 270
+
+    def __init__(self, registry, reader, market_data):
+        self.registry = registry
+        self.reader = reader
+        self.market_data = market_data
+
+    def execute(self):
+        # The books the fund reports on, which is what bounds the read below.
+        # Membership books included, so a strategy trading in a second book
+        # still contributes that book's instruments to the matrix.
+        books = sorted(
+            set(self.registry.list_portfolio_ids_in_use())
+            | {m["portfolio_id"] for m in self.registry.list_memberships()}
+        )
+        symbols = self.reader.held_symbols(books)
+        if not symbols:
+            return {
+                "symbols": [],
+                "matrix": [],
+                "observations": 0,
+                "symbolsWithoutPrices": [],
+            }
+
+        series = self.market_data.close_series(symbols, self.LOOKBACK_DAYS)
+        priced = {s: series[s] for s in symbols if series.get(s)}
+        result = build_matrix(priced)
+
+        return {
+            "symbols": list(result.symbols),
+            "matrix": [list(row) for row in result.matrix],
+            "observations": result.observations,
+            "symbolsWithoutPrices": sorted(set(symbols) - set(priced)),
+        }
 
 
 def build_strategy_summary(

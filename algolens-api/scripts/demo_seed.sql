@@ -261,21 +261,125 @@ VALUES
   ('6E','6E','Euro FX','FUTURE','CME',125000);
 
 -- 30 days of daily bars for the symbols the demo holds.
+-- ---------------------------------------------------------------------------
+-- Daily bars.
+--
+-- Every symbol used to move on the SAME sine wave: close = px * (1 + 0.004 *
+-- sin(d/4)). Eleven contracts across equities, treasuries, metals, energy, FX
+-- and grains, all rising and falling in lockstep, on 30 calendar days of which
+-- 8 were weekends. Two consequences:
+--
+--   Any correlation computed from it is 1.00 everywhere. That is why the
+--   correlation matrix shipped as an "unavailable" panel -- not because the
+--   price history was missing, but because it carried no cross-sectional
+--   information to correlate.
+--
+--   The prices barely moved, so the market-price column was decorative.
+--
+-- The series now has a factor structure, which is what makes a correlation
+-- matrix worth showing: index futures move together and against treasuries,
+-- the two treasuries move almost as one, gold and silver share a metals
+-- factor, crude and gas share an energy factor with gas mostly its own thing,
+-- and beans are largely idiosyncratic. Each symbol's returns are then
+-- standardised to a realistic annualised volatility -- a positive scaling,
+-- which leaves the correlations untouched.
+--
+-- The last bar is pinned to the price the book is marked at, so the market
+-- price and every notional derived from it stay the figures they were.
+-- ---------------------------------------------------------------------------
 INSERT INTO futures_data.ohlcv_1d (time, symbol, open, high, low, close, volume)
-SELECT (CURRENT_DATE - d)::timestamptz,
-       m.sym,
-       m.px * (1 + 0.002 * sin(d / 3.0)),
-       m.px * (1 + 0.006 * sin(d / 3.0)),
-       m.px * (1 - 0.006 * sin(d / 3.0)),
-       m.px * (1 + 0.004 * sin(d / 4.0)),
-       100000 + d * 37
-FROM generate_series(0, 29) d
-CROSS JOIN (VALUES
-    ('ES.v.0', 5310.75), ('NQ.v.0', 18512.25), ('CL.v.0', 79.10),
-    ('GC.v.0', 2437.60), ('ZN.v.0', 112.35), ('6E.v.0', 1.0915),
-    ('ZS.v.0', 1051.50), ('RTY.v.0', 2298.40), ('NG.v.0', 2.958),
-    ('ZB.v.0', 119.20), ('SI.v.0', 31.85)
-) AS m(sym, px);
+WITH days AS (
+    -- The same 90 weekdays the equity curve uses. Markets are shut at the
+    -- weekend and the pipeline writes no bar; this used to write two a week.
+    SELECT day, row_number() OVER (ORDER BY day) - 1 AS i
+    FROM (
+        SELECT d::date AS day
+        FROM generate_series(CURRENT_DATE - 200, CURRENT_DATE, INTERVAL '1 day') AS d
+        WHERE extract(isodow FROM d) <= 5
+        ORDER BY d DESC LIMIT 90
+    ) recent
+),
+contracts AS (
+    -- symbol, last close, target annualised volatility %
+    SELECT * FROM (VALUES
+        ('ES.v.0',  5310.75, 14.0), ('NQ.v.0', 18512.25, 19.0),
+        ('RTY.v.0', 2298.40, 20.0), ('ZN.v.0',   112.35,  5.0),
+        ('ZB.v.0',   119.20,  9.0), ('GC.v.0',  2437.60, 13.0),
+        ('SI.v.0',    31.85, 24.0), ('CL.v.0',    79.10, 28.0),
+        ('NG.v.0',     2.958, 45.0), ('6E.v.0',    1.0915, 7.0),
+        ('ZS.v.0',  1051.50, 16.0)
+    ) AS c(symbol, px, annual_vol)
+),
+loadings AS (
+    -- How each contract answers each driver. A row whose factor is the
+    -- symbol's own name is its idiosyncratic component.
+    SELECT * FROM (VALUES
+        ('ES.v.0','equity',1.00),  ('ES.v.0','rates',-0.10), ('ES.v.0','ES.v.0',0.35),
+        ('NQ.v.0','equity',1.15),  ('NQ.v.0','rates',-0.15), ('NQ.v.0','NQ.v.0',0.45),
+        ('RTY.v.0','equity',1.05), ('RTY.v.0','rates',-0.10),('RTY.v.0','RTY.v.0',0.55),
+        ('ZN.v.0','rates',1.00),                             ('ZN.v.0','ZN.v.0',0.25),
+        ('ZB.v.0','rates',1.55),                             ('ZB.v.0','ZB.v.0',0.30),
+        ('GC.v.0','metals',1.00),  ('GC.v.0','rates',0.25),  ('GC.v.0','GC.v.0',0.40),
+        ('SI.v.0','metals',1.55),  ('SI.v.0','rates',0.20),  ('SI.v.0','SI.v.0',0.70),
+        ('CL.v.0','energy',1.00),  ('CL.v.0','equity',0.20), ('CL.v.0','CL.v.0',0.55),
+        ('NG.v.0','energy',0.55),                            ('NG.v.0','NG.v.0',1.30),
+        ('6E.v.0','fx',1.00),      ('6E.v.0','rates',0.15),  ('6E.v.0','6E.v.0',0.40),
+        ('ZS.v.0','grain',1.00),   ('ZS.v.0','energy',0.20), ('ZS.v.0','ZS.v.0',0.60)
+    ) AS l(symbol, factor, loading)
+),
+draws AS (
+    -- One deterministic draw per driver per day: three uniforms summed to
+    -- approximate a normal, the same construction the equity curve uses.
+    SELECT d.i, f.factor,
+           2.0 * (
+                 ((('x' || substr(md5((d.i * 3 + 1)::text || f.factor), 1, 8))::bit(32)::bigint & 65535) / 65535.0)
+               + ((('x' || substr(md5((d.i * 3 + 2)::text || f.factor), 1, 8))::bit(32)::bigint & 65535) / 65535.0)
+               + ((('x' || substr(md5((d.i * 3 + 3)::text || f.factor), 1, 8))::bit(32)::bigint & 65535) / 65535.0)
+               - 1.5
+           ) AS z
+    FROM days d
+    CROSS JOIN (SELECT DISTINCT factor FROM loadings) f
+    WHERE d.i > 0
+),
+combined AS (
+    SELECT dr.i, l.symbol, sum(l.loading * dr.z) AS r
+    FROM loadings l JOIN draws dr ON dr.factor = l.factor
+    GROUP BY 1, 2
+),
+scaled AS (
+    -- Demeaned and rescaled to the target volatility. Scaling is a positive
+    -- multiple, so it changes each contract's volatility and none of the
+    -- correlations between them.
+    SELECT cb.i, cb.symbol,
+           ((cb.r - avg(cb.r) OVER w) / nullif(stddev_pop(cb.r) OVER w, 0))
+           * (c.annual_vol / 100.0 / sqrt(252.0)) AS logret
+    FROM combined cb JOIN contracts c ON c.symbol = cb.symbol
+    WINDOW w AS (PARTITION BY cb.symbol)
+),
+walk AS (
+    SELECT i, symbol,
+           sum(logret) OVER (PARTITION BY symbol ORDER BY i ROWS UNBOUNDED PRECEDING) AS cum,
+           logret
+    FROM scaled
+    UNION ALL
+    SELECT 0, symbol, 0.0, 0.0 FROM contracts
+),
+priced AS (
+    SELECT w.i, w.symbol, w.logret,
+           -- Anchored so the final bar is the price the book is marked at.
+           c.px * exp(w.cum - first_value(w.cum) OVER (PARTITION BY w.symbol ORDER BY w.i DESC)) AS close
+    FROM walk w JOIN contracts c ON c.symbol = w.symbol
+)
+SELECT d.day::timestamptz,
+       pr.symbol,
+       -- The day opens where the move started and closes where it ended; the
+       -- range extends a little past both, scaled by how big the move was.
+       pr.close * exp(-pr.logret * 0.6)                                          AS open,
+       greatest(pr.close, pr.close * exp(-pr.logret * 0.6)) * (1 + abs(pr.logret) * 0.35 + 0.0008) AS high,
+       least(pr.close, pr.close * exp(-pr.logret * 0.6))    * (1 - abs(pr.logret) * 0.35 - 0.0008) AS low,
+       pr.close,
+       (120000 + (('x' || substr(md5(pr.symbol || pr.i::text), 1, 8))::bit(32)::bigint & 65535))::bigint AS volume
+FROM priced pr JOIN days d ON d.i = pr.i;
 
 -- From trade-ngin migration 004, constraints included. The first version of
 -- this seed left every column nullable and untyped, which meant a write that

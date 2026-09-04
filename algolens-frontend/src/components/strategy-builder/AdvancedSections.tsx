@@ -34,8 +34,8 @@ export function AdvancedSections({ metrics, theme, expanded, onToggle }: Advance
           {metrics.advancedMetrics.correlationMatrix.length === 0 ? (
             <div className={`text-xs ${theme === 'dark' ? 'text-gray-500' : 'text-gray-500'
               }`}>
-              Correlation data unavailable — a real correlation matrix needs per-symbol
-              price history, which the API does not expose yet (tracked in issue #56).
+              Correlation unavailable for these holdings — the price pipeline has no
+              overlapping history for at least one of them.
             </div>
           ) : (
             <>
@@ -55,14 +55,22 @@ export function AdvancedSections({ metrics, theme, expanded, onToggle }: Advance
                         <td className="p-1 font-mono">{metrics.advancedMetrics.topHoldings[i].symbol}</td>
                         {row.map((corr, j) => (
                           <td key={j} className="p-1">
+                            {/* A pair the pipeline could not measure shows as
+                                unknown. Rendering null as 0.00 would claim
+                                two instruments are uncorrelated, which is a
+                                strong and specific claim about risk. */}
                             <div
-                              className="w-12 h-8 flex items-center justify-center text-white text-xs font-mono"
-                              style={{
+                              className={`w-12 h-8 flex items-center justify-center text-xs font-mono ${
+                                corr === null
+                                  ? theme === 'dark' ? 'text-gray-600' : 'text-gray-400'
+                                  : 'text-white'
+                              }`}
+                              style={corr === null ? undefined : {
                                 backgroundColor: `rgba(${corr > 0.7 ? '239, 68, 68' : corr > 0.4 ? '251, 146, 60' : '34, 197, 94'
                                   }, ${Math.abs(corr) * 0.7 + 0.3})`
                               }}
                             >
-                              {corr.toFixed(2)}
+                              {corr === null ? '—' : corr.toFixed(2)}
                             </div>
                           </td>
                         ))}
@@ -73,7 +81,16 @@ export function AdvancedSections({ metrics, theme, expanded, onToggle }: Advance
               </div>
               <div className={`text-xs mt-3 ${theme === 'dark' ? 'text-gray-600' : 'text-gray-400'
                 }`}>
-                ■ Green: Low correlation (0.3-0.4) • ■ Orange: Moderate (0.4-0.7) • ■ Red: High (0.7+)
+                ■ Low (under 0.4) • ■ Moderate (0.4&ndash;0.7) • ■ High (0.7+)
+              </div>
+              {/* What the matrix rests on. A correlation over a fortnight and
+                  one over a year read identically on screen and mean very
+                  different things. */}
+              <div className={`text-xs mt-1 ${theme === 'dark' ? 'text-gray-600' : 'text-gray-400'
+                }`}>
+                Pearson correlation of daily log returns over{' '}
+                {metrics.advancedMetrics.correlationObservations} trading days, from the
+                daily bars in the market data pipeline.
               </div>
             </>
           )}

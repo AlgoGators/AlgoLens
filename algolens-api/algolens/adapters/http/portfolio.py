@@ -32,6 +32,7 @@ from algolens.application.portfolio.use_cases import (
     CreateBook,
     DeleteBook,
     GetIncubationPerformance,
+    GetHeldCorrelations,
     GetStrategyDetail,
     ListAssignmentHistory,
     ListBooks,
@@ -228,6 +229,21 @@ def get_all_strategies():
             "[STRATEGIES] Error fetching strategies: %s", str(exc), exc_info=True
         )
         return jsonify({"error": "Failed to fetch strategies"}), 500
+
+
+@portfolio_bp.route("/correlations", methods=["GET"])
+@jwt_required()
+def get_correlations():
+    """Correlations between the instruments the fund currently holds."""
+    try:
+        registry, reader = _portfolio_dependencies()
+        result = GetHeldCorrelations(registry, reader, create_market_data()).execute()
+        return jsonify(result), 200
+    except Exception as exc:
+        current_app.logger.error(
+            "[CORRELATIONS] Error computing correlations: %s", str(exc), exc_info=True
+        )
+        return jsonify({"error": "Failed to compute correlations"}), 500
 
 
 @portfolio_bp.route("/incubation", methods=["GET"])
