@@ -349,6 +349,37 @@ apps print `n/a (no returns below target)` rather than a number.
 One test had settled for `EXPECT_LE(std::abs(sortino), 999.0)`, which was only
 ever a bound on how wrong the answer could be. It now asserts there is no answer.
 
+**And the zero defaults behind them.** The sentinels were the loud half. The
+quiet half was every sibling that returned **0.0** on the same division by zero
+— no 999, no obvious tell, and a value that reads as "earned nothing per unit of
+risk" rather than "this has no value". Three calculators had it:
+
+| | Was | Now |
+| --- | --- | --- |
+| `BacktestMetricsCalculator::calculate_sharpe_ratio` | 0.0 on zero volatility | empty |
+| `LiveMetricsCalculator::calculate_sharpe_ratio` / `calculate_sortino_ratio` | 0.0 | empty |
+| `LiveHistoricalMetricsCalculator` — `sharpe_ratio`, `sortino_ratio` | left at the field default 0.0 | empty |
+
+The third is the consequential one: it is the struct that writes
+`trading.live_results`, so a zero there was a zero on the dashboard. The runner
+now leaves both columns out of the metric map when they are undefined, which
+stores NULL, and `volatility` and `downside_deviation` go in regardless — an
+absent ratio always has its explanation in the same row.
+
+`LiveDataLoader` needed splitting to read them: its nullable reader had the
+profit-factor sentinel baked in, and a Sharpe ratio of 999 would be absurd but it
+would still be a Sharpe ratio. The 999 threshold now applies only to the column
+it was written for.
+
+Two comments in the live calculator said *"cannot calculate Sharpe ratio"* and
+*"cannot calculate Sortino ratio"* immediately before returning 0.0 — a number
+that says it can. Both now return nothing, which is what the comment always said.
+
+AlgoLens needed no change: `published_or_computed` already falls back to a local
+computation on NULL, `compute_sharpe` already returns None on zero volatility,
+and the demo seed already writes NULL through `CASE WHEN st.volatility > 0`. The
+three were in agreement about the right answer; only the engine was not.
+
 ### 8.2 Contract size is not a price multiplier
 
 A futures contract has a **contract size** — 5,000 bushels of corn, $100,000 of
@@ -525,12 +556,6 @@ not, and both now covered by tests that plant exactly that.
 
 ### Still open after this pass
 
-- **`calculate_sharpe_ratio` returns 0.0 when volatility is zero**, and the live
-  `LiveMetricsCalculator::calculate_sortino_ratio` does the same with zero
-  downside deviation. Not sentinels — no 999 anywhere — but the same shape of
-  claim: a zero risk-adjusted return where the ratio is undefined. Narrower in
-  effect, because a book with genuinely zero volatility is a book that has not
-  traded, and left alone for now rather than swept in.
 - **The equity-index aliases in §8.3.** One query settles it; the answer moves a
   published exposure figure by 10x either way, so it is not mine to pick.
 - **`trading.strategy_registry` is still a reconstruction.** No migration creates

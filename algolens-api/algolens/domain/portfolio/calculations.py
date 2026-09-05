@@ -297,11 +297,16 @@ def float_or_none(value: Any) -> float | None:
 def compute_sharpe(annualized_return: float | None, volatility: float | None) -> float | None:
     """Annualised return over volatility, with a ZERO risk-free rate.
 
-    The engine does not publish a Sharpe ratio, so this is computed here from
-    the two figures it does publish. No risk-free rate is subtracted because
-    none is available from any source; the UI says so on the tile. A zero
-    volatility makes the ratio undefined, and undefined is returned as None
-    rather than as 0, which would read as "no risk-adjusted return".
+    The engine does publish a Sharpe ratio, and it wins -- see
+    published_or_computed. This is the fallback for a row written before it did,
+    computed from the two figures that row does carry. No risk-free rate is
+    subtracted because none is available from any source; the UI says so on the
+    tile.
+
+    A zero volatility makes the ratio undefined, and undefined is returned as
+    None rather than as 0, which would read as "no risk-adjusted return". The
+    engine agrees: it writes no sharpe_ratio at all in that case, rather than
+    the 0.0 it used to.
     """
     if annualized_return is None or volatility is None or volatility <= 0:
         return None
