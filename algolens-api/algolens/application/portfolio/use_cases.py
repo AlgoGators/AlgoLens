@@ -30,6 +30,8 @@ from algolens.application.portfolio.ports import (
 from algolens.application.shared.errors import NotFoundError
 from algolens.domain.portfolio.correlation import build_matrix
 from algolens.domain.portfolio.calculations import (
+    live_leverage,
+    published_profit_factor,
     build_historical_data,
     compute_return_stats,
     compute_sharpe,
@@ -153,7 +155,9 @@ def build_strategy_detail(
             "avgWin": published_or_computed(latest.get("avg_win"), None),
             "avgLoss": published_or_computed(latest.get("avg_loss"), None),
             # Same dollar-P&L definition in both, so the fallback is safe.
-            "profitFactor": published_or_computed(
+            # The published value is dropped when it is the 999.99 sentinel a
+            # pre-migration row still carries.
+            "profitFactor": published_profit_factor(
                 latest.get("profit_factor"), stats["profit_factor"]
             ),
             "dailyReturn": float_or_none(latest["daily_return"]),
@@ -162,12 +166,11 @@ def build_strategy_detail(
             # The engine stopped writing trading.live_results.gross_leverage and
             # now puts that number in portfolio_leverage; the column it
             # abandoned is still there, holding whatever it held on the day it
-            # was abandoned. Reading it directly reported a dead value as a
-            # current one. See the note on LIVE_RESULTS in schema_contract.py.
-            "grossLeverage": float_or_none(
-                latest["gross_leverage"]
-                if latest.get("gross_leverage") is not None
-                else latest["portfolio_leverage"]
+            # was abandoned. See the note on LIVE_RESULTS in schema_contract.py.
+            #
+            # portfolio_leverage is read FIRST; see live_leverage.
+            "grossLeverage": live_leverage(
+                latest.get("portfolio_leverage"), latest.get("gross_leverage")
             ),
             "netLeverage": float_or_none(latest["net_leverage"]),
             "portfolioLeverage": float_or_none(latest["portfolio_leverage"]),

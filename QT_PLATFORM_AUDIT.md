@@ -299,3 +299,226 @@ bars render no geometry in the preview pane, because the pane reports
 from `requestAnimationFrame`. The axes and their domains come from the same
 data, and that data reconciles above; the line chart, which animates by stroke
 rather than geometry, draws normally. Worth a glance in a real browser.
+
+---
+
+## 8. Third pass — the two engine numbers, and whether any of this deploys
+
+Two things were flagged at the end of §7 as worth raising rather than fixing.
+Both are fixed here, in `trade-ngin` on the same `qt-platform-preview` branch.
+Then a third question, which is the one that mattered most: whether the platform
+this branch describes can actually be pointed at production.
+
+### 8.1 The profit-factor sentinel
+
+Profit factor is gross profit over gross loss. A book that has not had a losing
+day has no gross loss, so the ratio has no denominator and no value. The engine
+wrote **999.99** for that case, described in its own source as a "convention:
+very large profit factor if there are no losses". The backtest path wrote 999.0.
+
+It is not a large profit factor. It is a placeholder for an absent one, and once
+it is sitting in a numeric column nothing downstream can tell the two apart: it
+averages into a fund-level figure, it sorts to the top of a leaderboard, and it
+renders on a dashboard as "999.99x", which is the number a reader remembers.
+
+- `HistoricalMetrics::profit_factor` and the backtest's are `std::optional<double>`
+  now, from the calculators through to the column. An undefined ratio is left out
+  of the metric map, which stores the column NULL.
+- `gross_profit` and `gross_loss` are written alongside it either way, so nothing
+  a reader actually needs is lost when the ratio is absent.
+- The daily email omits the Profit Factor row rather than printing 999.99.
+- **Migration 010** clears the sentinel from rows already written. Its predicate
+  is narrow — a value at or above 999 *and* `gross_loss = 0` — so a genuine
+  profit factor of 999 is left alone, and the rollback reconstructs the sentinel
+  from that same condition.
+- AlgoLens does not rely on that migration having run: `published_profit_factor`
+  drops any published value at or above 999. A production database is not
+  migrated the moment this code deploys.
+
+### 8.2 Contract size is not a price multiplier
+
+A futures contract has a **contract size** — 5,000 bushels of corn, $100,000 of
+face value in ten-year notes — and a **price multiplier**, the currency worth of
+one point of the quoted price. For most contracts these are the same number,
+because the price is quoted per unit of the underlying: crude in dollars per
+barrel on 1,000 barrels, gold in dollars per ounce on 100 ounces. Code that
+confuses them is right by accident.
+
+It stops being right where the quote convention differs, and there the error is
+a clean factor of 100:
+
+| Group | Quoted as | Contract size | One point is |
+| --- | --- | --- | --- |
+| ZN, ZB, ZF, UB | percentage of par | $100,000 face | $1,000 |
+| ZC, ZS, ZW, KE | cents per bushel | 5,000 bushels | $50 |
+| ZL | cents per pound | 60,000 lb | $600 |
+| LE, HE | cents per pound | 40,000 lb | $400 |
+| GF | cents per pound | 50,000 lb | $500 |
+
+Four tables in `trade-ngin` held per-symbol constants and disagreed with each
+other, because they were answering two questions under one name:
+
+| | ZN | ZC | ZL | LE | ZR | GC |
+| --- | --- | --- | --- | --- | --- | --- |
+| `email_sender.cpp` (twice) | 100000 | 5000 | 60000 | 40000 | 2000 | 100 |
+| `live_pnl_manager.cpp` | 1000 | 5000 | 60000 | 40000 | 2000 | **1000** |
+| `backtest_pnl_manager.cpp` | 1000 | 50 | 600 | 400 | **20** | 100 |
+| correct | 1000 | 50 | 600 | 400 | 2000 | 100 |
+
+So every treasury and grain line in the daily email overstated notional by 100x,
+live P&L on grains and livestock was 100x too large, the live path priced gold
+ten times too high, and the backtest priced rough rice at a hundredth of what it
+is worth.
+
+`instruments/contract_multiplier.{hpp,cpp}` is now the one table, stating the
+quote convention beside every contract size, and the other four call it. It is
+covered by 16 unit tests. `InstrumentRegistry`, which reads `"Contract Size"`
+from `metadata.contract_metadata` and used to assign it straight to
+`spec.multiplier`, resolves it instead — and **does not assume which quantity
+that column holds**, because that is not settled: the column name says contract
+size and the AlgoLens demo seed holds point values. The resolver recognises
+either and logs which it saw. AlgoLens does the same thing, in
+`domain/portfolio/contract_multipliers.py`, so the engine and the dashboard
+cannot price the same position differently.
+
+Symbols reduce to a root now instead of matching by substring, which is how
+`M6E` came to be priced as `6E`.
+
+### 8.3 What was deliberately NOT changed, and needs a decision
+
+`InstrumentRegistry::get_instrument` rewrites **ES to MES, YM to MYM and NQ to
+MNQ** before every lookup: this deployment reads a full-size equity-index ticker
+as the micro contract. The old fallback tables did the same, and additionally
+read `M6E` as `6E`, `M6B` as `6B`, `MGC` as `GC` and `MSF` as `6S`.
+
+Every one of those is a **factor of ten**, and nothing in either repository
+settles it. If the fund trades full-size Russell contracts, RTY is priced at a
+tenth of what it should be; if it trades E-micro euro, M6E is priced ten times
+too high. Correcting them without knowing would silently move published exposure
+by 10x, so they are preserved exactly, in a `deployment_aliases()` map that says
+so in as many words.
+
+AlgoLens does **not** apply that remap and never has. If production's
+`metadata.contract_metadata` carries both an `ES` row and an `MES` row, the
+engine and the dashboard will differ by ten times on equity-index exposure.
+
+This is the query that settles it:
+
+```sql
+SELECT "Databento Symbol", "IB Symbol", "Name", "Contract Size"
+  FROM metadata.contract_metadata
+ WHERE "Databento Symbol" IN ('ES','MES','NQ','MNQ','YM','MYM','RTY','M2K',
+                              '6E','M6E','6B','M6B','GC','MGC','ZN','ZC','ZS');
+```
+
+Against the answer, one of two things follows: either the aliases go (the fund
+holds full-size contracts and the engine has been under-pricing them), or
+AlgoLens gains the same remap.
+
+### 8.4 Can any of this be deployed? — fourteen mismatches, then two
+
+The real question behind "is it migratable" turned out to be answerable exactly.
+Build a database from `trade-ngin/migrations` alone and check it against
+AlgoLens's schema contract:
+
+```
+14 schema mismatch(es):
+  [missing_column] trading.live_results.sharpe_ratio
+  [missing_column] trading.live_results.sortino_ratio
+  [missing_column] trading.live_results.downside_deviation
+  [missing_column] trading.live_results.max_drawdown
+  [missing_column] trading.live_results.win_rate
+  [missing_column] trading.live_results.avg_win
+  [missing_column] trading.live_results.avg_loss
+  [missing_column] trading.live_results.profit_factor
+  [missing_column] trading.live_results.best_day
+  [missing_column] trading.live_results.worst_day
+  [missing_column] trading.executions.execution_time
+  [missing_column] trading.executions.commissions_fees
+  [missing_table]  futures_data.ohlcv_1d
+  [missing_table]  metadata.contract_metadata
+```
+
+**Nothing in either repository creates `trading.live_results` or
+`trading.executions`, and nothing has ever added a column to either.** Migration
+001 ALTERs `positions` and `equity_curve`; these two tables it does not touch.
+Their shape exists only as whatever was done by hand on the box that runs the
+engine.
+
+That was survivable while the engine was the only reader of its own writes. It
+stopped being survivable in §7, when AlgoLens started reading ten published
+metrics out of `live_results` instead of recomputing them. Deploying that build
+against a database without those columns is a 500 on the dashboard, and no
+schema step would have added them.
+
+**Migration 011** declares every column the live runner's metric maps write and
+every column the execution writer names, with `ADD COLUMN IF NOT EXISTS`. It is
+a no-op on a database that already has them, which a working production box does.
+It does not create the tables: a database with no `trading.live_results` has
+never run the engine, and inventing it here would guess at the key and the
+uniqueness constraint. Its rollback refuses by default, because reverting an
+additive migration means dropping published metrics that cannot be recomputed.
+
+Migration 010 could not run on such a database either — it UPDATEs
+`profit_factor`, which did not exist, and failed the whole migration. Both it
+and its rollback now guard on the column.
+
+After 011 the same check reports **two** mismatches, and both are correct:
+`futures_data.ohlcv_1d` and `metadata.contract_metadata` belong to data-ngin and
+are rightly not created by trade-ngin's migrations. They are now declared in the
+schema contract so their absence is *reported* rather than discovered as a 500 —
+without them there are no market prices, no exposures and no correlation matrix
+at all.
+
+**Apply order: 011, then 010, then deploy.**
+
+### 8.5 Two more things the demo could not have shown
+
+Both found by asking what a production database contains that the demo seed does
+not, and both now covered by tests that plant exactly that.
+
+- **`trading.live_results.gross_leverage` is a dead column.** The engine stopped
+  writing it and puts that number in `portfolio_leverage`; the old column was
+  never dropped, so in production it holds a value frozen on the day of that
+  change. AlgoLens read it *in preference*. The demo seed leaves it NULL, so the
+  demo showed the live figure and every test passed. `live_leverage` now reads
+  `portfolio_leverage` first and keeps the dead column only as a fallback for a
+  row old enough to predate it.
+- **An unsequenced parameter index in `update_live_results`.** Three
+  `param_idx++` in one expression, whose operands C++ leaves unsequenced: the
+  compiler may number the WHERE placeholders in any order while the three values
+  are appended in a fixed one. The strategy id can bind to the date predicate,
+  the UPDATE matches nothing, and yesterday's metrics are silently never
+  finalised. It surfaced as `-Wsequence-point` in the build log, where it had
+  been sitting all along.
+
+### Verified after this pass
+
+- **225 backend unit tests** (18 new in `test_production_shapes.py`, 4 more for
+  the dead leverage column), **21 Postgres integration tests** (8 new, which plant
+  the production shapes into a seeded database and read them back through the
+  application's own SQL), **94 frontend tests**, `tsc --noEmit` clean.
+- 16 new C++ unit tests for the contract table, plus 4 for the registry's
+  resolution of the metadata column; the profit-factor tests now assert an
+  absent ratio where they used to assert 999.
+- `check_schema.py` against a database built from `trade-ngin/migrations`:
+  14 mismatches before 011, 2 after, both data-ngin's.
+- Driven in the browser after the change. ZN reads $4,494.0k (40 × 112.35 ×
+  1,000), not $449m; ZS $788.6k (15 × 1,051.50 × 50); Gross Leverage 15.60x,
+  equal to `portfolio_leverage`; Profit Factor 1.18; Net P&L $7,259.40 =
+  $6,330.00 + $950.00 − $20.60; the correlation matrix still reports ES/NQ 0.85
+  and GC/ZN 0.41 over 89 trading days.
+
+### Still open after this pass
+
+- **The equity-index aliases in §8.3.** One query settles it; the answer moves a
+  published exposure figure by 10x either way, so it is not mine to pick.
+- **`calculate_sortino_ratio` and `calculate_calmar_ratio` return 999.0** when
+  their denominator is zero — the same sentinel, in the same file, in two more
+  functions. Left alone because fixing them changes `BacktestResults` more widely
+  and the team may have a view on what a Sortino with no downside should report.
+  `backtest_metrics_calculator.cpp:90` and `:100`.
+- **`trading.strategy_registry` is still a reconstruction.** No migration creates
+  it and no engine code writes it. A schema dump from a real database is the only
+  thing that settles it, and it is the last table in the contract whose shape is
+  a guess.

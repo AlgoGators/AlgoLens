@@ -125,9 +125,12 @@ LIVE_RESULTS = TableContract(
         "avg_win and avg_loss are mean daily PERCENTAGE returns on winning and "
         "losing days, not dollar amounts. AlgoLens computed a mean dollar "
         "change under the same names and rendered it with a currency symbol.",
-        "The engine reports a profit factor of 999.99 for a book with gains "
-        "and no losses (live_historical_metrics.cpp). That is a sentinel, not "
-        "a measurement; treat it as undefined.",
+        "The engine used to report a profit factor of 999.99 for a book with "
+        "gains and no losses. It stopped (trade-ngin migration 010 clears the "
+        "rows already written), but a database migrated later than this code "
+        "deploys still carries it, so published_profit_factor drops any value "
+        "at or above 999. gross_profit and gross_loss are in the same row and "
+        "are what a reader should use.",
         "total_return and margin_leverage are written only by the legacy fixed "
         "INSERT, never by the live path. Do not read them.",
     ),
@@ -211,9 +214,47 @@ ASSIGNMENTS = TableContract(
     inserts_rows=True,
 )
 
+PRICE_BARS = TableContract(
+    name="futures_data.ohlcv_1d",
+    source=(
+        "data-ngin, which owns market data. trade-ngin reads the same table in "
+        "PostgresDatabase::get_latest_prices; the name is built from asset "
+        "class and frequency in trade_ngin/core/types.hpp."
+    ),
+    reads=("time", "symbol", "close"),
+    notes=(
+        "AlgoLens never writes here. Every market price and the whole "
+        "correlation matrix come from this one table, so its absence is not a "
+        "degraded view -- it is a position list with no marks and no "
+        "correlations.",
+        "Symbols carry the continuous-contract suffix (ES.v.0), the same "
+        "spelling trading.positions uses.",
+    ),
+)
+
+CONTRACT_METADATA = TableContract(
+    name="metadata.contract_metadata",
+    source=(
+        "data-ngin. trade-ngin's InstrumentRegistry reads it in "
+        "src/instruments/instrument_registry.cpp, keyed on \"Databento "
+        "Symbol\" and falling back to \"IB Symbol\"."
+    ),
+    reads=("Databento Symbol", "IB Symbol", "Contract Size"),
+    notes=(
+        "Column names are quoted and mixed-case, because that is how the "
+        "table is really spelled.",
+        "\"Contract Size\" is the number every exposure figure on the site is "
+        "multiplied by, and it is NOT reliably a price multiplier: a ten-year "
+        "note is $100,000 of face quoted as a percentage of par, so its point "
+        "value is $1,000. domain/portfolio/contract_multipliers.py recognises "
+        "either convention. Without this table there are no exposures at all.",
+    ),
+)
+
 CONTRACTS = (
     POSITIONS, EQUITY_CURVE, LIVE_RESULTS, EXECUTIONS, STRATEGY_REGISTRY,
     POSITION_OVERRIDES, RISK_LIMITS, PORTFOLIOS, MEMBERSHIPS, ASSIGNMENTS,
+    PRICE_BARS, CONTRACT_METADATA,
 )
 
 

@@ -22,6 +22,12 @@ import logging
 
 import psycopg2
 
+from algolens.domain.portfolio.contract_multipliers import (
+    REPORTED_UNRECOGNISED,
+    SCALED_CONTRACT_SIZE,
+    UNKNOWN_SYMBOL,
+    resolve_multiplier,
+)
 from algolens.infrastructure.db.postgres import get_db_connection
 
 logger = logging.getLogger(__name__)
@@ -118,11 +124,19 @@ class PostgresMarketData:
         return series
 
     def contract_multipliers(self, base_symbols):
-        """{root symbol: contract size}.
+        """{root symbol: PRICE MULTIPLIER}.
 
         Keyed on the root (``ES``), because that is how the metadata table is
         keyed, while positions and price bars carry the continuous-contract
         suffix (``ES.v.0``).
+
+        The value is the currency worth of one point of the quoted price, which
+        is not always what the ``"Contract Size"`` column holds. A ten-year note
+        is $100,000 of face value quoted as a percentage of par, so its point
+        value is $1,000; corn is 5,000 bushels quoted in cents, so its point
+        value is $50. Multiplying by the column directly overstated those by
+        100x. See domain/portfolio/contract_multipliers.py, which recognises
+        either convention rather than assuming one.
         """
         wanted = [s for s in dict.fromkeys(base_symbols) if s]
         if not wanted:
@@ -153,7 +167,23 @@ class PostgresMarketData:
             # than as a multiplier of zero, which would erase the position.
             if value <= 0:
                 continue
+
+            multiplier, how = resolve_multiplier(databento or ib, value)
+            if how == SCALED_CONTRACT_SIZE and multiplier != value:
+                logger.info(
+                    "%s: contract size %s scaled by quote convention to point value %s",
+                    databento or ib, value, multiplier,
+                )
+            elif how in (REPORTED_UNRECOGNISED, UNKNOWN_SYMBOL):
+                # Priced anyway -- refusing would blank an exposure the reader
+                # needs -- but nobody has checked this number against a
+                # contract specification, and the log is where that is said.
+                logger.warning(
+                    "%s: contract size %s taken as a point value unchecked (%s)",
+                    databento or ib, value, how,
+                )
+
             for key in (databento, ib):
                 if key:
-                    sizes.setdefault(key, value)
+                    sizes.setdefault(key, multiplier)
         return sizes

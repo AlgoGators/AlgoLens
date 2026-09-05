@@ -240,11 +240,16 @@ CREATE TABLE metadata.contract_metadata (
 --           cent) is $50, not $5,000.
 --
 -- Seeded from trade-ngin's fallback list, those three produced exposures 100x
--- too large: forty ZN read as $449,400,000 against a $264,000 book. Note that
--- the fallback table in trade-ngin (src/core/email_sender.cpp) holds the
--- underlying-unit figures, so anything using it as a price multiplier for
--- treasuries or grains inherits the same 100x error. Worth raising with the
--- engine team; the values below are the point values.
+-- too large: forty ZN read as $449,400,000 against a $264,000 book.
+--
+-- A real database may spell this column the other way -- as contract sizes,
+-- which is what the column NAME says -- and this seed cannot settle which.
+-- Neither application assumes any more: AlgoLens resolves it in
+-- domain/portfolio/contract_multipliers.py and trade-ngin in
+-- src/instruments/contract_multiplier.cpp, both recognising a contract size or
+-- an already-scaled point value and logging which they saw. The integration
+-- test tests/integration/test_production_shapes.py rewrites this table into
+-- underlying units and asserts every exposure comes out identical.
 INSERT INTO metadata.contract_metadata
   ("Databento Symbol", "IB Symbol", "Name", "Asset Type", "Exchange", "Contract Size")
 VALUES
@@ -793,9 +798,11 @@ SELECT
          THEN st.winning_days::numeric / st.total_days * 100 END,
     st.avg_win,
     st.avg_loss,
-    -- Engine convention is 999.99 for a book with gains and no losses. Left
-    -- NULL here instead: an undefined ratio is not a very large one, and the
-    -- app renders NULL as unknown. Flagged for the engine team.
+    -- NULL when there is no denominator. The engine used to write 999.99 here
+    -- and no longer does (trade-ngin migration 010 clears the rows that have
+    -- it), but a production database migrated later than this code deploys
+    -- still carries it, so published_profit_factor drops any value at or above
+    -- 999 on read.
     CASE WHEN st.gross_loss > 0 THEN st.gross_profit / st.gross_loss END,
     st.gross_profit,
     st.gross_loss,

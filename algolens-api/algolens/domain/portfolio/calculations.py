@@ -237,6 +237,53 @@ def published_or_computed(published: Any, computed: float | None) -> float | Non
     return computed
 
 
+#: What the engine used to write into trading.live_results.profit_factor for a
+#: book with gains and no losing days: 999.99 on the live path, 999.0 on the
+#: backtest path. Described in the source as a "convention", it is a placeholder
+#: for an undefined ratio and not a measurement of anything.
+PROFIT_FACTOR_SENTINEL = 999.0
+
+
+def published_profit_factor(published: Any, computed: float | None) -> float | None:
+    """The engine's profit factor, unless it is the sentinel.
+
+    trade-ngin stopped writing 999.99 (see its migration 010), but rows written
+    before that keep it, and a production database is not migrated the moment
+    this code deploys. Rendering it gives a reader "999.99x" as a fund
+    statistic, which is the number they will remember.
+
+    The sentinel is only ever written where there is no denominator, so an
+    undefined ratio is what it is turned back into -- and the local computation
+    is not used as a fallback either, because it would be undefined too.
+    """
+    if published is not None and float(published) >= PROFIT_FACTOR_SENTINEL:
+        return None
+    return published_or_computed(published, computed)
+
+
+def live_leverage(portfolio_leverage: Any, gross_leverage: Any) -> float | None:
+    """Gross leverage, from the column the engine still writes.
+
+    trade-ngin stopped writing trading.live_results.gross_leverage and puts that
+    number in portfolio_leverage instead (live_portfolio_runner.cpp writes
+    ``{"portfolio_leverage", gross_leverage}`` and no gross_leverage key). The
+    abandoned column was never dropped, so in a production database it holds
+    whatever it held on the day the engine stopped -- a real number, frozen,
+    indistinguishable on screen from a current one.
+
+    portfolio_leverage therefore wins. gross_leverage is kept only as a fallback
+    for a row old enough to predate portfolio_leverage entirely.
+
+    The demo seed leaves the abandoned column NULL, so the wrong preference
+    order was invisible there and correct-looking in every test.
+    """
+    if portfolio_leverage is not None:
+        return float(portfolio_leverage)
+    if gross_leverage is not None:
+        return float(gross_leverage)
+    return None
+
+
 def float_or_none(value: Any) -> float | None:
     """A NULL from the engine stays unknown.
 
