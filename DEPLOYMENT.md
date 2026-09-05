@@ -150,3 +150,48 @@ location /your-route {
 | **EC2 user** | `ec2-user` |
 | **Database** | PostgreSQL · `13.58.153.216:5432` · db: `new_algo_data` |
 | **Swap** | 2 GB `/swapfile` (required for frontend builds — do not remove) |
+
+---
+
+## Before Any Deploy: Check the Schema
+
+AlgoLens reads tables it does not own. `trading.*` belongs to trade-ngin,
+`futures_data.ohlcv_1d` and `metadata.contract_metadata` to data-ngin. Nothing
+in this repository can guarantee their shape, and no test here can either — the
+demo seed proves only that the seed matches what this application says it needs.
+
+`scripts/check_schema.py` is what closes that gap. It compares a real database
+against the declared contract in
+`algolens-api/algolens/infrastructure/db/schema_contract.py`, runs nothing but
+SELECTs against `information_schema`, changes nothing, and exits non-zero when
+the contract is not satisfied — so it can gate a deploy.
+
+```bash
+python scripts/check_schema.py "postgresql://USER@HOST:5432/new_algo_data"
+```
+
+Two kinds of finding matter. `missing_column` means a read fails. Ten columns
+of `trading.live_results` were reported missing against a database built from
+trade-ngin's migrations alone, because **no migration in either repository
+creates `trading.live_results` or `trading.executions`** — their shape existed
+only as whatever was done by hand on the box that runs the engine. trade-ngin's
+migration 011 declares them, additively and idempotently. `unsupplied_not_null`
+means a write fails; that one shipped undetected once already.
+
+### Migration order
+
+Apply trade-ngin's migrations in numeric order, with two exceptions worth
+stating because the numbers do not imply them:
+
+1. **011 before 010.** 010 UPDATEs `profit_factor`, which 011 is the first thing
+   to declare. 010 skips harmlessly if run early and can be re-run afterwards.
+2. **009 before deploying a build with the Books tab.** AlgoLens no longer
+   creates those tables itself.
+
+Then run the schema check, and only deploy if it passes.
+
+### New endpoints do not need an nginx change
+
+`deployment/algolens.conf` proxies `/auth` and `/portfolio` by prefix, so a new
+route under either is already served. Only a route outside both prefixes needs a
+new `location` block.
