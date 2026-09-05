@@ -170,6 +170,13 @@ the contract is not satisfied — so it can gate a deploy.
 python scripts/check_schema.py "postgresql://USER@HOST:5432/new_algo_data"
 ```
 
+For a fuller picture — including the questions that decide how positions are
+priced — run the read-only readiness pass instead. It writes nothing:
+
+```bash
+./scripts/production_readiness.sh "postgresql://USER@HOST:5432/new_algo_data"
+```
+
 Two kinds of finding matter. `missing_column` means a read fails. Ten columns
 of `trading.live_results` were reported missing against a database built from
 trade-ngin's migrations alone, because **no migration in either repository
@@ -188,7 +195,24 @@ stating because the numbers do not imply them:
 2. **009 before deploying a build with the Books tab.** AlgoLens no longer
    creates those tables itself.
 
-Then run the schema check, and only deploy if it passes.
+Then run the schema check, and only deploy if it passes. In full:
+
+```bash
+psql "$DSN" -v ON_ERROR_STOP=1 -f trade-ngin/migrations/011_live_results_and_executions_columns.sql
+psql "$DSN" -v ON_ERROR_STOP=1 -f trade-ngin/migrations/010_clear_profit_factor_sentinel.sql
+python algolens-api/scripts/check_schema.py "$DSN"   # must exit 0
+```
+
+011 is additive and idempotent, so it is safe to run on a database that already
+has those columns — it does nothing. 010 only clears rows where `profit_factor`
+is at or above 999 **and** `gross_loss` is zero, so a genuine ratio is untouched.
+Neither drops anything.
+
+Migration 002 (`002_backfill_qt_from_system.sql`) is a separate decision. It puts
+a second stream in `trading.positions` for every symbol and date. AlgoLens reads
+positions by stream as of the QT platform branch, so it is ready for that — but
+anything else querying that table without a `portfolio_type` predicate will start
+blending the model's book with the desk's. See AlgoLens issue #83.
 
 ### New endpoints do not need an nginx change
 

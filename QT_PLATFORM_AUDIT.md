@@ -562,3 +562,143 @@ not, and both now covered by tests that plant exactly that.
   it and no engine code writes it. A schema dump from a real database is the only
   thing that settles it, and it is the last table in the contract whose shape is
   a guess.
+
+---
+
+## 9. Fourth pass — the open issues, and what needs a database I cannot reach
+
+### 9.1 What I could not do, and why
+
+Four of the items at the end of §8 need the production database. **I have no
+access to it.** The host answers on the network and so does the EC2 box, but
+there are no credentials on this machine — only `.env.example` with placeholders
+— and the real values live in `/home/ec2-user/algolens-docker/.env`, gitignored,
+on a host this session is not permitted to reach.
+
+So the ES/MES question, the `strategy_registry` dump, and applying migrations 010
+and 011 are all still open, and none of them is open because it is hard.
+`scripts/production_readiness.sh` now answers all of them in one read-only pass —
+it writes nothing, takes the DSN as an argument rather than hunting for
+credentials, and prints the four things no amount of reading the code can settle.
+
+**One item I will not do even with access.** Running a live trading cycle
+submits orders. That is not mine to run. What is worth having instead: build the
+engine, run its suite (CI does), and if the desk wants a full cycle exercised,
+run it against a restored copy with execution disabled, with someone watching.
+
+### 9.2 The open issues, reviewed
+
+Both `QT ISSUE` threads were filed on 2026-09-05 and neither has a reply yet.
+The bodies are the substance.
+
+**AlgoLens #83 — the position read is not filtered by stream. FIXED HERE.**
+
+This was correct and it was a live gap in a query I had edited earlier in this
+same audit. `trading.positions` carries one row per (symbol, date, **stream**).
+Every production row is `portfolio_type = 'system'` today, so a query with no
+stream predicate is accidentally right and no test could tell. The moment
+trade-ngin migration 002 backfills the qt stream, every symbol and date has two
+rows and `DISTINCT ON (symbol) ORDER BY updated_at DESC` returns whichever was
+written last.
+
+The worst case is the write path: after a desk edit the qt row has the newest
+`updated_at`, so the edit appears to have worked — and would look identical if it
+had been written to the wrong stream.
+
+All three position reads take a stream now, defaulting to `PRIMARY_STREAM`,
+because that is what every other headline figure on the page already means. The
+issue asked for the default to be the model's book; I used the real book instead,
+to match the equity curve sitting directly above the table. Worth a word if that
+is wrong.
+
+Two things the issue did not mention and that mattered:
+
+- The **snapshot date has to be resolved within the stream**. Taking `max(date)`
+  across all of them asks the qt stream for a day only the system stream reached,
+  and returns an empty table on any day the engine ran and the desk did not.
+- `held_symbols`, which feeds the correlation matrix, had the same gap. Unscoped,
+  it would have correlated a portfolio nobody holds.
+
+`_has_portfolio_type` is per-table now. It checked `equity_curve` and was about
+to gate a predicate on `positions`. Migration 001 adds the column to both
+together, so in a healthy database the answer is the same — but a query against
+one table has no business trusting the shape of another, and a half-restore would
+have made the positions read name a column that is not there.
+
+Nine integration tests, against real PostgreSQL, planting both streams for the
+same symbols and dates with the qt rows written last. **This unblocks applying
+migration 002 to production**, which #83 lists as blocked.
+
+**AlgoLens #84 — the equity strategy maps to BASE_PORTFOLIO.** A data fix on the
+live database, and not mine to make. Worth noting that its author ran a read-only
+query against production on 2026-09-05 and got
+
+    inc_meanrev | LIVE_EQUITY_MEAN_REVERSION | BASE_PORTFOLIO | incubating
+
+which is the first direct evidence of `trading.strategy_registry`'s real shape
+this audit has seen. It confirms `id`, `strategy_type`, `portfolio_id` and
+`lifecycle` exist with those names. It does not confirm the other nine columns
+the contract declares, so the table stays marked unverified until a full dump.
+The issue also flags `inc_tf_base` and `inc_tf_fast` as resolving to
+BASE_PORTFOLIO and worth reviewing at the same time.
+
+**AlgoLens #29** — the older, unscoped `portfolio_id` version of the same bug —
+is fixed on this branch and has been since the first pass.
+
+### 9.3 The review comment on PR #80 — needs John's answer
+
+`raohemdutt` left a detailed plan for how this branch should travel, measured
+commit by commit against `main` with #80 merged, and it ends *"Tell me the order
+you prefer and I will line up the reviews accordingly."* That is a question for
+John, not something to action unilaterally. In summary:
+
+- Four commits fold into **#80 before it merges**, one of them as a hand-port
+  rather than a cherry-pick because it changes `evaluate_risk`'s signature.
+- The rest become **small separate PRs**, with the Postgres integration fixture
+  going **first of all of them** — *"every blocking defect on #80 dies against
+  that fixture and survives every fake"*.
+- The **Books** work travels as one ordered stack of ten commits, paired with
+  trade-ngin's `009_books_and_membership.sql`, after #60 lands.
+- **Never travels**: the two preview documents as they stand (their content
+  becomes issues), and `algolens-api/logs/algolens.log.10`.
+- **`refactor/models-range-filter` at 7832aaf2** deletes `streams.py` and
+  `AlphaAttribution.tsx`, which #80 imports. It must not merge before the QT
+  lane, and whether that deletion was intended is still unanswered — the same
+  question as P2-c in §3, now asked by two people.
+
+### 9.4 Two things from that review, done
+
+- **`algolens-api/logs/algolens.log.10` was tracked in git**: 10,239,989 bytes,
+  containing a developer's Windows path. `.gitignore` covered `algolens.log` but
+  not the rotated files beside it. Untracked, and the whole `logs/` directory is
+  ignored now.
+- **`algolens-api/services/` deleted**, with its test. Ninety lines of production
+  code that nothing under `algolens/` has imported since the DDD split in #71,
+  kept alive by a 185-line test suite that was the only thing referring to it. A
+  passing test on unreachable code is worse than no test, because it reads as
+  coverage.
+
+### Verified after this pass
+
+- 248 backend tests (9 new stream-scoping integration tests; the 12 that only
+  exercised the deleted `services/` package are gone with it).
+- The demo book still renders identically after the stream predicate: four
+  positions, $8,167,795.00 of notional, and the correlation matrix still nine
+  symbols over 89 days. The demo's positions are all `qt`, which is why the
+  default was invisible — and is itself evidence that `qt` is the right default.
+- `scripts/production_readiness.sh` run end-to-end against the demo database:
+  eighteen required columns present, no profit-factor sentinels, one stream.
+
+### Still open
+
+- **The ES/MES question** (§8.3) and everything else in §9.1 — blocked on
+  database access, not on work.
+- **The PR-splitting plan** in §9.3 — blocked on John's answer.
+- **`refactor/models-range-filter`** — blocked on whoever wrote it.
+- **P2-b, attribution across a book move.** Still the three options in §6. The
+  platform states the cost, records an acknowledgement and audits who accepted
+  it; it does not repair the maths, and which of the three is right is a desk
+  decision rather than an engineering one.
+- **No React component tests.** Adding them means adding
+  `@testing-library/react` and a DOM environment to the frontend's dependencies,
+  which is a decision about the project's toolchain rather than a gap in it.
