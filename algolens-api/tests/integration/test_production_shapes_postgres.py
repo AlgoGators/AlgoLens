@@ -13,6 +13,11 @@ the state the position-snapshot bug shipped in.
 
 These plant the production shapes into a seeded database and read back through
 the same SQL the application uses.
+
+Named ..._postgres to keep its basename distinct from the pure-Python
+tests/test_production_shapes.py beside it: pytest names modules by basename when
+the directory has no __init__.py, and two files called the same thing collide at
+collection time rather than at import.
 """
 
 import pathlib
