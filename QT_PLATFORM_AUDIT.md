@@ -335,6 +335,20 @@ renders on a dashboard as "999.99x", which is the number a reader remembers.
   drops any published value at or above 999. A production database is not
   migrated the moment this code deploys.
 
+**The same sentinel, twice more.** `calculate_sortino_ratio` and
+`calculate_calmar_ratio` returned 999.0 on a zero denominator, and 0.0 when the
+numerator was negative — two confident values for the same division by zero, one
+reading as a spectacular result and the other as a measured absence of one. Both
+are `std::optional<double>` now, and both degenerate branches are empty: a
+Sortino needs a return below the target and a Calmar needs a drawdown. The
+reason survives in each case — `downside_volatility` and `max_drawdown` are
+reported separately, and a zero in either is the whole explanation. The backtest
+coordinator leaves the column out when the ratio is absent, and the two console
+apps print `n/a (no returns below target)` rather than a number.
+
+One test had settled for `EXPECT_LE(std::abs(sortino), 999.0)`, which was only
+ever a bound on how wrong the answer could be. It now asserts there is no answer.
+
 ### 8.2 Contract size is not a price multiplier
 
 A futures contract has a **contract size** — 5,000 bushels of corn, $100,000 of
@@ -511,13 +525,14 @@ not, and both now covered by tests that plant exactly that.
 
 ### Still open after this pass
 
+- **`calculate_sharpe_ratio` returns 0.0 when volatility is zero**, and the live
+  `LiveMetricsCalculator::calculate_sortino_ratio` does the same with zero
+  downside deviation. Not sentinels — no 999 anywhere — but the same shape of
+  claim: a zero risk-adjusted return where the ratio is undefined. Narrower in
+  effect, because a book with genuinely zero volatility is a book that has not
+  traded, and left alone for now rather than swept in.
 - **The equity-index aliases in §8.3.** One query settles it; the answer moves a
   published exposure figure by 10x either way, so it is not mine to pick.
-- **`calculate_sortino_ratio` and `calculate_calmar_ratio` return 999.0** when
-  their denominator is zero — the same sentinel, in the same file, in two more
-  functions. Left alone because fixing them changes `BacktestResults` more widely
-  and the team may have a view on what a Sortino with no downside should report.
-  `backtest_metrics_calculator.cpp:90` and `:100`.
 - **`trading.strategy_registry` is still a reconstruction.** No migration creates
   it and no engine code writes it. A schema dump from a real database is the only
   thing that settles it, and it is the last table in the contract whose shape is
