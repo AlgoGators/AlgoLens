@@ -10,6 +10,7 @@ from algolens.application.portfolio.ports import (
     IncubationPerformanceRows,
     PortfolioDetailRows,
     PortfolioReaderPort,
+    RiskAcknowledgementRequired,
     StrategyRegistryPort,
 )
 from algolens.application.shared.errors import NotFoundError
@@ -24,6 +25,10 @@ from algolens.domain.portfolio.calculations import (
     transform_positions,
 )
 from algolens.domain.portfolio.incubation import compute_incubation_window
+from algolens.domain.portfolio.position_edit import (
+    evaluate_risk,
+    validate_position_payload,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -275,3 +280,66 @@ class RetireStrategy:
             reason=_require_reason(reason),
             user_id=user_id,
         )
+
+
+class UpsertQtPosition:
+    """Create or amend one position in the qt stream, with an audit row.
+
+    Orchestration only: validation and the risk verdict are domain logic, the
+    write is the repository's. This decides the one thing that is neither --
+    that a breach requires an explicit acknowledgement rather than blocking.
+    """
+
+    def __init__(self, registry: StrategyRegistryPort, reader: PortfolioReaderPort):
+        self.registry = registry
+        self.reader = reader
+
+    def execute(
+        self,
+        payload: Mapping[str, Any],
+        user_id: str,
+        acknowledge_risk: bool = False,
+    ) -> dict[str, Any]:
+        normalized = validate_position_payload(payload)
+
+        strategy = self.registry.get(normalized["strategy_id"])
+        if strategy is None:
+            raise StrategyNotFound(normalized["strategy_id"])
+
+        strategy_type = strategy["strategy_type"]
+        portfolio_id = strategy["portfolio_id"]
+
+        envelope = self.reader.fetch_risk_envelope(strategy_type, portfolio_id)
+        book = self.reader.fetch_qt_book(strategy_type, portfolio_id)
+
+        # The verdict describes the book at gate-evaluation time, not at commit
+        # time. That is acceptable because the gate is advisory by design: a
+        # breach never blocks, it only requires acknowledgement.
+        verdict = evaluate_risk(envelope, book, normalized)
+
+        if not verdict["passed"] and not acknowledge_risk:
+            raise RiskAcknowledgementRequired(verdict)
+
+        result = self.reader.write_qt_position(
+            strategy_type=strategy_type,
+            portfolio_id=portfolio_id,
+            normalized=normalized,
+            user_id=user_id,
+            verdict=verdict,
+            overrode_risk=not verdict["passed"],
+        )
+        return {**result, "risk_check": verdict}
+
+
+class ListPositionOverrides:
+    """The audit trail for one strategy, most recent first."""
+
+    def __init__(self, registry: StrategyRegistryPort, reader: PortfolioReaderPort):
+        self.registry = registry
+        self.reader = reader
+
+    def execute(self, strategy_id: str, limit: int = 100) -> list[dict[str, Any]]:
+        strategy = self.registry.get(strategy_id)
+        if strategy is None:
+            raise StrategyNotFound(strategy_id)
+        return list(self.reader.fetch_overrides(strategy["strategy_type"], limit))

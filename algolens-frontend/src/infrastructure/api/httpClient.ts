@@ -131,3 +131,55 @@ export async function fetchWithAuth(url: string): Promise<Response> {
     throw error;
   }
 }
+
+/**
+ * Read a non-httpOnly cookie.
+ *
+ * Only used for csrf_access_token, which flask-jwt-extended deliberately sets
+ * WITHOUT httpOnly so JS can echo it back in a header. The JWT itself stays
+ * httpOnly and is never readable here.
+ */
+function readCookie(name: string): string | null {
+  // Split rather than build a RegExp. Interpolating into a template literal
+  // silently swallowed the escape in "\s" -- an unrecognised escape in a
+  // template literal is just the character -- so the pattern degraded to
+  // ";s*" and missed the cookie whenever it was not the first one.
+  for (const part of document.cookie.split(";")) {
+    const separator = part.indexOf("=");
+    if (separator === -1) continue;
+    if (part.slice(0, separator).trim() === name) {
+      return decodeURIComponent(part.slice(separator + 1));
+    }
+  }
+  return null;
+}
+
+/**
+ * Authenticated, CSRF-protected POST.
+ *
+ * The backend runs with JWT_COOKIE_CSRF_PROTECT, so a state-changing request
+ * must echo the csrf_access_token cookie in an X-CSRF-TOKEN header or it is
+ * rejected with 401 before the route is reached. GETs are safe methods and do
+ * not need it, which is why fetchWithAuth above has no equivalent.
+ *
+ * Returns the Response rather than throwing on a non-2xx: callers need to tell
+ * 409-you-must-acknowledge apart from an outright refusal, and that decision
+ * belongs to them, not here.
+ */
+export async function postWithAuth(url: string, body: unknown): Promise<Response> {
+  const csrf = readCookie('csrf_access_token');
+  if (!csrf) {
+    log('warn', 'No csrf_access_token cookie found; the request will likely 401');
+  }
+
+  log('info', `POST ${url}`);
+  return fetch(url, {
+    method: 'POST',
+    credentials: 'include',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(csrf ? { 'X-CSRF-TOKEN': csrf } : {}),
+    },
+    body: JSON.stringify(body),
+  });
+}
