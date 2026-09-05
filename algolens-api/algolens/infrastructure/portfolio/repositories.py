@@ -25,7 +25,10 @@ from algolens.infrastructure.db.postgres import get_db_connection
 logger = logging.getLogger(__name__)
 
 _PORTFOLIO_TYPE_CACHE_TTL_SECONDS = 300
-_has_portfolio_type_cache = None
+#: {table name: bool}, refreshed wholesale when the TTL lapses. Keyed by table
+#: because the flag gates whether a query names the column, and the two tables
+#: migration 001 touches can be out of step during a partial migration.
+_has_portfolio_type_cache = {}
 _has_portfolio_type_expires_at = 0
 
 
@@ -75,26 +78,37 @@ class PostgresPortfolioRepository:
         )
         return cursor.fetchone()
 
-    def _has_portfolio_type(self, cursor):
+    def _has_portfolio_type(self, cursor, table="equity_curve"):
+        """Does `table` carry the stream column migration 001 adds?
+
+        Asked per table, not once for the schema. Migration 001 adds
+        portfolio_type to equity_curve and positions together, so in a healthy
+        database the answer is the same for both -- but this flag decides
+        whether a query names a column, and a query against positions has no
+        business trusting what equity_curve looks like. A partial migration or
+        a restore that brought back one table and not the other would otherwise
+        make the positions read ask for a column that is not there.
+        """
         global _has_portfolio_type_cache, _has_portfolio_type_expires_at
 
         now = time.monotonic()
-        if (
-            _has_portfolio_type_cache is not None
-            and now < _has_portfolio_type_expires_at
-        ):
-            return _has_portfolio_type_cache
+        if _has_portfolio_type_expires_at < now:
+            _has_portfolio_type_cache = {}
+            _has_portfolio_type_expires_at = now + _PORTFOLIO_TYPE_CACHE_TTL_SECONDS
+        if table in _has_portfolio_type_cache:
+            return _has_portfolio_type_cache[table]
 
         cursor.execute(
             """
             SELECT 1 FROM information_schema.columns
-            WHERE table_schema = 'trading' AND table_name = 'equity_curve'
+            WHERE table_schema = 'trading' AND table_name = %s
               AND column_name = 'portfolio_type'
-            """
+            """,
+            (table,),
         )
-        _has_portfolio_type_cache = cursor.fetchone() is not None
-        _has_portfolio_type_expires_at = now + _PORTFOLIO_TYPE_CACHE_TTL_SECONDS
-        return _has_portfolio_type_cache
+        present = cursor.fetchone() is not None
+        _has_portfolio_type_cache[table] = present
+        return present
 
     def _fetch_equity_curve(
         self,
@@ -167,9 +181,57 @@ class PostgresPortfolioRepository:
     # closed position has no row to be zero. Every figure downstream inherited
     # the error -- total notional, the position weights, and the current book
     # the risk gate checks a proposed edit against.
-    def _fetch_current_positions(self, cursor, strategy_type, portfolio_id):
+    # ---------------------------------------------------------------------
+    # THE STREAM PREDICATE
+    #
+    # trading.positions carries one row per (symbol, date, STREAM). Today every
+    # row is portfolio_type = 'system', so a query with no stream predicate
+    # happens to be right. The moment trade-ngin migration 002 backfills the qt
+    # stream, every symbol and date has two rows, and DISTINCT ON (symbol)
+    # ORDER BY updated_at DESC returns whichever stream was written last --
+    # blending the model's book and the desk's book in one table with nothing
+    # on screen saying which is which.
+    #
+    # Worse for the write path: after a desk edit the qt row has the newest
+    # updated_at, so the edit appears to have worked, for the wrong reason. It
+    # would look identical if the edit had been written to the wrong stream.
+    #
+    # The equity-curve read has taken a stream since the streams landed. These
+    # three now do too. See AlgoLens issue #83; this predicate is what unblocks
+    # applying migration 002 to production.
+    #
+    # The default is PRIMARY_STREAM -- the real book -- because that is what
+    # every other headline figure on the page already means, including the
+    # equity curve directly above the table.
+    #
+    # has_portfolio_type exists because the column does not, on a database that
+    # has not had migration 001. There the predicate is dropped, which is
+    # correct: a database with no streams has nothing to disambiguate.
+    # ---------------------------------------------------------------------
+    def _fetch_current_positions(
+        self,
+        cursor,
+        strategy_type,
+        portfolio_id,
+        portfolio_type=PRIMARY_STREAM,
+        has_portfolio_type=None,
+    ):
+        if portfolio_type is not None and has_portfolio_type is None:
+            has_portfolio_type = self._has_portfolio_type(cursor, "positions")
+        scoped = portfolio_type is not None and has_portfolio_type
+
+        # The snapshot date has to be found within the same stream. Taking the
+        # max over every stream would ask for the qt stream's rows on a date
+        # only the system stream reached, and return nothing at all.
+        stream_predicate = "AND portfolio_type = %s" if scoped else ""
+        params = (
+            (strategy_type, portfolio_id, portfolio_type,
+             strategy_type, portfolio_id, portfolio_type)
+            if scoped
+            else (strategy_type, portfolio_id, strategy_type, portfolio_id)
+        )
         cursor.execute(
-            """
+            f"""
             SELECT * FROM (
                 SELECT DISTINCT ON (symbol)
                        symbol, quantity, average_price,
@@ -177,20 +239,22 @@ class PostgresPortfolioRepository:
                 FROM trading.positions
                 WHERE strategy_id = %s
                 AND portfolio_id = %s
+                {stream_predicate}
                 AND quantity != 0
                 AND date = (
                     SELECT max(date) FROM trading.positions
                     WHERE strategy_id = %s AND portfolio_id = %s
+                    {stream_predicate}
                 )
                 ORDER BY symbol, updated_at DESC
             ) AS latest_positions
             ORDER BY ABS(quantity * average_price) DESC
             """,
-            (strategy_type, portfolio_id, strategy_type, portfolio_id),
+            params,
         )
         return cursor.fetchall()
 
-    def held_symbols(self, portfolio_ids):
+    def held_symbols(self, portfolio_ids, portfolio_type=PRIMARY_STREAM):
         """Every symbol the named books hold in their most recent snapshot.
 
         Scoped to that snapshot for the same reason the position view is: a
@@ -201,6 +265,10 @@ class PostgresPortfolioRepository:
         is (tests/test_portfolio_queries.py). The caller passes the books the
         fund actually reports on, so a stray row for some other portfolio
         cannot put an instrument on screen that no reported book holds.
+
+        Scoped to a stream for the same reason the position table is: once the
+        qt stream is backfilled, an unscoped DISTINCT would union the model's
+        holdings with the desk's and correlate a book nobody holds.
         """
         books = [b for b in dict.fromkeys(portfolio_ids) if b]
         if not books:
@@ -208,19 +276,31 @@ class PostgresPortfolioRepository:
         conn = self.connection_factory()
         try:
             with conn.cursor() as cursor:
+                scoped = (
+                    portfolio_type is not None
+                    and self._has_portfolio_type(cursor, "positions")
+                )
+                stream_predicate = "AND portfolio_type = %s" if scoped else ""
+                params = (
+                    (books, portfolio_type, books, portfolio_type)
+                    if scoped
+                    else (books, books)
+                )
                 cursor.execute(
-                    """
+                    f"""
                     SELECT DISTINCT symbol
                     FROM trading.positions
                     WHERE portfolio_id = ANY(%s)
                       AND quantity != 0
+                      {stream_predicate}
                       AND date = (
                           SELECT max(date) FROM trading.positions
                           WHERE portfolio_id = ANY(%s)
+                          {stream_predicate}
                       )
                     ORDER BY symbol
                     """,
-                    (books, books),
+                    params,
                 )
                 rows = cursor.fetchall()
         finally:
@@ -242,8 +322,15 @@ class PostgresPortfolioRepository:
         )
         return cursor.fetchall()
 
-    def _fetch_yesterday_positions(self, cursor, strategy_type, portfolio_id):
-        """The snapshot before the latest one.
+    def _fetch_yesterday_positions(
+        self,
+        cursor,
+        strategy_type,
+        portfolio_id,
+        portfolio_type=PRIMARY_STREAM,
+        has_portfolio_type=None,
+    ):
+        """The snapshot before the latest one, in the same stream.
 
         This asked for CURRENT_DATE - 1 literally, so the comparison had
         nothing to compare against every Monday and after every holiday --
@@ -251,26 +338,43 @@ class PostgresPortfolioRepository:
         with no explanation. "The previous snapshot" is the question the panel
         is actually asking.
         """
+        if portfolio_type is not None and has_portfolio_type is None:
+            has_portfolio_type = self._has_portfolio_type(cursor, "positions")
+        scoped = portfolio_type is not None and has_portfolio_type
+
+        # Same stream as the current snapshot, or the two columns of the
+        # comparison are two different books.
+        stream_predicate = "AND portfolio_type = %s" if scoped else ""
+        params = (
+            (strategy_type, portfolio_id, portfolio_type,
+             strategy_type, portfolio_id, portfolio_type,
+             strategy_type, portfolio_id, portfolio_type)
+            if scoped
+            else (strategy_type, portfolio_id, strategy_type, portfolio_id,
+                  strategy_type, portfolio_id)
+        )
         cursor.execute(
-            """
+            f"""
             SELECT DISTINCT ON (symbol)
                    symbol, quantity, average_price,
                    daily_unrealized_pnl, daily_realized_pnl, updated_at
             FROM trading.positions
             WHERE strategy_id = %s
             AND portfolio_id = %s
+            {stream_predicate}
             AND date = (
                 SELECT max(date) FROM trading.positions
                 WHERE strategy_id = %s AND portfolio_id = %s
+                {stream_predicate}
                 AND date < (
                     SELECT max(date) FROM trading.positions
                     WHERE strategy_id = %s AND portfolio_id = %s
+                    {stream_predicate}
                 )
             )
             ORDER BY symbol, updated_at DESC
             """,
-            (strategy_type, portfolio_id, strategy_type, portfolio_id,
-             strategy_type, portfolio_id),
+            params,
         )
         return cursor.fetchall()
 
@@ -312,7 +416,7 @@ class PostgresPortfolioRepository:
                     has_portfolio_type=has_portfolio_type,
                 )
                 positions = self._fetch_current_positions(
-                    cursor, strategy_type, portfolio_id
+                    cursor, strategy_type, portfolio_id,
                 )
                 executions = self._fetch_recent_executions(
                     cursor, strategy_type, portfolio_id
