@@ -798,3 +798,109 @@ Eleven unit tests, including the past-dated regression and the inclusive boundar
 Verified in the browser against the demo book: 1W now renders six points on both
 the fund chart and the strategy chart — Aug 27, 28, 31 and Sep 1, 2, 3, which is
 the trading week ending on the last bar — against four before.
+
+---
+
+## 11. The production database, read at last
+
+John supplied credentials on 2026-09-06. Everything in §9.1 that was blocked on
+access is answered here, and three of the answers are not what the code implied.
+
+### 11.1 The ten-times question is settled: AlgoLens was right
+
+`metadata."Contract Size"` holds **point values**, not underlying units — ZN is
+1000, ZC is 50, ZL 600, LE 400, CL 1000. The production table is correct as it
+stands, and AlgoLens reading the column straight through has always been right.
+
+Both spellings of every equity-index contract exist, each with its own correct
+point value: ES 50 and MES 5, NQ 20 and MNQ 2, YM 5 and MYM 0.5, RTY 50 and
+M2K 5. And the book trades the micros **directly**:
+
+| root | rows | first | last |
+|---|---|---|---|
+| MES | 128 | 2025-10-06 | 2026-05-03 |
+| MYM | 152 | 2025-10-06 | 2026-05-03 |
+| MNQ | 116 | 2025-10-06 | 2026-05-03 |
+| M2K | 80 | 2025-10-06 | 2026-05-03 |
+| YM | 42 | 2025-01-29 | 2025-11-10 |
+| NQ | 39 | 2025-09-02 | 2025-11-10 |
+| RTY | 11 | 2025-09-02 | 2025-10-28 |
+| ES | 1 | 2025-10-04 | 2025-10-04 (quantity **0**) |
+
+So `InstrumentRegistry`'s remap never once helped a position the fund holds. What
+it did was read the full-size NQ and YM held between September and November 2025
+as their micros — a tenth of their value. RTY was never in the registry's remap
+list, and the single ES row has no quantity.
+
+**Removed**, with John's approval, from both `get_instrument` and
+`has_instrument`, and the same four entries removed from `deployment_aliases()`.
+The remaining aliases in that table (MGC, MSF, M6B, M6E reading as full-size)
+stay: the book holds none of them, so nothing settles them, and they only fire
+when a metadata row carries no contract size at all — which in production never
+happens.
+
+Historical equity-index valuations move; nothing current does.
+
+### 11.2 `trading.strategy_registry` is no longer a reconstruction
+
+Fourteen columns, dumped and recorded: `id`, `strategy_type`, `portfolio_id`,
+`name`, `description`, `initial_equity`, `managers` (jsonb), `is_active`,
+`sort_order`, `created_at`, `updated_at`, `lifecycle`, `incubation_started_at`,
+`mock_capital`. Everything the contract declared is there.
+
+Four rows, and they confirm **#84**: `inc_meanrev`, `inc_tf_base` and
+`inc_tf_fast` all point at `BASE_PORTFOLIO`. The mechanism is visible now too —
+`LIVE_EQUITY_MEAN_REVERSION`'s results are written under `EQUITY_MR_PORTFOLIO`,
+so a registry row naming `BASE_PORTFOLIO` sends every read to the wrong book,
+where the only row is a stale one from 2025-08-15.
+
+### 11.3 The engine has not advanced the live book since 3 May
+
+`positions`, `equity_curve` and `live_results` all end **2026-05-03**;
+`executions` the day before. Market data is fine — `futures_data.ohlcv_1d` runs
+to 2026-08-06 with no gap and all 36 symbols.
+
+It is not a crash. `live_run_metadata` shows the engine ran on **2026-09-01, 02
+and 04**, and `live_results` rows were written on those days. But every one of
+them is for `LIVE_EQUITY_MEAN_REVERSION` over 2026-04-01 to 2026-04-21 — the E2
+verification of the new equity strategy, whose `strategy_trading_days_metadata`
+row was seeded by hand on 2026-09-01.
+
+So the engine works and is being run. **The live trend-following book simply has
+not been advanced since 3 May**, while attention moved to the incubating equity
+strategy. Three months of the fund's own history is missing, and the site shows a
+book frozen in May.
+
+This also makes §10.1 sharper than it looked. With the series ending 2026-05-03
+and today four months later, the production dashboard's 1W, 1M and 3M buttons
+return **nothing at all**: three of the five range buttons render empty charts
+right now. Anchoring the window to the data is what makes them show anything.
+
+### 11.4 Migrations applied to production
+
+Backup first: whole-database structure, plus `trading` and `auth` with their
+data, under `algolens-prod/backups/`. The `trading` schema is 17 MB; the 9.6 GB
+is `futures_data`, which no migration touches.
+
+| Migration | Result |
+|---|---|
+| 004 position_overrides | table, 3 indexes, 2 append-only rules |
+| 005 risk_limits | table + index |
+| 009 books and membership | 3 tables, seeded 4 membership rows from `strategy_registry` |
+| 011 live_results/executions columns | **no-op** — every column already existed |
+
+`check_schema.py` then reported **"Schema contract satisfied: every declared read
+and write is supported"**, exit 0, against production. The deploy gate is green.
+
+Not applied, deliberately: **010**, which clears the profit-factor sentinel. It
+is one row (`LIVE_TREND_FOLLOWING` / `CONSERVATIVE_PORTFOLIO` / 2025-10-06,
+999.99 against zero gross loss) and it edits a published historical number, so it
+waits for a separate yes. The code already ignores any value at or above 999, so
+nothing on screen depends on it.
+
+### Still open after this pass
+
+- **P2-b, attribution across a book move.** Unchanged: a desk decision.
+- **Running a live cycle.** Still nobody's, and still not mine.
+- **The stopped book.** Whoever owns the daily run has to decide whether to
+  backfill 4 May to today, or start again from now.
