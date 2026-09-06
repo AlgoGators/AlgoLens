@@ -645,7 +645,7 @@ BASE_PORTFOLIO and worth reviewing at the same time.
 **AlgoLens #29** — the older, unscoped `portfolio_id` version of the same bug —
 is fixed on this branch and has been since the first pass.
 
-### 9.3 The review comment on PR #80 — needs John's answer
+### 9.3 The review comment on PR #80 — answered
 
 `raohemdutt` left a detailed plan for how this branch should travel, measured
 commit by commit against `main` with #80 merged, and it ends *"Tell me the order
@@ -664,6 +664,38 @@ John, not something to action unilaterally. In summary:
 - **`refactor/models-range-filter` at 7832aaf2** deletes `streams.py` and
   `AlphaAttribution.tsx`, which #80 imports. **Answered:** the deletion does not
   land — see §10. Only `ed82b577` travels, rebased onto the QT lane.
+
+### 9.3b The order, as agreed — and the seven commits the plan had not seen
+
+The reply to that review lived on #80 and has since been deleted along with the
+claim quoted in it, so this section is the record.
+
+The reviewer's order stands as written: the Postgres integration fixture
+(`8e1ef5bf` + `559e96ce` + `1a55e65b`) first of everything, because every blocking
+defect on #80 dies against it and survives every fake — it has since caught the
+position-snapshot bug and the stream bug, both SQL, both invisible to doubles. Then
+the four commits folded into #80, with `74819cd3` hand-ported rather than
+cherry-picked because it imports `match_book` and changes `evaluate_risk`'s
+signature. Then the Books stack as one ordered ten, paired with
+`009_books_and_membership.sql`, after #60.
+
+Seven commits landed after `d96d5f25` and so are not placed anywhere in that plan:
+
+| Commit | Where it goes |
+|---|---|
+| `170b9d09` | Its own PR, **after** the fixture PR and **paired with trade-ngin migration 011**. This is the one that stops AlgoLens recomputing the engine's published metrics. |
+| `f434ced8` | Its own small PR, **immediately after the fixture**. The #83 fix; unblocks applying migration 002. |
+| `9172d9d7`, `df6c9525` | Docs and a read-only script. No code path. Travels whenever. |
+| `994eb852` | Two test files shared a basename and pytest collected neither. Folds into the fixture PR. |
+| `476d2f35`, `09bb7a5a` | Audit-document edits only. Per the rule that the preview documents do not travel, these should not either — their content is in the issues. |
+| `5bf87a92` | The React component tests. Its own small PR; depends on nothing. |
+
+**The cross-repo pairing is mandatory and was not when the plan was written.**
+`170b9d09` reads ten metric columns out of `trading.live_results` instead of
+recomputing them, and no migration in either repository has ever created those
+columns (§8). trade-ngin `011_live_results_and_executions_columns.sql` declares
+them additively. So: **011, then 010, then `check_schema.py`, then `170b9d09`
+deploys** — and not before.
 
 ### 9.4 Two things from that review, done
 
@@ -733,5 +765,6 @@ evidence that the read side is load-bearing rather than decorative.
   rebased onto the QT lane and travel on its own.
 - Nothing in the merge ordering waits on this any more.
 
-The claim itself has been removed from the #80 thread rather than left standing
-as an open question, since leaving it there invites someone to act on it.
+The claim has been removed from the #80 thread rather than left standing where
+someone could act on it. The comment quoting it went with it, so §9.3b above is
+now the only record of the agreed merge order.
