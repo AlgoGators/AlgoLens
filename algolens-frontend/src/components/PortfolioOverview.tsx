@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { periodReturn } from '../domain/portfolio/periodReturn';
+import { filterByPeriod } from '../domain/portfolio/filterByPeriod';
 import { TrendingUp, TrendingDown, Beaker } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, ResponsiveContainer, Tooltip } from 'recharts';
 import type { PortfolioData } from '../domain/portfolio/portfolioData';
@@ -19,42 +20,10 @@ export function PortfolioOverview({ data, onBuilderClick }: PortfolioOverviewPro
   const periods = ['1W', '1M', '3M', '1Y', 'ALL'];
 
   // Filter data based on selected period
-  const filteredData = useMemo(() => {
-    const now = new Date();
-    let daysToShow: number;
-
-    switch (selectedPeriod) {
-      case '1W':
-        daysToShow = 7;
-        break;
-      case '1M':
-        daysToShow = 30;
-        break;
-      case '3M':
-        daysToShow = 90;
-        break;
-      case '1Y':
-        daysToShow = 365;
-        break;
-      case 'ALL':
-      default:
-        return data.historicalData;
-    }
-
-    const cutoffDate = new Date(now);
-    // Midnight, not "this time of day 30 days ago". A daily bar is stamped at
-    // the start of its day, so a cutoff carrying the current clock time fell
-    // just after the oldest bar in the window and dropped it: "1M" measured 29
-    // days and reported 2.06% where the full month was 2.69%. Every period on
-    // every chart was short by one bar.
-    cutoffDate.setDate(cutoffDate.getDate() - daysToShow);
-    cutoffDate.setHours(0, 0, 0, 0);
-
-    return data.historicalData.filter(point => {
-      const pointDate = new Date(point.date);
-      return pointDate >= cutoffDate;
-    });
-  }, [selectedPeriod, data.historicalData]);
+  const filteredData = useMemo(
+    () => filterByPeriod(data.historicalData, selectedPeriod),
+    [selectedPeriod, data.historicalData]
+  );
 
   // Calculate period-specific return
   const windowReturn = useMemo(() => {

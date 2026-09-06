@@ -761,10 +761,40 @@ evidence that the read side is load-bearing rather than decorative.
 - The deletion in `7832aaf2` does not merge — not before the QT lane, not after
   it.
 - The range-filter and `models/`/`lib/` layering work in `ed82b577` on that same
-  branch is worth having and does not depend on the deletion. It should be
-  rebased onto the QT lane and travel on its own.
+  branch is worth having and does not depend on the deletion. **The bug fix in it
+  is already taken** — see §10.1. The layering half (moving `src/domain/` to
+  `src/models/` + `src/lib/` across ~28 importers) is a separate call and should
+  travel on its own, rebased onto the QT lane.
 - Nothing in the merge ordering waits on this any more.
 
 The claim has been removed from the #80 thread rather than left standing where
 someone could act on it. The comment quoting it went with it, so §9.3b above is
 now the only record of the agreed merge order.
+
+### 10.1 The one thing worth taking from that branch, taken
+
+`ed82b577` carries a real bug fix behind the layering churn, and it applies to
+this branch unchanged: **the 1W/1M/3M/1Y buttons measured their window from the
+wall clock rather than from the data.**
+
+That is right only while the engine published this morning. It is wrong every
+other time, and it fails quietly rather than loudly:
+
+- The demo series ends 2026-09-03 and today is 2026-09-06. "1W" was returning
+  **four bars** — four days of trading under a button that says a week — and "1M"
+  twenty where the month holds twenty-three.
+- A strategy that stopped publishing more than the window ago returns **nothing**,
+  and the chart draws that as an empty panel rather than as a series that ended.
+  Any retired or paused strategy hits this every time it is opened.
+
+`domain/portfolio/filterByPeriod.ts` anchors the window to the newest bar in the
+series instead, keeps the inclusive calendar-day boundary from §1 (the fix that
+stopped every window being short by one bar), and reduces both ends to UTC
+midnight so the answer cannot depend on the reader's timezone. `PortfolioOverview`,
+`StrategyDetail` and `IncubationDetail` all use it; the switch statement was
+copied into each of the three.
+
+Eleven unit tests, including the past-dated regression and the inclusive boundary.
+Verified in the browser against the demo book: 1W now renders six points on both
+the fund chart and the strategy chart — Aug 27, 28, 31 and Sep 1, 2, 3, which is
+the trading week ending on the last bar — against four before.
