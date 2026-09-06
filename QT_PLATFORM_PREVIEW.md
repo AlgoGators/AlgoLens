@@ -207,8 +207,8 @@ Open a PR comment on #80, or just tell John.
 - Attribution across a book change is stated and acknowledged, not repaired. The options
   are in `QT_PLATFORM_AUDIT.md` §6.
 - The `refactor/models-range-filter` branch deletes the three-stream read side (220 lines,
-  including all of `AlphaAttribution.tsx`). If that lands, it removes the other half of this
-  feature. Nobody has confirmed whether that deletion is intended — it needs an answer before
-  it goes anywhere near `main`.
+  including all of `AlphaAttribution.tsx`). **Decided 2026-09-06: it does not land.** The
+  streams and the alpha-attribution comparison stay; only the layering work in `ed82b577` is
+  worth taking, rebased onto this lane.
 - Component-level React tests do not exist; the pure state machines are tested, the wiring
   is verified by driving the app. Adding React Testing Library is a separate decision.

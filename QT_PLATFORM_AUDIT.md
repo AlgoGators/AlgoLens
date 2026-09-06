@@ -113,7 +113,7 @@ All four are now in **`algolens-api/scripts/demo_seed.sql`**, with the schema th
 |---|---|---|---|
 | ~~P2-a~~ | ~~Node 20 deprecation warnings~~ — **FIXED** in trade-ngin; versions read from the GitHub API, not guessed | S | |
 | P2-b | The `history_discontinuity` warning names a real problem the feature does not solve | **L / D** | Attribution across a book move still spans two compositions. Options: forbid moves on live strategies, or snapshot-and-restart the curve at the move. |
-| P2-c | `refactor/models-range-filter` deletes the three-stream read side (220 lines, all of `AlphaAttribution.tsx`) | **D** | Still on the remote. Merging it removes half of this feature. Nobody has confirmed whether the deletion was intended. |
+| ~~P2-c~~ | ~~`refactor/models-range-filter` deletes the three-stream read side~~ — **DECIDED 2026-09-06**: the streams stay; that deletion does not land | **D** | John rejected the scope-down premise. See §10. |
 | ~~P2-d~~ | ~~Demo seed is not part of any test run~~ — **SUPERSEDED**: `tests/integration` builds its own isolated schema per test, so it needs no seed and cannot be polluted by one | S | |
 
 ---
@@ -163,11 +163,11 @@ Three ways out, in rising order of cost:
 
 Option 3 is what ships today. It is a reasonable answer, but it should be a chosen one rather than a default, because the moment there is a year of live history the cost of changing it rises sharply.
 
-### P2-c — `refactor/models-range-filter` deletes the other half of this feature
+### P2-c — `refactor/models-range-filter` deletes the other half of this feature — **DECIDED**
 
 That branch is still on the remote and removes 220 lines: the stream constants and the whole of `AlphaAttribution.tsx`. When the edit surface was going to live in another repo, losing AlgoLens's read side was survivable. It is not now — merging it would delete the three-stream comparison that the position edit path exists to make meaningful.
 
-Nobody has confirmed whether the deletion was intended or fell out of an unrelated models refactor. That needs an answer from whoever wrote it before it goes near `main`.
+**Answered on 2026-09-06.** The scope-down premise behind that commit is rejected: the streams and the alpha-attribution comparison stay. The deletion does not land. What remains worth taking from the branch is the range-filter and `models/`/`lib/` layering work in `ed82b577`, rebased onto the QT lane rather than merged over it.
 
 ---
 
@@ -662,9 +662,8 @@ John, not something to action unilaterally. In summary:
 - **Never travels**: the two preview documents as they stand (their content
   becomes issues), and `algolens-api/logs/algolens.log.10`.
 - **`refactor/models-range-filter` at 7832aaf2** deletes `streams.py` and
-  `AlphaAttribution.tsx`, which #80 imports. It must not merge before the QT
-  lane, and whether that deletion was intended is still unanswered — the same
-  question as P2-c in §3, now asked by two people.
+  `AlphaAttribution.tsx`, which #80 imports. **Answered:** the deletion does not
+  land — see §10. Only `ed82b577` travels, rebased onto the QT lane.
 
 ### 9.4 Two things from that review, done
 
@@ -693,12 +692,46 @@ John, not something to action unilaterally. In summary:
 
 - **The ES/MES question** (§8.3) and everything else in §9.1 — blocked on
   database access, not on work.
-- **The PR-splitting plan** in §9.3 — blocked on John's answer.
-- **`refactor/models-range-filter`** — blocked on whoever wrote it.
+- ~~**The PR-splitting plan** in §9.3~~ — answered on #80: the reviewer's order
+  stands, with the seven later commits placed into it.
 - **P2-b, attribution across a book move.** Still the three options in §6. The
   platform states the cost, records an acknowledgement and audits who accepted
   it; it does not repair the maths, and which of the three is right is a desk
   decision rather than an engineering one.
-- **No React component tests.** Adding them means adding
-  `@testing-library/react` and a DOM environment to the frontend's dependencies,
-  which is a decision about the project's toolchain rather than a gap in it.
+- ~~**No React component tests.**~~ — done: `@testing-library/react` and a
+  per-file jsdom environment are in, and `PositionBreakdown.test.tsx` covers the
+  twelve honest-null behaviours that only exist once the component renders.
+
+---
+
+## 10. `refactor/models-range-filter` — decided
+
+Asked three times across this audit (P2-c in §3, §6, §9.3) and by two other
+people on #80. **Answered by John on 2026-09-06: the streams stay.**
+
+The commit that raised the question is `7832aaf2`, *"Remove qt/system/benchmark
+streams and alpha-attribution feature"*, on the branch `refactor/models-range-filter`.
+It was not an accident — its message argues that AlgoLens should narrow to
+portfolio visualisation and incubation, and drops the `portfolio_type` filter and
+the chart that compared the streams as surplus to that.
+
+That premise is rejected. The three-stream read side is the reason the platform
+exists: the qt book is what the desk actually holds, the system book is what the
+model says it should hold, and the whole point of the edit surface built in §1–§5
+is to make the gap between them visible and adjustable. Issue #83 is direct
+evidence that the read side is load-bearing rather than decorative.
+
+**What this means concretely.**
+
+- `streams.py`, `AlphaAttribution.tsx`, the 103 lines of `repositories.py` and
+  `tests/test_stream_scoping.py` stay. #80 imports the first of those and
+  `f434ced8` adds to the last.
+- The deletion in `7832aaf2` does not merge — not before the QT lane, not after
+  it.
+- The range-filter and `models/`/`lib/` layering work in `ed82b577` on that same
+  branch is worth having and does not depend on the deletion. It should be
+  rebased onto the QT lane and travel on its own.
+- Nothing in the merge ordering waits on this any more.
+
+The claim itself has been removed from the #80 thread rather than left standing
+as an open question, since leaving it there invites someone to act on it.
