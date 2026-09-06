@@ -1,7 +1,7 @@
 """Portfolio use cases."""
 
 import logging
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import datetime
 from typing import Any
 
@@ -43,6 +43,7 @@ from algolens.domain.portfolio.calculations import (
     published_or_computed,
     transform_positions,
 )
+from algolens.domain.portfolio.history_segments import book_change_breaks
 from algolens.domain.portfolio.incubation import compute_incubation_window
 from algolens.domain.portfolio.instruments import base_symbol, notional
 from algolens.domain.portfolio.position_edit import (
@@ -79,6 +80,7 @@ def build_strategy_detail(
     rows: PortfolioDetailRows,
     prices: Mapping[str, float] | None = None,
     multipliers: Mapping[str, float] | None = None,
+    history_breaks: Sequence[Mapping[str, Any]] | None = None,
 ) -> dict[str, Any] | None:
     if not rows.latest:
         return None
@@ -125,6 +127,10 @@ def build_strategy_detail(
         "returnPercent": return_percent,
         "positions": transformed_positions,
         "historicalData": historical_data,
+        # Where this curve stops describing the same portfolio. The points
+        # themselves are untouched -- these say where the line must break, so
+        # nothing is read straight across a change of book.
+        "historyBreaks": list(history_breaks or ()),
         "equityByStream": equity_by_stream,
         "bestDay": published_or_computed(latest.get("best_day"), stats["best_day"]),
         "worstDay": published_or_computed(latest.get("worst_day"), stats["worst_day"]),
@@ -381,6 +387,26 @@ class GetStrategyDetail:
             logger.error("[MARKET_DATA] lookup failed: %s", exc, exc_info=True)
             return {}, {}
 
+    def _history_breaks(self, strategy_id: str) -> list[dict[str, Any]]:
+        """Dates this strategy's curve restarts because it changed book.
+
+        Read defensively: the assignment audit is a young table and a database
+        that predates migration 009 does not have it. A chart drawn without the
+        breaks is the old, slightly dishonest chart; a chart not drawn at all is
+        worse, so a failure here degrades rather than raises.
+        """
+        reader = getattr(self.registry, "list_assignment_history", None)
+        if reader is None:
+            return []
+        try:
+            return book_change_breaks(reader(strategy_id))
+        except Exception as exc:
+            logger.error(
+                "[STRATEGY] Assignment history read failed for %s: %s",
+                strategy_id, exc, exc_info=True,
+            )
+            return []
+
     def execute(
         self, strategy_id: str, portfolio_id: Any = None
     ) -> dict[str, Any]:
@@ -419,7 +445,9 @@ class GetStrategyDetail:
 
         rows = self.reader.fetch_detail_rows(cfg["strategy_type"], target)
         prices, multipliers = self._market_data(rows.positions, rows.executions)
-        detail = build_strategy_detail(cfg, rows, prices, multipliers)
+        detail = build_strategy_detail(
+            cfg, rows, prices, multipliers, self._history_breaks(strategy_id)
+        )
         if detail is None:
             # A strategy freshly added to a book has no engine output for that
             # pairing yet. That is not the same as the strategy having no data

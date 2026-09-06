@@ -1,6 +1,12 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { periodReturn } from '../domain/portfolio/periodReturn';
 import { filterByPeriod } from '../domain/portfolio/filterByPeriod';
+import { formatBarDate } from '../domain/portfolio/formatBarDate';
+import {
+  breaksWithin,
+  latestSegment,
+  withBreakGaps,
+} from '../domain/portfolio/historySegments';
 import { ArrowLeft, TrendingUp, TrendingDown } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, ResponsiveContainer, Tooltip } from 'recharts';
 import type { Strategy } from '../domain/portfolio/portfolioData';
@@ -79,10 +85,25 @@ export function StrategyDetail({ strategy, onBack, onPositionsChanged }: Strateg
     [selectedPeriod, strategy.historicalData]
   );
 
-  // Calculate period-specific return
+  // Where this window's curve changes book. Only breaks a reader can actually
+  // see on the chart are worth drawing or naming.
+  const visibleBreaks = useMemo(
+    () => breaksWithin(filteredData, strategy.historyBreaks),
+    [filteredData, strategy.historyBreaks]
+  );
+
+  // The plotted series lifts the pen at each break. `connectNulls` is
+  // deliberately not set: connecting them is exactly what must not happen.
+  const plotted = useMemo(
+    () => withBreakGaps(filteredData, strategy.historyBreaks),
+    [filteredData, strategy.historyBreaks]
+  );
+
+  // The window's return, measured over the newest unbroken stretch only. A
+  // return that spans a book change adds up two different portfolios.
   const windowReturn = useMemo(() => {
-    return periodReturn(filteredData);
-  }, [filteredData]);
+    return periodReturn(latestSegment(filteredData, strategy.historyBreaks));
+  }, [filteredData, strategy.historyBreaks]);
   // The window's direction, for chart colours. An unknown window is
   // drawn in the neutral-positive colour rather than not drawn at all.
   const gaining = (windowReturn?.value ?? 0) >= 0;
@@ -140,7 +161,7 @@ export function StrategyDetail({ strategy, onBack, onPositionsChanged }: Strateg
 
       <div className="mb-4">
         <ResponsiveContainer width="100%" height={300}>
-          <LineChart data={filteredData}>
+          <LineChart data={plotted}>
             <defs>
               <linearGradient id="stratLineGradient" x1="0" y1="0" x2="0" y2="1">
                 <stop offset="0%" stopColor={gaining ? "#f97316" : "#ef4444"} stopOpacity={theme === 'dark' ? 0.2 : 0.1} />
@@ -163,8 +184,12 @@ export function StrategyDetail({ strategy, onBack, onPositionsChanged }: Strateg
                 boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)',
                 color: theme === 'dark' ? '#fff' : '#000'
               }}
-              formatter={(value: number) => [`$${value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, 'Value']}
-              labelFormatter={(label) => new Date(label).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+              formatter={(value) =>
+                typeof value === 'number'
+                  ? [`$${value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, 'Value']
+                  : ['—', 'Value']
+              }
+              labelFormatter={(label) => formatBarDate(label as string)}
             />
             <Line
               type="linear"
@@ -176,6 +201,17 @@ export function StrategyDetail({ strategy, onBack, onPositionsChanged }: Strateg
             />
           </LineChart>
         </ResponsiveContainer>
+        {visibleBreaks.map(brk => (
+          <p
+            key={brk.date}
+            className={`mt-2 text-xs ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}
+          >
+            History restarts {formatBarDate(brk.date)}: moved from{' '}
+            {brk.fromPortfolioId} to {brk.toPortfolioId}. The
+            line breaks because the two sides are different portfolios, and the
+            window return above measures only the stretch since the move.
+          </p>
+        ))}
       </div>
 
       {/* Is QT's judgement adding value? Renders an explanation instead of a

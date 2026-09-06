@@ -904,3 +904,65 @@ nothing on screen depends on it.
 - **Running a live cycle.** Still nobody's, and still not mine.
 - **The stopped book.** Whoever owns the daily run has to decide whether to
   backfill 4 May to today, or start again from now.
+
+---
+
+## 12. Attribution across a book move — decided, and built
+
+Open since the first pass as P2-b, and the last of the three questions that
+needed a person rather than a keyboard. **John chose option B on 2026-09-06: the
+line breaks at the move.**
+
+The problem, stated once more: a strategy that changes book keeps producing one
+continuous equity curve, but the money behind it changed. Drawn as a single line
+it invites the reading that is wrong — that the whole line describes one thing
+whose return can be measured end to end. The platform warned about this and then
+drew the misleading line anyway.
+
+### What now happens
+
+- `domain/portfolio/history_segments.py` decides **where** the breaks are, from
+  `trading.portfolio_assignments`. Only a genuine move counts: a row with no
+  `from_portfolio_id` is a first placement and a row whose from and to match is
+  a re-record, and neither changes the composition. Two moves in one day collapse
+  to one break naming the first book and the last.
+- The API returns them as `historyBreaks` on the strategy payload. **The equity
+  values are untouched** — these say where the line must break, nothing more.
+- `domain/portfolio/historySegments.ts` decides **how** they are drawn: a
+  null-valued spacer between segments, which is how recharts is told to lift the
+  pen. `connectNulls` is deliberately not set.
+- The window return is measured over `latestSegment` only. A 1M return that
+  spans a book change is two portfolios added together, which is not a number
+  about anything.
+- Under the chart, in words: which day, which two books, and why the line stops.
+
+The day of the move opens the new segment rather than closing the old one. The
+move takes effect that day, so that day's equity is the first of the new book's
+history.
+
+### A second bug, found by looking at it
+
+The first caption read **"History restarts Aug 2, 2026"** for a move dated the
+3rd. `new Date('2026-08-03')` is parsed as UTC midnight and rendered in the
+reader's timezone, so everyone west of Greenwich saw the day before.
+
+`domain/portfolio/formatBarDate.ts` builds a local date from the day parts
+instead, and the chart's tooltip uses it too — it had the same fault, on every
+date it has ever shown.
+
+### Verified
+
+- 18 backend tests, 15 frontend tests on the splitting, 6 on the date format.
+  236 backend and 138 frontend in total, all green.
+- Driven in the browser against a seeded move in the demo book: the plotted path
+  comes back with **two** subpaths where it had one, and the caption reads
+  "History restarts Aug 3, 2026: moved from AGGRESSIVE_PORTFOLIO to
+  CONSERVATIVE_PORTFOLIO."
+
+### What this deliberately does not do
+
+It does not restate cumulative return per segment, and it does not touch
+`bestDay`/`worstDay` — a best day is a day, and stays comparable across a move.
+What it stops is a *window* figure spanning a break and a *line* drawn straight
+through one. Segmented cumulative returns are a further step, and worth taking
+only if someone asks for them.

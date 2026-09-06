@@ -1,3 +1,4 @@
+import type { HistoryBreak } from './historySegments';
 export interface Position {
   symbol: string;
   name: string;
@@ -123,6 +124,8 @@ export interface HistoricalDataPoint {
   value: number;
 }
 
+export type { HistoryBreak } from './historySegments';
+
 export interface Strategy {
   id: string;
   name: string;
@@ -149,6 +152,12 @@ export interface Strategy {
    * Absent until the dual-portfolio migration has run, so always guard on it.
    */
   equityByStream?: Record<string, HistoricalDataPoint[]>;
+  /**
+   * Where this curve stops describing the same portfolio, because the strategy
+   * changed book. The equity values are untouched; these say where the line
+   * must break so nothing is read straight across the change.
+   */
+  historyBreaks?: HistoryBreak[];
   bestDay: number | null;
   worstDay: number | null;
   metrics: StrategyMetrics;
