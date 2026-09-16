@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Header } from './Header';
 import { PortfolioOverview } from './PortfolioOverview';
 import { StrategyList } from './StrategyList';
@@ -80,6 +80,18 @@ export function Dashboard({ onLogout }: DashboardProps) {
   useEffect(() => {
     void fetchPortfolioData();
   }, [fetchPortfolioData]);
+
+  // The Books tab changes which books a strategy is in, and the portfolio view
+  // reads that from data loaded before the change. Leaving Books re-reads it,
+  // quietly, so a strategy just added to a second book offers that book at
+  // once instead of after a full page reload.
+  const previousTab = useRef<ActiveTab>(activeTab);
+  useEffect(() => {
+    if (previousTab.current === 'books' && activeTab !== 'books') {
+      void fetchPortfolioData({ silent: true });
+    }
+    previousTab.current = activeTab;
+  }, [activeTab, fetchPortfolioData]);
 
   useEffect(() => {
     if ((activeTab === 'incubation' || activeTab === 'books') && !isInternalMember) {

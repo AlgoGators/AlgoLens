@@ -14,6 +14,7 @@ import { useTheme } from '../adapters/react/ThemeContext';
 import { FinancialAnalysis } from './FinancialAnalysis';
 import { PositionBreakdown } from './PositionBreakdown';
 import { PortfolioApiService } from '../infrastructure/api/portfolioApi';
+import { ApiError } from '../infrastructure/api/httpClient';
 import { OverrideHistory } from './OverrideHistory';
 import { TradingActivity } from './TradingActivity';
 import { AlphaAttribution } from './AlphaAttribution';
@@ -36,74 +37,100 @@ export function StrategyDetail({ strategy, onBack, onPositionsChanged }: Strateg
   const [bookDetail, setBookDetail] = useState<Strategy | null>(null);
   const [bookLoading, setBookLoading] = useState(false);
   const [bookError, setBookError] = useState<string | null>(null);
+  // Set when the chosen book is one the engine has not published anything for
+  // yet -- the normal state of a strategy just added to a book. Nothing is
+  // drawn for it, rather than the primary book's numbers under its name.
+  const [emptyBook, setEmptyBook] = useState<string | null>(null);
 
-  // The strategy the positions tab renders. Everything else on this screen is
-  // strategy-level and stays as it was.
+  // Everything on this screen is scoped to one book: the API reads value,
+  // history, metrics, executions and positions all by (strategy, book). So the
+  // whole page renders from the chosen book, not just the positions table.
   const shown = bookDetail ?? strategy;
 
-  const loadBook = useCallback(async (target: string | undefined) => {
+  // `onScreen` is the book currently rendered. If loading `target` fails for
+  // any reason other than "no data yet", the picker goes back to it, so the
+  // name in the picker and the numbers below it never disagree.
+  const loadBook = useCallback(async (target: string | undefined, onScreen?: string) => {
+    setBookError(null);
     if (!target || target === strategy.portfolio_id) {
+      setEmptyBook(null);
       setBookDetail(null);
-      setBookError(null);
       return;
     }
     setBookLoading(true);
-    setBookError(null);
     try {
-      setBookDetail(await PortfolioApiService.getStrategy(strategy.id, target));
+      const detail = await PortfolioApiService.getStrategy(strategy.id, target);
+      setEmptyBook(null);
+      setBookDetail(detail);
     } catch (err) {
-      setBookDetail(null);
-      setBookError(err instanceof Error ? err.message : 'Could not load that book');
+      if (err instanceof ApiError && err.code === 'no_data_for_book') {
+        setBookDetail(null);
+        setEmptyBook(target);
+      } else {
+        setBook(onScreen);
+        // The server's own sentence when it gave one; never the raw body.
+        setBookError(
+          (err instanceof ApiError && err.serverMessage) || `Could not load ${target}.`
+        );
+      }
     } finally {
       setBookLoading(false);
     }
   }, [strategy.id, strategy.portfolio_id]);
+
+  const bookOnScreen = emptyBook ?? shown.portfolio_id ?? strategy.portfolio_id;
+  const selectBook = (target: string) => {
+    const previous = bookOnScreen;
+    setBook(target);
+    void loadBook(target, previous);
+  };
 
   // A different strategy was opened: go back to its own primary book.
   useEffect(() => {
     setBook(strategy.portfolio_id);
     setBookDetail(null);
     setBookError(null);
+    setEmptyBook(null);
   }, [strategy.id, strategy.portfolio_id]);
 
   // An edit landed. Re-read whichever book is on screen, and let the dashboard
   // re-read the primary.
   const handlePositionsChanged = useCallback(() => {
-    void loadBook(book);
+    void loadBook(book, book);
     onPositionsChanged?.();
   }, [book, loadBook, onPositionsChanged]);
 
   const [selectedPeriod, setSelectedPeriod] = useState('1M');
   const [selectedTab, setSelectedTab] = useState<'positions' | 'analysis' | 'activity'>('positions');
   const { theme } = useTheme();
-  const isPositive = (strategy.return ?? 0) >= 0;
+  const isPositive = (shown.return ?? 0) >= 0;
   const periods = ['1W', '1M', '3M', '1Y', 'ALL'];
 
   // Filter data based on selected period
   const filteredData = useMemo(
-    () => filterByPeriod(strategy.historicalData, selectedPeriod),
-    [selectedPeriod, strategy.historicalData]
+    () => filterByPeriod(shown.historicalData, selectedPeriod),
+    [selectedPeriod, shown.historicalData]
   );
 
   // Where this window's curve changes book. Only breaks a reader can actually
   // see on the chart are worth drawing or naming.
   const visibleBreaks = useMemo(
-    () => breaksWithin(filteredData, strategy.historyBreaks),
-    [filteredData, strategy.historyBreaks]
+    () => breaksWithin(filteredData, shown.historyBreaks),
+    [filteredData, shown.historyBreaks]
   );
 
   // The plotted series lifts the pen at each break. `connectNulls` is
   // deliberately not set: connecting them is exactly what must not happen.
   const plotted = useMemo(
-    () => withBreakGaps(filteredData, strategy.historyBreaks),
-    [filteredData, strategy.historyBreaks]
+    () => withBreakGaps(filteredData, shown.historyBreaks),
+    [filteredData, shown.historyBreaks]
   );
 
   // The window's return, measured over the newest unbroken stretch only. A
   // return that spans a book change adds up two different portfolios.
   const windowReturn = useMemo(() => {
-    return periodReturn(latestSegment(filteredData, strategy.historyBreaks));
-  }, [filteredData, strategy.historyBreaks]);
+    return periodReturn(latestSegment(filteredData, shown.historyBreaks));
+  }, [filteredData, shown.historyBreaks]);
   // The window's direction, for chart colours. An unknown window is
   // drawn in the neutral-positive colour rather than not drawn at all.
   const gaining = (windowReturn?.value ?? 0) >= 0;
@@ -132,15 +159,88 @@ export function StrategyDetail({ strategy, onBack, onPositionsChanged }: Strateg
             </p>
             <div className={`text-sm mt-2 ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'
               }`}>
-              {strategy.lastUpdate}
+              {shown.lastUpdate}
             </div>
           </div>
         </div>
+
+        {/* Which book every number on this page belongs to. Always stated, not
+            only when there is a choice: a strategy's value, history, positions
+            and limits are all per book, and a reader should never have to
+            infer which one they are looking at. */}
+        <div className="mt-4 flex flex-wrap items-center gap-3">
+          <span className={`text-xs uppercase tracking-wider ${theme === 'dark' ? 'text-gray-500' : 'text-gray-500'}`}>
+            Book
+          </span>
+          {books.length > 1 ? (
+            <select
+              id="book-view"
+              aria-label="Which book to show"
+              value={book ?? ''}
+              onChange={e => selectBook(e.target.value)}
+              className={`rounded-lg border px-2 py-1.5 text-sm font-mono ${
+                theme === 'dark'
+                  ? 'bg-gray-900 border-gray-700 text-white'
+                  : 'bg-white border-gray-300 text-black'
+              }`}
+            >
+              {books.map(b => (
+                <option key={b} value={b}>
+                  {b}{b === strategy.portfolio_id ? ' (primary)' : ''}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <span
+              data-testid="book-name"
+              className={`rounded-lg border px-2 py-1 text-sm font-mono ${
+                theme === 'dark' ? 'border-gray-800 text-gray-200' : 'border-gray-200 text-gray-800'
+              }`}
+            >
+              {bookOnScreen}
+            </span>
+          )}
+          <span className={`text-xs ${theme === 'dark' ? 'text-gray-500' : 'text-gray-500'}`}>
+            {books.length > 1
+              ? `In ${books.length} books. Everything below is for the one selected; each has its own positions, history and risk limits.`
+              : 'Everything below is for this book.'}
+          </span>
+          {bookLoading && (
+            <span className={`text-xs ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>
+              Loading…
+            </span>
+          )}
+        </div>
+
+        {bookError && (
+          <div role="alert" className="mt-3 rounded-lg border border-red-500/50 bg-red-500/10 px-4 py-3 text-sm text-red-600 dark:text-red-400">
+            {bookError}
+          </div>
+        )}
       </div>
 
+      {emptyBook ? (
+        <div
+          role="status"
+          className={`rounded-lg border px-6 py-10 text-center ${
+            theme === 'dark' ? 'border-gray-800 bg-gray-900 text-gray-300' : 'border-gray-200 bg-gray-50 text-gray-700'
+          }`}
+        >
+          <p className="text-base mb-2">
+            Nothing published for {strategy.name} in{' '}
+            <span className="font-mono">{emptyBook}</span> yet.
+          </p>
+          <p className={`text-sm ${theme === 'dark' ? 'text-gray-500' : 'text-gray-500'}`}>
+            It was added to this book, but the engine has not traded it here. Its
+            positions, history and risk limits in this book start with the first
+            run that includes it.
+          </p>
+        </div>
+      ) : (
+      <>
       <div className="mb-6">
         <div className="text-3xl md:text-4xl mb-2">
-          ${strategy.currentValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+          ${shown.currentValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
         </div>
         {/* Null means the window holds fewer than two points, so there is no
             return to state. This used to state "$0.00 (+0.00%)" -- a flat
@@ -217,7 +317,7 @@ export function StrategyDetail({ strategy, onBack, onPositionsChanged }: Strateg
       {/* Is QT's judgement adding value? Renders an explanation instead of a
           chart until both streams exist. */}
       <div className="mb-8">
-        <AlphaAttribution equityByStream={strategy.equityByStream} theme={theme} />
+        <AlphaAttribution equityByStream={shown.equityByStream} theme={theme} />
       </div>
 
       <div className={`flex items-center justify-between mb-8 border-b ${theme === 'dark' ? 'border-gray-800' : 'border-gray-200'
@@ -304,50 +404,6 @@ export function StrategyDetail({ strategy, onBack, onPositionsChanged }: Strateg
       {/* Tab Content */}
       {selectedTab === 'positions' && (
         <>
-          {books.length > 1 && (
-            <div className="mb-4 flex flex-wrap items-center gap-3">
-              <label
-                htmlFor="book-view"
-                className={`text-xs uppercase tracking-wider ${
-                  theme === 'dark' ? 'text-gray-500' : 'text-gray-500'
-                }`}
-              >
-                Book
-              </label>
-              <select
-                id="book-view"
-                aria-label="Which book to show"
-                value={book ?? ''}
-                onChange={e => { setBook(e.target.value); void loadBook(e.target.value); }}
-                className={`rounded-lg border px-2 py-1.5 text-sm font-mono ${
-                  theme === 'dark'
-                    ? 'bg-gray-900 border-gray-700 text-white'
-                    : 'bg-white border-gray-300 text-black'
-                }`}
-              >
-                {books.map(b => (
-                  <option key={b} value={b}>
-                    {b}{b === strategy.portfolio_id ? ' (primary)' : ''}
-                  </option>
-                ))}
-              </select>
-              <span className={`text-xs ${theme === 'dark' ? 'text-gray-500' : 'text-gray-500'}`}>
-                Each book has its own positions and its own risk limits.
-              </span>
-              {bookLoading && (
-                <span className={`text-xs ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>
-                  Loading…
-                </span>
-              )}
-            </div>
-          )}
-
-          {bookError && (
-            <div className="mb-4 rounded-lg border border-red-500/50 bg-red-500/10 px-4 py-3 text-sm text-red-600 dark:text-red-400">
-              {bookError}
-            </div>
-          )}
-
           <PositionBreakdown
             positions={shown.positions}
             strategyId={strategy.id}
@@ -364,14 +420,16 @@ export function StrategyDetail({ strategy, onBack, onPositionsChanged }: Strateg
       )}
 
       {selectedTab === 'analysis' && (
-        <FinancialAnalysis metrics={strategy.metrics} />
+        <FinancialAnalysis metrics={shown.metrics} />
       )}
 
       {selectedTab === 'activity' && (
         <TradingActivity
-          executions={strategy.executions}
-          finalizedPositions={strategy.finalizedPositions}
+          executions={shown.executions}
+          finalizedPositions={shown.finalizedPositions}
         />
+      )}
+      </>
       )}
     </div>
   );

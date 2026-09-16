@@ -99,7 +99,7 @@ export function PositionBreakdown({
               {i < arr.length - 1 ? ', ' : ''}
             </span>
           ))}
-          . Those positions, and their risk limits, are separate and are not shown here.
+          . Those positions, and their risk limits, are separate; switch book at the top of the page to see them.
         </div>
       )}
 

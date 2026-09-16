@@ -39,6 +39,41 @@ if (isProd) {
   }
 }
 
+/**
+ * A non-2xx answer from the API.
+ *
+ * `message` keeps the full diagnostic string for logs. `code` and
+ * `serverMessage` carry what the server itself said, so a screen can react to
+ * a known condition -- a book with no engine data yet -- and show a sentence
+ * rather than a status line with a JSON body glued to it.
+ */
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly code?: string,
+    readonly serverMessage?: string,
+  ) {
+    super(message);
+    this.name = 'ApiError';
+  }
+}
+
+function parseErrorBody(body: string): { code?: string; error?: string } {
+  try {
+    const parsed = JSON.parse(body);
+    if (parsed && typeof parsed === 'object') {
+      return {
+        code: typeof parsed.code === 'string' ? parsed.code : undefined,
+        error: typeof parsed.error === 'string' ? parsed.error : undefined,
+      };
+    }
+  } catch {
+    // Not JSON: nothing structured to report.
+  }
+  return {};
+}
+
 export async function fetchWithAuth(url: string): Promise<Response> {
   log('info', `fetchWithAuth called for URL: ${url}`);
 
@@ -93,7 +128,13 @@ export async function fetchWithAuth(url: string): Promise<Response> {
       } catch {
         log('warn', 'Could not read error response body');
       }
-      throw new Error(`API request failed: ${response.status} ${response.statusText}. Body: ${errorBody}`);
+      const { code, error: serverMessage } = parseErrorBody(errorBody);
+      throw new ApiError(
+        `API request failed: ${response.status} ${response.statusText}. Body: ${errorBody}`,
+        response.status,
+        code,
+        serverMessage,
+      );
     }
 
     return response;

@@ -1073,3 +1073,49 @@ Unchanged from §11.4, minus the two just closed:
   2025-11-12, and the `&` in that id looks like a join gone wrong rather than a
   strategy). Neither is reachable from the dashboard, because every read is
   scoped by a registry row. Found while fixing #84; worth its own issue.
+
+---
+
+## 14. Which book is this page about? — fixed
+
+Asked on 2026-09-16, looking at Trend Following's positions: *how do I know
+which book this is, and how does it work for the others?* Answering it by
+putting Trend Following in a second book on the local demo turned up four faults.
+
+| # | Fault | Fix |
+|---|---|---|
+| 14.1 | The book was named only in small grey type beside "Today's Positions". Nothing at the top of the page said which book the value, the chart or the attribution belonged to. | A **Book** row under the strategy name, always shown: the book's name when there is one, a picker marking the primary when there are several. |
+| 14.2 | **Only the positions table followed the picker.** The value, the chart, the attribution, Financial Analysis and Trading Activity all stayed on the primary book, unlabelled, while the picker named another. The API scopes *every* one of those by (strategy, book); the component comment claiming they were "strategy-level" was wrong. | The whole page renders from the chosen book. |
+| 14.3 | Choosing a book the engine had not traded yet printed `API request failed: 404 NOT FOUND. Body: {"code":"no_data_for_book",...}` and **left the primary book's positions on screen under the other book's name**. The API had gone out of its way to make this a typed, normal state; the client dumped the body. | `ApiError` carries the server's `code` and sentence. `no_data_for_book` renders an empty state for that book and nothing else; any other failure shows the server's sentence and puts the picker back on the book actually shown. |
+| 14.4 | Adding a strategy to a book on the Books tab did not reach the strategy page until a full reload — the picker simply was not there. | Leaving the Books tab re-reads the portfolio quietly. |
+
+### Verified
+
+- 6 new component tests in `StrategyDetail.test.tsx`; 144 frontend tests, `tsc --noEmit` clean.
+- Driven against the local demo, with Trend Following given a smaller ledger in
+  AGGRESSIVE_PORTFOLIO (ES and GC only): switching the picker moved the value
+  from $523,681.65 to $209,472.66, the positions heading to AGGRESSIVE_PORTFOLIO,
+  the rows to ES and GC, total notional to $1,284,132.50 (3 × 5,310.75 × 50 +
+  2 × 2,437.60 × 100), and Trading Activity to that book's single ES fill.
+- An empty book reads "Nothing published for Trend Following in
+  AGGRESSIVE_PORTFOLIO yet", with no raw API text and none of the primary
+  book's figures.
+- Carry added to a second book on the Books tab; Portfolio → Carry offered both
+  books without a reload.
+
+A test note worth keeping: a `vi.fn` spy that returns a rejected promise fails
+the test even when the component catches the rejection, so these tests stub the
+API with a plain function.
+
+### Found, and left for a decision
+
+- **The fund headline and the book totals disagree once a strategy has data in
+  two books.** The headline adds each strategy's *primary* book; the Portfolios
+  grouping adds every book. On the demo that is $1,097,036 against $1,306,509,
+  the difference being Trend Following's AGGRESSIVE ledger. Which is right
+  depends on whether a second book is additional fund capital or another view
+  of the same money — a desk decision, not a display bug.
+- **Strategy cards on the Portfolio tab do not name a book**, and the rows in
+  the Portfolios grouping are not clickable. Making a row open the strategy on
+  that book would answer "which book" from the overview too; it is a feature,
+  not a fix, so it is not done here.
