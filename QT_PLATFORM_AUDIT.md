@@ -892,11 +892,11 @@ is `futures_data`, which no migration touches.
 `check_schema.py` then reported **"Schema contract satisfied: every declared read
 and write is supported"**, exit 0, against production. The deploy gate is green.
 
-Not applied, deliberately: **010**, which clears the profit-factor sentinel. It
-is one row (`LIVE_TREND_FOLLOWING` / `CONSERVATIVE_PORTFOLIO` / 2025-10-06,
-999.99 against zero gross loss) and it edits a published historical number, so it
-waits for a separate yes. The code already ignores any value at or above 999, so
-nothing on screen depends on it.
+Not applied at the time, deliberately: **010**, which clears the profit-factor
+sentinel. It is one row (`LIVE_TREND_FOLLOWING` / `CONSERVATIVE_PORTFOLIO` /
+2025-10-06, 999.99 against zero gross loss) and it edits a published historical
+number, so it waited for a separate yes. **That yes was given on 2026-09-15 and
+it is applied — see §13.**
 
 ### Still open after this pass
 
@@ -966,3 +966,110 @@ It does not restate cumulative return per segment, and it does not touch
 What it stops is a *window* figure spanning a break and a *line* drawn straight
 through one. Segmented cumulative returns are a further step, and worth taking
 only if someone asks for them.
+
+---
+
+## 13. Migration 010 and issue #84 — applied to production
+
+Both were open only because they change published data on the live database and
+needed a person to say so. John said so on 2026-09-15. Everything below was done
+read-only first, then backed up row by row, then applied.
+
+The backup is `algolens-prod/backups/20260915-222812-pre-010-and-84/`: the full
+prior contents of `strategy_registry`, `strategy_book_memberships` and every
+sentinel row as CSV, plus a `restore.sql` of literal `UPDATE`s that puts exactly
+these rows back. It is narrower and faster than the whole-database dumps from
+§11.4, which are still there.
+
+### 13.1 Migration 010 — applied
+
+One row matched, exactly the one the migration was written for:
+
+```
+LIVE_TREND_FOLLOWING | CONSERVATIVE_PORTFOLIO | 2025-10-06 | 999.99 | gross_profit 564.631426 | gross_loss 0.0
+```
+
+No row anywhere carried a value at or above 999 with a non-zero gross loss, so
+the migration's narrow predicate had nothing to decline. `trading.backtest_results`
+does not exist on this deployment and the guard skipped it silently, as designed.
+
+After: no sentinel anywhere in `trading.live_results`; that row reads
+`profit_factor = NULL` with `gross_profit` and `gross_loss` untouched, so the
+rollback can still reconstruct it exactly. Total row count unchanged at 289.
+
+An absent ratio is now absent in the column, not a number that reads as a
+thousand-to-one return. Nothing on screen moved — AlgoLens already dropped any
+value at or above 999 — but every other consumer of that table now sees the
+truth without needing to know the convention.
+
+### 13.2 Issue #84 — one row was wrong, not three
+
+The issue says `inc_meanrev`, `inc_tf_base` and `inc_tf_fast` all point at
+`BASE_PORTFOLIO` and are all wrong. The first half is true. The second is not,
+and acting on it would have broken two working strategies. What the results
+actually say:
+
+| registry row | strategy_type | book | results in that book | verdict |
+|---|---|---|---|---|
+| `inc_meanrev` | `LIVE_EQUITY_MEAN_REVERSION` | BASE_PORTFOLIO | 1, stale, 2025-08-15, zero PnL | **wrong** |
+| `inc_tf_base` | `LIVE_TREND_FOLLOWING` | BASE_PORTFOLIO | 37, 2025-10-05 → 2025-11-10 | correct |
+| `inc_tf_fast` | `LIVE_TREND_FOLLOWING_TREND_FOLLOWING_FAST` | BASE_PORTFOLIO | 11, 2025-01-29 → 2026-02-05 | correct |
+
+`inc_tf_base` is named "Trend Following (Base book)" and its results are in the
+base book. `inc_tf_fast` likewise. They point at `BASE_PORTFOLIO` because that is
+where they are. Only `inc_meanrev` names a book its results are not in: its 21
+real rows, 2026-04-01 to 2026-04-21, are under `EQUITY_MR_PORTFOLIO`, and the
+single `BASE_PORTFOLIO` row is a stale zero from 2025-08-15.
+
+So one row moved. `strategy_registry.portfolio_id` and
+`strategy_book_memberships` were corrected in the same transaction — the primary
+book and the membership set, which migration 009 seeded from each other and which
+must not be allowed to disagree. The write was guarded on exact row counts, on
+the destination book actually holding results, on no strategy being left in no
+book, and on the other two rows being untouched; any of those failing would have
+rolled the whole thing back.
+
+**No `trading.portfolio_assignments` row was written.** That table drives the
+history segmentation in §12: a row there means the money moved between books on
+that day, and the equity line breaks at it. Nothing moved. The registry row was
+recorded wrong on 2026-08-10, months after the April trial it describes. This is
+a correction, not a move, and drawing a break would invent an event that never
+happened.
+
+### Verified
+
+Through AlgoLens's own repository code — `list_incubating_strategies()` and
+`fetch_incubation_performance()`, the methods the HTTP routes call — against
+production, read-only:
+
+| | before | after |
+|---|---|---|
+| `inc_meanrev` equity points | 1 | **21** (2026-04-01 → 2026-04-21) |
+| `inc_meanrev` position rows | 0 | **15** (ABT, TMUS) |
+| `inc_tf_base` | 35 points, 395 positions | unchanged |
+| `inc_tf_fast` | 12 points, 111 positions | unchanged |
+
+The incubation view for the mean-reversion trial showed a single stale point and
+no positions — a flat line at a 2025 value for a strategy that traded in April
+2026. It now shows the trial that actually happened: $100,000 to $99,618.87 over
+21 days, a loss of $381.13, in two equity symbols.
+
+Every registry row now resolves to a book that holds its results — 21, 37, 11 and
+211 — and `check_schema.py` against production still reports **"Schema contract
+satisfied"**, exit 0.
+
+### Still open after this pass
+
+Unchanged from §11.4, minus the two just closed:
+
+- **P2-b is closed** (§12). **010 is applied.** **#84 is fixed.**
+- **The stopped book.** `positions`, `equity_curve` and `live_results` still end
+  2026-05-03. Backfill 4 May to today, or start again from now — still whoever
+  owns the daily run.
+- **Running a live cycle.** Still not mine.
+- **Two strategies write results with no registry row at all:**
+  `LIVE_EQUITY_BPGV_ROTATION` under `BPGV_ROTATION_PORTFOLIO` (1 row, 2026-08-05)
+  and `LIVE_TREND_FOLLOWING&TREND_FOLLOWING_FAST` under `BASE_PORTFOLIO` (1 row,
+  2025-11-12, and the `&` in that id looks like a join gone wrong rather than a
+  strategy). Neither is reachable from the dashboard, because every read is
+  scoped by a registry row. Found while fixing #84; worth its own issue.
