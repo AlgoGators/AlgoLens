@@ -167,7 +167,7 @@ describe('switching book switches the whole page', () => {
       target: { value: 'AGGRESSIVE_PORTFOLIO' },
     });
 
-    const status = await screen.findByRole('status');
+    const status = (await screen.findByText(/Nothing published for Trend Following in/)).closest('[role=status]') as HTMLElement;
     expect(status.textContent).toContain('Nothing published for Trend Following in AGGRESSIVE_PORTFOLIO yet');
     // None of the primary book's numbers survive under the other book's name.
     expect(screen.queryByTestId('positions')).toBeNull();
@@ -207,10 +207,84 @@ describe('switching book switches the whole page', () => {
     const picker = screen.getByRole('combobox');
 
     fireEvent.change(picker, { target: { value: 'AGGRESSIVE_PORTFOLIO' } });
-    await screen.findByRole('status');
+    await screen.findByText(/Nothing published for/);
 
     fireEvent.change(picker, { target: { value: 'CONSERVATIVE_PORTFOLIO' } });
     await waitFor(() => expect(screen.queryByRole('status')).toBeNull());
     expect(screen.getByTestId('positions').textContent).toBe('CONSERVATIVE_PORTFOLIO:C-POS');
+  });
+});
+
+describe('opening straight onto a chosen book', () => {
+  const primary = () =>
+    strategy({ tag: 'C', books: ['AGGRESSIVE_PORTFOLIO', 'CONSERVATIVE_PORTFOLIO'] });
+  const aggressive = () =>
+    strategy({
+      tag: 'A',
+      currentValue: 111111,
+      portfolio_id: 'AGGRESSIVE_PORTFOLIO',
+      books: ['AGGRESSIVE_PORTFOLIO', 'CONSERVATIVE_PORTFOLIO'],
+    });
+
+  it('loads the chosen book and shows its positions', async () => {
+    getStrategyImpl = async () => aggressive();
+    render(
+      <StrategyDetail strategy={primary()} initialBook="AGGRESSIVE_PORTFOLIO" onBack={() => {}} />,
+    );
+
+    expect((screen.getByRole('combobox') as HTMLSelectElement).value).toBe('AGGRESSIVE_PORTFOLIO');
+    await waitFor(() =>
+      expect(screen.getByTestId('positions').textContent).toBe('AGGRESSIVE_PORTFOLIO:A-POS'),
+    );
+    expect(getStrategyCalls).toEqual([['trendfollowing', 'AGGRESSIVE_PORTFOLIO']]);
+  });
+
+  it('never shows the primary book while the chosen one is loading', async () => {
+    let release: (s: Strategy) => void = () => {};
+    getStrategyImpl = () => new Promise<Strategy>(r => { release = r; });
+    render(
+      <StrategyDetail strategy={primary()} initialBook="AGGRESSIVE_PORTFOLIO" onBack={() => {}} />,
+    );
+
+    expect(screen.getByRole('status').textContent).toContain('Loading Trend Following in AGGRESSIVE_PORTFOLIO');
+    expect(screen.queryByTestId('positions')).toBeNull();
+    expect(screen.queryByText('$523,681.65')).toBeNull();
+
+    release(aggressive());
+    await waitFor(() =>
+      expect(screen.getByTestId('positions').textContent).toBe('AGGRESSIVE_PORTFOLIO:A-POS'),
+    );
+  });
+
+  it('opening on the primary book asks the API for nothing', () => {
+    render(
+      <StrategyDetail strategy={primary()} initialBook="CONSERVATIVE_PORTFOLIO" onBack={() => {}} />,
+    );
+    expect(screen.getByTestId('positions').textContent).toBe('CONSERVATIVE_PORTFOLIO:C-POS');
+    expect(getStrategyCalls).toEqual([]);
+  });
+
+  it('a slow answer for an earlier choice does not overwrite a later one', async () => {
+    const pending: Record<string, (s: Strategy) => void> = {};
+    getStrategyImpl = (_id, book) => new Promise<Strategy>(r => { pending[book as string] = r; });
+    const books = ['AGGRESSIVE_PORTFOLIO', 'CONSERVATIVE_PORTFOLIO', 'MACRO_BOOK'];
+    render(
+      <StrategyDetail strategy={strategy({ tag: 'C', books })} onBack={() => {}} />,
+    );
+    const picker = screen.getByRole('combobox');
+
+    fireEvent.change(picker, { target: { value: 'AGGRESSIVE_PORTFOLIO' } });
+    fireEvent.change(picker, { target: { value: 'MACRO_BOOK' } });
+
+    pending.MACRO_BOOK(strategy({ tag: 'M', portfolio_id: 'MACRO_BOOK', books }));
+    await waitFor(() =>
+      expect(screen.getByTestId('positions').textContent).toBe('MACRO_BOOK:M-POS'),
+    );
+
+    // The first request comes back last. It must be ignored.
+    pending.AGGRESSIVE_PORTFOLIO(strategy({ tag: 'A', portfolio_id: 'AGGRESSIVE_PORTFOLIO', books }));
+    await new Promise(r => setTimeout(r, 0));
+    expect(screen.getByTestId('positions').textContent).toBe('MACRO_BOOK:M-POS');
+    expect((picker as HTMLSelectElement).value).toBe('MACRO_BOOK');
   });
 });

@@ -1119,3 +1119,46 @@ API with a plain function.
   the Portfolios grouping are not clickable. Making a row open the strategy on
   that book would answer "which book" from the overview too; it is a feature,
   not a fix, so it is not done here.
+
+---
+
+## 15. Choose the book when opening a strategy — built
+
+Asked on 2026-09-16: *when a strategy lives in several books, let me choose the
+book when I click it, to see its positions.*
+
+### What now happens
+
+- **Strategy cards name their book.** One book: its name. Several: "In 2 books ·
+  figures for CONSERVATIVE_PORTFOLIO", because the card's numbers are the
+  primary book's.
+- **Clicking a strategy in several books asks which book.** A dialog lists
+  every book, primary first and marked, each with the strategy's value *in that
+  book* — or "nothing published yet" where the engine has not traded it there,
+  never $0. Choosing one opens the strategy on that book's Positions tab.
+  Escape, the close button or a click outside dismisses it; focus starts on the
+  primary, so Enter opens that.
+- **A strategy in one book opens directly**, as before.
+- **Rows in the Portfolios section open the strategy on that row's book**, with
+  no question, since the book is already known. Incubating rows stay plain
+  text: they have no page on this tab, and a row that looks clickable and does
+  nothing is worse.
+- **The page never shows one book's numbers under another's name while
+  loading.** Until the chosen book arrives, the body reads "Loading Trend
+  Following in AGGRESSIVE_PORTFOLIO…". A slow answer for an earlier choice is
+  dropped rather than overwriting a later one.
+- The picker in the Book row still switches books once the page is open.
+
+### Verified
+
+- 25 new tests (`bookChoices`, `BookChooser`, `StrategyList`,
+  `PortfolioGrouping`, and four more on `StrategyDetail`, including the
+  out-of-order response); 169 frontend tests, `tsc --noEmit` clean.
+- Driven on the local demo: Trend Following's card read "In 2 books"; the
+  dialog offered CONSERVATIVE_PORTFOLIO (primary, $523,682) and
+  AGGRESSIVE_PORTFOLIO ($209,473); choosing AGGRESSIVE opened Positions on that
+  book at $209,472.66 with ES and GC and $1,284,132.50 notional. Breakout opened
+  with no dialog. Carry's dialog read "nothing published yet" for AGGRESSIVE, and
+  choosing it showed the empty-book notice. Escape closed the dialog. The
+  Portfolios row "Trend Following" under AGGRESSIVE opened straight onto that
+  book; Mean Reversion's row was not a button.

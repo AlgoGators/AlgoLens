@@ -10,9 +10,11 @@ import { PortfolioGrouping } from './PortfolioGrouping';
 interface PortfolioOverviewProps {
   data: PortfolioData;
   onBuilderClick: () => void;
+  /** Open a strategy on the book whose row was clicked. */
+  onOpenStrategy?: (strategyId: string, portfolioId: string) => void;
 }
 
-export function PortfolioOverview({ data, onBuilderClick }: PortfolioOverviewProps) {
+export function PortfolioOverview({ data, onBuilderClick, onOpenStrategy }: PortfolioOverviewProps) {
   const [selectedPeriod, setSelectedPeriod] = useState('1M');
   const { theme } = useTheme();
   const isPositive = data.totalReturn >= 0;
@@ -79,7 +81,10 @@ export function PortfolioOverview({ data, onBuilderClick }: PortfolioOverviewPro
           portfolios, which contain strategies. Below the chart this sat at the
           fold and was invisible on a normal window. */}
       <div className="mb-8">
-        <PortfolioGrouping />
+        <PortfolioGrouping
+          onOpenStrategy={onOpenStrategy}
+          canOpen={id => data.strategies.some(s => s.id === id)}
+        />
       </div>
 
       <div className="mb-4">

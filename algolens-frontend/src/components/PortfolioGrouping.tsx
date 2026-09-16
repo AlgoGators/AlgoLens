@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Briefcase, ChevronDown, ChevronUp } from 'lucide-react';
+import { Briefcase, ChevronDown, ChevronRight, ChevronUp } from 'lucide-react';
 
 import { useTheme } from '../adapters/react/ThemeContext';
 import {
@@ -13,7 +13,9 @@ import { PortfolioApiService } from '../infrastructure/api/portfolioApi';
  *
  * Read-only. Changing which book a strategy belongs to lives on the Books tab —
  * this is an overview, and a destructive control sitting inside one is easy to
- * hit by accident while reading.
+ * hit by accident while reading. Clicking a strategy row opens that strategy
+ * on the book the row sits in, which is the one place here where the book is
+ * already known.
  *
  * Collapsed by default so it does not crowd the fund summary.
  */
@@ -34,7 +36,18 @@ function displayedBookTotal(portfolio: PortfolioSummary): number {
   }, 0);
 }
 
-export function PortfolioGrouping() {
+interface PortfolioGroupingProps {
+  /** Open a strategy on a specific book. Rows are plain text without it. */
+  onOpenStrategy?: (strategyId: string, portfolioId: string) => void;
+  /**
+   * Which strategies the caller can actually open. Incubating strategies are
+   * listed here but have no page on this tab, and a row that looks clickable
+   * and does nothing is worse than one that is plainly text.
+   */
+  canOpen?: (strategyId: string) => boolean;
+}
+
+export function PortfolioGrouping({ onOpenStrategy, canOpen }: PortfolioGroupingProps = {}) {
   const { theme } = useTheme();
   const [portfolios, setPortfolios] = useState<PortfolioSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -126,10 +139,22 @@ export function PortfolioGrouping() {
             </div>
           </div>
 
-          {portfolio.strategies.map(strategy => (
-            <div
+          {portfolio.strategies.map(strategy => {
+            const open = onOpenStrategy && (canOpen?.(strategy.id) ?? true)
+              ? onOpenStrategy
+              : undefined;
+            const Row = open ? 'button' : 'div';
+            return (
+            <Row
               key={strategy.id}
-              className={`flex items-center justify-between px-4 py-3 border-b last:border-b-0 ${
+              {...(open
+                ? {
+                    type: 'button' as const,
+                    onClick: () => open(strategy.id, portfolio.portfolio_id),
+                    'aria-label': `Open ${strategy.name} in ${portfolio.portfolio_id}`,
+                  }
+                : {})}
+              className={`group flex w-full items-center justify-between px-4 py-3 border-b last:border-b-0 text-left ${
                 isDark ? 'border-gray-800 hover:bg-gray-900' : 'border-gray-100 hover:bg-gray-50'
               }`}
             >
@@ -172,9 +197,15 @@ export function PortfolioGrouping() {
                     ${strategy.current_value.toLocaleString('en-US', { maximumFractionDigits: 0 })}
                   </span>
                 )}
+                {open && (
+                  <ChevronRight className={`w-4 h-4 transition-transform group-hover:translate-x-0.5 ${
+                    isDark ? 'text-gray-600' : 'text-gray-400'
+                  }`} />
+                )}
               </div>
-            </div>
-          ))}
+            </Row>
+            );
+          })}
         </div>
       ))}
       </>)}

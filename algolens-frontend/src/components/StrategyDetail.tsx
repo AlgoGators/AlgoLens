@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { periodReturn } from '../domain/portfolio/periodReturn';
 import { filterByPeriod } from '../domain/portfolio/filterByPeriod';
 import { formatBarDate } from '../domain/portfolio/formatBarDate';
@@ -24,15 +24,28 @@ interface StrategyDetailProps {
   onBack: () => void;
   /** Re-fetch the book after a manual position edit. */
   onPositionsChanged?: () => void;
+  /**
+   * The book to open on, when the reader already chose one -- from the book
+   * chooser, or a strategy row inside a book. Omitted means the primary.
+   */
+  initialBook?: string;
 }
 
-export function StrategyDetail({ strategy, onBack, onPositionsChanged }: StrategyDetailProps) {
+const sameBook = (a?: string | null, b?: string | null) =>
+  (a ?? '').toUpperCase() === (b ?? '').toUpperCase();
+
+export function StrategyDetail({
+  strategy,
+  onBack,
+  onPositionsChanged,
+  initialBook,
+}: StrategyDetailProps) {
   // Which book is on screen. A strategy can trade a different universe, with
   // different limits, in each book it belongs to; the view used to show the
   // primary one and offer no way to reach the others, so the rest of a
   // strategy's positions were simply unreachable from the app.
   const books = strategy.books ?? (strategy.portfolio_id ? [strategy.portfolio_id] : []);
-  const [book, setBook] = useState<string | undefined>(strategy.portfolio_id);
+  const [book, setBook] = useState<string | undefined>(initialBook ?? strategy.portfolio_id);
   // The detail for `book`. Null means "use the prop", which is the primary.
   const [bookDetail, setBookDetail] = useState<Strategy | null>(null);
   const [bookLoading, setBookLoading] = useState(false);
@@ -41,6 +54,9 @@ export function StrategyDetail({ strategy, onBack, onPositionsChanged }: Strateg
   // yet -- the normal state of a strategy just added to a book. Nothing is
   // drawn for it, rather than the primary book's numbers under its name.
   const [emptyBook, setEmptyBook] = useState<string | null>(null);
+  // Only the newest request may land. Switching books quickly must not let a
+  // slow answer for the first book overwrite the second.
+  const latestRequest = useRef(0);
 
   // Everything on this screen is scoped to one book: the API reads value,
   // history, metrics, executions and positions all by (strategy, book). So the
@@ -51,18 +67,22 @@ export function StrategyDetail({ strategy, onBack, onPositionsChanged }: Strateg
   // any reason other than "no data yet", the picker goes back to it, so the
   // name in the picker and the numbers below it never disagree.
   const loadBook = useCallback(async (target: string | undefined, onScreen?: string) => {
+    const request = ++latestRequest.current;
     setBookError(null);
-    if (!target || target === strategy.portfolio_id) {
+    if (!target || sameBook(target, strategy.portfolio_id)) {
       setEmptyBook(null);
       setBookDetail(null);
+      setBookLoading(false);
       return;
     }
     setBookLoading(true);
     try {
       const detail = await PortfolioApiService.getStrategy(strategy.id, target);
+      if (request !== latestRequest.current) return;
       setEmptyBook(null);
       setBookDetail(detail);
     } catch (err) {
+      if (request !== latestRequest.current) return;
       if (err instanceof ApiError && err.code === 'no_data_for_book') {
         setBookDetail(null);
         setEmptyBook(target);
@@ -74,24 +94,30 @@ export function StrategyDetail({ strategy, onBack, onPositionsChanged }: Strateg
         );
       }
     } finally {
-      setBookLoading(false);
+      if (request === latestRequest.current) setBookLoading(false);
     }
   }, [strategy.id, strategy.portfolio_id]);
 
   const bookOnScreen = emptyBook ?? shown.portfolio_id ?? strategy.portfolio_id;
+  // The picker names a book whose data has not arrived yet. Whatever is loaded
+  // belongs to a different book, so it is not drawn in the meantime.
+  const awaitingBook = book !== undefined && !sameBook(book, bookOnScreen);
+
   const selectBook = (target: string) => {
     const previous = bookOnScreen;
     setBook(target);
     void loadBook(target, previous);
   };
 
-  // A different strategy was opened: go back to its own primary book.
+  // A strategy was opened: start on the book the reader chose, or the primary.
   useEffect(() => {
-    setBook(strategy.portfolio_id);
+    const target = initialBook ?? strategy.portfolio_id;
     setBookDetail(null);
     setBookError(null);
     setEmptyBook(null);
-  }, [strategy.id, strategy.portfolio_id]);
+    setBook(target);
+    void loadBook(target, strategy.portfolio_id);
+  }, [strategy.id, strategy.portfolio_id, initialBook, loadBook]);
 
   // An edit landed. Re-read whichever book is on screen, and let the dashboard
   // re-read the primary.
@@ -205,7 +231,9 @@ export function StrategyDetail({ strategy, onBack, onPositionsChanged }: Strateg
               ? `In ${books.length} books. Everything below is for the one selected; each has its own positions, history and risk limits.`
               : 'Everything below is for this book.'}
           </span>
-          {bookLoading && (
+          {/* A refresh of the book already on screen. Loading a different
+              book is announced below, in place of the numbers. */}
+          {bookLoading && !awaitingBook && (
             <span className={`text-xs ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>
               Loading…
             </span>
@@ -219,7 +247,17 @@ export function StrategyDetail({ strategy, onBack, onPositionsChanged }: Strateg
         )}
       </div>
 
-      {emptyBook ? (
+      {awaitingBook ? (
+        <div
+          role="status"
+          aria-busy="true"
+          className={`rounded-lg border px-6 py-10 text-center text-sm ${
+            theme === 'dark' ? 'border-gray-800 text-gray-400' : 'border-gray-200 text-gray-500'
+          }`}
+        >
+          Loading {strategy.name} in <span className="font-mono">{book}</span>…
+        </div>
+      ) : emptyBook ? (
         <div
           role="status"
           className={`rounded-lg border px-6 py-10 text-center ${

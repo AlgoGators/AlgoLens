@@ -1,7 +1,8 @@
 import React from 'react';
 import { formatMetric } from '../domain/portfolio/formatMetric';
-import { ChevronRight, TrendingUp, TrendingDown, BarChart3 } from 'lucide-react';
+import { ChevronRight, TrendingUp, TrendingDown, BarChart3, Briefcase } from 'lucide-react';
 import type { Strategy } from '../domain/portfolio/portfolioData';
+import { distinctBooks } from '../domain/portfolio/bookChoices';
 import { useTheme } from '../adapters/react/ThemeContext';
 
 interface StrategyListProps {
@@ -16,6 +17,7 @@ export function StrategyList({ strategies, onSelectStrategy }: StrategyListProps
     <div className="grid grid-cols-1 md:grid-cols-1 gap-4">
       {strategies.map((strategy) => {
         const isPositive = (strategy.return ?? 0) >= 0;
+        const books = distinctBooks(strategy.books ?? (strategy.portfolio_id ? [strategy.portfolio_id] : []));
         
         return (
           <button
@@ -47,6 +49,27 @@ export function StrategyList({ strategies, onSelectStrategy }: StrategyListProps
                   theme === 'dark' ? 'text-gray-500' : 'text-gray-500'
                 }`}>
                   <span>{strategy.positions.length} Holdings</span>
+                  {/* The figures on this card are the primary book's. Say so,
+                      and say when there are other books to choose from. */}
+                  {books.length === 1 && (
+                    <span className="flex items-center gap-1" data-testid="card-book">
+                      <Briefcase className="w-3.5 h-3.5" />
+                      <span className="font-mono">{books[0]}</span>
+                    </span>
+                  )}
+                  {books.length > 1 && (
+                    <span
+                      className="flex items-center gap-1"
+                      data-testid="card-book"
+                      title={`Figures shown are for ${strategy.portfolio_id ?? books[0]}. Open to choose a book.`}
+                    >
+                      <Briefcase className="w-3.5 h-3.5" />
+                      <span>
+                        In {books.length} books · figures for{' '}
+                        <span className="font-mono">{strategy.portfolio_id ?? books[0]}</span>
+                      </span>
+                    </span>
+                  )}
                 </div>
               </div>
               
