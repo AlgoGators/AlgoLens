@@ -18,6 +18,11 @@ interface PositionBreakdownProps {
   portfolioId?: string;
   /** Every book this strategy trades in; more than one means this table is partial. */
   books?: string[];
+  /**
+   * Shown beside the heading in place of the plain book name -- a box the
+   * reader can open to switch book. The caller owns which book is loaded.
+   */
+  bookControl?: React.ReactNode;
   /** Called after a successful write so the caller can refetch the book. */
   onEdited?: () => void;
 }
@@ -32,6 +37,7 @@ export function PositionBreakdown({
   strategyId,
   portfolioId,
   books,
+  bookControl,
   onEdited,
 }: PositionBreakdownProps) {
   const { theme } = useTheme();
@@ -56,18 +62,21 @@ export function PositionBreakdown({
   return (
     <div>
       <div className="flex items-center justify-between mb-4">
-        <h3 className={`text-sm uppercase tracking-wider ${
-          theme === 'dark' ? 'text-gray-400' : 'text-gray-500'
-        }`}>
-          Today's Positions
-          {portfolioId && (
-            <span className={`ml-2 font-mono normal-case ${
-              theme === 'dark' ? 'text-gray-500' : 'text-gray-400'
-            }`}>
-              {portfolioId}
-            </span>
-          )}
-        </h3>
+        <div className="flex flex-wrap items-center gap-2">
+          <h3 className={`text-sm uppercase tracking-wider ${
+            theme === 'dark' ? 'text-gray-400' : 'text-gray-500'
+          }`}>
+            Today's Positions
+            {!bookControl && portfolioId && (
+              <span className={`ml-2 font-mono normal-case ${
+                theme === 'dark' ? 'text-gray-500' : 'text-gray-400'
+              }`}>
+                {portfolioId}
+              </span>
+            )}
+          </h3>
+          {bookControl}
+        </div>
         {canEdit && (
           <button
             onClick={() => setEditing({ symbol: null, existing: null })}
@@ -99,7 +108,8 @@ export function PositionBreakdown({
               {i < arr.length - 1 ? ', ' : ''}
             </span>
           ))}
-          . Those positions, and their risk limits, are separate; switch book at the top of the page to see them.
+          . Those positions, and their risk limits, are separate
+          {bookControl ? '; choose the book in the box above to see them.' : ' and are not shown here.'}
         </div>
       )}
 

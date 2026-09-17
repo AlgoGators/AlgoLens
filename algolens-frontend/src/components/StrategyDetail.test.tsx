@@ -11,6 +11,7 @@
 // and left the primary book's positions on screen under a picker naming the
 // other book. Both found by driving the app, not by a test; these pin them.
 
+import React from 'react';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -25,9 +26,16 @@ vi.mock('../adapters/react/ThemeContext', () => ({
 // The children are stubbed down to the one thing these tests care about:
 // which book's data each of them was handed.
 vi.mock('./PositionBreakdown', () => ({
-  PositionBreakdown: (p: { portfolioId?: string; positions: { symbol: string }[] }) => (
-    <div data-testid="positions">
-      {p.portfolioId}:{p.positions.map(x => x.symbol).join(',')}
+  PositionBreakdown: (p: {
+    portfolioId?: string;
+    positions: { symbol: string }[];
+    bookControl?: React.ReactNode;
+  }) => (
+    <div>
+      <div data-testid="positions">
+        {p.portfolioId}:{p.positions.map(x => x.symbol).join(',')}
+      </div>
+      {p.bookControl}
     </div>
   ),
 }));
@@ -91,6 +99,11 @@ function strategy(over: Partial<Strategy> & { tag: string }): Strategy {
   } as unknown as Strategy;
 }
 
+/** The book box in the row at the top of the page. */
+const topBox = () => screen.getByRole('combobox', { name: 'Which book to show' }) as HTMLSelectElement;
+/** The book box beside "Today's Positions". */
+const headingBox = () => screen.getByRole('combobox', { name: 'Book for these positions' }) as HTMLSelectElement;
+
 beforeEach(() => {
   getStrategyCalls.length = 0;
   getStrategyImpl = async () => { throw new Error('getStrategy not set'); };
@@ -113,11 +126,11 @@ describe('the page says which book it is about', () => {
         onBack={() => {}}
       />,
     );
-    const picker = screen.getByRole('combobox', { name: 'Which book to show' }) as HTMLSelectElement;
+    const picker = topBox();
     expect(picker.value).toBe('CONSERVATIVE_PORTFOLIO');
     expect(Array.from(picker.options).map(o => o.textContent)).toEqual([
-      'AGGRESSIVE_PORTFOLIO',
       'CONSERVATIVE_PORTFOLIO (primary)',
+      'AGGRESSIVE_PORTFOLIO',
     ]);
   });
 });
@@ -136,7 +149,7 @@ describe('switching book switches the whole page', () => {
       });
     render(<StrategyDetail strategy={primary()} onBack={() => {}} />);
 
-    fireEvent.change(screen.getByRole('combobox'), {
+    fireEvent.change(topBox(), {
       target: { value: 'AGGRESSIVE_PORTFOLIO' },
     });
 
@@ -163,7 +176,7 @@ describe('switching book switches the whole page', () => {
     };
     render(<StrategyDetail strategy={primary()} onBack={() => {}} />);
 
-    fireEvent.change(screen.getByRole('combobox'), {
+    fireEvent.change(topBox(), {
       target: { value: 'AGGRESSIVE_PORTFOLIO' },
     });
 
@@ -174,7 +187,7 @@ describe('switching book switches the whole page', () => {
     expect(screen.queryByText('$523,681.65')).toBeNull();
     // And no raw API text anywhere.
     expect(document.body.textContent).not.toContain('API request failed');
-    expect((screen.getByRole('combobox') as HTMLSelectElement).value).toBe('AGGRESSIVE_PORTFOLIO');
+    expect(topBox().value).toBe('AGGRESSIVE_PORTFOLIO');
   });
 
   it('on any other failure, says so plainly and keeps the picker on the book shown', async () => {
@@ -188,14 +201,14 @@ describe('switching book switches the whole page', () => {
     };
     render(<StrategyDetail strategy={primary()} onBack={() => {}} />);
 
-    fireEvent.change(screen.getByRole('combobox'), {
+    fireEvent.change(topBox(), {
       target: { value: 'AGGRESSIVE_PORTFOLIO' },
     });
 
     const alert = await screen.findByRole('alert');
     expect(alert.textContent).toBe('Failed to fetch strategy');
     expect(document.body.textContent).not.toContain('API request failed');
-    expect((screen.getByRole('combobox') as HTMLSelectElement).value).toBe('CONSERVATIVE_PORTFOLIO');
+    expect(topBox().value).toBe('CONSERVATIVE_PORTFOLIO');
     expect(screen.getByTestId('positions').textContent).toBe('CONSERVATIVE_PORTFOLIO:C-POS');
   });
 
@@ -204,7 +217,7 @@ describe('switching book switches the whole page', () => {
       throw new ApiError('x', 404, 'no_data_for_book', 'none yet');
     };
     render(<StrategyDetail strategy={primary()} onBack={() => {}} />);
-    const picker = screen.getByRole('combobox');
+    const picker = topBox();
 
     fireEvent.change(picker, { target: { value: 'AGGRESSIVE_PORTFOLIO' } });
     await screen.findByText(/Nothing published for/);
@@ -232,7 +245,7 @@ describe('opening straight onto a chosen book', () => {
       <StrategyDetail strategy={primary()} initialBook="AGGRESSIVE_PORTFOLIO" onBack={() => {}} />,
     );
 
-    expect((screen.getByRole('combobox') as HTMLSelectElement).value).toBe('AGGRESSIVE_PORTFOLIO');
+    expect(topBox().value).toBe('AGGRESSIVE_PORTFOLIO');
     await waitFor(() =>
       expect(screen.getByTestId('positions').textContent).toBe('AGGRESSIVE_PORTFOLIO:A-POS'),
     );
@@ -271,7 +284,7 @@ describe('opening straight onto a chosen book', () => {
     render(
       <StrategyDetail strategy={strategy({ tag: 'C', books })} onBack={() => {}} />,
     );
-    const picker = screen.getByRole('combobox');
+    const picker = topBox();
 
     fireEvent.change(picker, { target: { value: 'AGGRESSIVE_PORTFOLIO' } });
     fireEvent.change(picker, { target: { value: 'MACRO_BOOK' } });
@@ -286,5 +299,61 @@ describe('opening straight onto a chosen book', () => {
     await new Promise(r => setTimeout(r, 0));
     expect(screen.getByTestId('positions').textContent).toBe('MACRO_BOOK:M-POS');
     expect((picker as HTMLSelectElement).value).toBe('MACRO_BOOK');
+  });
+});
+
+describe('the book box beside the positions heading', () => {
+  const primary = () =>
+    strategy({ tag: 'C', books: ['AGGRESSIVE_PORTFOLIO', 'CONSERVATIVE_PORTFOLIO'] });
+
+  it('shows the book on screen and offers the others', () => {
+    render(<StrategyDetail strategy={primary()} onBack={() => {}} />);
+    const box = headingBox();
+    expect(box.value).toBe('CONSERVATIVE_PORTFOLIO');
+    expect(Array.from(box.options).map(o => o.value)).toEqual([
+      'CONSERVATIVE_PORTFOLIO',
+      'AGGRESSIVE_PORTFOLIO',
+    ]);
+  });
+
+  it('switches the whole page to the book chosen in it', async () => {
+    getStrategyImpl = async () =>
+      strategy({
+        tag: 'A',
+        currentValue: 111111,
+        portfolio_id: 'AGGRESSIVE_PORTFOLIO',
+        books: ['AGGRESSIVE_PORTFOLIO', 'CONSERVATIVE_PORTFOLIO'],
+      });
+    render(<StrategyDetail strategy={primary()} onBack={() => {}} />);
+
+    fireEvent.change(headingBox(), { target: { value: 'AGGRESSIVE_PORTFOLIO' } });
+
+    await waitFor(() =>
+      expect(screen.getByTestId('positions').textContent).toBe('AGGRESSIVE_PORTFOLIO:A-POS'),
+    );
+    expect(screen.getByText('$111,111.00')).toBeTruthy();
+    // Both boxes read the same book: there is one choice, shown twice.
+    expect(headingBox().value).toBe('AGGRESSIVE_PORTFOLIO');
+    expect(topBox().value).toBe('AGGRESSIVE_PORTFOLIO');
+  });
+
+  it('is not offered for a strategy in one book', () => {
+    render(<StrategyDetail strategy={strategy({ tag: 'C' })} onBack={() => {}} />);
+    expect(screen.queryByRole('combobox', { name: 'Book for these positions' })).toBeNull();
+  });
+
+  it('an empty book offers a way back from inside its notice', async () => {
+    getStrategyImpl = async () => {
+      throw new ApiError('x', 404, 'no_data_for_book', 'none yet');
+    };
+    render(<StrategyDetail strategy={primary()} onBack={() => {}} />);
+
+    fireEvent.change(headingBox(), { target: { value: 'AGGRESSIVE_PORTFOLIO' } });
+    const back = await screen.findByRole('combobox', { name: 'Choose another book' });
+
+    fireEvent.change(back, { target: { value: 'CONSERVATIVE_PORTFOLIO' } });
+    await waitFor(() =>
+      expect(screen.getByTestId('positions').textContent).toBe('CONSERVATIVE_PORTFOLIO:C-POS'),
+    );
   });
 });

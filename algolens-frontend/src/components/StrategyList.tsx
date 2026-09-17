@@ -61,7 +61,7 @@ export function StrategyList({ strategies, onSelectStrategy }: StrategyListProps
                     <span
                       className="flex items-center gap-1"
                       data-testid="card-book"
-                      title={`Figures shown are for ${strategy.portfolio_id ?? books[0]}. Open to choose a book.`}
+                      title={`Figures shown are for ${strategy.portfolio_id ?? books[0]}. Open the strategy and use the book box beside Today's Positions to switch.`}
                     >
                       <Briefcase className="w-3.5 h-3.5" />
                       <span>

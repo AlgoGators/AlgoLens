@@ -18,6 +18,7 @@ import { ApiError } from '../infrastructure/api/httpClient';
 import { OverrideHistory } from './OverrideHistory';
 import { TradingActivity } from './TradingActivity';
 import { AlphaAttribution } from './AlphaAttribution';
+import { BookSelect } from './BookSelect';
 
 interface StrategyDetailProps {
   strategy: Strategy;
@@ -109,6 +110,23 @@ export function StrategyDetail({
     void loadBook(target, previous);
   };
 
+  const hasSeveralBooks = books.length > 1;
+  // The same box, wherever the reader is when they want to switch: beside the
+  // positions heading, in the book row at the top (which the other two tabs
+  // rely on), and inside the "nothing published" notice so an empty book is
+  // never a dead end. One piece of state behind all three.
+  const bookBox = (ariaLabel: string, id?: string) => (
+    <BookSelect
+      id={id}
+      books={books}
+      primary={strategy.portfolio_id}
+      value={book}
+      onChange={selectBook}
+      ariaLabel={ariaLabel}
+      theme={theme}
+    />
+  );
+
   // A strategy was opened: start on the book the reader chose, or the primary.
   useEffect(() => {
     const target = initialBook ?? strategy.portfolio_id;
@@ -198,24 +216,8 @@ export function StrategyDetail({
           <span className={`text-xs uppercase tracking-wider ${theme === 'dark' ? 'text-gray-500' : 'text-gray-500'}`}>
             Book
           </span>
-          {books.length > 1 ? (
-            <select
-              id="book-view"
-              aria-label="Which book to show"
-              value={book ?? ''}
-              onChange={e => selectBook(e.target.value)}
-              className={`rounded-lg border px-2 py-1.5 text-sm font-mono ${
-                theme === 'dark'
-                  ? 'bg-gray-900 border-gray-700 text-white'
-                  : 'bg-white border-gray-300 text-black'
-              }`}
-            >
-              {books.map(b => (
-                <option key={b} value={b}>
-                  {b}{b === strategy.portfolio_id ? ' (primary)' : ''}
-                </option>
-              ))}
-            </select>
+          {hasSeveralBooks ? (
+            bookBox('Which book to show', 'book-view')
           ) : (
             <span
               data-testid="book-name"
@@ -273,6 +275,12 @@ export function StrategyDetail({
             positions, history and risk limits in this book start with the first
             run that includes it.
           </p>
+          {hasSeveralBooks && (
+            <div className="mt-4 flex items-center justify-center gap-2 text-sm">
+              <span>See another book:</span>
+              {bookBox('Choose another book')}
+            </div>
+          )}
         </div>
       ) : (
       <>
@@ -447,6 +455,7 @@ export function StrategyDetail({
             strategyId={strategy.id}
             portfolioId={shown.portfolio_id ?? book}
             books={books}
+            bookControl={hasSeveralBooks ? bookBox('Book for these positions') : undefined}
             onEdited={handlePositionsChanged}
           />
           {/* The audit trail sits directly under the book it describes. It was

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { bookChoices, distinctBooks, needsBookChoice } from './bookChoices';
+import { bookChoices, distinctBooks } from './bookChoices';
 import type { PortfolioSummary } from './portfolioAssignment';
 
 const portfolios: PortfolioSummary[] = [
@@ -25,17 +25,13 @@ const portfolios: PortfolioSummary[] = [
   },
 ];
 
-describe('whether to ask', () => {
-  it('asks only when there is more than one distinct book', () => {
-    expect(needsBookChoice(undefined)).toBe(false);
-    expect(needsBookChoice([])).toBe(false);
-    expect(needsBookChoice(['CONSERVATIVE_PORTFOLIO'])).toBe(false);
-    expect(needsBookChoice(['A_BOOK', 'B_BOOK'])).toBe(true);
-  });
-
+describe('distinct books', () => {
   it('does not count one book spelled two ways as two', () => {
     expect(distinctBooks(['base_portfolio', 'BASE_PORTFOLIO'])).toEqual(['base_portfolio']);
-    expect(needsBookChoice(['base_portfolio', 'BASE_PORTFOLIO'])).toBe(false);
+  });
+
+  it('treats a missing list as no books', () => {
+    expect(distinctBooks(undefined)).toEqual([]);
   });
 });
 

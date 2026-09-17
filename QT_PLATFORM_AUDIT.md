@@ -1162,3 +1162,38 @@ book when I click it, to see its positions.*
   choosing it showed the empty-book notice. Escape closed the dialog. The
   Portfolios row "Trend Following" under AGGRESSIVE opened straight onto that
   book; Mean Reversion's row was not a button.
+
+---
+
+## 16. The book box moves beside the positions — replaces §15's dialog
+
+Asked on 2026-09-17: *make the book name next to "Today's Positions" a box I can
+click to choose the book, instead of choosing it from a dialog when I open the
+strategy on the home screen.*
+
+- **Clicking a strategy card opens it directly**, on its primary book. The §15
+  dialog (`BookChooser`) and its tests are removed.
+- **The book name beside "Today's Positions" is now a box** when the strategy is
+  in more than one book: it shows the book on screen and opens to the others,
+  primary first and marked. Choosing one switches the whole page, as the picker
+  did. A strategy in one book keeps the plain name.
+- **The same box is in the Book row at the top**, which Financial Analysis and
+  Trading Activity need since they have no positions heading, **and inside the
+  "nothing published" notice**, so an empty book is never a dead end. All three
+  are one piece of state (`BookSelect`), so they cannot disagree.
+- The "also trades in" notice now says to choose the book in the box above.
+- Kept from §15: cards naming their book, Portfolios rows opening straight onto
+  their book, the loading notice, and dropping out-of-order answers.
+
+### Verified
+
+- 167 frontend tests, `tsc --noEmit` clean. New: the heading box's contents,
+  switching from it, its absence for a one-book strategy, the way back from an
+  empty book, and the heading showing the box instead of a second copy of the
+  name.
+- Driven on the local demo: Trend Following opened with no dialog; the heading
+  box read CONSERVATIVE_PORTFOLIO (primary) / AGGRESSIVE_PORTFOLIO; choosing
+  AGGRESSIVE moved the page to $209,472.66, ES and GC, $1,284,132.50, with the
+  top box following. Carry → AGGRESSIVE showed the notice with its own box, and
+  choosing CONSERVATIVE there brought back $254,345.19 and the positions.
+  Breakout showed "Today's Positions AGGRESSIVE_PORTFOLIO" with no box.

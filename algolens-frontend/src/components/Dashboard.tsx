@@ -17,8 +17,6 @@ import { isInternalRole } from '../domain/identity/user';
 import { useAuth } from '../adapters/react/useAuth';
 import { useTheme } from '../adapters/react/ThemeContext';
 import { BooksScreen } from './BooksScreen';
-import { BookChooser } from './BookChooser';
-import { needsBookChoice } from '../domain/portfolio/bookChoices';
 
 interface DashboardProps {
   onLogout: () => void;
@@ -31,8 +29,6 @@ export function Dashboard({ onLogout }: DashboardProps) {
   const [selectedStrategy, setSelectedStrategy] = useState<string | null>(null);
   // The book the strategy was opened on. Undefined means its primary.
   const [selectedBook, setSelectedBook] = useState<string | undefined>(undefined);
-  // A strategy in several books was clicked; which book is being asked.
-  const [choosingBookFor, setChoosingBookFor] = useState<string | null>(null);
   const [settingsScreen, setSettingsScreen] = useState<SettingsScreen>(null);
   const [showBuilder, setShowBuilder] = useState(false);
   const [activeTab, setActiveTab] = useState<ActiveTab>('portfolio');
@@ -131,27 +127,14 @@ export function Dashboard({ onLogout }: DashboardProps) {
     }
   };
 
+  // Opens on the primary book unless one is named. A card click names none:
+  // the book is chosen on the strategy page itself, in the box beside
+  // "Today's Positions". A row inside a book on the Portfolios section names
+  // its book, so that one opens straight onto it.
   const openStrategy = (strategyId: string, portfolioId?: string) => {
-    setChoosingBookFor(null);
     setSelectedBook(portfolioId);
     setSelectedStrategy(strategyId);
   };
-
-  // A strategy card was clicked. One book: open it. Several: ask which, since
-  // each is a separate ledger and opening "the strategy" would silently mean
-  // the primary one.
-  const handleSelectStrategy = (strategyId: string) => {
-    const strategy = portfolioData?.strategies.find(s => s.id === strategyId);
-    if (strategy && needsBookChoice(strategy.books)) {
-      setChoosingBookFor(strategyId);
-    } else {
-      openStrategy(strategyId);
-    }
-  };
-
-  const choosingStrategy = choosingBookFor
-    ? portfolioData?.strategies.find(s => s.id === choosingBookFor)
-    : undefined;
 
   const handleBuilderClose = () => {
     setShowBuilder(false);
@@ -259,19 +242,8 @@ export function Dashboard({ onLogout }: DashboardProps) {
               />
               <StrategyList
                 strategies={portfolioData.strategies}
-                onSelectStrategy={handleSelectStrategy}
+                onSelectStrategy={id => openStrategy(id)}
               />
-              {choosingStrategy && (
-                <BookChooser
-                  strategyId={choosingStrategy.id}
-                  strategyName={choosingStrategy.name}
-                  books={choosingStrategy.books ?? []}
-                  primary={choosingStrategy.portfolio_id}
-                  theme={theme}
-                  onChoose={book => openStrategy(choosingStrategy.id, book)}
-                  onClose={() => setChoosingBookFor(null)}
-                />
-              )}
             </>
           ) : (
             <StrategyDetail

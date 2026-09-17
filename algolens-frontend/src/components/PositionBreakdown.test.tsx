@@ -212,4 +212,24 @@ describe('the table says which book it is showing', () => {
     expect(heading.textContent).toContain("Today's Positions");
     expect(within(heading).getByText('CONSERVATIVE_PORTFOLIO')).toBeTruthy();
   });
+
+  it('puts a book box in place of the name when one is supplied', () => {
+    role = 'subscriber';
+    render(
+      <PositionBreakdown
+        positions={[position()]}
+        portfolioId="CONSERVATIVE_PORTFOLIO"
+        books={['AGGRESSIVE_PORTFOLIO', 'CONSERVATIVE_PORTFOLIO']}
+        bookControl={<select aria-label="Book for these positions" />}
+      />,
+    );
+    const heading = document.querySelector('h3') as HTMLElement;
+    // The name is not printed twice -- the box shows it.
+    expect(within(heading).queryByText('CONSERVATIVE_PORTFOLIO')).toBeNull();
+    expect(screen.getByRole('combobox', { name: 'Book for these positions' })).toBeTruthy();
+    // And the partial-view notice points at the box rather than elsewhere.
+    expect(document.body.textContent).toContain(
+      'This strategy also trades in AGGRESSIVE_PORTFOLIO. Those positions, and their risk limits, are separate; choose the book in the box above to see them.',
+    );
+  });
 });

@@ -1,8 +1,7 @@
 import type { PortfolioSummary } from './portfolioAssignment';
 
 /**
- * One book a strategy can be opened in, as offered when the strategy is
- * clicked.
+ * One book a strategy can be read in, as offered by the book box on its page.
  */
 export type BookChoice = {
   portfolioId: string;
@@ -29,17 +28,11 @@ export function distinctBooks(books: readonly string[] | undefined): string[] {
   return out;
 }
 
-/** Whether clicking this strategy should ask which book to open. */
-export function needsBookChoice(books: readonly string[] | undefined): boolean {
-  return distinctBooks(books).length > 1;
-}
-
 /**
  * The books to offer, primary first and the rest alphabetically.
  *
- * Values come from the per-book summary the Portfolios section already reads,
- * so the chooser can say which book holds what before anything is opened --
- * and which book has nothing in it yet.
+ * Values, when a per-book summary is supplied, say which book holds what and
+ * which has nothing in it yet.
  */
 export function bookChoices(
   strategyId: string,
