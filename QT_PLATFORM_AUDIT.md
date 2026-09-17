@@ -1197,3 +1197,41 @@ strategy on the home screen.*
   top box following. Carry → AGGRESSIVE showed the notice with its own box, and
   choosing CONSERVATIVE there brought back $254,345.19 and the positions.
   Breakout showed "Today's Positions AGGRESSIVE_PORTFOLIO" with no box.
+
+---
+
+## 17. "1 Holdings" — and the rest of the dashboard swept for it
+
+Asked on 2026-09-17 whether the "4 Holdings" line on a strategy card is
+computed or written down. It is computed — the count, the number of books and
+the book's name all are; only the words are literal — but the word never
+changed with the count.
+
+Four places said a count and then a noun that assumed it was not one:
+
+| Where | Was | Now |
+|---|---|---|
+| Strategy card | "1 Holdings" | "1 Holding" |
+| Strategy Builder's selection list | "1 positions" | "1 position" |
+| Incubation overview | "1 incubating strategies" | "1 incubating strategy" |
+| Incubation observation window | "1 days" | "1 day" |
+
+`domain/text/pluralize.ts` now owns this: `counted(1, 'Holding')` is "1
+Holding". The three places that already got it right by hand — the fund's
+"Excludes N strategies" notice, the positions footer's "excludes N positions
+with no known price", and the Portfolios section's counts — go through the same
+helper, so there is one way to do it rather than four.
+
+Checked and left alone: "In N books" and "belongs to N books" only ever appear
+when N is more than one; "46d elapsed", "Trades: N" and "Total Positions: N"
+are labelled counts, not phrases. The API's `book_not_empty` message already
+picks "strategy" for one. `BookNotEmpty`'s own `str()` still reads "1
+strategies", but it is deliberately never rendered to a client — the adapter
+builds the message — so it shows up only in a log line.
+
+### Verified
+
+- 173 frontend tests (6 new: the helper, and the card at one, none and two
+  holdings), `tsc --noEmit` clean.
+- On the demo: the Incubation tab, which has exactly one incubating strategy,
+  now reads "1 incubating strategy"; the cards still read 4, 3 and 2 Holdings.

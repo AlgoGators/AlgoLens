@@ -7,6 +7,7 @@ import {
   type PortfolioSummary,
 } from '../domain/portfolio/portfolioAssignment';
 import { PortfolioApiService } from '../infrastructure/api/portfolioApi';
+import { counted } from '../domain/text/pluralize';
 
 /**
  * The strategies grouped by the portfolio that owns them.
@@ -96,7 +97,7 @@ export function PortfolioGrouping({ onOpenStrategy, canOpen }: PortfolioGrouping
         </span>
         <span className="flex items-center gap-3">
           <span className={`text-xs ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>
-            {portfolios.length} {portfolios.length === 1 ? 'portfolio' : 'portfolios'}
+            {counted(portfolios.length, 'portfolio')}
           </span>
           {expanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
         </span>
@@ -118,8 +119,7 @@ export function PortfolioGrouping({ onOpenStrategy, canOpen }: PortfolioGrouping
               <Briefcase className="w-4 h-4" />
               <span className="font-mono text-sm">{portfolio.portfolio_id}</span>
               <span className={`text-xs ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>
-                {portfolio.strategy_count}{' '}
-                {portfolio.strategy_count === 1 ? 'strategy' : 'strategies'}
+                {counted(portfolio.strategy_count, 'strategy', 'strategies')}
               </span>
             </div>
             <div className="text-right">

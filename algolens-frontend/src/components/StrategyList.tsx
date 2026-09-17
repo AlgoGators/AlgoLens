@@ -3,6 +3,7 @@ import { formatMetric } from '../domain/portfolio/formatMetric';
 import { ChevronRight, TrendingUp, TrendingDown, BarChart3, Briefcase } from 'lucide-react';
 import type { Strategy } from '../domain/portfolio/portfolioData';
 import { distinctBooks } from '../domain/portfolio/bookChoices';
+import { counted } from '../domain/text/pluralize';
 import { useTheme } from '../adapters/react/ThemeContext';
 
 interface StrategyListProps {
@@ -48,7 +49,7 @@ export function StrategyList({ strategies, onSelectStrategy }: StrategyListProps
                 <div className={`text-sm flex items-center gap-3 ${
                   theme === 'dark' ? 'text-gray-500' : 'text-gray-500'
                 }`}>
-                  <span>{strategy.positions.length} Holdings</span>
+                  <span>{counted(strategy.positions.length, 'Holding')}</span>
                   {/* The figures on this card are the primary book's. Say so,
                       and say when there are other books to choose from. */}
                   {books.length === 1 && (

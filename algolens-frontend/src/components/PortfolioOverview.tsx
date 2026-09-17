@@ -6,6 +6,7 @@ import { LineChart, Line, XAxis, YAxis, ResponsiveContainer, Tooltip } from 'rec
 import type { PortfolioData } from '../domain/portfolio/portfolioData';
 import { useTheme } from '../adapters/react/ThemeContext';
 import { PortfolioGrouping } from './PortfolioGrouping';
+import { counted } from '../domain/text/pluralize';
 
 interface PortfolioOverviewProps {
   data: PortfolioData;
@@ -55,9 +56,8 @@ export function PortfolioOverview({ data, onBuilderClick, onOpenStrategy }: Port
             before the engine has published for the new pairing. */}
         {(data.strategiesAwaitingData ?? 0) > 0 && (
           <div className={`mb-2 text-sm ${theme === 'dark' ? 'text-amber-400' : 'text-amber-600'}`}>
-            Excludes {data.strategiesAwaitingData}{' '}
-            {data.strategiesAwaitingData === 1 ? 'strategy' : 'strategies'} the engine has not
-            published results for yet.
+            Excludes {counted(data.strategiesAwaitingData ?? 0, 'strategy', 'strategies')} the
+            engine has not published results for yet.
           </div>
         )}
         {/* Null means the window holds fewer than two points, so there is no

@@ -9,6 +9,7 @@ import {
   isWindowComplete,
 } from '../domain/portfolio/incubationUtils';
 import { useTheme } from '../adapters/react/ThemeContext';
+import { counted } from '../domain/text/pluralize';
 
 interface IncubationOverviewProps {
   strategies: IncubatingStrategy[];
@@ -57,7 +58,7 @@ export function IncubationOverview({ strategies }: IncubationOverviewProps) {
       windows.length === 0
         ? '—'
         : windows.length === 1
-          ? `${windows[0]} days`
+          ? counted(windows[0], 'day')
           : `${windows[0]}–${windows[windows.length - 1]} days`;
 
     return {
@@ -94,7 +95,7 @@ export function IncubationOverview({ strategies }: IncubationOverviewProps) {
             theme === 'dark' ? 'text-gray-300' : 'text-gray-700'
           }`}
         >
-          <span>{strategies.length} incubating strategies</span>
+          <span>{counted(strategies.length, 'incubating strategy', 'incubating strategies')}</span>
           {summary.missingCapital > 0 && (
             <>
               <span className="hidden sm:inline">•</span>

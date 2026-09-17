@@ -3,6 +3,7 @@ import { BookPlus, Plus, Trash2, X } from 'lucide-react';
 
 import { useTheme } from '../adapters/react/ThemeContext';
 import { isValidPortfolioId, normalizePortfolioId } from '../domain/portfolio/portfolioAssignment';
+import { pluralize } from '../domain/text/pluralize';
 import { PortfolioApiService, type Book } from '../infrastructure/api/portfolioApi';
 import { RemoveFromBookModal } from './RemoveFromBookModal';
 
@@ -238,7 +239,7 @@ export function BooksScreen() {
                 <div className="flex items-center gap-3">
                   <span className={`text-xs ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>
                     {book.strategy_count}{' '}
-                    {book.strategy_count === 1 ? 'strategy' : 'strategies'}
+                    {pluralize(book.strategy_count, 'strategy', 'strategies')}
                   </span>
                   {/* Only an empty book can be removed; the server enforces it too. */}
                   {book.strategy_count === 0 && (

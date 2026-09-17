@@ -6,6 +6,7 @@ import { useAuth } from '../adapters/react/useAuth';
 import { isInternalRole } from '../domain/identity/user';
 import type { Position } from '../domain/portfolio/portfolioData';
 import { EditPositionModal } from './EditPositionModal';
+import { counted } from '../domain/text/pluralize';
 
 interface PositionBreakdownProps {
   positions: Position[];
@@ -218,8 +219,7 @@ export function PositionBreakdown({
             <div className="mb-1">Active Positions: {positions.length}</div>
             {unpricedCount > 0 && (
               <div className={`text-sm ${theme === 'dark' ? 'text-amber-400' : 'text-amber-600'}`}>
-                Total excludes {unpricedCount}{' '}
-                {unpricedCount === 1 ? 'position' : 'positions'} with no known price.
+                Total excludes {counted(unpricedCount, 'position')} with no known price.
               </div>
             )}
           </div>

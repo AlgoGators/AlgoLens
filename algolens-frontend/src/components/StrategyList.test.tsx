@@ -59,3 +59,29 @@ describe('the book on a strategy card', () => {
     );
   });
 });
+
+describe('the holdings count on a card', () => {
+  it('says "1 Holding", not "1 Holdings"', () => {
+    render(
+      <StrategyList
+        strategies={[strategy({ positions: [{ symbol: 'ES.v.0' }] as never })]}
+        onSelectStrategy={() => {}}
+      />,
+    );
+    expect(screen.getByText('1 Holding')).toBeTruthy();
+  });
+
+  it('pluralises every other count, including none', () => {
+    render(
+      <StrategyList
+        strategies={[
+          strategy({ id: 'a', positions: [] }),
+          strategy({ id: 'b', positions: [{ symbol: 'ES.v.0' }, { symbol: 'NQ.v.0' }] as never }),
+        ]}
+        onSelectStrategy={() => {}}
+      />,
+    );
+    expect(screen.getByText('0 Holdings')).toBeTruthy();
+    expect(screen.getByText('2 Holdings')).toBeTruthy();
+  });
+});

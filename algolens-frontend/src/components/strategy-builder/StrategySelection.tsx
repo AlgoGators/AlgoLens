@@ -1,5 +1,6 @@
 import type { Strategy } from '../../domain/portfolio/portfolioData';
 import { formatMetric } from '../../domain/portfolio/formatMetric';
+import { counted } from '../../domain/text/pluralize';
 
 interface StrategySelectionProps {
   strategies: Strategy[];
@@ -47,7 +48,7 @@ export function StrategySelection({ strategies, selectedStrategies, onToggle, th
                     ? 'text-gray-500'
                     : theme === 'dark' ? 'text-gray-500' : 'text-gray-400'
                     }`}>
-                    {strategy.positions.length} positions
+                    {counted(strategy.positions.length, 'position')}
                   </p>
                 </div>
 
