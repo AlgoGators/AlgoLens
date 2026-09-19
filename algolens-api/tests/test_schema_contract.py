@@ -8,6 +8,8 @@ stops catching things is worse than none, because it reads as reassurance.
 
 from algolens.infrastructure.db.schema_contract import (
     CONTRACTS,
+    POSITION_OVERRIDE_LEGACY_SCOPES,
+    POSITION_OVERRIDES,
     TableContract,
     check_schema,
     format_findings,
@@ -125,3 +127,13 @@ def test_the_registry_contract_still_admits_it_is_unverified():
     # to come here and say so deliberately.
     registry = next(c for c in CONTRACTS if c.name == "trading.strategy_registry")
     assert "UNVERIFIED" in registry.source
+
+
+def test_position_override_contract_requires_portfolio_scope_for_reads_and_writes():
+    assert "portfolio_id" in POSITION_OVERRIDES.reads
+    assert "portfolio_id" in POSITION_OVERRIDES.writes
+
+
+def test_legacy_override_scope_contract_covers_the_join_columns():
+    assert POSITION_OVERRIDE_LEGACY_SCOPES in CONTRACTS
+    assert POSITION_OVERRIDE_LEGACY_SCOPES.reads == ("override_id", "portfolio_id")

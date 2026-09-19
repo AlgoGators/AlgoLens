@@ -843,13 +843,14 @@ class PostgresPortfolioRepository:
                     cursor.execute(
                         """
                         INSERT INTO trading.position_overrides
-                            (user_id, source_app, strategy_id, symbol,
+                            (portfolio_id, user_id, source_app, strategy_id, symbol,
                              before_state, after_state, reason,
                              risk_check_result, overrode_risk)
-                        VALUES (%s, 'algolens', %s, %s, %s, %s, %s, %s, %s)
+                        VALUES (%s, %s, 'algolens', %s, %s, %s, %s, %s, %s, %s)
                         RETURNING id
                         """,
                         (
+                            portfolio_id,
                             user_id,
                             strategy_type,
                             normalized["symbol"],
@@ -866,22 +867,25 @@ class PostgresPortfolioRepository:
         finally:
             conn.close()
 
-    def fetch_overrides(self, strategy_type, limit=100):
+    def fetch_overrides(self, strategy_type, portfolio_id, limit=100):
         """Recent audit entries. Read-only -- this table cannot be modified."""
         conn = self.connection_factory()
         try:
             with conn.cursor() as cursor:
                 cursor.execute(
                     """
-                    SELECT id, user_id, source_app, strategy_id, symbol,
-                           before_state, after_state, reason,
-                           risk_check_result, overrode_risk, created_at
-                    FROM trading.position_overrides
-                    WHERE strategy_id = %s
-                    ORDER BY created_at DESC
+                    SELECT o.id, o.user_id, o.source_app, o.strategy_id, o.symbol,
+                           o.before_state, o.after_state, o.reason,
+                           o.risk_check_result, o.overrode_risk, o.created_at
+                    FROM trading.position_overrides o
+                    LEFT JOIN trading.position_override_legacy_scopes legacy
+                           ON legacy.override_id = o.id
+                    WHERE COALESCE(o.portfolio_id, legacy.portfolio_id) = %s
+                      AND o.strategy_id = %s
+                    ORDER BY o.created_at DESC
                     LIMIT %s
                     """,
-                    (strategy_type, limit),
+                    (portfolio_id, strategy_type, limit),
                 )
                 return [dict(r) for r in cursor.fetchall()]
         finally:

@@ -7,6 +7,8 @@ Ported from AlgoLens PR #31 (closed August 2026 on a miscommunication) onto the
 layered package.
 """
 
+from pathlib import Path
+
 import pytest
 
 from algolens.application.portfolio.ports import RiskAcknowledgementRequired
@@ -22,6 +24,7 @@ from algolens.domain.portfolio.position_edit import (
     resolve_target_book,
     validate_position_payload,
 )
+from algolens.domain.portfolio.portfolio_assignment import AssignmentValidationError
 
 
 def _payload(**overrides):
@@ -280,12 +283,16 @@ class _Registry:
     def list(self, active_only=True):
         return [self._strategy] if self._strategy else []
 
+    def books_for_strategy(self, strategy_id):
+        return [self._strategy["portfolio_id"]] if self._strategy else []
+
 
 class _Reader:
     def __init__(self, envelope=None, book=None):
         self.envelope = envelope
         self.book = book or []
         self.written = None
+        self.override_scope = None
 
     def fetch_risk_envelope(self, strategy_type, portfolio_id):
         return self.envelope
@@ -297,7 +304,8 @@ class _Reader:
         self.written = kwargs
         return {"position": {"symbol": kwargs["normalized"]["symbol"]}, "override_id": 1}
 
-    def fetch_overrides(self, strategy_type, limit=100):
+    def fetch_overrides(self, strategy_type, portfolio_id, limit=100):
+        self.override_scope = (strategy_type, portfolio_id, limit)
         return [{"id": 1, "strategy_id": strategy_type}]
 
 
@@ -346,15 +354,47 @@ def test_the_write_always_targets_the_qt_stream():
     assert reader.written["normalized"]["portfolio_type"] == "qt"
 
 
-def test_overrides_are_listed_by_the_engine_strategy_type_not_the_display_id():
+def test_overrides_are_scoped_to_the_selected_book():
     reader = _Reader()
-    rows = ListPositionOverrides(_Registry(_STRATEGY), reader).execute("trendfollowing")
+    rows = ListPositionOverrides(_Registry(_STRATEGY), reader).execute(
+        "trendfollowing", "BASE_PORTFOLIO"
+    )
     assert rows[0]["strategy_id"] == "LIVE_TREND_FOLLOWING"
+    assert reader.override_scope == (
+        "LIVE_TREND_FOLLOWING", "BASE_PORTFOLIO", 100
+    )
+
+
+def test_overrides_for_a_non_member_book_are_refused_before_reading():
+    reader = _Reader()
+
+    with pytest.raises(AssignmentValidationError) as excinfo:
+        ListPositionOverrides(_Registry(_STRATEGY), reader).execute(
+            "trendfollowing", "SOMEONE_ELSES"
+        )
+
+    assert excinfo.value.code == "not_a_member_of_book"
+    assert reader.override_scope is None
 
 
 def test_overrides_for_an_unknown_strategy_are_not_found():
     with pytest.raises(StrategyNotFound):
-        ListPositionOverrides(_Registry(None), _Reader()).execute("nope")
+        ListPositionOverrides(_Registry(None), _Reader()).execute("nope", "BOOK")
+
+
+def test_override_repository_sql_scopes_new_writes_and_history_reads():
+    source = (
+        Path(__file__).parents[1]
+        / "algolens"
+        / "infrastructure"
+        / "portfolio"
+        / "repositories.py"
+    ).read_text(encoding="utf-8")
+
+    assert "(portfolio_id, user_id, source_app, strategy_id, symbol," in source
+    assert "LEFT JOIN trading.position_override_legacy_scopes legacy" in source
+    assert "WHERE COALESCE(o.portfolio_id, legacy.portfolio_id) = %s" in source
+    assert "AND o.strategy_id = %s" in source
 
 
 def test_evaluate_risk_accepts_decimal_rows_from_the_database():

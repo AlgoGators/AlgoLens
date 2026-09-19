@@ -690,7 +690,9 @@ class ListPositionOverrides:
         self.registry = registry
         self.reader = reader
 
-    def execute(self, strategy_id: str, limit: int = 100) -> list[dict[str, Any]]:
+    def execute(
+        self, strategy_id: str, portfolio_id: Any, limit: int = 100
+    ) -> list[dict[str, Any]]:
         # get_any, not get: the audit trail of a retired strategy is exactly the
         # kind of thing someone comes back to read. Hiding it with the strategy
         # would make retirement a way to lose the record of what was done.
@@ -698,7 +700,29 @@ class ListPositionOverrides:
         strategy = getter(strategy_id) if getter else self.registry.get(strategy_id)
         if strategy is None:
             raise StrategyNotFound(strategy_id)
-        return list(self.reader.fetch_overrides(strategy["strategy_type"], limit))
+
+        # Do not let a caller enumerate another book's audit history. The
+        # reader query is scoped, but membership is the authorization boundary
+        # and must be resolved before it can issue that query.
+        books = []
+        lister = getattr(self.registry, "books_for_strategy", None)
+        if lister:
+            try:
+                books = lister(strategy["id"])
+            except Exception as exc:
+                logger.error(
+                    "[OVERRIDES] Membership read failed for %s: %s",
+                    strategy["id"], exc, exc_info=True,
+                )
+        books = list(books) or [strategy["portfolio_id"]]
+        requested = normalize_portfolio_id(portfolio_id)
+        target = match_book(requested, books)
+        if target is None:
+            raise AssignmentValidationError(
+                "not_a_member_of_book",
+                f"{strategy_id} does not belong to {requested}",
+            )
+        return list(self.reader.fetch_overrides(strategy["strategy_type"], target, limit))
 
 
 class ListPortfolios:

@@ -469,8 +469,13 @@ def get_overrides(strategy_id):
     """The audit trail for one strategy, most recent first."""
     try:
         registry, reader = _portfolio_dependencies()
-        overrides = ListPositionOverrides(registry, reader).execute(strategy_id)
+        overrides = ListPositionOverrides(registry, reader).execute(
+            strategy_id, request.args.get("portfolio_id")
+        )
         return jsonify({"overrides": overrides}), 200
+    except AssignmentValidationError as exc:
+        message = ASSIGNMENT_MESSAGES.get(exc.code, "Invalid query parameter")
+        return jsonify({"error": message, "code": exc.code}), 400
     except StrategyNotFound:
         return jsonify({"error": "Strategy not found"}), 404
     except Exception:

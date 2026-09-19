@@ -194,7 +194,7 @@ class PortfolioReaderPort(Protocol):
         ...
 
     def fetch_overrides(
-        self, strategy_type: str, limit: int = 100
+        self, strategy_type: str, portfolio_id: str, limit: int = 100
     ) -> Sequence[Mapping[str, Any]]:
         ...
 

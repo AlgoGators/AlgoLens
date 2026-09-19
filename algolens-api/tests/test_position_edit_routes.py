@@ -38,11 +38,15 @@ class FakeRegistry:
     def get(self, strategy_id):
         return self._strategy
 
+    def books_for_strategy(self, strategy_id):
+        return [self._strategy["portfolio_id"]] if self._strategy else []
+
 
 class FakeReader:
     def __init__(self, envelope=None):
         self.envelope = envelope
         self.written = None
+        self.override_scope = None
 
     def fetch_risk_envelope(self, strategy_type, portfolio_id):
         return self.envelope
@@ -57,7 +61,8 @@ class FakeReader:
             "override_id": 99,
         }
 
-    def fetch_overrides(self, strategy_type, limit=100):
+    def fetch_overrides(self, strategy_type, portfolio_id, limit=100):
+        self.override_scope = (strategy_type, portfolio_id, limit)
         return [{"id": 99, "symbol": "ES", "reason": "hedging the roll"}]
 
 
@@ -161,17 +166,46 @@ def test_caller_cannot_choose_the_stream_it_writes(client, monkeypatch):
 
 
 def test_override_history_is_readable_by_internal_roles(client, monkeypatch):
+    reader = FakeReader()
+    _patch(monkeypatch, FakeRegistry(), reader)
+    _set_jwt_cookie(client, role="general_member")
+
+    response = client.get("/portfolio/overrides/trendfollowing?portfolio_id=BASE_PORTFOLIO")
+
+    assert response.status_code == 200
+    assert response.get_json()["overrides"][0]["id"] == 99
+    assert reader.override_scope == ("LIVE_TREND_FOLLOWING", "BASE_PORTFOLIO", 100)
+
+
+def test_override_history_requires_a_portfolio_id(client, monkeypatch):
     _patch(monkeypatch, FakeRegistry(), FakeReader())
     _set_jwt_cookie(client, role="general_member")
 
     response = client.get("/portfolio/overrides/trendfollowing")
 
-    assert response.status_code == 200
-    assert response.get_json()["overrides"][0]["id"] == 99
+    assert response.status_code == 400
+    assert response.get_json() == {
+        "error": "Field 'portfolio_id' is required",
+        "code": "missing_portfolio_id",
+    }
+
+
+def test_override_history_rejects_a_non_member_book(client, monkeypatch):
+    reader = FakeReader()
+    _patch(monkeypatch, FakeRegistry(), reader)
+    _set_jwt_cookie(client, role="general_member")
+
+    response = client.get("/portfolio/overrides/trendfollowing?portfolio_id=OTHER_BOOK")
+
+    assert response.status_code == 400
+    assert response.get_json()["code"] == "not_a_member_of_book"
+    assert reader.override_scope is None
 
 
 def test_override_history_is_not_readable_by_subscribers(client, monkeypatch):
     _patch(monkeypatch, FakeRegistry(), FakeReader())
     _set_jwt_cookie(client, role="subscriber_individual")
 
-    assert client.get("/portfolio/overrides/trendfollowing").status_code == 403
+    assert client.get(
+        "/portfolio/overrides/trendfollowing?portfolio_id=BASE_PORTFOLIO"
+    ).status_code == 403
