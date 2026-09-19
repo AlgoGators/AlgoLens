@@ -296,6 +296,17 @@ def _gross_notional(book):
         value = position.get("notional")
         if value is None:
             return None
+        total += abs(float(value))
+    return total
+
+
+def _net_notional(book):
+    """Signed exposure, or None if any position's exposure is unknown."""
+    total = 0.0
+    for position in book:
+        value = position.get("notional")
+        if value is None:
+            return None
         total += float(value)
     return total
 
@@ -344,16 +355,20 @@ def evaluate_risk(envelope, current_book, proposed, portfolio_value=None):
 
     # -- leverage, which needs exposure and the value of the book ------------
     gross = _gross_notional(projected)
-    for key, label in (("max_gross_leverage", "Gross"), ("max_net_leverage", "Net")):
+    net = _net_notional(projected)
+    for key, label, exposure in (
+        ("max_gross_leverage", "Gross", gross),
+        ("max_net_leverage", "Net", net),
+    ):
         limit = envelope.get(key)
         if limit is None:
             continue
-        if gross is None or not portfolio_value:
+        if exposure is None or not portfolio_value:
             # Cannot be computed. Not a pass; the caller is told what was and
             # was not looked at via "checked".
             continue
         checked.append(key)
-        actual = gross / float(portfolio_value)
+        actual = abs(exposure) / float(portfolio_value)
         if actual > float(limit):
             breaches.append({
                 "limit": key,

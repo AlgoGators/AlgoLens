@@ -157,14 +157,66 @@ def test_gross_leverage_is_checked_against_the_value_of_the_book():
     assert verdict["breaches"][0]["limit"] == "max_gross_leverage"
 
 
+def test_an_offsetting_book_keeps_its_gross_leverage():
+    # Offsetting longs and shorts neutralize net exposure, not the amount of
+    # capital at risk across the book.
+    envelope = {"max_gross_leverage": 1.5, "max_net_leverage": 0.5}
+    book = [{"symbol": "LONG", "quantity": 1, "notional": 100.0}]
+    proposed = {"symbol": "SHORT", "quantity": -1, "notional": -100.0}
+
+    verdict = evaluate_risk(envelope, book, proposed, portfolio_value=100.0)
+
+    assert verdict["passed"] is False
+    assert verdict["breaches"] == [{
+        "limit": "max_gross_leverage",
+        "limit_value": 1.5,
+        "actual": 2.0,
+        "message": "Gross leverage would be 2.00x, over the limit of 1.50x",
+    }]
+    assert set(verdict["checked"]) >= {
+        "max_gross_leverage", "max_net_leverage"
+    }
+
+
+def test_net_leverage_uses_signed_exposure_for_an_offsetting_book():
+    envelope = {"max_gross_leverage": 3.0, "max_net_leverage": 0.5}
+    book = [{"symbol": "LONG", "quantity": 1, "notional": 100.0}]
+    proposed = {"symbol": "SHORT", "quantity": -1, "notional": -100.0}
+
+    verdict = evaluate_risk(envelope, book, proposed, portfolio_value=100.0)
+
+    assert verdict["passed"] is True
+    assert set(verdict["checked"]) >= {
+        "max_gross_leverage", "max_net_leverage"
+    }
+
+
+def test_net_leverage_reports_a_positive_ratio_for_negative_net_exposure():
+    envelope = {"max_net_leverage": 1.0}
+    book = [{"symbol": "SHORT", "quantity": -1, "notional": -100.0}]
+    proposed = {"symbol": "SHORT_2", "quantity": -1, "notional": -100.0}
+
+    verdict = evaluate_risk(envelope, book, proposed, portfolio_value=100.0)
+
+    assert verdict["passed"] is False
+    assert verdict["breaches"] == [{
+        "limit": "max_net_leverage",
+        "limit_value": 1.0,
+        "actual": 2.0,
+        "message": "Net leverage would be 2.00x, over the limit of 1.00x",
+    }]
+
+
 def test_leverage_is_not_checked_when_an_exposure_is_unknown():
     # A partial sum compared against the same limit is a quietly weaker gate.
-    envelope = {"max_gross_leverage": 2.0}
+    envelope = {"max_gross_leverage": 2.0, "max_net_leverage": 2.0}
     book = [{"symbol": "NQ", "quantity": 1, "notional": None}]
     proposed = {"symbol": "ES", "quantity": 1, "notional": 150_000.0}
     verdict = evaluate_risk(envelope, book, proposed, portfolio_value=100_000.0)
     assert verdict["evaluated"] is False
     assert verdict["breaches"] == []
+    assert "max_gross_leverage" not in verdict["checked"]
+    assert "max_net_leverage" not in verdict["checked"]
 
 
 def test_leverage_is_not_checked_without_the_value_of_the_book():
