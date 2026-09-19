@@ -190,6 +190,19 @@ def test_override_history_requires_a_portfolio_id(client, monkeypatch):
     }
 
 
+def test_missing_override_book_precedes_unknown_strategy_lookup(client, monkeypatch):
+    _patch(monkeypatch, FakeRegistry(strategy=None), FakeReader())
+    _set_jwt_cookie(client, role="general_member")
+
+    response = client.get("/portfolio/overrides/missing-strategy")
+
+    assert response.status_code == 400
+    assert response.get_json() == {
+        "error": "Field 'portfolio_id' is required",
+        "code": "missing_portfolio_id",
+    }
+
+
 def test_override_history_rejects_a_non_member_book(client, monkeypatch):
     reader = FakeReader()
     _patch(monkeypatch, FakeRegistry(), reader)

@@ -693,6 +693,12 @@ class ListPositionOverrides:
     def execute(
         self, strategy_id: str, portfolio_id: Any, limit: int = 100
     ) -> list[dict[str, Any]]:
+        # Validate the required query parameter before looking up the strategy.
+        # The error contract must be stable even when the URL also names an
+        # unknown strategy; the route's internal_only decorator still runs
+        # before this use case, preserving subscriber 403s.
+        requested = normalize_portfolio_id(portfolio_id)
+
         # get_any, not get: the audit trail of a retired strategy is exactly the
         # kind of thing someone comes back to read. Hiding it with the strategy
         # would make retirement a way to lose the record of what was done.
@@ -704,18 +710,14 @@ class ListPositionOverrides:
         # Do not let a caller enumerate another book's audit history. The
         # reader query is scoped, but membership is the authorization boundary
         # and must be resolved before it can issue that query.
-        books = []
         lister = getattr(self.registry, "books_for_strategy", None)
-        if lister:
-            try:
-                books = lister(strategy["id"])
-            except Exception as exc:
-                logger.error(
-                    "[OVERRIDES] Membership read failed for %s: %s",
-                    strategy["id"], exc, exc_info=True,
-                )
-        books = list(books) or [strategy["portfolio_id"]]
-        requested = normalize_portfolio_id(portfolio_id)
+        if lister is None:
+            # Compatibility only for an older registry implementation that
+            # predates memberships. Once that method exists, a read error or
+            # an explicit empty result must not authorize the primary book.
+            books = [strategy["portfolio_id"]]
+        else:
+            books = list(lister(strategy["id"]))
         target = match_book(requested, books)
         if target is None:
             raise AssignmentValidationError(

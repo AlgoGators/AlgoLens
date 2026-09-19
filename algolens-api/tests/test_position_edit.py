@@ -287,6 +287,21 @@ class _Registry:
         return [self._strategy["portfolio_id"]] if self._strategy else []
 
 
+class _NeverLookupRegistry:
+    def get(self, strategy_id):
+        raise AssertionError("portfolio validation must happen before lookup")
+
+
+class _MembershipFailureRegistry(_Registry):
+    def books_for_strategy(self, strategy_id):
+        raise RuntimeError("membership storage unavailable")
+
+
+class _EmptyMembershipRegistry(_Registry):
+    def books_for_strategy(self, strategy_id):
+        return []
+
+
 class _Reader:
     def __init__(self, envelope=None, book=None):
         self.envelope = envelope
@@ -377,6 +392,38 @@ def test_overrides_for_a_non_member_book_are_refused_before_reading():
     assert reader.override_scope is None
 
 
+def test_missing_override_book_is_validated_before_strategy_lookup():
+    with pytest.raises(AssignmentValidationError) as excinfo:
+        ListPositionOverrides(_NeverLookupRegistry(), _Reader()).execute(
+            "missing-strategy", None
+        )
+
+    assert excinfo.value.code == "missing_portfolio_id"
+
+
+def test_override_history_propagates_membership_read_failures():
+    reader = _Reader()
+
+    with pytest.raises(RuntimeError, match="membership storage unavailable"):
+        ListPositionOverrides(_MembershipFailureRegistry(_STRATEGY), reader).execute(
+            "trendfollowing", "BASE_PORTFOLIO"
+        )
+
+    assert reader.override_scope is None
+
+
+def test_override_history_rejects_an_explicitly_empty_membership_list():
+    reader = _Reader()
+
+    with pytest.raises(AssignmentValidationError) as excinfo:
+        ListPositionOverrides(_EmptyMembershipRegistry(_STRATEGY), reader).execute(
+            "trendfollowing", "BASE_PORTFOLIO"
+        )
+
+    assert excinfo.value.code == "not_a_member_of_book"
+    assert reader.override_scope is None
+
+
 def test_overrides_for_an_unknown_strategy_are_not_found():
     with pytest.raises(StrategyNotFound):
         ListPositionOverrides(_Registry(None), _Reader()).execute("nope", "BOOK")
@@ -395,6 +442,96 @@ def test_override_repository_sql_scopes_new_writes_and_history_reads():
     assert "LEFT JOIN trading.position_override_legacy_scopes legacy" in source
     assert "WHERE COALESCE(o.portfolio_id, legacy.portfolio_id) = %s" in source
     assert "AND o.strategy_id = %s" in source
+
+
+class _RepositoryCursor:
+    def __init__(self, history_rows=()):
+        self.history_rows = list(history_rows)
+        self.statements = []
+        self._one = None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, traceback):
+        return False
+
+    def execute(self, sql, params):
+        self.statements.append((sql, params))
+        if "FOR UPDATE" in sql:
+            self._one = None
+        elif "SELECT strategy_name" in sql:
+            self._one = {"strategy_name": "engine_name"}
+        elif "INSERT INTO trading.positions" in sql:
+            self._one = {"symbol": "ES", "quantity": 3, "average_price": 500.0}
+        elif "INSERT INTO trading.position_overrides" in sql:
+            self._one = {"id": 41}
+
+    def fetchone(self):
+        return self._one
+
+    def fetchall(self):
+        return self.history_rows
+
+
+class _RepositoryConnection:
+    def __init__(self, history_rows=()):
+        self.cursor_instance = _RepositoryCursor(history_rows)
+        self.transaction_entries = 0
+        self.closed = False
+
+    def __enter__(self):
+        self.transaction_entries += 1
+        return self
+
+    def __exit__(self, exc_type, exc, traceback):
+        return False
+
+    def cursor(self):
+        return self.cursor_instance
+
+    def close(self):
+        self.closed = True
+
+
+def test_override_repository_binds_scope_and_shares_the_write_transaction():
+    from algolens.infrastructure.portfolio.repositories import PostgresPortfolioRepository
+
+    write_connection = _RepositoryConnection()
+    history_connection = _RepositoryConnection(history_rows=[{"id": 41, "symbol": "ES"}])
+    connections = iter((write_connection, history_connection))
+    repository = PostgresPortfolioRepository(connection_factory=lambda: next(connections))
+
+    result = repository.write_qt_position(
+        strategy_type="LIVE_TREND_FOLLOWING",
+        portfolio_id="BOOK_A",
+        normalized={
+            "symbol": "ES",
+            "quantity": 3,
+            "average_price": 500.0,
+            "reason": "hedging the roll",
+        },
+        user_id="7",
+        verdict={"passed": True},
+        overrode_risk=False,
+    )
+    history = repository.fetch_overrides("LIVE_TREND_FOLLOWING", "BOOK_A", limit=7)
+
+    audit_statement = next(
+        statement
+        for statement in write_connection.cursor_instance.statements
+        if "INSERT INTO trading.position_overrides" in statement[0]
+    )
+    history_statement = next(
+        statement
+        for statement in history_connection.cursor_instance.statements
+        if "FROM trading.position_overrides o" in statement[0]
+    )
+    assert result["override_id"] == 41
+    assert write_connection.transaction_entries == 1
+    assert audit_statement[1][0] == "BOOK_A"
+    assert history_statement[1] == ("BOOK_A", "LIVE_TREND_FOLLOWING", 7)
+    assert history == [{"id": 41, "symbol": "ES"}]
 
 
 def test_evaluate_risk_accepts_decimal_rows_from_the_database():
