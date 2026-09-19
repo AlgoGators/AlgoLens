@@ -344,6 +344,33 @@ def test_a_clean_edit_is_written_with_its_verdict():
     assert reader.written["user_id"] == "7"
 
 
+@pytest.mark.parametrize("short_quantity,net_limit,expected_net", [(-1, 0.5, None), (-3, 1.0, 2.0)])
+def test_market_priced_edits_preserve_short_exposure(short_quantity, net_limit, expected_net):
+    class MarketData:
+        def latest_prices(self, symbols):
+            return {"LONG": 10.0, "SHORT": 10.0}
+
+        def contract_multipliers(self, symbols):
+            return {"LONG": 10.0, "SHORT": 10.0}
+
+    class ValuedReader(_Reader):
+        def fetch_summary_row(self, strategy_type, portfolio_id):
+            return {"current_portfolio_value": 100.0}
+
+    reader = ValuedReader(
+        envelope={"max_gross_leverage": 1.5, "max_net_leverage": net_limit,
+                  "max_symbol_notional": {"SHORT": 50}},
+        book=[{"symbol": "LONG", "quantity": 1}],
+    )
+    result = UpsertQtPosition(_Registry(_STRATEGY), reader, MarketData()).execute(
+        _payload(symbol="SHORT", quantity=short_quantity), "7", acknowledge_risk=True
+    )
+    breaches = {b["limit"]: b["actual"] for b in result["risk_check"]["breaches"]}
+    assert breaches["max_gross_leverage"] == (2.0 if short_quantity == -1 else 4.0)
+    assert breaches.get("max_net_leverage") == expected_net
+    assert breaches["max_symbol_notional"] == (100.0 if short_quantity == -1 else 300.0)
+
+
 def test_a_breach_is_refused_until_it_is_acknowledged():
     reader = _Reader(envelope={"max_symbol_position_contracts": {"ES": 1}})
     with pytest.raises(RiskAcknowledgementRequired) as excinfo:
@@ -460,7 +487,7 @@ class _RepositoryCursor:
         self.statements.append((sql, params))
         if "FOR UPDATE" in sql:
             self._one = None
-        elif "SELECT strategy_name" in sql:
+        elif "SELECT DISTINCT strategy_name" in sql:
             self._one = {"strategy_name": "engine_name"}
         elif "INSERT INTO trading.positions" in sql:
             self._one = {"symbol": "ES", "quantity": 3, "average_price": 500.0}
@@ -471,6 +498,8 @@ class _RepositoryCursor:
         return self._one
 
     def fetchall(self):
+        if self.statements and "SELECT DISTINCT strategy_name" in self.statements[-1][0]:
+            return [self._one]
         return self.history_rows
 
 

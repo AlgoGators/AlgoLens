@@ -594,11 +594,15 @@ class UpsertQtPosition:
         def priced(row):
             symbol = row["symbol"]
             price = prices.get(symbol) or prices.get(base_symbol(symbol))
+            exposure = notional(
+                row.get("quantity"), price, multipliers.get(base_symbol(symbol))
+            )
+            # Display notional is absolute; the risk book must preserve shorts.
+            if exposure is not None and float(row["quantity"]) < 0:
+                exposure = -exposure
             return {
                 **row,
-                "notional": notional(
-                    row.get("quantity"), price, multipliers.get(base_symbol(symbol))
-                ),
+                "notional": exposure,
             }
 
         return [priced(p) for p in book], priced(proposal)

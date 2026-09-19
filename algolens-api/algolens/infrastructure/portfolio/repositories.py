@@ -692,28 +692,28 @@ class PostgresPortfolioRepository:
             conn.close()
 
     def fetch_qt_book(self, strategy_type, portfolio_id):
-        """Today's qt positions, one row per symbol."""
+        """Today's QT positions, retaining individual strategy and zero evidence."""
         conn = self.connection_factory()
         try:
             with conn.cursor() as cursor:
                 cursor.execute(
                     """
-                    SELECT DISTINCT ON (symbol)
-                           symbol, quantity, average_price
+                    SELECT symbol, strategy_name, date, quantity, average_price
                     FROM trading.positions
                     WHERE strategy_id = %s
                       AND portfolio_id = %s
                       AND portfolio_type = %s
-                      AND quantity != 0
-                    ORDER BY symbol, updated_at DESC
+                      AND date = %s
+                    ORDER BY strategy_name, symbol
                     """,
-                    (strategy_type, portfolio_id, QT_STREAM),
+                    (strategy_type, portfolio_id, QT_STREAM, _date.today()),
                 )
                 return [_plain_position(r) for r in cursor.fetchall()]
         finally:
             conn.close()
 
-    def _fetch_existing_position(self, cursor, strategy_type, portfolio_id, symbol):
+    def _fetch_existing_position(self, cursor, strategy_type, portfolio_id, symbol,
+                                 strategy_name, position_date):
         # Lock the row for the rest of the transaction so we capture the true
         # before_state in the audit trail. If two QT members edit the same symbol
         # concurrently, or the engine's daily run writes between our read and
@@ -722,23 +722,23 @@ class PostgresPortfolioRepository:
         # is nothing to lock; the ON CONFLICT clause still makes the insert safe.
         cursor.execute(
             """
-            SELECT symbol, quantity, average_price,
+            SELECT symbol, strategy_name, date, quantity, average_price,
                    daily_unrealized_pnl, daily_realized_pnl
             FROM trading.positions
             WHERE strategy_id = %s
               AND portfolio_id = %s
               AND portfolio_type = %s
               AND symbol = %s
-            ORDER BY updated_at DESC
-            LIMIT 1
+              AND strategy_name = %s AND date = %s
             FOR UPDATE
             """,
-            (strategy_type, portfolio_id, QT_STREAM, symbol),
+            (strategy_type, portfolio_id, QT_STREAM, symbol, strategy_name, position_date),
         )
         row = cursor.fetchone()
         return _plain_position(row) if row else None
 
-    def _resolve_strategy_name(self, cursor, strategy_type, portfolio_id):
+    def _resolve_strategy_name(self, cursor, strategy_type, portfolio_id,
+                               symbol, position_date, requested_name=None):
         """The engine's own strategy_name for this book.
 
         strategy_name is part of the positions primary key and the engine
@@ -749,23 +749,35 @@ class PostgresPortfolioRepository:
         """
         cursor.execute(
             """
-            SELECT strategy_name
+            SELECT DISTINCT strategy_name
             FROM trading.positions
             WHERE portfolio_id = %s AND strategy_id = %s
-            ORDER BY updated_at DESC
-            LIMIT 1
+              AND portfolio_type = %s AND date = %s AND symbol = %s
             """,
-            (portfolio_id, strategy_type),
+            (portfolio_id, strategy_type, QT_STREAM, position_date, symbol),
         )
-        row = cursor.fetchone()
-        if row is None:
-            raise StrategyNameUnresolved(
-                f"No existing positions for strategy {strategy_type} in "
-                f"portfolio {portfolio_id}, so the engine's strategy_name cannot "
-                f"be determined. Refusing to guess: a wrong strategy_name writes "
-                f"a row the engine will never reconcile."
+        names = {row["strategy_name"] for row in cursor.fetchall()}
+        if not names:
+            # A new symbol has no row to bind. Only a unique current QT
+            # strategy (or an explicitly named member of that snapshot) may
+            # own it; an unrelated most-recent row is never a tie-breaker.
+            cursor.execute(
+                """
+                SELECT DISTINCT strategy_name FROM trading.positions
+                WHERE portfolio_id = %s AND strategy_id = %s
+                  AND portfolio_type = %s AND date = %s
+                """,
+                (portfolio_id, strategy_type, QT_STREAM, position_date),
             )
-        return row["strategy_name"]
+            names = {row["strategy_name"] for row in cursor.fetchall()}
+        if requested_name is not None:
+            names = names.intersection({requested_name})
+        if len(names) != 1:
+            raise StrategyNameUnresolved(
+                f"Expected one QT position identity for {portfolio_id}/"
+                f"{strategy_type}/{symbol} on {position_date}; found {len(names)}."
+            )
+        return next(iter(names))
 
     def write_qt_position(
         self,
@@ -787,13 +799,18 @@ class PostgresPortfolioRepository:
         try:
             with conn:  # commits on success, rolls back on exception
                 with conn.cursor() as cursor:
+                    position_date = _date.today()
+                    strategy_name = self._resolve_strategy_name(
+                        cursor, strategy_type, portfolio_id, normalized["symbol"],
+                        position_date, normalized.get("strategy_name"),
+                    )
                     before = self._fetch_existing_position(
-                        cursor, strategy_type, portfolio_id, normalized["symbol"]
+                        cursor, strategy_type, portfolio_id, normalized["symbol"],
+                        strategy_name, position_date,
                     )
                     after = build_after_state(before, normalized)
-                    strategy_name = self._resolve_strategy_name(
-                        cursor, strategy_type, portfolio_id
-                    )
+                    after.update(strategy_name=strategy_name, date=str(position_date),
+                                 portfolio_id=portfolio_id, portfolio_type=QT_STREAM)
 
                     cursor.execute(
                         """
@@ -823,7 +840,7 @@ class PostgresPortfolioRepository:
                             portfolio_id,
                             strategy_type,
                             strategy_name,
-                            _date.today(),
+                            position_date,
                             normalized["symbol"],
                             QT_STREAM,
                             after["quantity"],

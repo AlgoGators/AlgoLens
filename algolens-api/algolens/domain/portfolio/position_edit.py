@@ -180,8 +180,15 @@ def validate_position_payload(payload):
                 "price_negative", "Field 'average_price' must not be negative"
             )
 
+    strategy_name = payload.get("strategy_name")
+    if strategy_name is not None and (
+        not isinstance(strategy_name, str) or not strategy_name.strip()
+    ):
+        raise PositionValidationError("invalid_strategy_name", "strategy_name must be a nonempty string")
+
     return {
         "strategy_id": strategy_id,
+        "strategy_name": strategy_name,
         "symbol": symbol,
         "quantity": quantity,
         "average_price": average_price,
@@ -240,10 +247,16 @@ def with_known_price(current_book, proposed):
     """
     if proposed.get("average_price") is not None:
         return proposed
-    existing = next((p for p in current_book if p["symbol"] == proposed["symbol"]), None)
+    existing = next((p for p in current_book if _same_position(p, proposed)), None)
     if not existing or existing.get("average_price") is None:
         return proposed
     return {**proposed, "average_price": existing["average_price"]}
+
+
+def _same_position(position, proposed):
+    return (position["symbol"] == proposed["symbol"] and
+            (proposed.get("strategy_name") is None or
+             position.get("strategy_name") == proposed["strategy_name"]))
 
 
 def _projected_book(current_book, proposed):
@@ -252,7 +265,7 @@ def _projected_book(current_book, proposed):
     The edited symbol REPLACES its existing row. Adding to it instead would
     double-count every edit and report a breach on almost any change.
     """
-    projected = [p for p in current_book if p["symbol"] != proposed["symbol"]]
+    projected = [p for p in current_book if p["quantity"] != 0 and not _same_position(p, proposed)]
     if proposed["quantity"] != 0:
         projected.append(proposed)
     return projected
@@ -386,6 +399,7 @@ def evaluate_risk(envelope, current_book, proposed, portfolio_value=None):
     if dollar_cap is not None:
         proposed_notional = proposed.get("notional")
         if proposed_notional is not None:
+            proposed_notional = abs(float(proposed_notional))
             checked.append("max_symbol_notional")
             if float(proposed_notional) > float(dollar_cap):
                 breaches.append({
