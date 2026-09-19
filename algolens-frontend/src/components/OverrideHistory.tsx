@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { AlertTriangle, History } from 'lucide-react';
 
 import { useTheme } from '../adapters/react/ThemeContext';
@@ -27,21 +27,25 @@ function quantityOf(state: Record<string, unknown> | null | undefined): string {
  */
 export function OverrideHistory({ strategyId, portfolioId }: OverrideHistoryProps) {
   const { theme } = useTheme();
-  const [overrides, setOverrides] = useState<PositionOverride[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const scope = JSON.stringify([strategyId, portfolioId]);
+  const [state, setState] = useState<{
+    scope: string; overrides: PositionOverride[] | null; error: string | null;
+  }>({ scope, overrides: null, error: null });
+  const { overrides, error } = state.scope === scope
+    ? state : { overrides: null, error: null };
 
   const isDark = theme === 'dark';
 
-  const load = useCallback(async () => {
-    try {
-      setOverrides(await PortfolioApiService.getPositionOverrides(strategyId, portfolioId));
-      setError(null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not load the override history');
-    }
-  }, [strategyId, portfolioId]);
-
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    let cancelled = false;
+    setState({ scope, overrides: null, error: null });
+    void PortfolioApiService.getPositionOverrides(strategyId, portfolioId).then(
+      overrides => { if (!cancelled) setState({ scope, overrides, error: null }); },
+      err => { if (!cancelled) setState({ scope, overrides: null,
+        error: err instanceof Error ? err.message : 'Could not load the override history' }); },
+    );
+    return () => { cancelled = true; };
+  }, [strategyId, portfolioId, scope]);
 
   if (error) {
     return (
