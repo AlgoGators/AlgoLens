@@ -6,6 +6,7 @@ import { PortfolioApiService, type PositionOverride } from '../infrastructure/ap
 
 interface OverrideHistoryProps {
   strategyId: string;
+  portfolioId: string;
 }
 
 function quantityOf(state: Record<string, unknown> | null | undefined): string {
@@ -24,7 +25,7 @@ function quantityOf(state: Record<string, unknown> | null | undefined): string {
  * Overrides that went through a stated risk breach are called out: "which edits
  * were made over a warning" is the question this table exists to answer.
  */
-export function OverrideHistory({ strategyId }: OverrideHistoryProps) {
+export function OverrideHistory({ strategyId, portfolioId }: OverrideHistoryProps) {
   const { theme } = useTheme();
   const [overrides, setOverrides] = useState<PositionOverride[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -33,12 +34,12 @@ export function OverrideHistory({ strategyId }: OverrideHistoryProps) {
 
   const load = useCallback(async () => {
     try {
-      setOverrides(await PortfolioApiService.getPositionOverrides(strategyId));
+      setOverrides(await PortfolioApiService.getPositionOverrides(strategyId, portfolioId));
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not load the override history');
     }
-  }, [strategyId]);
+  }, [strategyId, portfolioId]);
 
   useEffect(() => { void load(); }, [load]);
 

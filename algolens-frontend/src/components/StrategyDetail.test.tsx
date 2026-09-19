@@ -23,6 +23,11 @@ vi.mock('../adapters/react/ThemeContext', () => ({
   useTheme: () => ({ theme: 'light' }),
 }));
 
+let role = 'subscriber_individual';
+vi.mock('../adapters/react/useAuth', () => ({
+  useAuth: () => ({ user: { role } }),
+}));
+
 // The children are stubbed down to the one thing these tests care about:
 // which book's data each of them was handed.
 vi.mock('./PositionBreakdown', () => ({
@@ -49,7 +54,6 @@ vi.mock('./TradingActivity', () => ({
     <div data-testid="activity">{p.executions.map(e => e.tag).join(',')}</div>
   ),
 }));
-vi.mock('./OverrideHistory', () => ({ OverrideHistory: () => null }));
 vi.mock('./AlphaAttribution', () => ({ AlphaAttribution: () => null }));
 vi.mock('recharts', () => {
   const Stub = () => null;
@@ -65,11 +69,18 @@ vi.mock('recharts', () => {
 type Impl = (id: string, book?: string) => Promise<Strategy>;
 let getStrategyImpl: Impl = async () => { throw new Error('getStrategy not set'); };
 const getStrategyCalls: unknown[][] = [];
+type OverridesImpl = (id: string, book: string) => Promise<unknown[]>;
+let getPositionOverridesImpl: OverridesImpl = async () => [];
+const getPositionOverridesCalls: [string, string][] = [];
 vi.mock('../infrastructure/api/portfolioApi', () => ({
   PortfolioApiService: {
     getStrategy: (id: string, book?: string) => {
       getStrategyCalls.push([id, book]);
       return getStrategyImpl(id, book);
+    },
+    getPositionOverrides: (id: string, book: string) => {
+      getPositionOverridesCalls.push([id, book]);
+      return getPositionOverridesImpl(id, book);
     },
   },
 }));
@@ -105,8 +116,68 @@ const topBox = () => screen.getByRole('combobox', { name: 'Which book to show' }
 const headingBox = () => screen.getByRole('combobox', { name: 'Book for these positions' }) as HTMLSelectElement;
 
 beforeEach(() => {
+  role = 'subscriber_individual';
   getStrategyCalls.length = 0;
   getStrategyImpl = async () => { throw new Error('getStrategy not set'); };
+  getPositionOverridesCalls.length = 0;
+  getPositionOverridesImpl = async () => [];
+});
+
+describe('override history access and book scope', () => {
+  it('does not render or request override history for a subscriber', async () => {
+    render(<StrategyDetail strategy={strategy({ tag: 'C' })} onBack={() => {}} />);
+
+    await new Promise(resolve => setTimeout(resolve, 0));
+
+    expect(screen.queryByText('Loading…')).toBeNull();
+    expect(screen.queryByRole('heading', { name: 'Manual edits' })).toBeNull();
+    expect(getPositionOverridesCalls).toEqual([]);
+  });
+
+  it('renders override history and requests the shown book for an internal role', async () => {
+    role = 'general_member';
+    render(<StrategyDetail strategy={strategy({ tag: 'C' })} onBack={() => {}} />);
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'Manual edits' })).toBeTruthy(),
+    );
+    expect(getPositionOverridesCalls).toEqual([
+      ['trendfollowing', 'CONSERVATIVE_PORTFOLIO'],
+    ]);
+  });
+
+  it('requests override history for the newly selected book', async () => {
+    role = 'general_member';
+    getStrategyImpl = async () =>
+      strategy({
+        tag: 'A',
+        portfolio_id: 'AGGRESSIVE_PORTFOLIO',
+        books: ['AGGRESSIVE_PORTFOLIO', 'CONSERVATIVE_PORTFOLIO'],
+      });
+    render(
+      <StrategyDetail
+        strategy={strategy({
+          tag: 'C',
+          books: ['AGGRESSIVE_PORTFOLIO', 'CONSERVATIVE_PORTFOLIO'],
+        })}
+        onBack={() => {}}
+      />,
+    );
+
+    await waitFor(() =>
+      expect(getPositionOverridesCalls).toEqual([
+        ['trendfollowing', 'CONSERVATIVE_PORTFOLIO'],
+      ]),
+    );
+    fireEvent.change(topBox(), { target: { value: 'AGGRESSIVE_PORTFOLIO' } });
+
+    await waitFor(() =>
+      expect(getPositionOverridesCalls).toEqual([
+        ['trendfollowing', 'CONSERVATIVE_PORTFOLIO'],
+        ['trendfollowing', 'AGGRESSIVE_PORTFOLIO'],
+      ]),
+    );
+  });
 });
 
 describe('the page says which book it is about', () => {

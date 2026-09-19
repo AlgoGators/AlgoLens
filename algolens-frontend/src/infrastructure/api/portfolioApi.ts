@@ -462,9 +462,10 @@ export class PortfolioApiService {
     return data.assignments || [];
   }
 
-  static async getPositionOverrides(strategyId: string): Promise<PositionOverride[]> {
+  static async getPositionOverrides(strategyId: string, portfolioId: string): Promise<PositionOverride[]> {
     const encodedId = encodeURIComponent(strategyId);
-    const response = await fetchWithAuth(`${API_BASE_URL}/portfolio/overrides/${encodedId}`);
+    const query = `?portfolio_id=${encodeURIComponent(portfolioId)}`;
+    const response = await fetchWithAuth(`${API_BASE_URL}/portfolio/overrides/${encodedId}${query}`);
     const data = await response.json();
     return data.overrides || [];
   }
