@@ -804,14 +804,23 @@ class PostgresPortfolioRepository:
                         cursor, strategy_type, portfolio_id, normalized["symbol"],
                         position_date, normalized.get("strategy_name"),
                     )
-                    before = self._fetch_existing_position(
-                        cursor, strategy_type, portfolio_id, normalized["symbol"],
-                        strategy_name, position_date,
-                    )
-                    after = build_after_state(before, normalized)
-                    after.update(strategy_name=strategy_name, date=str(position_date),
-                                 portfolio_id=portfolio_id, portfolio_type=QT_STREAM)
-
+                    # Reserve an absent identity before taking its snapshot.
+                    # SELECT ... FOR UPDATE protects an existing row, but locks
+                    # nothing when the row is absent. Two writers could therefore
+                    # both record {} as before_state, even though PostgreSQL later
+                    # serialised their upserts. INSERT ... DO NOTHING waits for a
+                    # competing engine/manual insert to commit or roll back; only
+                    # the loser then reads the committed row under FOR UPDATE.
+                    #
+                    # A quantity-only edit needs a price only if it wins this
+                    # reservation. Use a temporary valid value so the conflict
+                    # path can still reach and preserve an existing price. If it
+                    # really did create a row, build_after_state raises the
+                    # user-facing missing-price validation error and this whole
+                    # transaction rolls its temporary insert back.
+                    provisional_price = normalized["average_price"]
+                    if provisional_price is None:
+                        provisional_price = 0
                     cursor.execute(
                         """
                         INSERT INTO trading.positions
@@ -825,15 +834,13 @@ class PostgresPortfolioRepository:
                         -- no default, so omitting them made every manual write
                         -- fail outright. A position created by hand this second
                         -- has accrued no PnL, and it was last touched now.
-                        -- On conflict none of the three is overwritten: they
-                        -- belong to the engine, and an edit to quantity is not
-                        -- a claim about PnL.
+                        -- On conflict nothing is overwritten. The loser must
+                        -- snapshot the winner before it can edit it and write
+                        -- an audit row with a truthful before_state.
                         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 0, 0, now(), now())
                         ON CONFLICT (portfolio_id, strategy_id, strategy_name, date,
                                      symbol, portfolio_type)
-                        DO UPDATE SET quantity      = EXCLUDED.quantity,
-                                      average_price = EXCLUDED.average_price,
-                                      updated_at    = now()
+                        DO NOTHING
                         RETURNING symbol, quantity, average_price
                         """,
                         (
@@ -843,19 +850,50 @@ class PostgresPortfolioRepository:
                             position_date,
                             normalized["symbol"],
                             QT_STREAM,
-                            after["quantity"],
-                            # after, not normalized: a blank price on an edit means
-                            # "keep it", and build_after_state already carried the
-                            # existing price forward. Writing the raw proposal here
-                            # wiped average_price on every quantity-only edit.
-                            after.get("average_price"),
+                            normalized["quantity"],
+                            provisional_price,
                         ),
                     )
+                    position = cursor.fetchone()
+                    if position is None:
+                        before = self._fetch_existing_position(
+                            cursor, strategy_type, portfolio_id, normalized["symbol"],
+                            strategy_name, position_date,
+                        )
+                        after = build_after_state(before, normalized)
+                        after.update(strategy_name=strategy_name, date=str(position_date),
+                                     portfolio_id=portfolio_id, portfolio_type=QT_STREAM)
+                        cursor.execute(
+                            """
+                            UPDATE trading.positions
+                            SET quantity = %s, average_price = %s, updated_at = now()
+                            WHERE portfolio_id = %s AND strategy_id = %s
+                              AND strategy_name = %s AND date = %s
+                              AND symbol = %s AND portfolio_type = %s
+                            RETURNING symbol, quantity, average_price
+                            """,
+                            (
+                                after["quantity"],
+                                after.get("average_price"),
+                                portfolio_id,
+                                strategy_type,
+                                strategy_name,
+                                position_date,
+                                normalized["symbol"],
+                                QT_STREAM,
+                            ),
+                        )
+                        position = cursor.fetchone()
+                    else:
+                        before = None
+                        after = build_after_state(before, normalized)
+                        after.update(strategy_name=strategy_name, date=str(position_date),
+                                     portfolio_id=portfolio_id, portfolio_type=QT_STREAM)
                     # Coerced, not raw: NUMERIC columns come back as Decimal and
                     # jsonify renders those as JSON strings. The 201 body was
                     # returning "quantity": "20", which any client parsing it as
                     # a number would get wrong.
-                    position = _plain_position(cursor.fetchone())
+                    position = _plain_position(position)
 
                     cursor.execute(
                         """

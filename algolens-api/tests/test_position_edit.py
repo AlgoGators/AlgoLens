@@ -79,6 +79,16 @@ def test_boolean_quantity_is_not_a_number():
         validate_position_payload(_payload(quantity=True))
 
 
+@pytest.mark.parametrize("field", ["quantity", "average_price"])
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf"), 10 ** 400],
+                         ids=["nan", "positive-infinity", "negative-infinity", "float-overflow"])
+def test_non_finite_position_numbers_are_refused(field, value):
+    with pytest.raises(PositionValidationError) as exc:
+        validate_position_payload(_payload(**{field: value}))
+    expected = "quantity_not_finite" if field == "quantity" else "price_not_finite"
+    assert exc.value.code == expected
+
+
 def test_negative_average_price_is_refused():
     with pytest.raises(PositionValidationError, match="average_price"):
         validate_position_payload(_payload(average_price=-1))

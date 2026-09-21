@@ -122,6 +122,34 @@ def db(monkeypatch):
                 overrode_risk BOOLEAN NOT NULL DEFAULT FALSE,
                 created_at TIMESTAMPTZ NOT NULL DEFAULT now()
             );
+            -- Migration 012 is deliberately additive: legacy rows stay
+            -- immutable and unscoped, while every new AlgoLens write must
+            -- name its book.  Keep this disposable fixture at that exact
+            -- post-migration contract; without the column all current writer
+            -- tests fail before they exercise their intended behavior.
+            ALTER TABLE trading.position_overrides
+                ADD COLUMN portfolio_id TEXT;
+            ALTER TABLE trading.position_overrides
+                ADD CONSTRAINT position_overrides_new_rows_require_portfolio
+                CHECK (portfolio_id IS NOT NULL) NOT VALID;
+            CREATE TABLE trading.position_override_legacy_scopes (
+                override_id BIGINT PRIMARY KEY
+                    REFERENCES trading.position_overrides(id),
+                portfolio_id TEXT NOT NULL,
+                inference_basis JSONB NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            );
+            CREATE INDEX idx_position_overrides_portfolio_strategy_created
+                ON trading.position_overrides
+                   (portfolio_id, strategy_id, created_at DESC);
+            CREATE RULE position_overrides_no_update AS
+                ON UPDATE TO trading.position_overrides DO INSTEAD NOTHING;
+            CREATE RULE position_overrides_no_delete AS
+                ON DELETE TO trading.position_overrides DO INSTEAD NOTHING;
+            CREATE RULE position_override_legacy_scopes_no_update AS
+                ON UPDATE TO trading.position_override_legacy_scopes DO INSTEAD NOTHING;
+            CREATE RULE position_override_legacy_scopes_no_delete AS
+                ON DELETE TO trading.position_override_legacy_scopes DO INSTEAD NOTHING;
             -- As migration 009 defines them, for the book tests below.
             CREATE TABLE trading.portfolios (
                 portfolio_id TEXT PRIMARY KEY, name TEXT NOT NULL,

@@ -4,6 +4,9 @@ Covers the wiring the use-case tests cannot: role gating, status codes, and
 that a risk breach round-trips as 409-then-201 rather than blocking outright.
 """
 
+import json
+
+import pytest
 from flask_jwt_extended import create_access_token, get_csrf_token
 
 from app import app
@@ -125,6 +128,24 @@ def test_invalid_payload_is_a_bad_request(client, monkeypatch):
 
     assert response.status_code == 400
     assert "strategy_id" in response.get_json()["error"]
+
+
+@pytest.mark.parametrize("field", ["quantity", "average_price"])
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf"), 10 ** 400],
+                         ids=["nan", "positive-infinity", "negative-infinity", "float-overflow"])
+def test_non_finite_position_numbers_cannot_reach_a_write(client, monkeypatch, field, value):
+    reader = FakeReader()
+    _patch(monkeypatch, FakeRegistry(), reader)
+    csrf = _set_jwt_cookie(client)
+    response = client.post(
+        "/portfolio/positions", data=json.dumps({**_BODY, field: value}),
+        content_type="application/json", headers={"X-CSRF-TOKEN": csrf},
+    )
+    assert response.status_code == 400
+    assert response.get_json()["code"] == (
+        "quantity_not_finite" if field == "quantity" else "price_not_finite"
+    )
+    assert reader.written is None
 
 
 def test_unknown_strategy_is_not_found(client, monkeypatch):

@@ -101,6 +101,7 @@ VALIDATION_MESSAGES = {
         "is indistinguishable from an accident when read back months later"
     ),
     "quantity_not_a_number": "Field 'quantity' must be a number",
+    "quantity_not_finite": "Field 'quantity' must be a finite number",
     "portfolio_id_not_a_string": "Field 'portfolio_id' must be a string",
     "empty_portfolio_id": "Field 'portfolio_id' must not be empty",
     "not_a_member_of_book": "That strategy does not belong to the book named",
@@ -110,6 +111,7 @@ VALIDATION_MESSAGES = {
         "no existing price to keep"
     ),
     "price_not_a_number": "Field 'average_price' must be a number",
+    "price_not_finite": "Field 'average_price' must be a finite number",
     "price_negative": "Field 'average_price' must not be negative",
 }
 

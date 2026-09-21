@@ -11,6 +11,7 @@ that turned out to be a miscommunication, so this restores the design ADR-003
 D-5 always described.
 """
 
+from math import isfinite
 from numbers import Real
 
 # Set by the service, never by the caller. See
@@ -97,6 +98,15 @@ def _normalize_symbol(raw):
     return text.upper()
 
 
+def _require_finite_number(value, field, code):
+    try:
+        finite = isfinite(value)
+    except (OverflowError, ValueError):
+        finite = False
+    if not finite:
+        raise PositionValidationError(code, f"Field '{field}' must be a finite number")
+
+
 def validate_position_payload(payload):
     """Normalize and check a proposed position edit.
 
@@ -152,6 +162,7 @@ def validate_position_payload(payload):
         raise PositionValidationError(
             "quantity_not_a_number", "Field 'quantity' must be a number"
         )
+    _require_finite_number(quantity, "quantity", "quantity_not_finite")
 
     # Optional, and only meaningful once a strategy can be in several books.
     # Validated here so a malformed value is rejected the same way as any other
@@ -175,6 +186,7 @@ def validate_position_payload(payload):
             raise PositionValidationError(
                 "price_not_a_number", "Field 'average_price' must be a number"
             )
+        _require_finite_number(average_price, "average_price", "price_not_finite")
         if average_price < 0:
             raise PositionValidationError(
                 "price_negative", "Field 'average_price' must not be negative"
