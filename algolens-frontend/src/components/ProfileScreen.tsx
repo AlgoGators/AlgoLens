@@ -3,6 +3,7 @@ import { X, Moon, Sun, LogOut, ChevronRight } from 'lucide-react';
 import { useTheme } from '../adapters/react/ThemeContext';
 import { useAuth } from '../adapters/react/useAuth';
 import logo from '../assets/logo.png';
+import { useDialogLifecycle } from './useDialogLifecycle';
 
 interface ProfileScreenProps {
   onClose: () => void;
@@ -13,19 +14,26 @@ interface ProfileScreenProps {
 export function ProfileScreen({ onClose, onLogout, onNavigate }: ProfileScreenProps) {
   const { theme, toggleTheme } = useTheme();
   const { user } = useAuth();
+  const dialogRef = useDialogLifecycle(onClose);
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-end md:items-center justify-center">
-      <div className={`w-full md:w-[500px] md:max-h-[80vh] md:rounded-2xl overflow-hidden ${
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="profile-dialog-title"
+        className={`w-full md:w-[500px] md:max-h-[80vh] md:rounded-2xl overflow-hidden ${
         theme === 'dark' ? 'bg-black text-white' : 'bg-white text-black'
       }`}>
         {/* Header */}
         <div className={`flex items-center justify-between p-4 border-b ${
           theme === 'dark' ? 'border-gray-800' : 'border-gray-200'
         }`}>
-          <h2 className="text-xl">Account</h2>
+          <h2 id="profile-dialog-title" className="text-xl">Account</h2>
           <button
             onClick={onClose}
+            aria-label="Close account"
             className={`p-2 rounded-full transition-colors ${
               theme === 'dark' ? 'hover:bg-gray-900' : 'hover:bg-gray-100'
             }`}

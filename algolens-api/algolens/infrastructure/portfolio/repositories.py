@@ -2,8 +2,9 @@ import logging
 """Postgres portfolio readers."""
 
 import json
+import math
 import time
-from datetime import date as _date
+from datetime import datetime, time as day_time, timedelta, timezone
 
 import psycopg2
 
@@ -11,16 +12,24 @@ from algolens.application.portfolio.ports import (
     IncubationError,
     IncubationPerformanceRows,
     IncubationStorageError,
+    OpenPositionsError,
     PortfolioDetailRows,
+    PositionsUnavailableError,
     StrategyNameUnresolved,
     StrategyNotInRegistry,
 )
 from algolens.domain.portfolio.position_edit import (
+    PositionValidationError,
     QT_STREAM,
     build_after_state,
 )
-from algolens.domain.portfolio.streams import PORTFOLIO_STREAMS, PRIMARY_STREAM
+from algolens.domain.portfolio.streams import (
+    PORTFOLIO_STREAMS,
+    PRIMARY_STREAM,
+    current_utc_date,
+)
 from algolens.infrastructure.db.postgres import get_db_connection
+from algolens.infrastructure.portfolio.book_lock import acquire_qt_book_locks
 
 logger = logging.getLogger(__name__)
 
@@ -233,8 +242,8 @@ class PostgresPortfolioRepository:
         cursor.execute(
             f"""
             SELECT * FROM (
-                SELECT DISTINCT ON (symbol)
-                       symbol, quantity, average_price,
+                SELECT DISTINCT ON (strategy_name, symbol)
+                       strategy_name, date, symbol, quantity, average_price,
                        daily_unrealized_pnl, daily_realized_pnl
                 FROM trading.positions
                 WHERE strategy_id = %s
@@ -246,7 +255,7 @@ class PostgresPortfolioRepository:
                     WHERE strategy_id = %s AND portfolio_id = %s
                     {stream_predicate}
                 )
-                ORDER BY symbol, updated_at DESC
+                ORDER BY strategy_name, symbol, updated_at DESC
             ) AS latest_positions
             ORDER BY ABS(quantity * average_price) DESC
             """,
@@ -307,7 +316,16 @@ class PostgresPortfolioRepository:
             conn.close()
         return [row["symbol"] if isinstance(row, dict) else row[0] for row in rows]
 
-    def _fetch_recent_executions(self, cursor, strategy_type, portfolio_id):
+    def _fetch_recent_executions(self, cursor, strategy_type, portfolio_id,
+                                 reporting_date=None, portfolio_type=PRIMARY_STREAM,
+                                 has_portfolio_type=None):
+        if has_portfolio_type is None:
+            has_portfolio_type = self._has_portfolio_type(cursor, "executions")
+        # Legacy execution rows cannot be attributed to a stream. Do not label
+        # an unscoped historical list as this day's QT fills.
+        if not has_portfolio_type or reporting_date is None or portfolio_type is None:
+            return []
+        start = datetime.combine(reporting_date, day_time.min, tzinfo=timezone.utc)
         cursor.execute(
             """
             SELECT symbol, side, quantity, price,
@@ -315,10 +333,11 @@ class PostgresPortfolioRepository:
             FROM trading.executions
             WHERE strategy_id = %s
             AND portfolio_id = %s
+            AND portfolio_type = %s
+            AND execution_time >= %s AND execution_time < %s
             ORDER BY execution_time DESC
-            LIMIT 100
             """,
-            (strategy_type, portfolio_id),
+            (strategy_type, portfolio_id, portfolio_type, start, start + timedelta(days=1)),
         )
         return cursor.fetchall()
 
@@ -355,8 +374,8 @@ class PostgresPortfolioRepository:
         )
         cursor.execute(
             f"""
-            SELECT DISTINCT ON (symbol)
-                   symbol, quantity, average_price,
+            SELECT DISTINCT ON (strategy_name, symbol)
+                   strategy_name, date, symbol, quantity, average_price,
                    daily_unrealized_pnl, daily_realized_pnl, updated_at
             FROM trading.positions
             WHERE strategy_id = %s
@@ -372,7 +391,7 @@ class PostgresPortfolioRepository:
                     {stream_predicate}
                 )
             )
-            ORDER BY symbol, updated_at DESC
+            ORDER BY strategy_name, symbol, updated_at DESC
             """,
             params,
         )
@@ -418,8 +437,25 @@ class PostgresPortfolioRepository:
                 positions = self._fetch_current_positions(
                     cursor, strategy_type, portfolio_id,
                 )
+                positions_scoped = self._has_portfolio_type(cursor, "positions")
+                stream_predicate = "AND portfolio_type = %s" if positions_scoped else ""
+                scope = (strategy_type, portfolio_id, PRIMARY_STREAM) if positions_scoped else (strategy_type, portfolio_id)
+                # Includes explicit zero rows: a fully closed QT book still
+                # has a current snapshot and engine identity for a later add.
+                cursor.execute(
+                    f"""SELECT date, strategy_name FROM trading.positions
+                        WHERE strategy_id = %s AND portfolio_id = %s {stream_predicate}
+                          AND date = (SELECT max(date) FROM trading.positions
+                                      WHERE strategy_id = %s AND portfolio_id = %s {stream_predicate})""",
+                    scope + scope,
+                )
+                snapshot = cursor.fetchall()
+                position_date = snapshot[0]["date"] if snapshot else None
+                position_names = tuple({r["strategy_name"] for r in snapshot})
+                executions_scoped = self._has_portfolio_type(cursor, "executions")
                 executions = self._fetch_recent_executions(
-                    cursor, strategy_type, portfolio_id
+                    cursor, strategy_type, portfolio_id, latest["date"],
+                    has_portfolio_type=executions_scoped,
                 )
                 yesterday_positions = self._fetch_yesterday_positions(
                     cursor, strategy_type, portfolio_id
@@ -434,6 +470,11 @@ class PostgresPortfolioRepository:
             positions=positions,
             executions=executions,
             yesterday_positions=yesterday_positions,
+            position_date=position_date,
+            position_strategy_names=position_names,
+            position_stream=PRIMARY_STREAM if positions_scoped else None,
+            execution_date=latest["date"],
+            executions_available=executions_scoped,
         )
 
     def list_incubating_strategies(self):
@@ -509,12 +550,128 @@ class PostgresPortfolioRepository:
             equity_curve=equity_curve,
         )
 
-    def _fetch_lifecycle(self, cursor, strategy_id):
+    def _fetch_lifecycle(self, cursor, strategy_id, *, for_update=False):
         cursor.execute(
-            "SELECT lifecycle FROM trading.strategy_registry WHERE id = %s",
+            """
+            SELECT id, strategy_type, portfolio_id, lifecycle
+            FROM trading.strategy_registry WHERE id = %s
+            """ + (" FOR UPDATE" if for_update else ""),
             (strategy_id,),
         )
         return cursor.fetchone()
+
+    def _lock_lifecycle_books(self, cursor, strategy_row):
+        """Lock every current or historical evidence book canonically.
+
+        Membership removal is intentionally non-destructive: positions and the
+        assignment audit remain in the removed book. Limiting this set to current
+        membership would make removal a retirement bypass, so persisted position
+        scopes and both sides of assignment history remain part of the lock and
+        flatness universe.
+        """
+        cursor.execute(
+            """
+            SELECT portfolio_id FROM (
+                SELECT portfolio_id
+                FROM trading.strategy_book_memberships
+                WHERE strategy_id = %s
+                UNION
+                SELECT positions.portfolio_id
+                FROM trading.positions AS positions
+                JOIN trading.strategy_registry AS registry
+                  ON registry.strategy_type = positions.strategy_id
+                WHERE registry.id = %s
+                UNION
+                SELECT from_portfolio_id AS portfolio_id
+                FROM trading.portfolio_assignments
+                WHERE strategy_id = %s AND from_portfolio_id IS NOT NULL
+                UNION
+                SELECT to_portfolio_id AS portfolio_id
+                FROM trading.portfolio_assignments
+                WHERE strategy_id = %s AND to_portfolio_id IS NOT NULL
+            ) AS relevant_books
+            ORDER BY portfolio_id
+            """,
+            (
+                strategy_row["id"],
+                strategy_row["id"],
+                strategy_row["id"],
+                strategy_row["id"],
+            ),
+        )
+        books = [row["portfolio_id"] for row in cursor.fetchall()]
+        books.append(strategy_row["portfolio_id"])
+        acquire_qt_book_locks(cursor, *books)
+        return sorted(set(books))
+
+    def _ever_live(self, cursor, strategy_id, current_state):
+        if current_state == "live":
+            return True
+        cursor.execute(
+            """
+            SELECT EXISTS (
+                SELECT 1 FROM trading.strategy_lifecycle_log
+                WHERE strategy_id = %s
+                  AND (before_state = 'live' OR after_state = 'live')
+            ) AS ever_live
+            """,
+            (strategy_id,),
+        )
+        return bool(cursor.fetchone()["ever_live"])
+
+    def _require_effectively_flat(self, cursor, strategy_row, books, *, ever_live):
+        """Refuse any effective holding and fail closed on incomplete live evidence.
+
+        Position identity deliberately excludes the stream: QT and system are
+        competing views of the same engine/book/name/symbol identity. The newest
+        date wins for each identity and QT wins the tie, retaining explicit zero
+        rows as closure evidence.
+        """
+        cursor.execute(
+            """
+            SELECT portfolio_id, strategy_id, strategy_name, symbol, date,
+                   portfolio_type, quantity
+            FROM trading.positions
+            WHERE strategy_id = %s AND portfolio_id = ANY(%s)
+              AND portfolio_type IN ('qt', 'system')
+            ORDER BY portfolio_id, strategy_name, symbol, date DESC,
+                     CASE portfolio_type WHEN 'qt' THEN 0 ELSE 1 END
+            """,
+            (strategy_row["strategy_type"], books),
+        )
+        grouped = {}
+        for row in cursor.fetchall():
+            identity = (
+                row["portfolio_id"],
+                row["strategy_id"],
+                row["strategy_name"],
+                row["symbol"],
+            )
+            grouped.setdefault(identity, []).append(row)
+
+        unreliable = not grouped and ever_live
+        for rows in grouped.values():
+            newest = max(row["date"] for row in rows)
+            newest_rows = [row for row in rows if row["date"] == newest]
+            qt_rows = [row for row in newest_rows if row["portfolio_type"] == "qt"]
+            selected = qt_rows[0] if qt_rows else None
+            if selected is not None:
+                if selected["quantity"] != 0:
+                    raise OpenPositionsError("Strategy has open positions")
+                continue
+
+            # A never-live incubation may close without evidence, but it still
+            # cannot close over a published nonzero proposal.
+            if any(row["quantity"] != 0 for row in newest_rows):
+                if ever_live:
+                    unreliable = True
+                else:
+                    raise OpenPositionsError("Strategy has open positions")
+            elif ever_live:
+                unreliable = True
+
+        if unreliable:
+            raise PositionsUnavailableError("Reliable position evidence is unavailable")
 
     def _insert_lifecycle_audit(
         self, cursor, strategy_id, before_state, after_state, reason, user_id
@@ -529,42 +686,42 @@ class PostgresPortfolioRepository:
         )
 
     def start_incubation(self, strategy_id, mock_capital, reason, user_id):
-        if mock_capital <= 0:
-            raise IncubationError("mock_capital must be positive")
+        if not math.isfinite(mock_capital) or mock_capital <= 0:
+            raise IncubationError("mock_capital must be a positive finite number")
         if not reason or not reason.strip():
             raise IncubationError("reason must be non-empty")
 
         conn = self.connection_factory()
         try:
-            with conn.cursor() as cursor:
-                row = self._fetch_lifecycle(cursor, strategy_id)
-                if row is None:
-                    raise StrategyNotInRegistry(f"Strategy {strategy_id} not found")
-
-                current_state = row["lifecycle"]
-                if current_state == "incubating":
-                    raise IncubationError(f"Strategy {strategy_id} is already incubating")
-
-                cursor.execute(
-                    """
-                    UPDATE trading.strategy_registry
-                    SET lifecycle = %s, mock_capital = %s,
-                        incubation_started_at = now(), updated_at = now()
-                    WHERE id = %s
-                    """,
-                    ("incubating", mock_capital, strategy_id),
-                )
-                self._insert_lifecycle_audit(
-                    cursor,
-                    strategy_id,
-                    current_state,
-                    "incubating",
-                    reason,
-                    user_id,
-                )
-            conn.commit()
+            with conn:
+                with conn.cursor() as cursor:
+                    row = self._fetch_lifecycle(cursor, strategy_id, for_update=True)
+                    if row is None:
+                        raise StrategyNotInRegistry(f"Strategy {strategy_id} not found")
+                    current_state = row["lifecycle"]
+                    if current_state == "incubating":
+                        raise IncubationError(f"Strategy {strategy_id} is already incubating")
+                    books = self._lock_lifecycle_books(cursor, row)
+                    revalidated = self._fetch_lifecycle(cursor, strategy_id)
+                    if revalidated["lifecycle"] != current_state:
+                        raise IncubationStorageError("Lifecycle changed during transition")
+                    if current_state == "live":
+                        self._require_effectively_flat(
+                            cursor, row, books, ever_live=True
+                        )
+                    cursor.execute(
+                        """
+                        UPDATE trading.strategy_registry
+                        SET lifecycle = %s, mock_capital = %s,
+                            incubation_started_at = now(), updated_at = now()
+                        WHERE id = %s
+                        """,
+                        ("incubating", mock_capital, strategy_id),
+                    )
+                    self._insert_lifecycle_audit(
+                        cursor, strategy_id, current_state, "incubating", reason, user_id
+                    )
         except psycopg2.Error as exc:
-            conn.rollback()
             logger.error("Incubation write failed: %s", exc, exc_info=True)
             raise IncubationStorageError("Database error") from exc
         finally:
@@ -576,37 +733,33 @@ class PostgresPortfolioRepository:
 
         conn = self.connection_factory()
         try:
-            with conn.cursor() as cursor:
-                row = self._fetch_lifecycle(cursor, strategy_id)
-                if row is None:
-                    raise StrategyNotInRegistry(f"Strategy {strategy_id} not found")
-
-                current_state = row["lifecycle"]
-                if current_state != "incubating":
-                    raise IncubationError(
-                        f"Strategy {strategy_id} is not currently incubating"
+            with conn:
+                with conn.cursor() as cursor:
+                    row = self._fetch_lifecycle(cursor, strategy_id, for_update=True)
+                    if row is None:
+                        raise StrategyNotInRegistry(f"Strategy {strategy_id} not found")
+                    current_state = row["lifecycle"]
+                    if current_state != "incubating":
+                        raise IncubationError(
+                            f"Strategy {strategy_id} is not currently incubating"
+                        )
+                    self._lock_lifecycle_books(cursor, row)
+                    revalidated = self._fetch_lifecycle(cursor, strategy_id)
+                    if revalidated["lifecycle"] != current_state:
+                        raise IncubationStorageError("Lifecycle changed during transition")
+                    cursor.execute(
+                        """
+                        UPDATE trading.strategy_registry
+                        SET lifecycle = %s, mock_capital = NULL,
+                            incubation_started_at = NULL, updated_at = now()
+                        WHERE id = %s
+                        """,
+                        ("live", strategy_id),
                     )
-
-                cursor.execute(
-                    """
-                    UPDATE trading.strategy_registry
-                    SET lifecycle = %s, mock_capital = NULL,
-                        incubation_started_at = NULL, updated_at = now()
-                    WHERE id = %s
-                    """,
-                    ("live", strategy_id),
-                )
-                self._insert_lifecycle_audit(
-                    cursor,
-                    strategy_id,
-                    "incubating",
-                    "live",
-                    reason,
-                    user_id,
-                )
-            conn.commit()
+                    self._insert_lifecycle_audit(
+                        cursor, strategy_id, "incubating", "live", reason, user_id
+                    )
         except psycopg2.Error as exc:
-            conn.rollback()
             logger.error("Incubation write failed: %s", exc, exc_info=True)
             raise IncubationStorageError("Database error") from exc
         finally:
@@ -618,34 +771,56 @@ class PostgresPortfolioRepository:
 
         conn = self.connection_factory()
         try:
-            with conn.cursor() as cursor:
-                row = self._fetch_lifecycle(cursor, strategy_id)
-                if row is None:
-                    raise StrategyNotInRegistry(f"Strategy {strategy_id} not found")
-
-                current_state = row["lifecycle"]
-                cursor.execute(
-                    """
-                    UPDATE trading.strategy_registry
-                    SET lifecycle = %s, mock_capital = NULL,
-                        incubation_started_at = NULL, updated_at = now()
-                    WHERE id = %s
-                    """,
-                    ("retired", strategy_id),
-                )
-                self._insert_lifecycle_audit(
-                    cursor,
-                    strategy_id,
-                    current_state,
-                    "retired",
-                    reason,
-                    user_id,
-                )
-            conn.commit()
+            with conn:
+                with conn.cursor() as cursor:
+                    row = self._fetch_lifecycle(cursor, strategy_id, for_update=True)
+                    if row is None:
+                        raise StrategyNotInRegistry(f"Strategy {strategy_id} not found")
+                    current_state = row["lifecycle"]
+                    if current_state == "retired":
+                        return
+                    books = self._lock_lifecycle_books(cursor, row)
+                    revalidated = self._fetch_lifecycle(cursor, strategy_id)
+                    if revalidated["lifecycle"] != current_state:
+                        raise IncubationStorageError("Lifecycle changed during transition")
+                    ever_live = self._ever_live(cursor, strategy_id, current_state)
+                    self._require_effectively_flat(
+                        cursor, row, books, ever_live=ever_live
+                    )
+                    cursor.execute(
+                        """
+                        UPDATE trading.strategy_registry
+                        SET lifecycle = %s, mock_capital = NULL,
+                            incubation_started_at = NULL, updated_at = now()
+                        WHERE id = %s
+                        """,
+                        ("retired", strategy_id),
+                    )
+                    self._insert_lifecycle_audit(
+                        cursor, strategy_id, current_state, "retired", reason, user_id
+                    )
         except psycopg2.Error as exc:
-            conn.rollback()
             logger.error("Incubation write failed: %s", exc, exc_info=True)
             raise IncubationStorageError("Database error") from exc
+        finally:
+            conn.close()
+
+    def list_lifecycle_history(self, strategy_id, limit=100):
+        conn = self.connection_factory()
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    SELECT id, strategy_id, before_state, after_state, reason,
+                           user_id, created_at
+                    FROM trading.strategy_lifecycle_log
+                    WHERE strategy_id = %s
+                    ORDER BY created_at DESC, id DESC
+                    LIMIT %s
+                    """,
+                    (strategy_id, min(limit, 100)),
+                )
+                return [dict(row) for row in cursor.fetchall()]
         finally:
             conn.close()
 
@@ -657,63 +832,110 @@ class PostgresPortfolioRepository:
     # these are the only writes that make the two diverge, and every one of
     # them lands in trading.position_overrides in the same transaction.
 
-    def fetch_risk_envelope(self, strategy_type, portfolio_id):
-        """The most recent envelope trade-ngin published for this book.
+    def _fetch_risk_envelope(self, cursor, strategy_type, portfolio_id):
+        cursor.execute(
+            """
+            SELECT 1 FROM information_schema.tables
+            WHERE table_schema = 'trading' AND table_name = 'risk_limits'
+            """
+        )
+        if cursor.fetchone() is None:
+            return None
+        cursor.execute(
+            """
+            SELECT limits FROM trading.risk_limits
+            WHERE strategy_id = %s AND portfolio_id = %s
+            ORDER BY published_at DESC LIMIT 1
+            """,
+            (strategy_type, portfolio_id),
+        )
+        row = cursor.fetchone()
+        return row["limits"] if row else None
 
-        Returns None when the table does not exist yet (trade-ngin has not
-        shipped the publisher) or holds no row -- the gate reports that as
-        "not evaluated" rather than as a pass.
-        """
+    def fetch_risk_envelope(self, strategy_type, portfolio_id):
+        """The most recent envelope trade-ngin published for this book."""
         conn = self.connection_factory()
         try:
             with conn.cursor() as cursor:
-                cursor.execute(
-                    """
-                    SELECT 1 FROM information_schema.tables
-                    WHERE table_schema = 'trading' AND table_name = 'risk_limits'
-                    """
-                )
-                if cursor.fetchone() is None:
-                    return None
-
-                cursor.execute(
-                    """
-                    SELECT limits
-                    FROM trading.risk_limits
-                    WHERE strategy_id = %s AND portfolio_id = %s
-                    ORDER BY published_at DESC
-                    LIMIT 1
-                    """,
-                    (strategy_type, portfolio_id),
-                )
-                row = cursor.fetchone()
-                return row["limits"] if row else None
+                return self._fetch_risk_envelope(cursor, strategy_type, portfolio_id)
         finally:
             conn.close()
+
+    def _fetch_qt_book(self, cursor, strategy_type, portfolio_id, position_date):
+        cursor.execute(
+            """
+            SELECT symbol, strategy_name, date, quantity, average_price
+            FROM trading.positions
+            WHERE strategy_id = %s AND portfolio_id = %s
+              AND portfolio_type = %s AND date = %s
+            ORDER BY strategy_name, symbol
+            """,
+            (strategy_type, portfolio_id, QT_STREAM, position_date),
+        )
+        return [_plain_position(row) for row in cursor.fetchall()]
 
     def fetch_qt_book(self, strategy_type, portfolio_id):
-        """Today's qt positions, one row per symbol."""
+        """Today's QT positions, retaining individual strategy and zero evidence."""
         conn = self.connection_factory()
         try:
             with conn.cursor() as cursor:
-                cursor.execute(
-                    """
-                    SELECT DISTINCT ON (symbol)
-                           symbol, quantity, average_price
-                    FROM trading.positions
-                    WHERE strategy_id = %s
-                      AND portfolio_id = %s
-                      AND portfolio_type = %s
-                      AND quantity != 0
-                    ORDER BY symbol, updated_at DESC
-                    """,
-                    (strategy_type, portfolio_id, QT_STREAM),
+                return self._fetch_qt_book(
+                    cursor, strategy_type, portfolio_id, current_utc_date()
                 )
-                return [_plain_position(r) for r in cursor.fetchall()]
         finally:
             conn.close()
 
-    def _fetch_existing_position(self, cursor, strategy_type, portfolio_id, symbol):
+    def _strategy_is_book_member(self, cursor, strategy_id, portfolio_id):
+        """Current membership, with the migration-era primary-book fallback."""
+        cursor.execute(
+            """
+            SELECT to_regclass('trading.strategy_book_memberships') IS NOT NULL
+                   AS memberships_present
+            """
+        )
+        memberships_present = cursor.fetchone()["memberships_present"]
+        if memberships_present:
+            cursor.execute(
+                """
+                SELECT CASE
+                    WHEN EXISTS (
+                        SELECT 1 FROM trading.strategy_book_memberships
+                        WHERE strategy_id = %s
+                    ) THEN EXISTS (
+                        SELECT 1 FROM trading.strategy_book_memberships
+                        WHERE strategy_id = %s AND portfolio_id = %s
+                    )
+                    ELSE EXISTS (
+                        SELECT 1 FROM trading.strategy_registry
+                        WHERE id = %s AND portfolio_id = %s
+                    )
+                END AS is_member
+                """,
+                (strategy_id, strategy_id, portfolio_id, strategy_id, portfolio_id),
+            )
+        else:
+            cursor.execute(
+                """
+                SELECT EXISTS (
+                    SELECT 1 FROM trading.strategy_registry
+                    WHERE id = %s AND portfolio_id = %s
+                ) AS is_member
+                """,
+                (strategy_id, portfolio_id),
+            )
+        return bool(cursor.fetchone()["is_member"])
+
+    def _fetch_summary_if_available(self, cursor, strategy_type, portfolio_id):
+        """Preserve the advisory gate when the engine has no results table yet."""
+        cursor.execute(
+            "SELECT to_regclass('trading.live_results') IS NOT NULL AS present"
+        )
+        if not cursor.fetchone()["present"]:
+            return None
+        return self._fetch_summary_row(cursor, strategy_type, portfolio_id)
+
+    def _fetch_existing_position(self, cursor, strategy_type, portfolio_id, symbol,
+                                 strategy_name, position_date):
         # Lock the row for the rest of the transaction so we capture the true
         # before_state in the audit trail. If two QT members edit the same symbol
         # concurrently, or the engine's daily run writes between our read and
@@ -722,23 +944,23 @@ class PostgresPortfolioRepository:
         # is nothing to lock; the ON CONFLICT clause still makes the insert safe.
         cursor.execute(
             """
-            SELECT symbol, quantity, average_price,
+            SELECT symbol, strategy_name, date, quantity, average_price,
                    daily_unrealized_pnl, daily_realized_pnl
             FROM trading.positions
             WHERE strategy_id = %s
               AND portfolio_id = %s
               AND portfolio_type = %s
               AND symbol = %s
-            ORDER BY updated_at DESC
-            LIMIT 1
+              AND strategy_name = %s AND date = %s
             FOR UPDATE
             """,
-            (strategy_type, portfolio_id, QT_STREAM, symbol),
+            (strategy_type, portfolio_id, QT_STREAM, symbol, strategy_name, position_date),
         )
         row = cursor.fetchone()
         return _plain_position(row) if row else None
 
-    def _resolve_strategy_name(self, cursor, strategy_type, portfolio_id):
+    def _resolve_strategy_name(self, cursor, strategy_type, portfolio_id,
+                               symbol, position_date, requested_name=None):
         """The engine's own strategy_name for this book.
 
         strategy_name is part of the positions primary key and the engine
@@ -749,23 +971,35 @@ class PostgresPortfolioRepository:
         """
         cursor.execute(
             """
-            SELECT strategy_name
+            SELECT DISTINCT strategy_name
             FROM trading.positions
             WHERE portfolio_id = %s AND strategy_id = %s
-            ORDER BY updated_at DESC
-            LIMIT 1
+              AND portfolio_type = %s AND date = %s AND symbol = %s
             """,
-            (portfolio_id, strategy_type),
+            (portfolio_id, strategy_type, QT_STREAM, position_date, symbol),
         )
-        row = cursor.fetchone()
-        if row is None:
-            raise StrategyNameUnresolved(
-                f"No existing positions for strategy {strategy_type} in "
-                f"portfolio {portfolio_id}, so the engine's strategy_name cannot "
-                f"be determined. Refusing to guess: a wrong strategy_name writes "
-                f"a row the engine will never reconcile."
+        names = {row["strategy_name"] for row in cursor.fetchall()}
+        if not names:
+            # A new symbol has no row to bind. Only a unique current QT
+            # strategy (or an explicitly named member of that snapshot) may
+            # own it; an unrelated most-recent row is never a tie-breaker.
+            cursor.execute(
+                """
+                SELECT DISTINCT strategy_name FROM trading.positions
+                WHERE portfolio_id = %s AND strategy_id = %s
+                  AND portfolio_type = %s AND date = %s
+                """,
+                (portfolio_id, strategy_type, QT_STREAM, position_date),
             )
-        return row["strategy_name"]
+            names = {row["strategy_name"] for row in cursor.fetchall()}
+        if requested_name is not None:
+            names = names.intersection({requested_name})
+        if len(names) != 1 or any(not isinstance(name, str) or not name.strip() for name in names):
+            raise StrategyNameUnresolved(
+                f"Expected one QT position identity for {portfolio_id}/"
+                f"{strategy_type}/{symbol} on {position_date}; found {len(names)}."
+            )
+        return next(iter(names))
 
     def write_qt_position(
         self,
@@ -773,8 +1007,7 @@ class PostgresPortfolioRepository:
         portfolio_id,
         normalized,
         user_id,
-        verdict,
-        overrode_risk,
+        risk_check,
     ):
         """Upsert one qt position and its audit row, atomically.
 
@@ -787,14 +1020,65 @@ class PostgresPortfolioRepository:
         try:
             with conn:  # commits on success, rolls back on exception
                 with conn.cursor() as cursor:
-                    before = self._fetch_existing_position(
-                        cursor, strategy_type, portfolio_id, normalized["symbol"]
+                    strategy_row = self._fetch_lifecycle(
+                        cursor, normalized["strategy_id"], for_update=True
                     )
-                    after = build_after_state(before, normalized)
-                    strategy_name = self._resolve_strategy_name(
+                    if strategy_row is None:
+                        raise PositionValidationError(
+                            "strategy_not_found", "Strategy not found"
+                        )
+                    acquire_qt_book_locks(cursor, portfolio_id)
+                    revalidated = self._fetch_lifecycle(
+                        cursor, normalized["strategy_id"]
+                    )
+                    if revalidated["lifecycle"] == "retired":
+                        raise PositionValidationError(
+                            "strategy_retired",
+                            "A retired strategy cannot accept position edits",
+                        )
+                    # Sample after waiting for the book lock. A request queued
+                    # across UTC midnight must evaluate and write the new day,
+                    # matching the engine/report calendar.
+                    position_date = current_utc_date()
+                    if not self._strategy_is_book_member(
+                        cursor, normalized["strategy_id"], portfolio_id
+                    ):
+                        raise PositionValidationError(
+                            "not_a_member_of_book",
+                            f"{normalized['strategy_id']} does not belong to {portfolio_id}",
+                        )
+                    envelope = self._fetch_risk_envelope(
                         cursor, strategy_type, portfolio_id
                     )
-
+                    book = self._fetch_qt_book(
+                        cursor, strategy_type, portfolio_id, position_date
+                    )
+                    summary = self._fetch_summary_if_available(
+                        cursor, strategy_type, portfolio_id
+                    )
+                    verdict = risk_check(envelope, book, summary)
+                    overrode_risk = not verdict["passed"]
+                    strategy_name = self._resolve_strategy_name(
+                        cursor, strategy_type, portfolio_id, normalized["symbol"],
+                        position_date, normalized.get("strategy_name"),
+                    )
+                    # Reserve an absent identity before taking its snapshot.
+                    # SELECT ... FOR UPDATE protects an existing row, but locks
+                    # nothing when the row is absent. Two writers could therefore
+                    # both record {} as before_state, even though PostgreSQL later
+                    # serialised their upserts. INSERT ... DO NOTHING waits for a
+                    # competing engine/manual insert to commit or roll back; only
+                    # the loser then reads the committed row under FOR UPDATE.
+                    #
+                    # A quantity-only edit needs a price only if it wins this
+                    # reservation. Use a temporary valid value so the conflict
+                    # path can still reach and preserve an existing price. If it
+                    # really did create a row, build_after_state raises the
+                    # user-facing missing-price validation error and this whole
+                    # transaction rolls its temporary insert back.
+                    provisional_price = normalized["average_price"]
+                    if provisional_price is None:
+                        provisional_price = 0
                     cursor.execute(
                         """
                         INSERT INTO trading.positions
@@ -808,48 +1092,78 @@ class PostgresPortfolioRepository:
                         -- no default, so omitting them made every manual write
                         -- fail outright. A position created by hand this second
                         -- has accrued no PnL, and it was last touched now.
-                        -- On conflict none of the three is overwritten: they
-                        -- belong to the engine, and an edit to quantity is not
-                        -- a claim about PnL.
+                        -- On conflict nothing is overwritten. The loser must
+                        -- snapshot the winner before it can edit it and write
+                        -- an audit row with a truthful before_state.
                         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 0, 0, now(), now())
                         ON CONFLICT (portfolio_id, strategy_id, strategy_name, date,
                                      symbol, portfolio_type)
-                        DO UPDATE SET quantity      = EXCLUDED.quantity,
-                                      average_price = EXCLUDED.average_price,
-                                      updated_at    = now()
+                        DO NOTHING
                         RETURNING symbol, quantity, average_price
                         """,
                         (
                             portfolio_id,
                             strategy_type,
                             strategy_name,
-                            _date.today(),
+                            position_date,
                             normalized["symbol"],
                             QT_STREAM,
-                            after["quantity"],
-                            # after, not normalized: a blank price on an edit means
-                            # "keep it", and build_after_state already carried the
-                            # existing price forward. Writing the raw proposal here
-                            # wiped average_price on every quantity-only edit.
-                            after.get("average_price"),
+                            normalized["quantity"],
+                            provisional_price,
                         ),
                     )
+                    position = cursor.fetchone()
+                    if position is None:
+                        before = self._fetch_existing_position(
+                            cursor, strategy_type, portfolio_id, normalized["symbol"],
+                            strategy_name, position_date,
+                        )
+                        after = build_after_state(before, normalized)
+                        after.update(strategy_name=strategy_name, date=str(position_date),
+                                     portfolio_id=portfolio_id, portfolio_type=QT_STREAM)
+                        cursor.execute(
+                            """
+                            UPDATE trading.positions
+                            SET quantity = %s, average_price = %s, updated_at = now()
+                            WHERE portfolio_id = %s AND strategy_id = %s
+                              AND strategy_name = %s AND date = %s
+                              AND symbol = %s AND portfolio_type = %s
+                            RETURNING symbol, quantity, average_price
+                            """,
+                            (
+                                after["quantity"],
+                                after.get("average_price"),
+                                portfolio_id,
+                                strategy_type,
+                                strategy_name,
+                                position_date,
+                                normalized["symbol"],
+                                QT_STREAM,
+                            ),
+                        )
+                        position = cursor.fetchone()
+                    else:
+                        before = None
+                        after = build_after_state(before, normalized)
+                        after.update(strategy_name=strategy_name, date=str(position_date),
+                                     portfolio_id=portfolio_id, portfolio_type=QT_STREAM)
                     # Coerced, not raw: NUMERIC columns come back as Decimal and
                     # jsonify renders those as JSON strings. The 201 body was
                     # returning "quantity": "20", which any client parsing it as
                     # a number would get wrong.
-                    position = _plain_position(cursor.fetchone())
+                    position = _plain_position(position)
 
                     cursor.execute(
                         """
                         INSERT INTO trading.position_overrides
-                            (user_id, source_app, strategy_id, symbol,
+                            (portfolio_id, user_id, source_app, strategy_id, symbol,
                              before_state, after_state, reason,
                              risk_check_result, overrode_risk)
-                        VALUES (%s, 'algolens', %s, %s, %s, %s, %s, %s, %s)
+                        VALUES (%s, %s, 'algolens', %s, %s, %s, %s, %s, %s, %s)
                         RETURNING id
                         """,
                         (
+                            portfolio_id,
                             user_id,
                             strategy_type,
                             normalized["symbol"],
@@ -862,26 +1176,33 @@ class PostgresPortfolioRepository:
                     )
                     override_id = cursor.fetchone()["id"]
 
-            return {"position": position, "override_id": override_id}
+            return {
+                "position": position,
+                "override_id": override_id,
+                "risk_check": verdict,
+            }
         finally:
             conn.close()
 
-    def fetch_overrides(self, strategy_type, limit=100):
+    def fetch_overrides(self, strategy_type, portfolio_id, limit=100):
         """Recent audit entries. Read-only -- this table cannot be modified."""
         conn = self.connection_factory()
         try:
             with conn.cursor() as cursor:
                 cursor.execute(
                     """
-                    SELECT id, user_id, source_app, strategy_id, symbol,
-                           before_state, after_state, reason,
-                           risk_check_result, overrode_risk, created_at
-                    FROM trading.position_overrides
-                    WHERE strategy_id = %s
-                    ORDER BY created_at DESC
+                    SELECT o.id, o.user_id, o.source_app, o.strategy_id, o.symbol,
+                           o.before_state, o.after_state, o.reason,
+                           o.risk_check_result, o.overrode_risk, o.created_at
+                    FROM trading.position_overrides o
+                    LEFT JOIN trading.position_override_legacy_scopes legacy
+                           ON legacy.override_id = o.id
+                    WHERE COALESCE(o.portfolio_id, legacy.portfolio_id) = %s
+                      AND o.strategy_id = %s
+                    ORDER BY o.created_at DESC
                     LIMIT %s
                     """,
-                    (strategy_type, limit),
+                    (portfolio_id, strategy_type, limit),
                 )
                 return [dict(r) for r in cursor.fetchall()]
         finally:

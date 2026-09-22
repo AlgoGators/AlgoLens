@@ -24,6 +24,7 @@ import {
 } from '../domain/portfolio/incubationUtils';
 import { useTheme } from '../adapters/react/ThemeContext';
 import { IncubationActions } from './IncubationActions';
+import { formatBarDate } from '../domain/portfolio/formatBarDate';
 
 interface IncubationDetailProps {
   strategy: IncubatingStrategy;
@@ -234,7 +235,7 @@ export function IncubationDetail({
                     'Mock Equity',
                   ]}
                   labelFormatter={label =>
-                    new Date(label).toLocaleDateString('en-US', {
+                    formatBarDate(String(label), {
                       month: 'short',
                       day: 'numeric',
                       year: 'numeric',

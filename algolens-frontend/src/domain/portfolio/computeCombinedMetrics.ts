@@ -1,4 +1,9 @@
 import type { HeldCorrelations, Strategy, StrategyMetrics } from './portfolioData';
+import {
+  aggregateCommonCoverage,
+  EMPTY_COVERAGE,
+  type AggregateCoverage,
+} from './commonCoverage';
 
 // Shapes of the derived data the StrategyBuilder view renders. Extracted verbatim
 // from the old inline useMemo so the computation can live (and be tested) apart
@@ -60,7 +65,8 @@ export interface CombinedMetrics {
   /** Every instrument, ungrouped. This is what a holdings count means. */
   holdings: AllocationSlice[];
   strategyAllocation: StrategySlice[];
-  historicalPerformance: { date: string; return: number }[];
+  historicalPerformance: { date: string; return: number | null }[];
+  coverage: AggregateCoverage;
   advancedMetrics: AdvancedMetrics;
 }
 
@@ -105,6 +111,7 @@ function emptyCombined(): CombinedMetrics {
     holdings: [],
     strategyAllocation: [],
     historicalPerformance: [],
+    coverage: { ...EMPTY_COVERAGE },
     advancedMetrics: {
       sortinoRatio: null, informationRatio: null, hhi: 0, correlationMatrix: [],
       topHoldings: [], var95: null, correlationObservations: 0
@@ -226,16 +233,23 @@ export function informationRatioVsBenchmark(
   const streams = selected.map(s => s.equityByStream?.benchmark);
   if (streams.some(stream => !stream || stream.length === 0)) return null;
 
-  const benchmarkByDate = new Map<string, number>();
-  streams.forEach(stream => {
-    stream!.forEach(pt => {
-      benchmarkByDate.set(pt.date, (benchmarkByDate.get(pt.date) || 0) + pt.value);
-    });
-  });
+  const benchmark = aggregateCommonCoverage(selected.map((strategy, index) => ({
+    id: strategy.id,
+    points: streams[index]!,
+    historyBreaks: strategy.historyBreaks,
+  })));
+  if (!benchmark.coverage.comparableDailyReturns) return null;
 
-  // Only dates present in both curves. A book date the benchmark does not cover is
-  // not a day on which the benchmark returned zero.
-  const paired = bookCurve.filter(pt => benchmarkByDate.has(pt.date));
+  // Pair the already-common book curve with the already-common benchmark.
+  // A date missing from either side is an exclusion, never a zero return.
+  const pairCoverage = aggregateCommonCoverage([
+    { id: 'book', points: bookCurve },
+    { id: 'benchmark', points: benchmark.points },
+  ]);
+  if (!pairCoverage.coverage.comparableDailyReturns) return null;
+  const sharedDates = new Set(pairCoverage.points.map(point => point.date));
+  const paired = bookCurve.filter(point => sharedDates.has(point.date));
+  const benchmarkByDate = new Map(benchmark.points.map(point => [point.date, point.value]));
 
   // n points give n-1 returns, and dispersion needs at least two of those.
   if (paired.length < 3) return null;
@@ -351,24 +365,30 @@ export function computeCombinedMetrics(
     percentage: share(s.currentValue, totalValue)
   }));
 
-  // Combined equity curve: sum each selected strategy's REAL historical equity by
-  // date, then express it as cumulative % return from the first (earliest) point.
-  // Reads the actual per-strategy equity curves instead of simulating a series.
-  const equityByDate = new Map<string, number>();
-  selected.forEach(s => {
-    s.historicalData.forEach(pt => {
-      equityByDate.set(pt.date, (equityByDate.get(pt.date) || 0) + pt.value);
+  // A combined curve exists only on common coverage. Treating a missing
+  // strategy as zero turns inception or a publication hole into a capital
+  // gain/loss. Keep exclusions explicit and split every unsupported return.
+  const { points: combinedCurve, coverage } = aggregateCommonCoverage(
+    selected.map(strategy => ({
+      id: strategy.id,
+      points: strategy.historicalData,
+      historyBreaks: strategy.historyBreaks,
+    })),
+  );
+  const returnByDate = new Map<string, number | null>();
+  coverage.segments.forEach(segment => {
+    const baseEquity = segment[0]?.value ?? 0;
+    segment.forEach(point => {
+      returnByDate.set(
+        point.date,
+        baseEquity > 0 ? ((point.value - baseEquity) / baseEquity) * 100 : null,
+      );
     });
   });
-  const combinedCurve = Array.from(equityByDate.entries())
-    .map(([date, value]) => ({ date, value }))
-    .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-
-  const baseEquity = combinedCurve.length > 0 ? combinedCurve[0].value : 0;
-  const historicalPerformance = combinedCurve.map(pt => ({
-    date: pt.date,
-    return: baseEquity > 0 ? ((pt.value - baseEquity) / baseEquity) * 100 : 0
-  }));
+  coverage.excludedDates.forEach(item => returnByDate.set(item.date, null));
+  const historicalPerformance = Array.from(returnByDate.entries())
+    .map(([date, value]) => ({ date, return: value }))
+    .sort((a, b) => a.date.localeCompare(b.date));
 
   // Combine all finalized positions for PnL by symbol
   const symbolPnL: { [key: string]: number } = {};
@@ -388,11 +408,11 @@ export function computeCombinedMetrics(
 
   // Daily PnL: day-over-day change in the combined equity curve (real dollars),
   // most recent 31 days. Derived from the same real curve, not simulated.
-  const dailyPnL = combinedCurve
-    .map((pt, i) => ({
-      date: pt.date,
-      pnl: i === 0 ? 0 : pt.value - combinedCurve[i - 1].value
-    }))
+  const dailyPnL = coverage.segments
+    .flatMap(segment => segment.slice(1).map((point, index) => ({
+      date: point.date,
+      pnl: point.value - segment[index].value,
+    })))
     .slice(-31);
 
   // Weighted average metrics - MUST BE CALCULATED FIRST
@@ -461,12 +481,15 @@ export function computeCombinedMetrics(
   // sum. These were value-weighted averages, presented with the same labels
   // as the real thing. They are now read off the combined curve, the same
   // way Sortino and the information ratio already were.
-  const curveStats = curveStatistics(combinedCurve);
+  const curveStats = coverage.comparableDailyReturns
+    ? curveStatistics(combinedCurve)
+    : { volatility: null, maxDrawdown: null, winRate: null };
   weightedMetrics.volatility = curveStats.volatility;
   weightedMetrics.maxDrawdown = curveStats.maxDrawdown;
   weightedMetrics.winRate = curveStats.winRate;
-  weightedMetrics.executionsToday = selected.reduce(
-    (n, s) => n + (s.metrics.executionsToday ?? 0), 0);
+  weightedMetrics.executionsToday = selected.some(s => s.metrics.executionsToday == null)
+    ? null
+    : selected.reduce((n, s) => n + (s.metrics.executionsToday ?? 0), 0);
   weightedMetrics.avgWin = weighted(m => m.avgWin);
   weightedMetrics.avgLoss = weighted(m => m.avgLoss);
   weightedMetrics.profitFactor = weighted(m => m.profitFactor);
@@ -500,12 +523,14 @@ export function computeCombinedMetrics(
 
   // Calculate advanced risk metrics (NOW weightedMetrics is available)
   const sortinoRatio =
-    weightedMetrics.annualizedReturn === null
+    weightedMetrics.annualizedReturn === null || !coverage.comparableDailyReturns
       ? null
       : sortinoRatioFromCurve(combinedCurve, weightedMetrics.annualizedReturn);
 
   // Information Ratio: active return against the benchmark stream, annualised.
-  const informationRatio = informationRatioVsBenchmark(combinedCurve, selected);
+  const informationRatio = coverage.comparableDailyReturns
+    ? informationRatioVsBenchmark(combinedCurve, selected)
+    : null;
 
   // Herfindahl-Hirschman Index (concentration risk)
   const hhi = assetAllocation.reduce((sum, asset) =>
@@ -559,6 +584,7 @@ export function computeCombinedMetrics(
     holdings: assetAllocation,
     strategyAllocation,
     historicalPerformance,
+    coverage,
     advancedMetrics: {
       sortinoRatio,
       informationRatio,

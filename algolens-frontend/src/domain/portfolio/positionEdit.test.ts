@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildDiff,
   canSubmit,
+  isValidAveragePrice,
   initialState,
   reduce,
   type SubmitState,
@@ -142,6 +143,20 @@ describe('canSubmit', () => {
 
   it('accepts a negative quantity, which is a short', () => {
     expect(canSubmit('going short', '-2')).toBe(true);
+  });
+});
+
+describe('average price validation', () => {
+  it('accepts blank as preserve and finite non-negative prices', () => {
+    expect(isValidAveragePrice('')).toBe(true);
+    expect(isValidAveragePrice('0')).toBe(true);
+    expect(isValidAveragePrice('5310.75')).toBe(true);
+  });
+
+  it('rejects text, infinity, NaN and negative prices before JSON serialization', () => {
+    for (const value of ['abc', 'Infinity', 'NaN', '-0.01']) {
+      expect(isValidAveragePrice(value)).toBe(false);
+    }
   });
 });
 

@@ -2,6 +2,7 @@
 
 import logging
 import os
+import re
 from datetime import timedelta
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
@@ -14,6 +15,7 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 
 from algolens.adapters.http.auth import auth_bp
 from algolens.adapters.http.portfolio import portfolio_bp
+from algolens.adapters.http.runtime_control import runtime_control_bp
 from algolens.infrastructure.db.postgres import get_db_connection
 from extensions import limiter
 
@@ -98,8 +100,8 @@ def create_app():
             request.path,
             request.remote_addr,
         )
-        if request.get_json(silent=True):
-            data = request.get_json()
+        data = request.get_json(silent=True)
+        if isinstance(data, dict):
             safe_data = {
                 key: ("***" if key in ["password"] else value)
                 for key, value in data.items()
@@ -200,6 +202,17 @@ def create_app():
 
     app.register_blueprint(auth_bp, url_prefix="/auth")
     app.register_blueprint(portfolio_bp, url_prefix="/portfolio")
+    app.register_blueprint(runtime_control_bp, url_prefix="/portfolio")
+
+    release_sha = os.getenv("APP_RELEASE_SHA", "")
+    release_sha = release_sha.lower() if re.fullmatch(r"[0-9a-fA-F]{40}", release_sha) else None
+
+    @app.route("/version", methods=["GET"])
+    def version():
+        # Release identity is public and independent of database readiness.
+        response = jsonify({"release": release_sha})
+        response.headers["Cache-Control"] = "no-store"
+        return response
 
     @app.route("/health", methods=["GET"])
     def health_check():

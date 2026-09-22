@@ -3,6 +3,7 @@ import { AlertTriangle, X } from 'lucide-react';
 
 import { initialState, reduce } from '../domain/portfolio/portfolioAssignment';
 import { PortfolioApiService } from '../infrastructure/api/portfolioApi';
+import { useDialogLifecycle } from './useDialogLifecycle';
 
 interface RemoveFromBookModalProps {
   strategyId: string;
@@ -34,6 +35,7 @@ export function RemoveFromBookModal({
 }: RemoveFromBookModalProps) {
   const [state, dispatch] = useReducer(reduce, undefined, initialState);
   const mounted = useRef(true);
+  const inFlight = useRef(false);
   useEffect(() => () => { mounted.current = false; }, []);
 
   const [reason, setReason] = useState('');
@@ -44,9 +46,12 @@ export function RemoveFromBookModal({
 
   const isDark = theme === 'dark';
   const submitting = state.phase === 'submitting';
+  const dialogRef = useDialogLifecycle(onClose, submitting);
   const disabled = submitting || reason.trim().length === 0;
 
   async function handleSubmit() {
+    if (inFlight.current || reason.trim().length === 0) return;
+    inFlight.current = true;
     dispatch({ type: 'submit' });
     try {
       const result = await PortfolioApiService.removeStrategyFromBook({
@@ -73,6 +78,8 @@ export function RemoveFromBookModal({
         type: 'rejected',
         message: error instanceof Error ? error.message : 'Could not remove the strategy',
       });
+    } finally {
+      inFlight.current = false;
     }
   }
 
@@ -85,6 +92,10 @@ export function RemoveFromBookModal({
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-4">
       <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="remove-book-title"
         className={`w-full max-w-lg rounded-xl border shadow-xl ${
           isDark ? 'bg-black border-gray-800 text-white' : 'bg-white border-gray-200 text-black'
         }`}
@@ -95,13 +106,14 @@ export function RemoveFromBookModal({
           }`}
         >
           <div>
-            <h2 className="text-lg font-semibold">Remove {strategyName}</h2>
+            <h2 id="remove-book-title" className="text-lg font-semibold">Remove {strategyName}</h2>
             <p className={`text-sm ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
               from <span className="font-mono">{portfolioId}</span>
             </p>
           </div>
           <button
             onClick={onClose}
+            disabled={submitting}
             aria-label="Close"
             className={`rounded-lg p-2 ${isDark ? 'hover:bg-gray-800' : 'hover:bg-gray-100'}`}
           >
@@ -160,6 +172,7 @@ export function RemoveFromBookModal({
         >
           <button
             onClick={onClose}
+            disabled={submitting}
             className={`rounded-lg px-4 py-2 text-sm ${
               isDark ? 'bg-gray-800 hover:bg-gray-700' : 'bg-gray-100 hover:bg-gray-200'
             }`}

@@ -148,7 +148,7 @@ describe('the footer says what it excluded', () => {
       />,
     );
     expect(
-      screen.getByText(/Total excludes 1 position with no known price/),
+      screen.getByText(/Total excludes 1 position with unknown notional/),
     ).toBeTruthy();
   });
 
@@ -192,10 +192,86 @@ describe('the edit controls are offered only where a write would succeed', () =>
         positions={[position({ symbol: 'AA.v.0', name: 'Alpha' }), position({ symbol: 'BB.v.0', name: 'Bravo' })]}
         strategyId="trendfollowing"
         portfolioId="CONSERVATIVE_PORTFOLIO"
+        positionsEditable={true}
       />,
     );
     expect(screen.getByLabelText('Adjust AA.v.0')).toBeTruthy();
     expect(screen.getByLabelText('Adjust BB.v.0')).toBeTruthy();
+  });
+
+  it('fails closed when a legacy payload omits editability', () => {
+    role = 'admin';
+    render(
+      <PositionBreakdown
+        positions={[position({ strategyName: 'Engine A' } as Partial<Position>)]}
+        strategyId="trendfollowing"
+        portfolioId="CONSERVATIVE_PORTFOLIO"
+      />,
+    );
+
+    expect(screen.queryByLabelText(/^Adjust /)).toBeNull();
+    expect(screen.queryByText('Add position')).toBeNull();
+  });
+
+  it('does not invent an Add identity for an editable but empty snapshot', () => {
+    role = 'admin';
+    render(
+      <PositionBreakdown
+        positions={[]}
+        strategyId="trendfollowing"
+        portfolioId="CONSERVATIVE_PORTFOLIO"
+        positionsEditable={true}
+      />,
+    );
+
+    // The backend currently preserves zero-row identity internally but does
+    // not serialize it. No row means no engine-owned strategyName to send.
+    expect(screen.queryByText('Add position')).toBeNull();
+  });
+
+  it('uses the explicit server identity to add to an editable flat snapshot', () => {
+    role = 'admin';
+    render(
+      <PositionBreakdown
+        positions={[]}
+        strategyId="trendfollowing"
+        portfolioId="CONSERVATIVE_PORTFOLIO"
+        positionsEditable={true}
+        positionStrategyNames={['Engine A']}
+      />,
+    );
+
+    expect(screen.getByText('Add position')).toBeTruthy();
+  });
+
+  it('fails closed when the server supplies more than one add identity', () => {
+    role = 'admin';
+    render(
+      <PositionBreakdown
+        positions={[]}
+        strategyId="trendfollowing"
+        portfolioId="CONSERVATIVE_PORTFOLIO"
+        positionsEditable={true}
+        positionStrategyNames={['Engine A', 'Engine B']}
+      />,
+    );
+
+    expect(screen.queryByText('Add position')).toBeNull();
+  });
+
+  it('fails the whole add capability closed when one identity entry is malformed', () => {
+    role = 'admin';
+    render(
+      <PositionBreakdown
+        positions={[]}
+        strategyId="trendfollowing"
+        portfolioId="CONSERVATIVE_PORTFOLIO"
+        positionsEditable={true}
+        positionStrategyNames={['Engine A', null] as unknown as string[]}
+      />,
+    );
+
+    expect(screen.queryByText('Add position')).toBeNull();
   });
 });
 
@@ -209,7 +285,7 @@ describe('the table says which book it is showing', () => {
       />,
     );
     const heading = document.querySelector('h3') as HTMLElement;
-    expect(heading.textContent).toContain("Today's Positions");
+    expect(heading.textContent).toContain('Positions snapshot (date unavailable)');
     expect(within(heading).getByText('CONSERVATIVE_PORTFOLIO')).toBeTruthy();
   });
 
@@ -229,7 +305,110 @@ describe('the table says which book it is showing', () => {
     expect(screen.getByRole('combobox', { name: 'Book for these positions' })).toBeTruthy();
     // And the partial-view notice points at the box rather than elsewhere.
     expect(document.body.textContent).toContain(
-      'This strategy also trades in AGGRESSIVE_PORTFOLIO. Those positions, and their risk limits, are separate; choose the book in the box above to see them.',
+      'This strategy is also registered in AGGRESSIVE_PORTFOLIO for AlgoLens reporting. Positions and risk limits appear for a book only when published by the trading runtime; choose the book in the box above to see them.',
     );
+  });
+
+  it('does not claim that registry membership proves a flat strategy trades there', () => {
+    role = 'subscriber';
+    render(
+      <PositionBreakdown
+        positions={[]}
+        portfolioId="AUDIT_BOOK_A"
+        books={['AUDIT_BOOK_A', 'AUDIT_BOOK_B']}
+      />,
+    );
+
+    expect(document.body.textContent).toContain(
+      'This strategy is also registered in AUDIT_BOOK_B for AlgoLens reporting. Positions and risk limits appear for a book only when published by the trading runtime',
+    );
+    expect(document.body.textContent).not.toContain('also trades in');
+  });
+});
+
+describe('snapshot identity and edit availability', () => {
+  it('labels the actual snapshot and explains why an older snapshot is read-only', () => {
+    role = 'admin';
+    render(
+      <PositionBreakdown
+        positions={[position({ strategyName: 'Trend Engine A' } as Partial<Position>)]}
+        strategyId="trendfollowing"
+        portfolioId="MACRO_BOOK"
+        positionDate="2026-09-18"
+        positionsEditable={false}
+        positionEditUnavailableReason="Only the current engine snapshot can be edited."
+      />,
+    );
+    expect(screen.getByRole('heading', { name: /Positions snapshot 2026-09-18/i })).toBeTruthy();
+    expect(screen.queryByLabelText(/^Adjust /)).toBeNull();
+    expect(screen.getByText('Only the current engine snapshot can be edited.')).toBeTruthy();
+  });
+
+  it('renders same-symbol engine rows independently', () => {
+    render(
+      <PositionBreakdown
+        positions={[
+          position({ strategyName: 'Engine A' } as Partial<Position>),
+          position({ strategyName: 'Engine B', shares: 7 } as Partial<Position>),
+        ]}
+      />,
+    );
+    expect(screen.getAllByText('ES.v.0')).toHaveLength(2);
+  });
+});
+
+describe('the footer never promotes partial exposure to a complete total', () => {
+  function footer(): HTMLElement {
+    return screen.getByText('Total Notional').closest('div.grid') as HTMLElement;
+  }
+
+  it('renders unknown total and percentage when every notional is unknown', () => {
+    render(
+      <PositionBreakdown
+        positions={[
+          position({ symbol: 'AA.v.0', notional: null, marketPrice: null }),
+          position({ symbol: 'BB.v.0', notional: null, marketPrice: null }),
+        ]}
+      />,
+    );
+
+    expect(footer().textContent).not.toContain('$0.00');
+    expect(screen.getByText(/with unknown notional/)).toBeTruthy();
+    expect(footer().textContent).not.toContain('100.00%');
+    expect(footer().textContent).toContain('—');
+  });
+
+  it('marks a priced subtotal partial and makes no 100% completeness claim', () => {
+    render(
+      <PositionBreakdown
+        positions={[
+          position({ symbol: 'AA.v.0', notional: 600_000 }),
+          position({ symbol: 'BB.v.0', notional: null, marketPrice: null }),
+        ]}
+      />,
+    );
+
+    expect(footer().textContent).toContain('$600,000.00');
+    expect(within(footer()).getByText('partial')).toBeTruthy();
+    expect(footer().textContent).not.toContain('100.00%');
+    expect(screen.getByText('% of Known')).toBeTruthy();
+    expect(screen.queryByText('% of Total')).toBeNull();
+  });
+
+  it('retains the complete total when every row is priced', () => {
+    render(<PositionBreakdown positions={[position({ notional: 600_000 })]} />);
+    expect(footer().textContent).toContain('$600,000.00');
+    expect(footer().textContent).toContain('100.00%');
+  });
+});
+
+describe('the position table remains aligned on a narrow viewport', () => {
+  it('scrolls a fixed minimum-width table instead of compressing its columns', () => {
+    render(<PositionBreakdown positions={[position()]} />);
+
+    const header = screen.getByText('Market Price').closest('div.grid') as HTMLElement;
+    const table = header.parentElement as HTMLElement;
+    expect(table.className).toContain('min-w-[760px]');
+    expect(table.parentElement?.className).toContain('overflow-x-auto');
   });
 });

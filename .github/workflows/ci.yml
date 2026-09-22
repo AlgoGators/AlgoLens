@@ -1,8 +1,8 @@
 name: AlgoLens CI
 
 # Runs the backend and frontend test/build gates on every PR and on pushes to main.
-# The Deploy workflow is chained to this via workflow_run, so a red build here
-# blocks the production deploy.
+# Deployment is manual-only and separately checks this workflow's successful
+# main push run for the requested exact commit, plus operational approvals.
 
 on:
   push:
@@ -51,6 +51,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r algolens-api/requirements.txt
           pip install pytest
+
+      - name: Test guarded release orchestration offline
+        run: python deployment/test_release.py
 
       - name: Run backend tests
         # The suites are designed to run without a database (fail-closed guards run

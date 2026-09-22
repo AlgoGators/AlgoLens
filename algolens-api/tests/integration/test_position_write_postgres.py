@@ -24,7 +24,9 @@ Pointing this at ``algolens_demo`` once wiped the seeded demo mid-session.
     ALGOLENS_TEST_DB=postgresql://algolens@127.0.0.1:55432/algolens_test pytest tests/integration
 """
 
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 from decimal import Decimal
+from threading import Barrier
 
 import pytest
 
@@ -36,6 +38,7 @@ import psycopg2.extras
 
 from algolens.application.portfolio.ports import RiskAcknowledgementRequired
 from algolens.application.portfolio.use_cases import UpsertQtPosition
+from algolens.domain.portfolio.position_edit import PositionValidationError
 from algolens.infrastructure.portfolio.repositories import PostgresPortfolioRepository
 
 pytestmark = pytest.mark.integration
@@ -122,6 +125,34 @@ def db(monkeypatch):
                 overrode_risk BOOLEAN NOT NULL DEFAULT FALSE,
                 created_at TIMESTAMPTZ NOT NULL DEFAULT now()
             );
+            -- Migration 012 is deliberately additive: legacy rows stay
+            -- immutable and unscoped, while every new AlgoLens write must
+            -- name its book.  Keep this disposable fixture at that exact
+            -- post-migration contract; without the column all current writer
+            -- tests fail before they exercise their intended behavior.
+            ALTER TABLE trading.position_overrides
+                ADD COLUMN portfolio_id TEXT;
+            ALTER TABLE trading.position_overrides
+                ADD CONSTRAINT position_overrides_new_rows_require_portfolio
+                CHECK (portfolio_id IS NOT NULL) NOT VALID;
+            CREATE TABLE trading.position_override_legacy_scopes (
+                override_id BIGINT PRIMARY KEY
+                    REFERENCES trading.position_overrides(id),
+                portfolio_id TEXT NOT NULL,
+                inference_basis JSONB NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            );
+            CREATE INDEX idx_position_overrides_portfolio_strategy_created
+                ON trading.position_overrides
+                   (portfolio_id, strategy_id, created_at DESC);
+            CREATE RULE position_overrides_no_update AS
+                ON UPDATE TO trading.position_overrides DO INSTEAD NOTHING;
+            CREATE RULE position_overrides_no_delete AS
+                ON DELETE TO trading.position_overrides DO INSTEAD NOTHING;
+            CREATE RULE position_override_legacy_scopes_no_update AS
+                ON UPDATE TO trading.position_override_legacy_scopes DO INSTEAD NOTHING;
+            CREATE RULE position_override_legacy_scopes_no_delete AS
+                ON DELETE TO trading.position_override_legacy_scopes DO INSTEAD NOTHING;
             -- As migration 009 defines them, for the book tests below.
             CREATE TABLE trading.portfolios (
                 portfolio_id TEXT PRIMARY KEY, name TEXT NOT NULL,
@@ -317,6 +348,134 @@ def test_an_edit_inside_the_cap_needs_no_acknowledgement(db):
     assert float(_row(db)["quantity"]) == 5.0
 
 
+def test_concurrent_different_symbol_edits_recheck_the_serialized_book(db):
+    """Only one unacknowledged edit may cross a book-wide position-count cap."""
+    conn = db()
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE trading.positions SET quantity = 0 "
+                    "WHERE strategy_id = %s AND portfolio_id = %s AND symbol = 'ES'",
+                    (STRATEGY_TYPE, PORTFOLIO_ID),
+                )
+                cur.execute(
+                    """
+                    INSERT INTO trading.positions
+                        (strategy_id, strategy_name, portfolio_id, portfolio_type,
+                         symbol, quantity, average_price, daily_unrealized_pnl,
+                         daily_realized_pnl, date, last_update)
+                    VALUES (%s, %s, %s, 'qt', 'NQ', 0, 100, 0, 0,
+                            CURRENT_DATE, now())
+                    """,
+                    (STRATEGY_TYPE, STRATEGY_NAME, PORTFOLIO_ID),
+                )
+                cur.execute(
+                    "UPDATE trading.risk_limits "
+                    "SET limits = '{\"max_position_count\": 1}'::jsonb "
+                    "WHERE strategy_id = %s AND portfolio_id = %s",
+                    (STRATEGY_TYPE, PORTFOLIO_ID),
+                )
+    finally:
+        conn.close()
+    start = Barrier(2)
+    stale_read = Barrier(2)
+
+    class SynchronizeOldReadRepository(PostgresPortfolioRepository):
+        def fetch_qt_book(self, strategy_type, portfolio_id):
+            book = super().fetch_qt_book(strategy_type, portfolio_id)
+            stale_read.wait(timeout=5)
+            return book
+
+    def edit(symbol):
+        start.wait(timeout=5)
+        use_case = UpsertQtPosition(
+            _Registry(), SynchronizeOldReadRepository(connection_factory=db)
+        )
+        try:
+            result = use_case.execute(
+                {
+                    "strategy_id": STRATEGY_ID,
+                    "strategy_name": STRATEGY_NAME,
+                    "symbol": symbol,
+                    "quantity": 1,
+                    "average_price": 100,
+                    "reason": f"concurrent open {symbol}",
+                },
+                user_id="1",
+            )
+            return "written", result["risk_check"]
+        except RiskAcknowledgementRequired as exc:
+            return "refused", exc.verdict
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        outcomes = list(pool.map(edit, ("ES", "NQ")))
+
+    assert sorted(status for status, _ in outcomes) == ["refused", "written"]
+    refused = next(verdict for status, verdict in outcomes if status == "refused")
+    assert refused["passed"] is False
+    assert refused["breaches"] == [
+        {
+            "limit": "max_position_count",
+            "limit_value": 1.0,
+            "actual": 2,
+            "message": "2 open positions exceeds the cap of 1",
+        }
+    ]
+
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT count(*) AS count FROM trading.positions "
+                "WHERE strategy_id = %s AND portfolio_id = %s "
+                "AND portfolio_type = 'qt' AND date = CURRENT_DATE "
+                "AND quantity <> 0",
+                (STRATEGY_TYPE, PORTFOLIO_ID),
+            )
+            assert cur.fetchone()["count"] == 1
+            cur.execute("SELECT count(*) AS count FROM trading.position_overrides")
+            assert cur.fetchone()["count"] == 1
+    finally:
+        conn.close()
+
+
+def test_write_revalidates_current_book_membership_inside_its_transaction(db):
+    """A stale registry read cannot authorize a write after membership changed."""
+    conn = db()
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE trading.strategy_registry SET portfolio_id = 'OTHER_BOOK' "
+                    "WHERE id = %s",
+                    (STRATEGY_ID,),
+                )
+    finally:
+        conn.close()
+
+    with pytest.raises(PositionValidationError) as excinfo:
+        _use_case(db).execute(
+            {
+                "strategy_id": STRATEGY_ID,
+                "strategy_name": STRATEGY_NAME,
+                "symbol": "ES",
+                "quantity": 5,
+                "reason": "stale membership must not authorize this edit",
+            },
+            user_id="1",
+        )
+
+    assert excinfo.value.code == "not_a_member_of_book"
+    conn = db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT count(*) AS count FROM trading.position_overrides")
+            assert cur.fetchone()["count"] == 0
+    finally:
+        conn.close()
+
+
 # ---------------------------------------------------------------------------
 # Books. These need the real tables because the rules live partly in SQL: what
 # "in this book" means to delete_book, and where the primary goes on removal.
@@ -388,3 +547,40 @@ def test_removing_a_non_primary_book_leaves_the_primary_alone(db):
 
     assert outcome["primary_portfolio_id"] is None
     assert registry.get_any(STRATEGY_ID)["portfolio_id"] == primary
+
+
+def test_membership_removal_waits_for_the_same_book_transaction_lock(db):
+    registry = PostgresStrategyRegistry(connection_factory=db)
+    strategy = registry.get_any(STRATEGY_ID)
+    primary = strategy["portfolio_id"]
+    _put_in_two_books(db, primary)
+    audit = build_membership_audit(
+        strategy,
+        primary,
+        "remove",
+        user_id="1",
+        reason="serialize against a concurrent edit",
+        acknowledged=True,
+    )
+
+    control = db()
+    future = None
+    try:
+        with control.cursor() as cur:
+            cur.execute(
+                "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
+                (f"algolens:qt-book:{primary}",),
+            )
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(
+                registry.remove_membership, STRATEGY_ID, primary, audit
+            )
+            with pytest.raises(FutureTimeoutError):
+                future.result(timeout=0.25)
+            control.rollback()
+            outcome = future.result(timeout=5)
+    finally:
+        control.rollback()
+        control.close()
+
+    assert outcome["primary_portfolio_id"] == "MACRO_BOOK"

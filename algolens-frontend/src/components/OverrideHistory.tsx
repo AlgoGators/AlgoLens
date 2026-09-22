@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { AlertTriangle, History } from 'lucide-react';
 
 import { useTheme } from '../adapters/react/ThemeContext';
@@ -6,6 +6,9 @@ import { PortfolioApiService, type PositionOverride } from '../infrastructure/ap
 
 interface OverrideHistoryProps {
   strategyId: string;
+  portfolioId: string;
+  /** Increments after a successful same-scope edit. */
+  refreshKey?: number;
 }
 
 function quantityOf(state: Record<string, unknown> | null | undefined): string {
@@ -24,23 +27,27 @@ function quantityOf(state: Record<string, unknown> | null | undefined): string {
  * Overrides that went through a stated risk breach are called out: "which edits
  * were made over a warning" is the question this table exists to answer.
  */
-export function OverrideHistory({ strategyId }: OverrideHistoryProps) {
+export function OverrideHistory({ strategyId, portfolioId, refreshKey = 0 }: OverrideHistoryProps) {
   const { theme } = useTheme();
-  const [overrides, setOverrides] = useState<PositionOverride[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const scope = JSON.stringify([strategyId, portfolioId]);
+  const [state, setState] = useState<{
+    scope: string; overrides: PositionOverride[] | null; error: string | null;
+  }>({ scope, overrides: null, error: null });
+  const { overrides, error } = state.scope === scope
+    ? state : { overrides: null, error: null };
 
   const isDark = theme === 'dark';
 
-  const load = useCallback(async () => {
-    try {
-      setOverrides(await PortfolioApiService.getPositionOverrides(strategyId));
-      setError(null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not load the override history');
-    }
-  }, [strategyId]);
-
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    let cancelled = false;
+    setState({ scope, overrides: null, error: null });
+    void PortfolioApiService.getPositionOverrides(strategyId, portfolioId).then(
+      overrides => { if (!cancelled) setState({ scope, overrides, error: null }); },
+      err => { if (!cancelled) setState({ scope, overrides: null,
+        error: err instanceof Error ? err.message : 'Could not load the override history' }); },
+    );
+    return () => { cancelled = true; };
+  }, [strategyId, portfolioId, scope, refreshKey]);
 
   if (error) {
     return (
@@ -72,6 +79,9 @@ export function OverrideHistory({ strategyId }: OverrideHistoryProps) {
           </span>
         )}
       </div>
+      <p className={`mb-3 text-xs ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>
+        Newest 100 manual edits, newest first.
+      </p>
 
       {overrides.length === 0 ? (
         <div
@@ -82,68 +92,70 @@ export function OverrideHistory({ strategyId }: OverrideHistoryProps) {
           No manual edits recorded for this strategy.
         </div>
       ) : (
-        <div className={`rounded-lg border overflow-hidden ${isDark ? 'border-gray-800' : 'border-gray-200'}`}>
-          <div
-            className={`grid grid-cols-6 gap-4 p-4 text-sm border-b ${
-              isDark
-                ? 'bg-gray-900 border-gray-800 text-gray-400'
-                : 'bg-gray-50 border-gray-200 text-gray-500'
-            }`}
-          >
-            <div>When</div>
-            <div>Symbol</div>
-            <div className="text-right">Change</div>
-            <div>Who</div>
-            <div>Risk</div>
-            <div>Reason</div>
-          </div>
-
-          {overrides.map((override, index) => (
+        <div className={`rounded-lg border overflow-x-auto ${isDark ? 'border-gray-800' : 'border-gray-200'}`}>
+          <div className="min-w-[840px]">
             <div
-              key={override.id}
-              className={`grid grid-cols-6 gap-4 p-4 text-sm ${
-                index !== overrides.length - 1
-                  ? isDark
-                    ? 'border-b border-gray-800'
-                    : 'border-b border-gray-200'
-                  : ''
+              className={`grid grid-cols-6 gap-4 p-4 text-sm border-b ${
+                isDark
+                  ? 'bg-gray-900 border-gray-800 text-gray-400'
+                  : 'bg-gray-50 border-gray-200 text-gray-500'
               }`}
             >
-              <div className={isDark ? 'text-gray-400' : 'text-gray-500'}>
-                {new Date(override.created_at).toLocaleString('en-US', {
-                  month: 'short',
-                  day: 'numeric',
-                  hour: '2-digit',
-                  minute: '2-digit',
-                })}
-              </div>
-              <div className="font-mono">{override.symbol}</div>
-              <div className="text-right font-mono tabular-nums">
-                {quantityOf(override.before_state)} → {quantityOf(override.after_state)}
-              </div>
-              <div className={isDark ? 'text-gray-400' : 'text-gray-500'}>
-                {override.user_id}{' '}
-                <span className={`text-xs ${isDark ? 'text-gray-600' : 'text-gray-400'}`}>
-                  via {override.source_app}
-                </span>
-              </div>
-              <div>
-                {/* Three states, not two. "not checked" is what an unreachable
-                    risk envelope records, and it must never read as a pass. */}
-                {override.overrode_risk ? (
-                  <span className={`flex items-center gap-1 ${isDark ? 'text-amber-400' : 'text-amber-600'}`}>
-                    <AlertTriangle className="w-3.5 h-3.5" />
-                    overridden
-                  </span>
-                ) : override.risk_check_result?.evaluated === false ? (
-                  <span className={isDark ? 'text-gray-500' : 'text-gray-400'}>not checked</span>
-                ) : (
-                  <span className={isDark ? 'text-gray-400' : 'text-gray-500'}>passed</span>
-                )}
-              </div>
-              <div className={isDark ? 'text-gray-300' : 'text-gray-700'}>{override.reason}</div>
+              <div>When</div>
+              <div>Symbol</div>
+              <div className="text-right">Change</div>
+              <div>Who</div>
+              <div>Risk</div>
+              <div>Reason</div>
             </div>
-          ))}
+
+            {overrides.map((override, index) => (
+              <div
+                key={override.id}
+                className={`grid grid-cols-6 gap-4 p-4 text-sm ${
+                  index !== overrides.length - 1
+                    ? isDark
+                      ? 'border-b border-gray-800'
+                      : 'border-b border-gray-200'
+                    : ''
+                }`}
+              >
+                <div className={isDark ? 'text-gray-400' : 'text-gray-500'}>
+                  {new Date(override.created_at).toLocaleString('en-US', {
+                    month: 'short',
+                    day: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                  })}
+                </div>
+                <div className="font-mono">{override.symbol}</div>
+                <div className="text-right font-mono tabular-nums">
+                  {quantityOf(override.before_state)} → {quantityOf(override.after_state)}
+                </div>
+                <div className={isDark ? 'text-gray-400' : 'text-gray-500'}>
+                  {override.user_id}{' '}
+                  <span className={`text-xs ${isDark ? 'text-gray-600' : 'text-gray-400'}`}>
+                    via {override.source_app}
+                  </span>
+                </div>
+                <div>
+                  {/* Three states, not two. "not checked" is what an unreachable
+                      risk envelope records, and it must never read as a pass. */}
+                  {override.overrode_risk ? (
+                    <span className={`flex items-center gap-1 ${isDark ? 'text-amber-400' : 'text-amber-600'}`}>
+                      <AlertTriangle className="w-3.5 h-3.5" />
+                      overridden
+                    </span>
+                  ) : override.risk_check_result?.evaluated === false ? (
+                    <span className={isDark ? 'text-gray-500' : 'text-gray-400'}>not checked</span>
+                  ) : (
+                    <span className={isDark ? 'text-gray-400' : 'text-gray-500'}>passed</span>
+                  )}
+                </div>
+                <div className={isDark ? 'text-gray-300' : 'text-gray-700'}>{override.reason}</div>
+              </div>
+            ))}
+          </div>
         </div>
       )}
     </div>

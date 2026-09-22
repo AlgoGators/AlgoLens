@@ -1,6 +1,9 @@
 import { useMemo } from 'react';
 import { Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis, Legend } from 'recharts';
 import type { HistoricalDataPoint } from '../domain/portfolio/portfolioData';
+import type { HistoryBreak } from '../domain/portfolio/historySegments';
+import { aggregateCommonCoverage } from '../domain/portfolio/commonCoverage';
+import { formatBarDate } from '../domain/portfolio/formatBarDate';
 
 /**
  * Shows whether QT's decisions are adding value.
@@ -19,6 +22,7 @@ import type { HistoricalDataPoint } from '../domain/portfolio/portfolioData';
 
 interface Props {
     equityByStream?: Record<string, HistoricalDataPoint[]>;
+    historyBreaks?: HistoryBreak[];
     theme: 'light' | 'dark';
 }
 
@@ -62,13 +66,26 @@ function mergeByDate(
 const money = (n: number) =>
     `$${n.toLocaleString('en-US', { maximumFractionDigits: 0 })}`;
 
-export function AlphaAttribution({ equityByStream, theme }: Props) {
+export function AlphaAttribution({ equityByStream, historyBreaks, theme }: Props) {
     const dark = theme === 'dark';
 
-    const merged = useMemo(
-        () => (equityByStream ? mergeByDate(equityByStream) : []),
-        [equityByStream],
-    );
+    const namedStreams = useMemo(() => {
+        if (!equityByStream) return {};
+        return Object.fromEntries(
+            ['qt', 'benchmark', 'system']
+                .filter(name => equityByStream[name]?.length)
+                .map(name => [name, equityByStream[name]]),
+        );
+    }, [equityByStream]);
+
+    const merged = useMemo(() => {
+        const rows = mergeByDate(namedStreams);
+        for (const item of [...(historyBreaks ?? [])].sort((a, b) => a.date.localeCompare(b.date))) {
+            const index = rows.findIndex(row => String(row.date) >= item.date);
+            if (index > 0) rows.splice(index, 0, { date: `${item.date} (history break)` });
+        }
+        return rows;
+    }, [historyBreaks, namedStreams]);
 
     // The headline number: where the real book ended up versus where the
     // untouched system would have. Only meaningful once both streams exist.
@@ -77,16 +94,31 @@ export function AlphaAttribution({ equityByStream, theme }: Props) {
         const qt = equityByStream.qt;
         const bench = equityByStream.benchmark;
         if (!qt?.length || !bench?.length) return null;
-        const qtFinal = qt[qt.length - 1].value;
-        const benchFinal = bench[bench.length - 1].value;
-        return { qtFinal, benchFinal, diff: qtFinal - benchFinal };
-    }, [equityByStream]);
+        const common = aggregateCommonCoverage([
+            { id: 'qt', points: qt, historyBreaks },
+            { id: 'benchmark', points: bench, historyBreaks },
+        ]);
+        const comparisonDate = common.coverage.lastCommonDate;
+        if (!comparisonDate) return null;
+        const qtFinal = qt.find(point => point.date === comparisonDate)!.value;
+        const benchFinal = bench.find(point => point.date === comparisonDate)!.value;
+        return {
+            qtFinal,
+            benchFinal,
+            diff: qtFinal - benchFinal,
+            comparisonDate,
+            coverage: common.coverage,
+            qtLatest: qt[qt.length - 1].date,
+            benchmarkLatest: bench[bench.length - 1].date,
+        };
+    }, [equityByStream, historyBreaks]);
 
-    const streams = equityByStream ? Object.keys(equityByStream) : [];
+    const streams = Object.keys(namedStreams);
+    const hasRequiredStreams = streams.includes('qt') && streams.includes('benchmark');
 
     // Before the dual-portfolio migration there is only one stream, so there is
     // nothing to compare. Say so plainly rather than rendering an empty chart.
-    if (streams.length < 2) {
+    if (!hasRequiredStreams || !spread) {
         return (
             <div
                 className={`rounded-lg border p-6 ${dark ? 'border-gray-800 bg-gray-900/40' : 'border-gray-200 bg-gray-50'
@@ -96,9 +128,8 @@ export function AlphaAttribution({ equityByStream, theme }: Props) {
                     Discretionary alpha
                 </h3>
                 <p className={`text-sm ${dark ? 'text-gray-400' : 'text-gray-600'}`}>
-                    Not available yet. This compares the portfolio QT actually traded against
-                    what the system would have done untouched — it needs both streams, which
-                    begin accumulating once dual-portfolio tracking is live.
+                    Not available yet. This comparison needs both the QT and benchmark streams
+                    with at least one shared date.
                 </p>
             </div>
         );
@@ -131,9 +162,23 @@ export function AlphaAttribution({ equityByStream, theme }: Props) {
                         <div className={`text-xs ${dark ? 'text-gray-500' : 'text-gray-500'}`}>
                             {spread.diff >= 0 ? 'added by QT' : 'given up vs. system alone'}
                         </div>
+                        <div className={`text-xs ${dark ? 'text-gray-500' : 'text-gray-500'}`}>
+                            Compared on {formatBarDate(spread.comparisonDate)}
+                        </div>
                     </div>
                 )}
             </div>
+
+            {(spread.coverage.partial || spread.qtLatest !== spread.benchmarkLatest) && (
+                <p className={`mb-3 text-xs ${dark ? 'text-amber-400' : 'text-amber-700'}`}>
+                    {spread.coverage.excludedDates.length > 0
+                        ? `${spread.coverage.excludedDates.length} ${spread.coverage.excludedDates.length === 1 ? 'date' : 'dates'} excluded from the QT comparison. `
+                        : ''}
+                    {spread.qtLatest !== spread.benchmarkLatest
+                        ? `The latest QT point is ${formatBarDate(spread.qtLatest)}; benchmark is ${formatBarDate(spread.benchmarkLatest)}.`
+                        : ''}
+                </p>
+            )}
 
             <ResponsiveContainer width="100%" height={280}>
                 <LineChart data={merged}>
@@ -141,7 +186,7 @@ export function AlphaAttribution({ equityByStream, theme }: Props) {
                         dataKey="date"
                         tick={{ fontSize: 11, fill: dark ? '#6b7280' : '#9ca3af' }}
                         tickFormatter={(d: string) =>
-                            new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+                            formatBarDate(d, { month: 'short', day: 'numeric' })
                         }
                         minTickGap={40}
                     />
@@ -163,7 +208,7 @@ export function AlphaAttribution({ equityByStream, theme }: Props) {
                             STREAM_STYLE[name]?.label ?? name,
                         ]}
                         labelFormatter={(label) =>
-                            new Date(label).toLocaleDateString('en-US', {
+                            formatBarDate(String(label), {
                                 month: 'short',
                                 day: 'numeric',
                                 year: 'numeric',
@@ -185,7 +230,7 @@ export function AlphaAttribution({ equityByStream, theme }: Props) {
                             // baseline, so it is visually subordinate.
                             strokeDasharray={stream === 'system' ? '4 3' : undefined}
                             dot={false}
-                            connectNulls
+                            connectNulls={false}
                         />
                     ))}
                 </LineChart>

@@ -2,6 +2,8 @@
 
 from werkzeug.security import check_password_hash, generate_password_hash
 
+from algolens.application.runtime_control import RuntimeControlService
+from algolens.infrastructure.config.runtime_control import RuntimeControlConfig
 from algolens.infrastructure.db.postgres import execute_query, get_db_connection
 from algolens.infrastructure.identity.dev_config import EnvironmentDevAuthConfig
 from algolens.infrastructure.identity.repositories import PostgresUserRepository
@@ -9,6 +11,7 @@ from algolens.infrastructure.identity.security import WerkzeugPasswordHasher
 from algolens.infrastructure.identity.sessions import FlaskJwtSessionIssuer
 from algolens.infrastructure.portfolio.market_data import PostgresMarketData
 from algolens.infrastructure.portfolio.repositories import PostgresPortfolioRepository
+from algolens.infrastructure.portfolio.runtime_control import PostgresRuntimeControlRepository
 from algolens.infrastructure.portfolio.strategy_registry import PostgresStrategyRegistry
 
 
@@ -43,3 +46,11 @@ def create_market_data(connection_factory=None):
 
 def create_dev_auth_config():
     return EnvironmentDevAuthConfig()
+
+
+def create_runtime_control_service(connection_factory=None, environment=None):
+    """Compose runtime policy and persistence without opening a connection."""
+    return RuntimeControlService(
+        PostgresRuntimeControlRepository(connection_factory=connection_factory),
+        RuntimeControlConfig(environment),
+    )

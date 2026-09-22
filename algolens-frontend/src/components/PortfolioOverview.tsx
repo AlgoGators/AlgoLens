@@ -7,6 +7,7 @@ import type { PortfolioData } from '../domain/portfolio/portfolioData';
 import { useTheme } from '../adapters/react/ThemeContext';
 import { PortfolioGrouping } from './PortfolioGrouping';
 import { counted } from '../domain/text/pluralize';
+import { formatBarDate } from '../domain/portfolio/formatBarDate';
 
 interface PortfolioOverviewProps {
   data: PortfolioData;
@@ -18,8 +19,6 @@ interface PortfolioOverviewProps {
 export function PortfolioOverview({ data, onBuilderClick, onOpenStrategy }: PortfolioOverviewProps) {
   const [selectedPeriod, setSelectedPeriod] = useState('1M');
   const { theme } = useTheme();
-  const isPositive = data.totalReturn >= 0;
-
   const periods = ['1W', '1M', '3M', '1Y', 'ALL'];
 
   // Filter data based on selected period
@@ -27,6 +26,20 @@ export function PortfolioOverview({ data, onBuilderClick, onOpenStrategy }: Port
     () => filterByPeriod(data.historicalData, selectedPeriod),
     [selectedPeriod, data.historicalData]
   );
+  const chartData = useMemo(() => {
+    const values = new Map<string, number | null>(
+      filteredData.map(point => [point.date, point.value]),
+    );
+    const first = filteredData[0]?.date;
+    const last = filteredData[filteredData.length - 1]?.date;
+    for (const excluded of data.historicalCoverage?.excludedDates ?? []) {
+      if (first && last && excluded.date >= first && excluded.date <= last) {
+        values.set(excluded.date, null);
+      }
+    }
+    return Array.from(values, ([date, value]) => ({ date, value }))
+      .sort((a, b) => a.date.localeCompare(b.date));
+  }, [data.historicalCoverage, filteredData]);
 
   // Calculate period-specific return
   const windowReturn = useMemo(() => {
@@ -60,6 +73,14 @@ export function PortfolioOverview({ data, onBuilderClick, onOpenStrategy }: Port
             engine has not published results for yet.
           </div>
         )}
+        {data.historicalCoverage?.partial && (
+          <div className={`mb-2 text-sm ${theme === 'dark' ? 'text-amber-400' : 'text-amber-600'}`}>
+            Fund history uses common strategy coverage
+            {data.historicalCoverage.firstCommonDate && data.historicalCoverage.lastCommonDate
+              ? ` from ${formatBarDate(data.historicalCoverage.firstCommonDate)} to ${formatBarDate(data.historicalCoverage.lastCommonDate)}`
+              : ''}; {counted(data.historicalCoverage.excludedDates.length, 'date')} excluded.
+          </div>
+        )}
         {/* Null means the window holds fewer than two points, so there is no
             return to state. This used to state "$0.00 (+0.00%)" -- a flat
             period, rather than a period nothing is known about. */}
@@ -89,7 +110,7 @@ export function PortfolioOverview({ data, onBuilderClick, onOpenStrategy }: Port
 
       <div className="mb-4">
         <ResponsiveContainer width="100%" height={300}>
-          <LineChart data={filteredData}>
+          <LineChart data={chartData}>
             <defs>
               <linearGradient id="lineGradient" x1="0" y1="0" x2="0" y2="1">
                 <stop offset="0%" stopColor={gaining ? "#f97316" : "#ef4444"} stopOpacity={theme === 'dark' ? 0.2 : 0.1} />
@@ -116,7 +137,7 @@ export function PortfolioOverview({ data, onBuilderClick, onOpenStrategy }: Port
                 padding: '12px'
               }}
               formatter={(value: number) => [`$${value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, 'Fund Value']}
-              labelFormatter={(label) => new Date(label).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+              labelFormatter={(label) => formatBarDate(String(label))}
             />
             <Line
               type="linear"
@@ -125,6 +146,7 @@ export function PortfolioOverview({ data, onBuilderClick, onOpenStrategy }: Port
               strokeWidth={2}
               dot={false}
               fill="url(#lineGradient)"
+              connectNulls={false}
             />
           </LineChart>
         </ResponsiveContainer>

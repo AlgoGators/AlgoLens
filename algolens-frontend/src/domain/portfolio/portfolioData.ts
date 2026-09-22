@@ -1,6 +1,11 @@
 import type { HistoryBreak } from './historySegments';
+import type { AggregateCoverage } from './commonCoverage';
 export interface Position {
   symbol: string;
+  /** Engine-owned row identity. Required when writing this exact position. */
+  strategyName: string;
+  /** Snapshot containing this row, when supplied by the API. */
+  positionDate?: string | null;
   name: string;
   shares: number;
   /** Average entry price. Null when the engine has not published one. */
@@ -42,6 +47,7 @@ export interface Execution {
 
 export interface FinalizedPosition {
   symbol: string;
+  strategyName: string;
   quantity: number;
   /** Yesterday's average price, or null when the engine published none. */
   entryPrice: number | null;
@@ -71,12 +77,10 @@ export interface StrategyMetrics {
   /** Share of profitable DAYS on the equity curve, not of trades. */
   winRate: number | null;
   /**
-   * Fills recorded for TODAY. It was called totalTrades and shown as "Total
-   * Trades", which it has never been -- there is no lifetime trade count in
-   * live_results, and the engine's own comment says total_trades was removed
-   * pending closing-trade logic.
+   * Fills attributed to the selected execution date, or null when legacy rows
+   * cannot be attributed to the QT stream.
    */
-  executionsToday: number;
+  executionsToday: number | null;
   /** Mean daily percentage return on winning days. Percent, not dollars. */
   avgWin: number | null;
   /** Mean daily percentage loss on losing days, positive. Percent. */
@@ -142,6 +146,16 @@ export interface Strategy {
   return: number | null;
   returnPercent: number | null;
   positions: Position[];
+  /**
+   * Engine-owned identities valid for creating a row in this snapshot.
+   * Exactly one identity is required before the frontend may offer Add.
+   */
+  positionStrategyNames: string[];
+  /** Actual selected QT snapshot date, not necessarily the current day. */
+  positionDate: string | null;
+  /** True only when the current server-day row has resolvable engine identity. */
+  positionsEditable: boolean;
+  positionEditUnavailableReason: string | null;
   historicalData: HistoricalDataPoint[];
   /**
    * Equity curve per portfolio stream, keyed by stream name:
@@ -162,6 +176,11 @@ export interface Strategy {
   worstDay: number | null;
   metrics: StrategyMetrics;
   executions: Execution[];
+  /** False when legacy execution rows cannot be attributed to this stream. */
+  executionsAvailable?: boolean;
+  executionUnavailableReason?: string | null;
+  /** Server-selected live-results date used to scope attributed fills. */
+  executionDate?: string | null;
   finalizedPositions: FinalizedPosition[];
   managers: string[];
   lastUpdate: string;
@@ -179,10 +198,13 @@ export interface PortfolioData {
   /** Covers only strategies with published results. See strategiesAwaitingData. */
   totalValue: number;
   totalInvested: number;
-  totalReturn: number;
-  totalReturnPercent: number;
+  /** Null when any included strategy has no known starting equity. */
+  totalReturn: number | null;
+  /** Null for the same reason, or when the known basis is non-positive. */
+  totalReturnPercent: number | null;
   strategies: Strategy[];
   historicalData: HistoricalDataPoint[];
+  historicalCoverage?: AggregateCoverage;
   /**
    * How many strategies are excluded from the totals because the engine has
    * published nothing for them. Non-zero means the headline is partial and the

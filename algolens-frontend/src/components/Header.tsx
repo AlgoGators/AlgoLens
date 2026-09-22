@@ -126,6 +126,7 @@ export function Header({
             <div className="relative">
               <button
                 onClick={() => setShowNotification(!showNotification)}
+                aria-label="Notifications"
                 className={`p-2 rounded-full transition-colors relative ${theme === 'dark'
                   ? 'hover:bg-gray-900'
                   : 'hover:bg-gray-100'
@@ -148,6 +149,7 @@ export function Header({
                     <h3 className="font-semibold">Notifications</h3>
                     <button
                       onClick={() => setShowNotification(false)}
+                      aria-label="Close notifications"
                       className={`p-1 rounded hover:bg-gray-800 ${theme === 'dark' ? 'hover:bg-gray-800' : 'hover:bg-gray-100'}`}
                     >
                       <X className="w-4 h-4" />
@@ -167,6 +169,7 @@ export function Header({
             </div>
             <button
               onClick={onProfileClick}
+              aria-label="Open account"
               className={`p-2 rounded-full transition-colors ${theme === 'dark'
                 ? 'hover:bg-gray-900'
                 : 'hover:bg-gray-100'

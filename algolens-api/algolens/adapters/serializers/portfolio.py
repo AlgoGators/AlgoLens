@@ -118,6 +118,23 @@ def serialize_assignment_history(rows):
     }
 
 
+def serialize_lifecycle_history(rows):
+    return {
+        "history": [
+            {
+                "id": row["id"],
+                "strategy_id": row["strategy_id"],
+                "before_state": row["before_state"],
+                "after_state": row["after_state"],
+                "reason": row["reason"],
+                "user_id": row["user_id"],
+                "created_at": _isoformat(row["created_at"]),
+            }
+            for row in rows
+        ]
+    }
+
+
 def serialize_book(book):
     return {
         "portfolio_id": book["portfolio_id"],

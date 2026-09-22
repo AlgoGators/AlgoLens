@@ -6,8 +6,12 @@ import { isValidPortfolioId, normalizePortfolioId } from '../domain/portfolio/po
 import { pluralize } from '../domain/text/pluralize';
 import { PortfolioApiService, type Book } from '../infrastructure/api/portfolioApi';
 import { RemoveFromBookModal } from './RemoveFromBookModal';
+import { RuntimeControlPanel } from './RuntimeControlPanel';
+import { StrategyHistoryPanel } from './StrategyHistoryPanel';
+import { StrategyLifecycleControls } from './StrategyLifecycleControls';
 
 type RemoveTarget = { strategyId: string; strategyName: string; portfolioId: string };
+const UNCERTAIN_OUTCOME = 'The request failed before a response was received. The outcome is uncertain; refresh the books before retrying.';
 
 /**
  * Define the books, and decide what goes in each.
@@ -37,6 +41,7 @@ export function BooksScreen() {
   const [newName, setNewName] = useState('');
   const [newDescription, setNewDescription] = useState('');
   const [creating, setCreating] = useState(false);
+  const [historyVersion, setHistoryVersion] = useState<Record<string, number>>({});
 
   const isDark = theme === 'dark';
 
@@ -68,8 +73,10 @@ export function BooksScreen() {
       setNewName('');
       setNewDescription('');
       setError(null);
-      setNotice(`${result.book.portfolio_id} is ready. Move strategies into it below.`);
+      setNotice(`${result.book.portfolio_id} is ready in AlgoLens. Add registry membership below.`);
       await load();
+    } catch {
+      setError(UNCERTAIN_OUTCOME);
     } finally {
       setCreating(false);
     }
@@ -77,13 +84,17 @@ export function BooksScreen() {
 
   async function handleDelete(book: Book) {
     setNotice(null);
-    const result = await PortfolioApiService.deleteBook(book.portfolio_id);
-    if (result.outcome === 'rejected') {
-      setError(result.message);
-      return;
+    try {
+      const result = await PortfolioApiService.deleteBook(book.portfolio_id);
+      if (result.outcome === 'rejected') {
+        setError(result.message);
+        return;
+      }
+      setError(null);
+      await load();
+    } catch {
+      setError(UNCERTAIN_OUTCOME);
     }
-    setError(null);
-    await load();
   }
 
   const inputClass = `w-full px-3 py-2 rounded-lg border text-sm ${
@@ -109,18 +120,30 @@ export function BooksScreen() {
 
   async function handleAdd(book: Book) {
     setNotice(null);
-    const result = await PortfolioApiService.addStrategyToBook({
-      portfolio_id: book.portfolio_id,
-      strategy_id: addStrategyId,
-      reason: addReason.trim(),
-    });
-    if (result.outcome === 'rejected') {
-      setError(result.message);
-      return;
+    try {
+      const result = await PortfolioApiService.addStrategyToBook({
+        portfolio_id: book.portfolio_id,
+        strategy_id: addStrategyId,
+        reason: addReason.trim(),
+      });
+      if (result.outcome === 'rejected') {
+        setError(result.message);
+        return;
+      }
+      setAddingTo(null);
+      setError(null);
+      await load();
+    } catch {
+      setError(UNCERTAIN_OUTCOME);
     }
-    setAddingTo(null);
-    setError(null);
+  }
+
+  async function handleLifecycleChanged(strategyId: string) {
     await load();
+    setHistoryVersion(current => ({
+      ...current,
+      [strategyId]: (current[strategyId] ?? 0) + 1,
+    }));
   }
 
   return (
@@ -128,8 +151,9 @@ export function BooksScreen() {
       <div>
         <h1 className="text-2xl mb-1">Books</h1>
         <p className={`text-sm ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
-          A book is a portfolio the engine trades and reports on separately. Define one
-          here, then decide which strategies belong in it.
+          Manage AlgoLens registry and reporting membership for each book. Changes here
+          do not immediately start or stop a process or deploy capital. They can block the
+          next engine publication until separate eligible-admin next-run approval is applied.
         </p>
       </div>
 
@@ -151,7 +175,7 @@ export function BooksScreen() {
             />
             <p className={`mt-1 text-xs ${idIsValid ? (isDark ? 'text-gray-500' : 'text-gray-400') : 'text-red-500'}`}>
               {idIsValid
-                ? 'Letters, digits, underscores and hyphens. Used by the engine.'
+                ? 'Letters, digits, underscores and hyphens. This is the AlgoLens registry identifier.'
                 : 'Only letters, digits, underscores and hyphens.'}
             </p>
           </div>
@@ -193,7 +217,7 @@ export function BooksScreen() {
       </div>
 
       {error && (
-        <div className="rounded-lg border border-red-500/50 bg-red-500/10 px-4 py-3 text-sm text-red-600 dark:text-red-400">
+        <div role="alert" className="rounded-lg border border-red-500/50 bg-red-500/10 px-4 py-3 text-sm text-red-600 dark:text-red-400">
           {error}
         </div>
       )}
@@ -263,46 +287,67 @@ export function BooksScreen() {
                 book.strategies.map(strategy => (
                   <div
                     key={strategy.id}
-                    className={`flex items-center justify-between px-4 py-3 border-b last:border-b-0 ${
+                    className={`px-4 py-3 border-b last:border-b-0 ${
                       isDark ? 'border-gray-800 hover:bg-gray-900' : 'border-gray-100 hover:bg-gray-50'
                     }`}
                   >
-                    <div>
-                      <div className="text-sm">{strategy.name}</div>
-                      <div className={`text-xs font-mono ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>
-                        {strategy.strategy_type}
-                        {strategy.lifecycle !== 'live' && (
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <div className="text-sm">{strategy.name}</div>
+                        <div className={`text-xs font-mono ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>
+                          {strategy.strategy_type}
                           <span className="ml-2 uppercase">· {strategy.lifecycle}</span>
+                        </div>
+                      </div>
+                      <div className="flex flex-wrap items-center justify-end gap-2">
+                        {strategy.is_primary && (
+                          <span
+                            className={`rounded-full px-2 py-0.5 text-[10px] uppercase tracking-wide ${
+                              isDark ? 'bg-gray-800 text-gray-400' : 'bg-gray-200 text-gray-600'
+                            }`}
+                            title="Primary book in the AlgoLens registry. Trading runtime selection is configured separately."
+                          >
+                            primary
+                          </span>
                         )}
+                        <StrategyLifecycleControls
+                          strategyId={strategy.id}
+                          strategyName={strategy.name}
+                          lifecycle={strategy.lifecycle}
+                          theme={theme}
+                          onChanged={() => handleLifecycleChanged(strategy.id)}
+                        />
+                        <button
+                          aria-label={`Remove ${strategy.name} from ${book.portfolio_id}`}
+                          onClick={() =>
+                            setRemoving({
+                              strategyId: strategy.id,
+                              strategyName: strategy.name,
+                              portfolioId: book.portfolio_id,
+                            })
+                          }
+                          className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs ${
+                            isDark ? 'hover:bg-gray-800' : 'hover:bg-gray-200'
+                          }`}
+                        >
+                          <X className="w-3.5 h-3.5" />
+                          Remove
+                        </button>
                       </div>
                     </div>
-                    <div className="flex items-center gap-3">
-                      {strategy.is_primary && (
-                        <span
-                          className={`rounded-full px-2 py-0.5 text-[10px] uppercase tracking-wide ${
-                            isDark ? 'bg-gray-800 text-gray-400' : 'bg-gray-200 text-gray-600'
-                          }`}
-                          title="The book the engine reads where a single answer is needed"
-                        >
-                          primary
-                        </span>
-                      )}
-                      <button
-                        aria-label={`Remove ${strategy.name} from ${book.portfolio_id}`}
-                        onClick={() =>
-                          setRemoving({
-                            strategyId: strategy.id,
-                            strategyName: strategy.name,
-                            portfolioId: book.portfolio_id,
-                          })
-                        }
-                        className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs ${
-                          isDark ? 'hover:bg-gray-800' : 'hover:bg-gray-200'
-                        }`}
-                      >
-                        <X className="w-3.5 h-3.5" />
-                        Remove
-                      </button>
+                    <div className="mt-2">
+                      <StrategyHistoryPanel
+                        strategyId={strategy.id}
+                        strategyName={strategy.name}
+                        theme={theme}
+                        refreshToken={historyVersion[strategy.id] ?? 0}
+                      />
+                      <RuntimeControlPanel
+                        strategyId={strategy.id}
+                        portfolioId={book.portfolio_id}
+                        strategyName={strategy.name}
+                        refreshKey={`${strategy.lifecycle}:${historyVersion[strategy.id] ?? 0}`}
+                      />
                     </div>
                   </div>
                 ))

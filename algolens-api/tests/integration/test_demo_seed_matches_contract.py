@@ -114,3 +114,33 @@ def test_the_seed_declares_the_columns_the_write_path_depends_on(seeded):
             "that difference is what hid the write bug"
         )
     assert columns["average_price"] == "NO"
+
+
+def test_the_seed_preserves_migration_012_audit_protections(seeded):
+    """The demo must keep 012's scope, index and append-only guarantees."""
+    with seeded.cursor() as cur:
+        cur.execute(
+            "SELECT convalidated FROM pg_constraint "
+            "WHERE conname = 'position_overrides_new_rows_require_portfolio'"
+        )
+        constraint = cur.fetchone()
+        cur.execute(
+            "SELECT indexdef FROM pg_indexes "
+            "WHERE schemaname = 'trading' "
+            "AND indexname = 'idx_position_overrides_portfolio_strategy_created'"
+        )
+        index = cur.fetchone()
+        cur.execute(
+            "SELECT rulename FROM pg_rules WHERE schemaname = 'trading' "
+            "AND tablename IN ('position_overrides', 'position_override_legacy_scopes')"
+        )
+        rules = {row[0] for row in cur.fetchall()}
+
+    assert constraint == (False,)
+    assert index and "(portfolio_id, strategy_id, created_at DESC)" in index[0]
+    assert rules >= {
+        "position_overrides_no_update",
+        "position_overrides_no_delete",
+        "position_override_legacy_scopes_no_update",
+        "position_override_legacy_scopes_no_delete",
+    }

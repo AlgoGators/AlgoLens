@@ -166,16 +166,22 @@ STRATEGY_REGISTRY = TableContract(
 
 POSITION_OVERRIDES = TableContract(
     name="trading.position_overrides",
-    source="trade-ngin migration 004",
+    source="trade-ngin migrations 004 and 012",
     reads=(
-        "id", "user_id", "source_app", "strategy_id", "symbol", "before_state",
+        "id", "portfolio_id", "user_id", "source_app", "strategy_id", "symbol", "before_state",
         "after_state", "reason", "risk_check_result", "overrode_risk", "created_at",
     ),
     writes=(
-        "user_id", "source_app", "strategy_id", "symbol", "before_state",
+        "portfolio_id", "user_id", "source_app", "strategy_id", "symbol", "before_state",
         "after_state", "reason", "risk_check_result", "overrode_risk",
     ),
     inserts_rows=True,
+)
+
+POSITION_OVERRIDE_LEGACY_SCOPES = TableContract(
+    name="trading.position_override_legacy_scopes",
+    source="trade-ngin migration 012",
+    reads=("override_id", "portfolio_id"),
 )
 
 RISK_LIMITS = TableContract(
@@ -253,7 +259,8 @@ CONTRACT_METADATA = TableContract(
 
 CONTRACTS = (
     POSITIONS, EQUITY_CURVE, LIVE_RESULTS, EXECUTIONS, STRATEGY_REGISTRY,
-    POSITION_OVERRIDES, RISK_LIMITS, PORTFOLIOS, MEMBERSHIPS, ASSIGNMENTS,
+    POSITION_OVERRIDES, POSITION_OVERRIDE_LEGACY_SCOPES, RISK_LIMITS, PORTFOLIOS,
+    MEMBERSHIPS, ASSIGNMENTS,
     PRICE_BARS, CONTRACT_METADATA,
 )
 

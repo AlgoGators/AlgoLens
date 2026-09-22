@@ -407,6 +407,36 @@ CREATE TABLE trading.position_overrides (
     created_at        TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- From trade-ngin migration 012.  The demo starts with no legacy overrides,
+-- but it must expose the post-migration shape the write and history paths use:
+-- every new override names its book, and the companion remains available for
+-- immutable legacy attribution when a real migrated database has old rows.
+ALTER TABLE trading.position_overrides
+    ADD COLUMN portfolio_id TEXT;
+ALTER TABLE trading.position_overrides
+    ADD CONSTRAINT position_overrides_new_rows_require_portfolio
+    CHECK (portfolio_id IS NOT NULL) NOT VALID;
+
+CREATE TABLE trading.position_override_legacy_scopes (
+    override_id     BIGINT PRIMARY KEY REFERENCES trading.position_overrides(id),
+    portfolio_id    TEXT NOT NULL,
+    inference_basis JSONB NOT NULL,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_position_overrides_portfolio_strategy_created
+    ON trading.position_overrides (portfolio_id, strategy_id, created_at DESC);
+
+-- Both audit relations are append-only, as in migrations 004 and 012.
+CREATE RULE position_overrides_no_update AS
+    ON UPDATE TO trading.position_overrides DO INSTEAD NOTHING;
+CREATE RULE position_overrides_no_delete AS
+    ON DELETE TO trading.position_overrides DO INSTEAD NOTHING;
+CREATE RULE position_override_legacy_scopes_no_update AS
+    ON UPDATE TO trading.position_override_legacy_scopes DO INSTEAD NOTHING;
+CREATE RULE position_override_legacy_scopes_no_delete AS
+    ON DELETE TO trading.position_override_legacy_scopes DO INSTEAD NOTHING;
+
 -- From trade-ngin migration 005
 CREATE TABLE trading.risk_limits (
     id           BIGSERIAL PRIMARY KEY,

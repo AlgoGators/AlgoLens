@@ -57,6 +57,7 @@ describe('the book on a strategy card', () => {
     expect(screen.getByTestId('card-book').textContent).toBe(
       'In 2 books · figures for CONSERVATIVE_PORTFOLIO',
     );
+    expect(screen.getByTestId('card-book').getAttribute('title')).toContain('Positions snapshot');
   });
 });
 

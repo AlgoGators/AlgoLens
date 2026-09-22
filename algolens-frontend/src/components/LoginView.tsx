@@ -44,6 +44,7 @@ export function LoginView({ onNavigateToRegister }: LoginViewProps) {
           )}
 
           <div>
+            <label className="sr-only" htmlFor="email">Email</label>
             <input
               id="email"
               type="email"
@@ -57,6 +58,7 @@ export function LoginView({ onNavigateToRegister }: LoginViewProps) {
           </div>
 
           <div>
+            <label className="sr-only" htmlFor="password">Password</label>
             <input
               id="password"
               type="password"
@@ -79,9 +81,15 @@ export function LoginView({ onNavigateToRegister }: LoginViewProps) {
         </form>
 
         <div className="mt-6 text-center">
-          <button className="text-orange-500 text-sm hover:text-orange-600">
+          <button
+            disabled
+            aria-disabled="true"
+            title="Password reset is not available yet"
+            className="text-gray-400 text-sm cursor-not-allowed"
+          >
             Forgot your password?
           </button>
+          <p className="mt-1 text-xs text-gray-500">Password reset is not available yet.</p>
         </div>
 
         <div className="mt-8 pt-8 border-t border-gray-200 text-center">

@@ -11,6 +11,8 @@ import { ArrowLeft, TrendingUp, TrendingDown } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, ResponsiveContainer, Tooltip } from 'recharts';
 import type { Strategy } from '../domain/portfolio/portfolioData';
 import { useTheme } from '../adapters/react/ThemeContext';
+import { useAuth } from '../adapters/react/useAuth';
+import { isInternalRole } from '../domain/identity/user';
 import { FinancialAnalysis } from './FinancialAnalysis';
 import { PositionBreakdown } from './PositionBreakdown';
 import { PortfolioApiService } from '../infrastructure/api/portfolioApi';
@@ -55,6 +57,7 @@ export function StrategyDetail({
   // yet -- the normal state of a strategy just added to a book. Nothing is
   // drawn for it, rather than the primary book's numbers under its name.
   const [emptyBook, setEmptyBook] = useState<string | null>(null);
+  const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
   // Only the newest request may land. Switching books quickly must not let a
   // slow answer for the first book overwrite the second.
   const latestRequest = useRef(0);
@@ -63,6 +66,7 @@ export function StrategyDetail({
   // history, metrics, executions and positions all by (strategy, book). So the
   // whole page renders from the chosen book, not just the positions table.
   const shown = bookDetail ?? strategy;
+  const shownPortfolioId = shown.portfolio_id ?? book;
 
   // `onScreen` is the book currently rendered. If loading `target` fails for
   // any reason other than "no data yet", the picker goes back to it, so the
@@ -140,6 +144,7 @@ export function StrategyDetail({
   // An edit landed. Re-read whichever book is on screen, and let the dashboard
   // re-read the primary.
   const handlePositionsChanged = useCallback(() => {
+    setHistoryRefreshKey(key => key + 1);
     void loadBook(book, book);
     onPositionsChanged?.();
   }, [book, loadBook, onPositionsChanged]);
@@ -147,6 +152,8 @@ export function StrategyDetail({
   const [selectedPeriod, setSelectedPeriod] = useState('1M');
   const [selectedTab, setSelectedTab] = useState<'positions' | 'analysis' | 'activity'>('positions');
   const { theme } = useTheme();
+  const { user } = useAuth();
+  const canReadOverrideHistory = isInternalRole(user?.role);
   const isPositive = (shown.return ?? 0) >= 0;
   const periods = ['1W', '1M', '3M', '1Y', 'ALL'];
 
@@ -363,7 +370,11 @@ export function StrategyDetail({
       {/* Is QT's judgement adding value? Renders an explanation instead of a
           chart until both streams exist. */}
       <div className="mb-8">
-        <AlphaAttribution equityByStream={shown.equityByStream} theme={theme} />
+        <AlphaAttribution
+          equityByStream={shown.equityByStream}
+          historyBreaks={shown.historyBreaks}
+          theme={theme}
+        />
       </div>
 
       <div className={`flex items-center justify-between mb-8 border-b ${theme === 'dark' ? 'border-gray-800' : 'border-gray-200'
@@ -452,28 +463,46 @@ export function StrategyDetail({
         <>
           <PositionBreakdown
             positions={shown.positions}
+            positionStrategyNames={shown.positionStrategyNames}
             strategyId={strategy.id}
             portfolioId={shown.portfolio_id ?? book}
+            positionDate={shown.positionDate}
+            positionsEditable={shown.positionsEditable}
+            positionEditUnavailableReason={shown.positionEditUnavailableReason}
             books={books}
             bookControl={hasSeveralBooks ? bookBox('Book for these positions') : undefined}
             onEdited={handlePositionsChanged}
           />
           {/* The audit trail sits directly under the book it describes. It was
               being written on every edit and read by nobody. */}
-          <div className="mt-8">
-            <OverrideHistory strategyId={strategy.id} />
-          </div>
+          {canReadOverrideHistory && shownPortfolioId && (
+            <div className="mt-8">
+              <OverrideHistory
+                strategyId={strategy.id}
+                portfolioId={shownPortfolioId}
+                refreshKey={historyRefreshKey}
+              />
+            </div>
+          )}
         </>
       )}
 
       {selectedTab === 'analysis' && (
-        <FinancialAnalysis metrics={shown.metrics} />
+        <FinancialAnalysis
+          metrics={shown.metrics}
+          executionsAvailable={shown.executionsAvailable}
+          executionUnavailableReason={shown.executionUnavailableReason}
+          executionDate={shown.executionDate}
+        />
       )}
 
       {selectedTab === 'activity' && (
         <TradingActivity
           executions={shown.executions}
           finalizedPositions={shown.finalizedPositions}
+          executionsAvailable={shown.executionsAvailable}
+          executionUnavailableReason={shown.executionUnavailableReason}
+          executionDate={shown.executionDate}
         />
       )}
       </>

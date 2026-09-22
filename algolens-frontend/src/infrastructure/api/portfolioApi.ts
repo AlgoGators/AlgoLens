@@ -1,11 +1,42 @@
 import type { Strategy, PortfolioData, HistoricalDataPoint, HeldCorrelations } from '../../domain/portfolio/portfolioData';
 import type { IncubatingStrategy, IncubationPerformance } from '../../domain/portfolio/incubationData';
 import type { RiskCheck } from '../../domain/portfolio/positionEdit';
+import { aggregateCommonCoverage } from '../../domain/portfolio/commonCoverage';
 import type {
   AssignmentCheck,
   PortfolioSummary,
 } from '../../domain/portfolio/portfolioAssignment';
 import { API_BASE_URL, deleteWithAuth, fetchWithAuth, log, postWithAuth, putWithAuth } from './httpClient';
+
+export function sanitizePositionStrategyNames(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  if (value.some(name => typeof name !== 'string' || name.trim().length === 0)) {
+    return [];
+  }
+  // Engine names are opaque database keys. Validate with trim, but never
+  // normalize the value into a different key; deduplicate only exact strings.
+  return [...new Set(value as string[])];
+}
+
+type PortfolioTotalSource = Pick<Strategy, 'dataAvailable' | 'invested' | 'currentValue'>;
+
+export function aggregatePortfolioTotals(strategies: PortfolioTotalSource[]): Pick<
+  PortfolioData,
+  'totalValue' | 'totalInvested' | 'totalReturn' | 'totalReturnPercent'
+> {
+  const included = strategies.filter(strategy => strategy.dataAvailable !== false);
+  const anyBasisUnknown = included.some(strategy => strategy.invested === null);
+  const totalInvested = included.reduce(
+    (sum, strategy) => sum + (strategy.invested ?? 0),
+    0,
+  );
+  const totalValue = included.reduce((sum, strategy) => sum + strategy.currentValue, 0);
+  const totalReturn = anyBasisUnknown ? null : totalValue - totalInvested;
+  const totalReturnPercent = totalReturn === null || totalInvested <= 0
+    ? null
+    : (totalReturn / totalInvested) * 100;
+  return { totalValue, totalInvested, totalReturn, totalReturnPercent };
+}
 
 /**
  * A strategy the engine has published nothing for.
@@ -26,6 +57,10 @@ function placeholderStrategy(summary: { id: string; name: string }): Strategy {
     return: null,
     returnPercent: null,
     positions: [],
+    positionStrategyNames: [],
+    positionDate: null,
+    positionsEditable: false,
+    positionEditUnavailableReason: 'The engine has not published this strategy yet.',
     historicalData: [],
     bestDay: null,
     worstDay: null,
@@ -124,7 +159,10 @@ export class PortfolioApiService {
       historicalDataCount: data.historicalData?.length,
     });
 
-    return data;
+    return {
+      ...data,
+      positionStrategyNames: sanitizePositionStrategyNames(data.positionStrategyNames),
+    };
   }
 
   static async getAllStrategies(): Promise<Strategy[]> {
@@ -214,16 +252,20 @@ export class PortfolioApiService {
     log('info', 'Calculating portfolio totals...');
     const priced = strategies.filter(s => s.dataAvailable !== false);
     const strategiesAwaitingData = strategies.length - priced.length;
-    // A strategy with no starting equity on record adds nothing to invested;
-    // it is not counted as $0 put in.
-    const totalInvested = priced.reduce((sum, s) => sum + (s.invested ?? 0), 0);
-    const totalValue = priced.reduce((sum, s) => sum + s.currentValue, 0);
-    const totalReturn = totalValue - totalInvested;
-    const totalReturnPercent = totalInvested > 0 ? (totalReturn / totalInvested) * 100 : 0;
+    // The known bases may still be summed for disclosure, but a missing basis
+    // makes aggregate return unknowable rather than turning that basis into $0.
+    const { totalInvested, totalValue, totalReturn, totalReturnPercent } =
+      aggregatePortfolioTotals(priced);
 
     // Aggregate historical data
     log('info', 'Aggregating historical data...');
-    const historicalData = this.aggregateHistoricalData(priced);
+    const { points: historicalData, coverage: historicalCoverage } = aggregateCommonCoverage(
+      priced.map(strategy => ({
+        id: strategy.id,
+        points: strategy.historicalData,
+        historyBreaks: strategy.historyBreaks,
+      })),
+    );
 
     const result = {
       totalValue,
@@ -232,6 +274,7 @@ export class PortfolioApiService {
       totalReturnPercent,
       strategies,
       historicalData,
+      historicalCoverage,
       strategiesAwaitingData,
     };
 
@@ -247,29 +290,6 @@ export class PortfolioApiService {
     return result;
   }
 
-  private static aggregateHistoricalData(strategies: Strategy[]): HistoricalDataPoint[] {
-    if (strategies.length === 0) return [];
-
-    // Create a map of dates to total values
-    const dateMap = new Map<string, number>();
-
-    // For each strategy, add its historical values to the corresponding dates
-    strategies.forEach(strategy => {
-      strategy.historicalData.forEach(point => {
-        const currentValue = dateMap.get(point.date) || 0;
-        dateMap.set(point.date, currentValue + point.value);
-      });
-    });
-
-    // Convert map to array and sort by date
-    const aggregated: HistoricalDataPoint[] = Array.from(dateMap.entries())
-      .map(([date, value]) => ({ date, value }))
-      .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-
-    return aggregated;
-  }
-
-
   /**
    * Write one position into the qt stream.
    *
@@ -280,6 +300,8 @@ export class PortfolioApiService {
    */
   static async savePosition(input: {
     strategy_id: string;
+    /** Exact engine-owned identity from the selected QT snapshot row. */
+    strategy_name: string;
     symbol: string;
     quantity: number;
     average_price?: number | null;
@@ -334,7 +356,14 @@ export class PortfolioApiService {
     );
     if (response.ok) return { outcome: 'ok' };
     const data = await response.json().catch(() => ({}));
-    return { outcome: 'rejected', message: data.error || `Request failed (${response.status})` };
+    const messages: Record<string, string> = {
+      open_positions: 'Close every effective position in every book before changing this lifecycle.',
+      positions_unavailable: 'Reliable position evidence is unavailable, so this lifecycle change was blocked.',
+    };
+    return {
+      outcome: 'rejected',
+      message: messages[data.error] || 'The lifecycle change was rejected. Refresh and try again.',
+    };
   }
 
   static async getBooks(): Promise<Book[]> {
@@ -462,9 +491,19 @@ export class PortfolioApiService {
     return data.assignments || [];
   }
 
-  static async getPositionOverrides(strategyId: string): Promise<PositionOverride[]> {
+  static async getLifecycleHistory(strategyId: string): Promise<LifecycleRecord[]> {
     const encodedId = encodeURIComponent(strategyId);
-    const response = await fetchWithAuth(`${API_BASE_URL}/portfolio/overrides/${encodedId}`);
+    const response = await fetchWithAuth(
+      `${API_BASE_URL}/portfolio/strategies/${encodedId}/lifecycle/history`,
+    );
+    const data = await response.json();
+    return data.history || [];
+  }
+
+  static async getPositionOverrides(strategyId: string, portfolioId: string): Promise<PositionOverride[]> {
+    const encodedId = encodeURIComponent(strategyId);
+    const query = `?portfolio_id=${encodeURIComponent(portfolioId)}`;
+    const response = await fetchWithAuth(`${API_BASE_URL}/portfolio/overrides/${encodedId}${query}`);
     const data = await response.json();
     return data.overrides || [];
   }
@@ -497,6 +536,16 @@ export interface AssignmentRecord {
   reason: string | null;
   consequences: { code: string; message: string }[] | null;
   acknowledged: boolean;
+  created_at: string;
+}
+
+export interface LifecycleRecord {
+  id: number;
+  strategy_id: string;
+  before_state: string;
+  after_state: string;
+  reason: string;
+  user_id: string | null;
   created_at: string;
 }
 

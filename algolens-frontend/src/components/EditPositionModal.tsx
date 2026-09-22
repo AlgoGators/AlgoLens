@@ -1,11 +1,14 @@
 import { useEffect, useReducer, useRef, useState } from 'react';
 import { AlertTriangle, X } from 'lucide-react';
 
-import { buildDiff, canSubmit, initialState, reduce } from '../domain/portfolio/positionEdit';
+import { buildDiff, canSubmit, initialState, isValidAveragePrice, reduce } from '../domain/portfolio/positionEdit';
 import { PortfolioApiService } from '../infrastructure/api/portfolioApi';
+import { useDialogLifecycle } from './useDialogLifecycle';
 
 interface EditPositionModalProps {
   strategyId: string;
+  /** Engine-owned identity; strategy type alone is not a unique write target. */
+  strategyName: string;
   /** The book being edited. Sent explicitly so the write cannot land elsewhere. */
   portfolioId?: string;
   /** null when adding a new position, in which case the symbol is editable. */
@@ -28,6 +31,7 @@ interface EditPositionModalProps {
  */
 export function EditPositionModal({
   strategyId,
+  strategyName,
   portfolioId,
   symbol,
   existing,
@@ -36,6 +40,7 @@ export function EditPositionModal({
   onSaved,
 }: EditPositionModalProps) {
   const [state, dispatch] = useReducer(reduce, undefined, initialState);
+  const inFlight = useRef(false);
 
   // If the user closes the modal mid-flight the request still completes; without
   // this guard its resolution would dispatch into an unmounted component.
@@ -61,11 +66,16 @@ export function EditPositionModal({
   const acknowledging = state.phase === 'needs_acknowledgement';
 
   const isDark = theme === 'dark';
+  const addingPosition = symbol === null;
   const parsedQuantity = Number(quantity);
-  const parsedPrice = avgPrice.trim() === '' ? null : Number(avgPrice);
-  const diff = canSubmit(reason, quantity)
+  const priceMissing = avgPrice.trim() === '';
+  const parsedPrice = priceMissing ? null : Number(avgPrice);
+  const priceIsValid = isValidAveragePrice(avgPrice) && (!addingPosition || !priceMissing);
+  const diff = canSubmit(reason, quantity) && priceIsValid
     ? buildDiff(existing, { quantity: parsedQuantity, average_price: parsedPrice })
     : [];
+  const submitting = state.phase === 'submitting';
+  const dialogRef = useDialogLifecycle(onClose, submitting);
 
   function onFieldChange(setter: (value: string) => void) {
     return (value: string) => {
@@ -76,10 +86,13 @@ export function EditPositionModal({
   }
 
   async function handleSubmit() {
+    if (inFlight.current || !canSubmit(reason, quantity) || !priceIsValid || diff.length === 0) return;
+    inFlight.current = true;
     dispatch({ type: 'submit' });
     try {
       const result = await PortfolioApiService.savePosition({
         strategy_id: strategyId,
+        strategy_name: strategyName,
         symbol: symbolInput.trim().toUpperCase(),
         quantity: parsedQuantity,
         average_price: parsedPrice,
@@ -110,14 +123,17 @@ export function EditPositionModal({
         type: 'rejected',
         message: error instanceof Error ? error.message : 'Could not save the position',
       });
+    } finally {
+      inFlight.current = false;
     }
   }
 
-  const submitting = state.phase === 'submitting';
   const choosingBook = state.phase === 'needs_book';
   const disabled =
     submitting ||
     !canSubmit(reason, quantity) ||
+    !priceIsValid ||
+    diff.length === 0 ||
     symbolInput.trim() === '' ||
     (choosingBook && bookChoice === '');
   const inputClass = `w-full px-3 py-2 rounded-lg border text-sm ${
@@ -130,6 +146,10 @@ export function EditPositionModal({
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-4">
       <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="position-editor-title"
         className={`w-full max-w-lg rounded-xl border shadow-xl ${
           isDark ? 'bg-black border-gray-800 text-white' : 'bg-white border-gray-200 text-black'
         }`}
@@ -140,7 +160,7 @@ export function EditPositionModal({
           }`}
         >
           <div>
-            <h2 className="text-lg font-semibold">
+            <h2 id="position-editor-title" className="text-lg font-semibold">
               {symbol ? `Adjust ${symbol}` : 'Add position'}
             </h2>
             <p className={`text-sm ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
@@ -156,6 +176,7 @@ export function EditPositionModal({
           </div>
           <button
             onClick={onClose}
+            disabled={submitting}
             aria-label="Close"
             className={`rounded-lg p-2 ${isDark ? 'hover:bg-gray-800' : 'hover:bg-gray-100'}`}
           >
@@ -189,15 +210,26 @@ export function EditPositionModal({
             </div>
             <div>
               <label className={labelClass} htmlFor="position-price">
-                Average price <span className="font-normal">(optional)</span>
+                Average price{' '}
+                <span className="font-normal">
+                  {addingPosition ? '(required for new positions)' : '(optional — blank keeps current)'}
+                </span>
               </label>
               <input
                 id="position-price"
                 className={inputClass}
                 value={avgPrice}
+                aria-invalid={!priceIsValid}
                 onChange={e => onFieldChange(setAvgPrice)(e.target.value)}
-                placeholder="leave blank to keep"
+                placeholder={addingPosition ? 'Required' : 'Leave blank to keep current'}
               />
+              {!priceIsValid && (
+                <p role="alert" className="mt-1 text-xs text-red-600 dark:text-red-400">
+                  {addingPosition && priceMissing
+                    ? 'A new position needs an average price.'
+                    : 'Average price must be a finite, non-negative number.'}
+                </p>
+              )}
             </div>
           </div>
 
@@ -283,6 +315,7 @@ export function EditPositionModal({
         >
           <button
             onClick={onClose}
+            disabled={submitting}
             className={`rounded-lg px-4 py-2 text-sm ${
               isDark ? 'bg-gray-800 hover:bg-gray-700' : 'bg-gray-100 hover:bg-gray-200'
             }`}

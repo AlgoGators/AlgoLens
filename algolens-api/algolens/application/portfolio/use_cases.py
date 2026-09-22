@@ -1,6 +1,7 @@
 """Portfolio use cases."""
 
 import logging
+import math
 from collections.abc import Mapping, Sequence
 from datetime import datetime
 from typing import Any
@@ -29,6 +30,7 @@ from algolens.application.portfolio.ports import (
 )
 from algolens.application.shared.errors import NotFoundError
 from algolens.domain.portfolio.correlation import build_matrix
+from algolens.domain.portfolio.streams import current_utc_date
 from algolens.domain.portfolio.calculations import (
     live_leverage,
     published_profit_factor,
@@ -117,6 +119,20 @@ def build_strategy_detail(
         latest.get("sharpe_ratio"), compute_sharpe(annualized_return, volatility)
     )
 
+    snapshot_dates = {str(p["date"]) for p in rows.positions if p.get("date") is not None}
+    position_date = (str(rows.position_date) if rows.position_date is not None
+                     else next(iter(snapshot_dates)) if len(snapshot_dates) == 1 else None)
+    names = list(rows.position_strategy_names) or [p.get("strategy_name") for p in rows.positions]
+    unavailable = None
+    if rows.position_stream != "qt":
+        unavailable = "The position stream is unknown; only identified QT snapshots can be edited."
+    elif position_date is None:
+        unavailable = "No dated QT snapshot is available."
+    elif position_date != current_utc_date().isoformat():
+        unavailable = "This is an older QT snapshot. Only today's snapshot can be edited."
+    elif not names or any(not isinstance(name, str) or not name.strip() for name in names):
+        unavailable = "An engine-owned strategy identity is unavailable for this snapshot."
+
     return {
         "id": cfg["id"],
         "name": cfg["name"],
@@ -126,6 +142,14 @@ def build_strategy_detail(
         "return": total_return,
         "returnPercent": return_percent,
         "positions": transformed_positions,
+        "positionDate": position_date,
+        # Keep engine-owned identity available after the last nonzero row closes.
+        # Never infer it from the display strategy id/name or another book.
+        "positionStrategyNames": sorted(set(names)) if names and all(
+            isinstance(name, str) and name.strip() for name in names
+        ) else [],
+        "positionsEditable": unavailable is None,
+        "positionEditUnavailableReason": unavailable,
         "historicalData": historical_data,
         # Where this curve stops describing the same portfolio. The points
         # themselves are untouched -- these say where the line must break, so
@@ -135,6 +159,10 @@ def build_strategy_detail(
         "bestDay": published_or_computed(latest.get("best_day"), stats["best_day"]),
         "worstDay": published_or_computed(latest.get("worst_day"), stats["worst_day"]),
         "executions": transformed_executions,
+        "executionDate": str(rows.execution_date) if rows.execution_date is not None else None,
+        "executionsAvailable": rows.executions_available,
+        "executionUnavailableReason": (None if rows.executions_available else
+            "Execution stream metadata is unavailable; legacy fills cannot be attributed to QT."),
         "finalizedPositions": transformed_finalized,
         "managers": cfg["managers"],
         "lastUpdate": latest["date"].isoformat(),
@@ -152,7 +180,7 @@ def build_strategy_detail(
             "winRate": published_or_computed(latest.get("win_rate"), stats["win_rate"]),
             # Fills recorded for THIS day, not trades since inception. The UI
             # labelled this "Total Trades", which it has never been.
-            "executionsToday": len(transformed_executions),
+            "executionsToday": len(transformed_executions) if rows.executions_available else None,
             # The engine's avg_win and avg_loss are the mean daily PERCENTAGE
             # return on winning and losing days. AlgoLens computed a mean
             # daily DOLLAR change instead and rendered it with a "$" under the
@@ -343,8 +371,8 @@ def _require_reason(reason: str) -> str:
 
 
 def _require_mock_capital(mock_capital: float) -> float:
-    if mock_capital <= 0:
-        raise IncubationError("mock_capital must be positive")
+    if not math.isfinite(mock_capital) or mock_capital <= 0:
+        raise IncubationError("mock_capital must be a positive finite number")
     return mock_capital
 
 
@@ -594,22 +622,21 @@ class UpsertQtPosition:
         def priced(row):
             symbol = row["symbol"]
             price = prices.get(symbol) or prices.get(base_symbol(symbol))
+            exposure = notional(
+                row.get("quantity"), price, multipliers.get(base_symbol(symbol))
+            )
+            # Display notional is absolute; the risk book must preserve shorts.
+            if exposure is not None and float(row["quantity"]) < 0:
+                exposure = -exposure
             return {
                 **row,
-                "notional": notional(
-                    row.get("quantity"), price, multipliers.get(base_symbol(symbol))
-                ),
+                "notional": exposure,
             }
 
         return [priced(p) for p in book], priced(proposal)
 
-    def _portfolio_value(self, strategy_type, portfolio_id):
-        """The book's value, needed to turn exposure into leverage."""
-        try:
-            row = self.reader.fetch_summary_row(strategy_type, portfolio_id)
-        except Exception as exc:
-            logger.error("[POSITIONS] Portfolio value read failed: %s", exc, exc_info=True)
-            return None
+    def _portfolio_value(self, row):
+        """The serialized book snapshot's value, used to calculate leverage."""
         if not row:
             return None
         value = row.get("current_portfolio_value") if hasattr(row, "get") else None
@@ -626,9 +653,14 @@ class UpsertQtPosition:
     ) -> dict[str, Any]:
         normalized = validate_position_payload(payload)
 
-        strategy = self.registry.get(normalized["strategy_id"])
+        get_strategy = getattr(self.registry, "get_any", self.registry.get)
+        strategy = get_strategy(normalized["strategy_id"])
         if strategy is None:
             raise StrategyNotFound(normalized["strategy_id"])
+        if strategy.get("lifecycle") == "retired":
+            raise PositionValidationError(
+                "strategy_retired", "A retired strategy cannot accept position edits"
+            )
 
         strategy_type = strategy["strategy_type"]
         # Which book, decided explicitly. Reading strategy["portfolio_id"] here
@@ -651,36 +683,25 @@ class UpsertQtPosition:
             strategy["portfolio_id"],
         )
 
-        envelope = self.reader.fetch_risk_envelope(strategy_type, portfolio_id)
-        book = self.reader.fetch_qt_book(strategy_type, portfolio_id)
+        def check_locked_book(envelope, book, summary):
+            # Price the book at the market, so the gate compares exposures the
+            # same way trade-ngin does: quantity x price x contract size.
+            proposal = with_known_price(book, normalized)
+            priced_book, priced_proposal = self._price_for_risk(book, proposal)
+            verdict = evaluate_risk(
+                envelope, priced_book, priced_proposal, self._portfolio_value(summary)
+            )
+            if not verdict["passed"] and not acknowledge_risk:
+                raise RiskAcknowledgementRequired(verdict)
+            return verdict
 
-        # Price the book at the market, so the gate compares exposures the same
-        # way trade-ngin does: quantity x price x contract size. Without this
-        # every leverage limit the engine publishes is uncheckable, and the
-        # verdict would record "not checked" for the limits that matter most.
-        proposal = with_known_price(book, normalized)
-        priced_book, priced_proposal = self._price_for_risk(book, proposal)
-        portfolio_value = self._portfolio_value(strategy_type, portfolio_id)
-
-        # The verdict describes the book at gate-evaluation time, not at commit
-        # time. That is acceptable because the gate is advisory by design: a
-        # breach never blocks, it only requires acknowledgement.
-        verdict = evaluate_risk(
-            envelope, priced_book, priced_proposal, portfolio_value
-        )
-
-        if not verdict["passed"] and not acknowledge_risk:
-            raise RiskAcknowledgementRequired(verdict)
-
-        result = self.reader.write_qt_position(
+        return self.reader.write_qt_position(
             strategy_type=strategy_type,
             portfolio_id=portfolio_id,
             normalized=normalized,
             user_id=user_id,
-            verdict=verdict,
-            overrode_risk=not verdict["passed"],
+            risk_check=check_locked_book,
         )
-        return {**result, "risk_check": verdict}
 
 
 class ListPositionOverrides:
@@ -690,7 +711,15 @@ class ListPositionOverrides:
         self.registry = registry
         self.reader = reader
 
-    def execute(self, strategy_id: str, limit: int = 100) -> list[dict[str, Any]]:
+    def execute(
+        self, strategy_id: str, portfolio_id: Any, limit: int = 100
+    ) -> list[dict[str, Any]]:
+        # Validate the required query parameter before looking up the strategy.
+        # The error contract must be stable even when the URL also names an
+        # unknown strategy; the route's internal_only decorator still runs
+        # before this use case, preserving subscriber 403s.
+        requested = normalize_portfolio_id(portfolio_id)
+
         # get_any, not get: the audit trail of a retired strategy is exactly the
         # kind of thing someone comes back to read. Hiding it with the strategy
         # would make retirement a way to lose the record of what was done.
@@ -698,7 +727,25 @@ class ListPositionOverrides:
         strategy = getter(strategy_id) if getter else self.registry.get(strategy_id)
         if strategy is None:
             raise StrategyNotFound(strategy_id)
-        return list(self.reader.fetch_overrides(strategy["strategy_type"], limit))
+
+        # Do not let a caller enumerate another book's audit history. The
+        # reader query is scoped, but membership is the authorization boundary
+        # and must be resolved before it can issue that query.
+        lister = getattr(self.registry, "books_for_strategy", None)
+        if lister is None:
+            # Compatibility only for an older registry implementation that
+            # predates memberships. Once that method exists, a read error or
+            # an explicit empty result must not authorize the primary book.
+            books = [strategy["portfolio_id"]]
+        else:
+            books = list(lister(strategy["id"]))
+        target = match_book(requested, books)
+        if target is None:
+            raise AssignmentValidationError(
+                "not_a_member_of_book",
+                f"{strategy_id} does not belong to {requested}",
+            )
+        return list(self.reader.fetch_overrides(strategy["strategy_type"], target, limit))
 
 
 class ListPortfolios:
@@ -862,6 +909,17 @@ class ListAssignmentHistory:
 
     def execute(self, strategy_id: str, limit: int = 100) -> list[dict[str, Any]]:
         return self.registry.list_assignment_history(strategy_id, limit)
+
+
+class ListLifecycleHistory:
+    def __init__(self, registry: StrategyRegistryPort, reader: PortfolioReaderPort):
+        self.registry = registry
+        self.reader = reader
+
+    def execute(self, strategy_id: str, limit: int = 100) -> list[dict[str, Any]]:
+        if self.registry.get_any(strategy_id) is None:
+            raise StrategyNotFound(strategy_id)
+        return list(self.reader.list_lifecycle_history(strategy_id, min(limit, 100)))
 
 
 class ListBooks:

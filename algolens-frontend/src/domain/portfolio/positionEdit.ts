@@ -110,6 +110,13 @@ export function canSubmit(reason: string, quantity: string): boolean {
   return Number.isFinite(Number(quantity));
 }
 
+/** Blank preserves the existing basis; a supplied price must survive JSON as itself. */
+export function isValidAveragePrice(value: string): boolean {
+  if (value.trim() === '') return true;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0;
+}
+
 export type DiffLine = { field: string; from: string; to: string };
 
 export function buildDiff(

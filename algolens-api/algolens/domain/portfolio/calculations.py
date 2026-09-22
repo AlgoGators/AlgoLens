@@ -68,6 +68,7 @@ def transform_positions(
         transformed.append(
             {
                 "symbol": symbol,
+                "strategyName": _get(pos, "strategy_name"),
                 "name": root,
                 "shares": quantity,
                 "quantity": quantity,
@@ -183,7 +184,9 @@ def transform_finalized(yesterday_positions: Sequence[Any], positions: Sequence[
         yesterday_qty = float(_get(yesterday, "quantity"))
         yesterday_price = float_or_none(_get(yesterday, "average_price"))
 
-        today_pos = next((p for p in positions if _get(p, "symbol") == symbol), None)
+        strategy_name = _get(yesterday, "strategy_name")
+        today_pos = next((p for p in positions if _get(p, "symbol") == symbol
+                          and _get(p, "strategy_name") == strategy_name), None)
         today_qty = float(_get(today_pos, "quantity")) if today_pos else 0
         # A lot that is gone today exited at a price nobody here knows; carrying
         # yesterday's entry price forward as the "exit" was a guess dressed as
@@ -195,6 +198,7 @@ def transform_finalized(yesterday_positions: Sequence[Any], positions: Sequence[
             transformed.append(
                 {
                     "symbol": symbol.replace(".v.0", ""),
+                    "strategyName": strategy_name,
                     "quantity": yesterday_qty,
                     "entryPrice": yesterday_price,
                     "exitPrice": today_price,

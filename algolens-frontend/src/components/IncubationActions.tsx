@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { AlertTriangle, ArrowUpCircle, XCircle } from 'lucide-react';
 
 import { PortfolioApiService } from '../infrastructure/api/portfolioApi';
@@ -15,7 +15,7 @@ interface IncubationActionsProps {
 type Pending = 'promote' | 'retire' | null;
 
 /**
- * Promote a trial to live capital, or retire it.
+ * Record a trial as live or retired in the AlgoLens registry.
  *
  * Both transitions existed on the API from the start with nothing calling them,
  * so the trial workflow could only be driven with curl. Both take a reason and
@@ -37,13 +37,15 @@ export function IncubationActions({
   const [reason, setReason] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const inFlight = useRef(false);
 
   const isDark = theme === 'dark';
   const windowComplete = daysElapsed >= windowDays;
   const remaining = Math.max(0, windowDays - daysElapsed);
 
   async function submit() {
-    if (!pending) return;
+    if (!pending || inFlight.current) return;
+    inFlight.current = true;
     setBusy(true);
     setError(null);
     try {
@@ -57,7 +59,10 @@ export function IncubationActions({
       setPending(null);
       setReason('');
       onChanged();
+    } catch {
+      setError('The request failed before a response was received. The outcome is uncertain; refresh this strategy before retrying.');
     } finally {
+      inFlight.current = false;
       setBusy(false);
     }
   }
@@ -72,7 +77,7 @@ export function IncubationActions({
           className={`${buttonBase} bg-blue-600 text-white hover:bg-blue-500`}
         >
           <ArrowUpCircle className="w-4 h-4" />
-          Promote to live
+          Mark live in AlgoLens
         </button>
         <button
           onClick={() => { setPending('retire'); setError(null); }}
@@ -81,7 +86,7 @@ export function IncubationActions({
           }`}
         >
           <XCircle className="w-4 h-4" />
-          Retire
+          Mark retired in AlgoLens
         </button>
         {error && (
           <span className="text-sm text-red-600 dark:text-red-400">{error}</span>
@@ -98,16 +103,22 @@ export function IncubationActions({
     >
       <div className="mb-2 text-sm font-medium">
         {pending === 'promote'
-          ? `Promote ${strategyName} to live capital`
-          : `Retire ${strategyName}`}
+          ? `Mark ${strategyName} live in AlgoLens`
+          : `Mark ${strategyName} retired in AlgoLens`}
       </div>
+
+      <p className={`mb-3 text-sm ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>
+        {pending === 'promote'
+          ? 'This does not immediately enable the trading engine or deploy capital. The registry change can block the next engine publication until separate eligible-admin next-run approval is applied.'
+          : 'This does not immediately stop or disable the trading engine. The registry change can block the next engine publication until separate eligible-admin next-run approval is applied.'}
+      </p>
 
       {pending === 'promote' && !windowComplete && (
         <div className="mb-3 flex items-start gap-2 rounded-lg border border-amber-500/50 bg-amber-500/10 px-3 py-2">
           <AlertTriangle className="mt-0.5 w-4 h-4 shrink-0 text-amber-600 dark:text-amber-400" />
           <span className="text-sm">
-            The observation window has {remaining} of {windowDays} days left. Promoting now
-            decides on a partial sample.
+            The observation window has {remaining} of {windowDays} days left. Marking the
+            strategy live now decides on a partial sample.
           </span>
         </div>
       )}
@@ -124,8 +135,8 @@ export function IncubationActions({
         onChange={e => setReason(e.target.value)}
         placeholder={
           pending === 'promote'
-            ? 'What in the trial justifies live capital?'
-            : 'Why is this trial being stopped?'
+            ? 'Why should this trial be marked live in AlgoLens?'
+            : 'Why should this trial be marked retired in AlgoLens?'
         }
         className={`w-full min-h-[64px] rounded-lg border px-3 py-2 text-sm ${
           isDark
@@ -135,7 +146,7 @@ export function IncubationActions({
       />
 
       {error && (
-        <div className="mt-2 rounded-lg border border-red-500/50 bg-red-500/10 px-3 py-2 text-sm text-red-600 dark:text-red-400">
+        <div role="alert" className="mt-2 rounded-lg border border-red-500/50 bg-red-500/10 px-3 py-2 text-sm text-red-600 dark:text-red-400">
           {error}
         </div>
       )}
@@ -143,6 +154,7 @@ export function IncubationActions({
       <div className="mt-3 flex justify-end gap-2">
         <button
           onClick={() => { setPending(null); setReason(''); setError(null); }}
+          disabled={busy}
           className={`${buttonBase} ${
             isDark ? 'bg-gray-800 hover:bg-gray-700' : 'bg-gray-200 hover:bg-gray-300'
           }`}
@@ -158,7 +170,7 @@ export function IncubationActions({
               : 'bg-red-600 hover:bg-red-500'
           }`}
         >
-          {busy ? 'Saving…' : pending === 'promote' ? 'Promote' : 'Retire'}
+          {busy ? 'Saving…' : pending === 'promote' ? 'Mark live' : 'Mark retired'}
         </button>
       </div>
     </div>

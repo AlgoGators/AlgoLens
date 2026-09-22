@@ -10,6 +10,8 @@ import { counted } from '../domain/text/pluralize';
 
 interface PositionBreakdownProps {
   positions: Position[];
+  /** Explicit engine identities supplied for this snapshot; never inferred. */
+  positionStrategyNames?: string[];
   /**
    * Supplying this turns on manual editing for internal roles. Omitted (the
    * subscriber-facing views), the table stays exactly as it was: read-only.
@@ -17,7 +19,11 @@ interface PositionBreakdownProps {
   strategyId?: string;
   /** The book these positions came from. Passed to the editor so it writes there. */
   portfolioId?: string;
-  /** Every book this strategy trades in; more than one means this table is partial. */
+  /** Actual selected QT snapshot date, never inferred as today by the browser. */
+  positionDate?: string | null;
+  positionsEditable?: boolean;
+  positionEditUnavailableReason?: string | null;
+  /** Every AlgoLens registry book membership; more than one means this table may be partial. */
   books?: string[];
   /**
    * Shown beside the heading in place of the plain book name -- a box the
@@ -30,13 +36,18 @@ interface PositionBreakdownProps {
 
 type EditTarget = {
   symbol: string | null;
+  strategyName: string;
   existing: { quantity: number; average_price: number | null } | null;
 };
 
 export function PositionBreakdown({
   positions,
+  positionStrategyNames,
   strategyId,
   portfolioId,
+  positionDate,
+  positionsEditable,
+  positionEditUnavailableReason,
   books,
   bookControl,
   onEdited,
@@ -47,7 +58,20 @@ export function PositionBreakdown({
 
   // The backend enforces this too (@internal_only); this only avoids offering a
   // button that would come back 403.
-  const canEdit = Boolean(strategyId) && isInternalRole(user?.role);
+  const isInternalMember = isInternalRole(user?.role);
+  // Fail closed for legacy/unknown payloads. Only the API's explicit true says
+  // this is the current server-date snapshot with resolvable engine identity.
+  const canEdit = Boolean(strategyId) && isInternalMember && positionsEditable === true;
+  const addIdentityFieldIsValid = Array.isArray(positionStrategyNames)
+    && positionStrategyNames.every(
+      name => typeof name === 'string' && name.trim().length > 0,
+    );
+  // Preserve opaque engine keys exactly. A partially malformed field cannot
+  // be salvaged into an apparently unambiguous write capability.
+  const addStrategyNames = addIdentityFieldIsValid
+    ? [...new Set(positionStrategyNames)]
+    : [];
+  const canAdd = canEdit && addStrategyNames.length === 1;
   const columns = canEdit ? 'grid-cols-6' : 'grid-cols-5';
 
   // Only rows whose exposure could actually be computed contribute to the
@@ -59,6 +83,8 @@ export function PositionBreakdown({
     (sum, pos) => sum + (pos.notional as number),
     0,
   );
+  const hasPricedTotal = pricedPositions.length > 0;
+  const hasCompleteTotal = positions.length > 0 && unpricedCount === 0;
 
   return (
     <div>
@@ -67,7 +93,7 @@ export function PositionBreakdown({
           <h3 className={`text-sm uppercase tracking-wider ${
             theme === 'dark' ? 'text-gray-400' : 'text-gray-500'
           }`}>
-            Today's Positions
+            Positions snapshot {positionDate ?? '(date unavailable)'}
             {!bookControl && portfolioId && (
               <span className={`ml-2 font-mono normal-case ${
                 theme === 'dark' ? 'text-gray-500' : 'text-gray-400'
@@ -78,9 +104,9 @@ export function PositionBreakdown({
           </h3>
           {bookControl}
         </div>
-        {canEdit && (
+        {canAdd && (
           <button
-            onClick={() => setEditing({ symbol: null, existing: null })}
+            onClick={() => setEditing({ symbol: null, strategyName: addStrategyNames[0], existing: null })}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm ${
               theme === 'dark'
                 ? 'bg-gray-800 hover:bg-gray-700 text-white'
@@ -93,30 +119,40 @@ export function PositionBreakdown({
         )}
       </div>
 
-      {/* A strategy can trade a different universe in each book it belongs to.
-          This table is one book; saying so is the difference between a partial
-          view and a wrong one. */}
+      {isInternalMember && !positionsEditable && positionEditUnavailableReason && (
+        <div role="status" className={`mb-4 rounded-lg border px-4 py-3 text-sm ${
+          theme === 'dark' ? 'border-gray-800 bg-gray-900 text-gray-300' : 'border-gray-200 bg-gray-50 text-gray-700'
+        }`}>
+          {positionEditUnavailableReason}
+        </div>
+      )}
+
+      {/* Registry membership does not prove that the trading runtime published
+          positions for a book. Keep the reporting relationship and runtime
+          data availability distinct, especially for flat snapshots. */}
       {books && books.length > 1 && (
         <div className={`mb-4 rounded-lg border px-4 py-3 text-sm ${
           theme === 'dark'
             ? 'border-gray-800 bg-gray-900 text-gray-300'
             : 'border-gray-200 bg-gray-50 text-gray-700'
         }`}>
-          This strategy also trades in{' '}
+          This strategy is also registered in{' '}
           {books.filter(b => b !== portfolioId).map((b, i, arr) => (
             <span key={b}>
               <span className="font-mono">{b}</span>
               {i < arr.length - 1 ? ', ' : ''}
             </span>
           ))}
-          . Those positions, and their risk limits, are separate
-          {bookControl ? '; choose the book in the box above to see them.' : ' and are not shown here.'}
+          {' '}for AlgoLens reporting. Positions and risk limits appear for a book only when
+          published by the trading runtime
+          {bookControl ? '; choose the book in the box above to see them.' : '; other books are not shown here.'}
         </div>
       )}
 
-      <div className={`border rounded-lg overflow-hidden ${
-        theme === 'dark' ? 'border-gray-800' : 'border-gray-200'
-      }`}>
+      <div className="overflow-x-auto">
+        <div className={`min-w-[760px] border rounded-lg overflow-hidden ${
+          theme === 'dark' ? 'border-gray-800' : 'border-gray-200'
+        }`}>
         {/* Header */}
         <div className={`grid ${columns} gap-4 p-4 text-sm border-b ${
           theme === 'dark'
@@ -127,7 +163,7 @@ export function PositionBreakdown({
           <div className="text-right">Quantity</div>
           <div className="text-right">Market Price</div>
           <div className="text-right">Notional</div>
-          <div className="text-right">% of Total</div>
+          <div className="text-right">{unpricedCount > 0 ? '% of Known' : '% of Total'}</div>
           {canEdit && <div className="text-right">Adjust</div>}
         </div>
 
@@ -147,7 +183,7 @@ export function PositionBreakdown({
 
           return (
             <div
-              key={position.symbol}
+              key={`${position.symbol}:${position.strategyName ?? index}`}
               className={`grid ${columns} gap-4 p-4 transition-colors ${
                 theme === 'dark' ? 'hover:bg-gray-900' : 'hover:bg-gray-50'
               } ${
@@ -186,10 +222,11 @@ export function PositionBreakdown({
               {canEdit && (
                 <div className="text-right">
                   <button
-                    aria-label={`Adjust ${position.symbol}`}
+                    aria-label={`Adjust ${position.symbol}${position.strategyName ? ` (${position.strategyName})` : ''}`}
                     onClick={() =>
                       setEditing({
                         symbol: position.symbol,
+                        strategyName: position.strategyName,
                         existing: {
                           quantity: position.shares,
                           // The editor edits cost basis, not the market price.
@@ -219,7 +256,7 @@ export function PositionBreakdown({
             <div className="mb-1">Active Positions: {positions.length}</div>
             {unpricedCount > 0 && (
               <div className={`text-sm ${theme === 'dark' ? 'text-amber-400' : 'text-amber-600'}`}>
-                Total excludes {counted(unpricedCount, 'position')} with no known price.
+                Total excludes {counted(unpricedCount, 'position')} with unknown notional.
               </div>
             )}
           </div>
@@ -229,16 +266,27 @@ export function PositionBreakdown({
             }`}>
               Total Notional
             </div>
-            <div>${totalNotional.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+            <div>
+              {hasPricedTotal
+                ? `$${totalNotional.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                : '\u2014'}
+              {hasPricedTotal && !hasCompleteTotal && (
+                <span className={`ml-1 text-sm ${theme === 'dark' ? 'text-amber-400' : 'text-amber-600'}`}>
+                  partial
+                </span>
+              )}
+            </div>
           </div>
-          <div className="text-right">100.00%</div>
+          <div className="text-right">{hasCompleteTotal ? '100.00%' : '\u2014'}</div>
           {canEdit && <div />}
+        </div>
         </div>
       </div>
 
       {editing && strategyId && (
         <EditPositionModal
           strategyId={strategyId}
+          strategyName={editing.strategyName}
           portfolioId={portfolioId}
           symbol={editing.symbol}
           existing={editing.existing}

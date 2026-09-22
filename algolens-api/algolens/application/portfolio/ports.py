@@ -2,13 +2,25 @@
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Any, Callable, Protocol
 
 from algolens.application.shared.errors import ValidationError
 
 
 class IncubationError(ValidationError):
     """Raised when an incubation operation violates lifecycle constraints."""
+
+
+class OpenPositionsError(IncubationError):
+    """An effective nonzero position prevents a lifecycle close."""
+
+    code = "open_positions"
+
+
+class PositionsUnavailableError(IncubationError):
+    """A previously-live strategy lacks reliable evidence that it is flat."""
+
+    code = "positions_unavailable"
 
 
 class StrategyNameUnresolved(Exception):
@@ -42,6 +54,11 @@ class PortfolioDetailRows:
     positions: Sequence[Mapping[str, Any]]
     executions: Sequence[Mapping[str, Any]]
     yesterday_positions: Sequence[Mapping[str, Any]]
+    position_date: Any = None
+    position_strategy_names: Sequence[str] = ()
+    position_stream: str | None = "qt"
+    execution_date: Any = None
+    executions_available: bool = True
 
 
 @dataclass(frozen=True)
@@ -164,6 +181,11 @@ class PortfolioReaderPort(Protocol):
     def retire_strategy(self, strategy_id: str, reason: str, user_id: str) -> None:
         ...
 
+    def list_lifecycle_history(
+        self, strategy_id: str, limit: int = 100
+    ) -> Sequence[Mapping[str, Any]]:
+        ...
+
     # -- qt stream writes (F2) ------------------------------------------------
 
     def fetch_risk_envelope(
@@ -187,14 +209,20 @@ class PortfolioReaderPort(Protocol):
         portfolio_id: str,
         normalized: Mapping[str, Any],
         user_id: str,
-        verdict: Mapping[str, Any],
-        overrode_risk: bool,
+        risk_check: Callable[
+            [
+                Mapping[str, Any] | None,
+                Sequence[Mapping[str, Any]],
+                Mapping[str, Any] | None,
+            ],
+            Mapping[str, Any],
+        ],
     ) -> Mapping[str, Any]:
-        """Upsert one qt position and its audit row, atomically."""
+        """Evaluate and upsert against one locked book snapshot, atomically."""
         ...
 
     def fetch_overrides(
-        self, strategy_type: str, limit: int = 100
+        self, strategy_type: str, portfolio_id: str, limit: int = 100
     ) -> Sequence[Mapping[str, Any]]:
         ...
 
