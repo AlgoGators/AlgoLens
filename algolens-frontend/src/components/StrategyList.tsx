@@ -62,7 +62,7 @@ export function StrategyList({ strategies, onSelectStrategy }: StrategyListProps
                     <span
                       className="flex items-center gap-1"
                       data-testid="card-book"
-                      title={`Figures shown are for ${strategy.portfolio_id ?? books[0]}. Open the strategy and use the book box beside Today's Positions to switch.`}
+                      title={`Figures shown are for ${strategy.portfolio_id ?? books[0]}. Open the strategy and use the book box beside Positions snapshot to switch.`}
                     >
                       <Briefcase className="w-3.5 h-3.5" />
                       <span>
@@ -91,10 +91,9 @@ export function StrategyList({ strategies, onSelectStrategy }: StrategyListProps
                   }`}>
                     Current Value
                   </div>
-                  {/* Placeholder zeros are not measurements. */}
-                  {strategy.dataAvailable === false ? (
+                  {strategy.dataAvailable === false || strategy.currentValue === null ? (
                     <div className={`text-sm ${theme === 'dark' ? 'text-amber-400' : 'text-amber-600'}`}>
-                      awaiting engine data
+                      QT performance unavailable
                     </div>
                   ) : (
                     <div className="text-lg">
@@ -110,7 +109,7 @@ export function StrategyList({ strategies, onSelectStrategy }: StrategyListProps
                   }`}>
                     Total Return
                   </div>
-                  {strategy.dataAvailable === false ? (
+                  {strategy.dataAvailable === false || strategy.returnPercent === null ? (
                     <div className={`text-lg ${theme === 'dark' ? 'text-gray-600' : 'text-gray-400'}`}>—</div>
                   ) : (
                     <div className={`text-lg flex items-center gap-1 ${
@@ -148,7 +147,7 @@ export function StrategyList({ strategies, onSelectStrategy }: StrategyListProps
               </div>
 
               {/* Mini Performance Bar */}
-              <div className="mt-4">
+              {strategy.dataAvailable !== false && strategy.returnPercent !== null && <div className="mt-4">
                 <div className={`h-2 rounded-full overflow-hidden ${
                   theme === 'dark' ? 'bg-gray-800' : 'bg-gray-200'
                 }`}>
@@ -161,7 +160,7 @@ export function StrategyList({ strategies, onSelectStrategy }: StrategyListProps
                     }}
                   ></div>
                 </div>
-              </div>
+              </div>}
             </div>
           </button>
         );

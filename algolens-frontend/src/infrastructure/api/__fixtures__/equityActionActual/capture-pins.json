@@ -1,0 +1,11 @@
+{
+  "actual_model_invoked": true,
+  "authentic_runtime_certification": "unavailable",
+  "case": "original_S_split",
+  "case_index_sha256": "c240dd3500f070c4399b19dee1669de4ea9fd1c07c7b280dad3c57e48b9869bc",
+  "manifest_sha256": "28a01ee8c4ce9b6ca0c365245d2299c1141659503af1577a05e0de20de2cb8b8",
+  "owned_cleanup_verified": true,
+  "response_sha256": "e9cefcee8fa5fd499469135757147107a980623f12a50365f851474f5c427041",
+  "schema_version": "qt-action-http-acceptance/v1",
+  "source_closure_verified": true
+}

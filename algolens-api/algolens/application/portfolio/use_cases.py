@@ -1,6 +1,7 @@
 """Portfolio use cases."""
 
 import logging
+import math
 from collections.abc import Mapping, Sequence
 from datetime import datetime
 from typing import Any
@@ -18,6 +19,7 @@ from algolens.domain.portfolio.portfolio_assignment import (
     validate_book,
 )
 from algolens.application.portfolio.ports import (
+    InstrumentCatalogPort,
     IncubationError,
     IncubationPerformanceRows,
     MembershipAcknowledgementRequired,
@@ -29,6 +31,10 @@ from algolens.application.portfolio.ports import (
 )
 from algolens.application.shared.errors import NotFoundError
 from algolens.domain.portfolio.correlation import build_matrix
+from algolens.domain.portfolio.streams import (
+    DEFAULT_POSITION_STREAM, PRIMARY_STREAM, current_utc_date,
+    validate_position_stream,
+)
 from algolens.domain.portfolio.calculations import (
     live_leverage,
     published_profit_factor,
@@ -46,7 +52,9 @@ from algolens.domain.portfolio.calculations import (
 from algolens.domain.portfolio.history_segments import book_change_breaks
 from algolens.domain.portfolio.incubation import compute_incubation_window
 from algolens.domain.portfolio.instruments import base_symbol, notional
+from algolens.domain.portfolio.instrument_quantity import validate_instrument_quantity
 from algolens.domain.portfolio.position_edit import (
+    PositionValidationError,
     resolve_target_book,
     with_known_price,
     evaluate_risk,
@@ -82,15 +90,20 @@ def build_strategy_detail(
     multipliers: Mapping[str, float] | None = None,
     history_breaks: Sequence[Mapping[str, Any]] | None = None,
 ) -> dict[str, Any] | None:
-    if not rows.latest:
+    if not rows.latest and not (rows.position_date or rows.positions or rows.equity_curve):
         return None
 
     latest = rows.latest
+    result_available = latest is not None
+    def result(key):
+        return latest.get(key) if latest else None
+
     initial_equity = resolve_initial_equity(rows.equity_curve, cfg["initial_equity"])
-    current_value = float(latest["current_portfolio_value"])
+    current_value = float_or_none(result("current_portfolio_value"))
     # No starting equity on record and no curve to read one from: the return
     # is unknown, and is reported as unknown rather than measured from $0.
-    total_return = current_value - initial_equity if initial_equity is not None else None
+    total_return = (current_value - initial_equity
+                    if current_value is not None and initial_equity is not None else None)
     return_percent = (
         (total_return / initial_equity * 100)
         if total_return is not None and initial_equity > 0
@@ -103,70 +116,113 @@ def build_strategy_detail(
         for stream, stream_rows in rows.equity_by_stream.items()
     }
     transformed_positions = transform_positions(
-        rows.positions, current_value, prices, multipliers
+        rows.positions, current_value if rows.position_stream == "qt" else None,
+        prices, multipliers,
     )
-    stats = compute_return_stats(historical_data)
+    # A curve can be present without a selected-stream result. Keep its points,
+    # but do not publish derived performance in place of the missing result.
+    stats = compute_return_stats(historical_data) if result_available else {}
     transformed_executions = transform_executions(rows.executions, multipliers)
-    transformed_finalized = transform_finalized(rows.yesterday_positions, rows.positions)
+    transformed_finalized = (
+        transform_finalized(rows.yesterday_positions, rows.qt_positions if rows.qt_positions is not None else rows.positions)
+        if rows.finalized_positions_available else []
+    )
 
-    volatility = float(latest["volatility"])
-    annualized_return = float(latest["total_annualized_return"])
+    volatility = float_or_none(result("volatility"))
+    annualized_return = float_or_none(result("total_annualized_return"))
     # The engine publishes its own Sharpe. compute_sharpe is the fallback for
     # a row that predates the column, not the primary source it used to be.
-    sharpe = published_or_computed(
-        latest.get("sharpe_ratio"), compute_sharpe(annualized_return, volatility)
-    )
+    sharpe = (published_or_computed(result("sharpe_ratio"),
+              compute_sharpe(annualized_return, volatility)) if result_available else None)
+
+    snapshot_dates = {str(p["date"]) for p in rows.positions if p.get("date") is not None}
+    position_date = (str(rows.position_date) if rows.position_date is not None
+                     else next(iter(snapshot_dates)) if len(snapshot_dates) == 1 else None)
+    names = list(rows.position_strategy_names) or [p.get("strategy_name") for p in rows.positions]
+    unavailable = None
+    if rows.position_stream == "system":
+        unavailable = "Model/system positions are read-only. Select QT to edit its current snapshot."
+    elif rows.position_stream != "qt":
+        unavailable = "The position stream is unknown; only identified QT snapshots can be edited."
+    elif position_date is None:
+        unavailable = "No dated QT snapshot is available."
+    elif position_date != current_utc_date().isoformat():
+        unavailable = "This is an older QT snapshot. Only today's snapshot can be edited."
+    elif not names or any(not isinstance(name, str) or not name.strip() for name in names):
+        unavailable = "An engine-owned strategy identity is unavailable for this snapshot."
 
     return {
         "id": cfg["id"],
         "name": cfg["name"],
         "description": cfg["description"],
+        "dataAvailable": result_available,
+        "resultSource": PRIMARY_STREAM,
+        "resultDate": str(latest["date"]) if latest else None,
         "invested": initial_equity,
         "currentValue": current_value,
         "return": total_return,
         "returnPercent": return_percent,
         "positions": transformed_positions,
+        "positionStream": rows.position_stream,
+        "positionDate": position_date,
+        # Keep engine-owned identity available after the last nonzero row closes.
+        # Never infer it from the display strategy id/name or another book.
+        "positionStrategyNames": sorted(set(names)) if names and all(
+            isinstance(name, str) and name.strip() for name in names
+        ) else [],
+        "positionsEditable": unavailable is None,
+        "positionEditUnavailableReason": unavailable,
         "historicalData": historical_data,
         # Where this curve stops describing the same portfolio. The points
         # themselves are untouched -- these say where the line must break, so
         # nothing is read straight across a change of book.
         "historyBreaks": list(history_breaks or ()),
         "equityByStream": equity_by_stream,
-        "bestDay": published_or_computed(latest.get("best_day"), stats["best_day"]),
-        "worstDay": published_or_computed(latest.get("worst_day"), stats["worst_day"]),
+        "bestDay": published_or_computed(result("best_day"), stats.get("best_day")),
+        "worstDay": published_or_computed(result("worst_day"), stats.get("worst_day")),
         "executions": transformed_executions,
+        "executionDate": str(rows.execution_date) if rows.execution_date is not None else None,
+        "executionsAvailable": rows.executions_available,
+        "executionUnavailableReason": (
+            None if rows.executions_available else
+            "QT result date is unavailable; fills cannot be attributed to a reporting day."
+            if not result_available else
+            "Execution stream metadata is unavailable; legacy fills cannot be attributed to QT."
+        ),
         "finalizedPositions": transformed_finalized,
+        "activityStream": rows.activity_stream,
+        "finalizedPositionsAvailable": rows.finalized_positions_available,
         "managers": cfg["managers"],
-        "lastUpdate": latest["date"].isoformat(),
+        "lastUpdate": latest["date"].isoformat() if latest else "",
         "metrics": {
             "volatility": volatility,
             "sharpeRatio": sharpe,
             # The engine publishes a Sortino ratio and AlgoLens never showed
             # it, so the one downside-risk figure the platform actually
             # produces was invisible.
-            "sortinoRatio": float_or_none(latest.get("sortino_ratio")),
-            "downsideDeviation": float_or_none(latest.get("downside_deviation")),
+            "sortinoRatio": float_or_none(result("sortino_ratio")),
+            "downsideDeviation": float_or_none(result("downside_deviation")),
             "maxDrawdown": published_or_computed(
-                latest.get("max_drawdown"), stats["max_drawdown"]
+                result("max_drawdown"), stats.get("max_drawdown")
             ),
-            "winRate": published_or_computed(latest.get("win_rate"), stats["win_rate"]),
+            "winRate": published_or_computed(result("win_rate"), stats.get("win_rate")),
             # Fills recorded for THIS day, not trades since inception. The UI
             # labelled this "Total Trades", which it has never been.
-            "executionsToday": len(transformed_executions),
+            "executionsToday": len(transformed_executions) if rows.executions_available else None,
             # The engine's avg_win and avg_loss are the mean daily PERCENTAGE
             # return on winning and losing days. AlgoLens computed a mean
             # daily DOLLAR change instead and rendered it with a "$" under the
             # same name, so the two were different quantities wearing one
             # label. The engine's definition wins; the UI now says "%".
-            "avgWin": published_or_computed(latest.get("avg_win"), None),
-            "avgLoss": published_or_computed(latest.get("avg_loss"), None),
+            "avgWin": published_or_computed(result("avg_win"), None),
+            "avgLoss": published_or_computed(result("avg_loss"), None),
             # Same dollar-P&L definition in both, so the fallback is safe.
             # The published value is dropped when it is the 999.99 sentinel a
             # pre-migration row still carries.
             "profitFactor": published_profit_factor(
-                latest.get("profit_factor"), stats["profit_factor"]
+                result("profit_factor"), stats.get("profit_factor")
             ),
-            "dailyReturn": float_or_none(latest["daily_return"]),
+            "dailyReturn": float_or_none(result("daily_return")),
             "cumulativeReturn": return_percent,
             "annualizedReturn": annualized_return,
             # The engine stopped writing trading.live_results.gross_leverage and
@@ -175,32 +231,30 @@ def build_strategy_detail(
             # was abandoned. See the note on LIVE_RESULTS in schema_contract.py.
             #
             # portfolio_leverage is read FIRST; see live_leverage.
-            "grossLeverage": live_leverage(
-                latest.get("portfolio_leverage"), latest.get("gross_leverage")
-            ),
-            "netLeverage": float_or_none(latest["net_leverage"]),
-            "portfolioLeverage": float_or_none(latest["portfolio_leverage"]),
-            "marginPosted": float_or_none(latest["margin_posted"]),
-            "equityToMarginRatio": float_or_none(latest["equity_to_margin_ratio"]),
-            "marginCushion": float_or_none(latest["margin_cushion"]),
-            "totalNotional": float_or_none(latest["gross_notional"]),
-            "unrealizedPnL": float_or_none(latest["total_unrealized_pnl"]),
-            "realizedPnL": float_or_none(latest["total_realized_pnl"]),
-            "totalCommissions": float_or_none(latest["total_transaction_costs"]),
+            "grossLeverage": live_leverage(result("portfolio_leverage"), result("gross_leverage")),
+            "netLeverage": float_or_none(result("net_leverage")),
+            "portfolioLeverage": float_or_none(result("portfolio_leverage")),
+            "marginPosted": float_or_none(result("margin_posted")),
+            "equityToMarginRatio": float_or_none(result("equity_to_margin_ratio")),
+            "marginCushion": float_or_none(result("margin_cushion")),
+            "totalNotional": float_or_none(result("gross_notional")),
+            "unrealizedPnL": float_or_none(result("total_unrealized_pnl")),
+            "realizedPnL": float_or_none(result("total_realized_pnl")),
+            "totalCommissions": float_or_none(result("total_transaction_costs")),
             # Net P&L sits beside unrealised P&L, realised P&L and
             # commissions, and a reader adds those three to check it. It held
             # current value minus starting equity -- the return since
             # inception -- which on the demo book is $92,405.72 next to three
             # figures that sum to $7,259.40. It is now what its label says.
             "netPnL": net_pnl(
-                float_or_none(latest["total_unrealized_pnl"]),
-                float_or_none(latest["total_realized_pnl"]),
-                float_or_none(latest["total_transaction_costs"]),
+                float_or_none(result("total_unrealized_pnl")),
+                float_or_none(result("total_realized_pnl")),
+                float_or_none(result("total_transaction_costs")),
             ),
             # The return since inception, which is what netPnL used to hold.
             # It already has a home on the page: the header beside the chart.
             "totalReturn": total_return,
-            "cashAvailable": float_or_none(latest["cash_available"]),
+            "cashAvailable": float_or_none(result("cash_available")),
             "currentPortfolioValue": current_value,
         },
     }
@@ -275,6 +329,8 @@ def build_strategy_summary(
             "id": cfg["id"],
             "name": cfg["name"],
             "dataAvailable": False,
+            "resultSource": PRIMARY_STREAM,
+            "resultDate": None,
             "currentValue": None,
             "returnPercent": None,
             "volatility": None,
@@ -283,14 +339,14 @@ def build_strategy_summary(
         }
 
     base_equity = cfg["initial_equity"]
-    current_value = float(latest["current_portfolio_value"])
+    current_value = float_or_none(latest.get("current_portfolio_value"))
     return_percent = (
         ((current_value - base_equity) / base_equity * 100)
-        if base_equity is not None and base_equity > 0
+        if current_value is not None and base_equity is not None and base_equity > 0
         else None
     )
-    volatility = float(latest["volatility"])
-    annualized_return = float(latest["total_annualized_return"])
+    volatility = float_or_none(latest.get("volatility"))
+    annualized_return = float_or_none(latest.get("total_annualized_return"))
     # Same rule as the detail view: the engine's own Sharpe when it published
     # one. The list and the detail page must not disagree about a strategy.
     sharpe = published_or_computed(
@@ -301,6 +357,8 @@ def build_strategy_summary(
         "id": cfg["id"],
         "name": cfg["name"],
         "dataAvailable": True,
+        "resultSource": PRIMARY_STREAM,
+        "resultDate": str(latest["date"]) if latest.get("date") is not None else None,
         "currentValue": current_value,
         "returnPercent": return_percent,
         "volatility": volatility,
@@ -343,8 +401,8 @@ def _require_reason(reason: str) -> str:
 
 
 def _require_mock_capital(mock_capital: float) -> float:
-    if mock_capital <= 0:
-        raise IncubationError("mock_capital must be positive")
+    if not math.isfinite(mock_capital) or mock_capital <= 0:
+        raise IncubationError("mock_capital must be a positive finite number")
     return mock_capital
 
 
@@ -408,8 +466,10 @@ class GetStrategyDetail:
             return []
 
     def execute(
-        self, strategy_id: str, portfolio_id: Any = None
+        self, strategy_id: str, portfolio_id: Any = None,
+        position_stream: str = DEFAULT_POSITION_STREAM,
     ) -> dict[str, Any]:
+        position_stream = validate_position_stream(position_stream)
         cfg = self.registry.get(strategy_id)
         if cfg is None:
             raise StrategyNotFound(strategy_id)
@@ -443,7 +503,7 @@ class GetStrategyDetail:
                 )
             target = found
 
-        rows = self.reader.fetch_detail_rows(cfg["strategy_type"], target)
+        rows = self.reader.fetch_detail_rows(cfg["strategy_type"], target, position_stream)
         prices, multipliers = self._market_data(rows.positions, rows.executions)
         detail = build_strategy_detail(
             cfg, rows, prices, multipliers, self._history_breaks(strategy_id)
@@ -473,22 +533,10 @@ class ListStrategies:
     def execute(self) -> list[dict[str, Any]]:
         strategies = []
         for cfg in self.registry.list(active_only=True):
-            try:
-                latest = self.reader.fetch_summary_row(
-                    cfg["strategy_type"], cfg["portfolio_id"]
-                )
-                summary = build_strategy_summary(cfg, latest)
-            except Exception as exc:
-                logger.error(
-                    "[STRATEGIES] Failed to summarize %s: %s",
-                    cfg["id"],
-                    str(exc),
-                    exc_info=True,
-                )
-                # Still report it. Dropping a strategy because its numbers could
-                # not be read removes its value from the fund total without
-                # saying so, which is worse than showing it with no numbers.
-                summary = build_strategy_summary(cfg, None)
+            latest = self.reader.fetch_summary_row(
+                cfg["strategy_type"], cfg["portfolio_id"]
+            )
+            summary = build_strategy_summary(cfg, latest)
             if summary:
                 strategies.append(summary)
         return strategies
@@ -565,9 +613,11 @@ class UpsertQtPosition:
     that a breach requires an explicit acknowledgement rather than blocking.
     """
 
-    def __init__(self, registry: StrategyRegistryPort, reader: PortfolioReaderPort, market_data=None):
+    def __init__(self, registry: StrategyRegistryPort, reader: PortfolioReaderPort,
+                 market_data=None, instrument_catalog: InstrumentCatalogPort | None = None):
         self.registry = registry
         self.reader = reader
+        self.instrument_catalog = instrument_catalog
         # Optional: without it prices are unknown and the gate says so.
         self.market_data = market_data
 
@@ -607,13 +657,8 @@ class UpsertQtPosition:
 
         return [priced(p) for p in book], priced(proposal)
 
-    def _portfolio_value(self, strategy_type, portfolio_id):
-        """The book's value, needed to turn exposure into leverage."""
-        try:
-            row = self.reader.fetch_summary_row(strategy_type, portfolio_id)
-        except Exception as exc:
-            logger.error("[POSITIONS] Portfolio value read failed: %s", exc, exc_info=True)
-            return None
+    def _portfolio_value(self, row):
+        """The serialized book snapshot's value, used to calculate leverage."""
         if not row:
             return None
         value = row.get("current_portfolio_value") if hasattr(row, "get") else None
@@ -630,9 +675,14 @@ class UpsertQtPosition:
     ) -> dict[str, Any]:
         normalized = validate_position_payload(payload)
 
-        strategy = self.registry.get(normalized["strategy_id"])
+        get_strategy = getattr(self.registry, "get_any", self.registry.get)
+        strategy = get_strategy(normalized["strategy_id"])
         if strategy is None:
             raise StrategyNotFound(normalized["strategy_id"])
+        if strategy.get("lifecycle") == "retired":
+            raise PositionValidationError(
+                "strategy_retired", "A retired strategy cannot accept position edits"
+            )
 
         strategy_type = strategy["strategy_type"]
         # Which book, decided explicitly. Reading strategy["portfolio_id"] here
@@ -655,36 +705,39 @@ class UpsertQtPosition:
             strategy["portfolio_id"],
         )
 
-        envelope = self.reader.fetch_risk_envelope(strategy_type, portfolio_id)
-        book = self.reader.fetch_qt_book(strategy_type, portfolio_id)
+        # The caller's asset label is never authority. Missing catalog evidence
+        # must block even an acknowledged risk override, before any write.
+        try:
+            asset_type = (self.instrument_catalog.resolve_asset_type(normalized["symbol"])
+                          if self.instrument_catalog is not None else None)
+        except PositionValidationError:
+            raise
+        except Exception:
+            logger.warning("[POSITIONS] Instrument type lookup unavailable")
+            raise PositionValidationError(
+                "instrument_type_unavailable", "Instrument type could not be verified"
+            ) from None
+        validate_instrument_quantity(normalized["quantity"], asset_type)
 
-        # Price the book at the market, so the gate compares exposures the same
-        # way trade-ngin does: quantity x price x contract size. Without this
-        # every leverage limit the engine publishes is uncheckable, and the
-        # verdict would record "not checked" for the limits that matter most.
-        proposal = with_known_price(book, normalized)
-        priced_book, priced_proposal = self._price_for_risk(book, proposal)
-        portfolio_value = self._portfolio_value(strategy_type, portfolio_id)
+        def check_locked_book(envelope, book, summary):
+            # Price the book at the market, so the gate compares exposures the
+            # same way trade-ngin does: quantity x price x contract size.
+            proposal = with_known_price(book, normalized)
+            priced_book, priced_proposal = self._price_for_risk(book, proposal)
+            verdict = evaluate_risk(
+                envelope, priced_book, priced_proposal, self._portfolio_value(summary)
+            )
+            if not verdict["passed"] and not acknowledge_risk:
+                raise RiskAcknowledgementRequired(verdict)
+            return verdict
 
-        # The verdict describes the book at gate-evaluation time, not at commit
-        # time. That is acceptable because the gate is advisory by design: a
-        # breach never blocks, it only requires acknowledgement.
-        verdict = evaluate_risk(
-            envelope, priced_book, priced_proposal, portfolio_value
-        )
-
-        if not verdict["passed"] and not acknowledge_risk:
-            raise RiskAcknowledgementRequired(verdict)
-
-        result = self.reader.write_qt_position(
+        return self.reader.write_qt_position(
             strategy_type=strategy_type,
             portfolio_id=portfolio_id,
             normalized=normalized,
             user_id=user_id,
-            verdict=verdict,
-            overrode_risk=not verdict["passed"],
+            risk_check=check_locked_book,
         )
-        return {**result, "risk_check": verdict}
 
 
 class ListPositionOverrides:
@@ -778,7 +831,8 @@ class ListPortfolios:
             for portfolio_id in books:
                 bucket = buckets.setdefault(
                     portfolio_id,
-                    {"portfolio_id": portfolio_id, "strategies": [], "total_value": 0.0},
+                    {"portfolio_id": portfolio_id, "strategies": [],
+                     "total_value": 0.0, "strategies_awaiting_data": 0},
                 )
                 # None, not 0.0. The engine keys live_results on
                 # (strategy_type, portfolio_id), so a pairing it has not
@@ -794,19 +848,13 @@ class ListPortfolios:
                 # An incubating strategy trades mock capital. Its live_results
                 # row is history from before it was pulled, so reporting it
                 # here would put retired-from-live money in a live book total.
-                try:
-                    latest = None if lifecycle == "incubating" else self.reader.fetch_summary_row(
-                        cfg["strategy_type"], portfolio_id
-                    )
-                    if latest and latest.get("current_portfolio_value") is not None:
-                        value = float(latest["current_portfolio_value"])
-                except Exception as exc:
-                    # A book is still worth listing when one strategy's numbers
-                    # are unreadable -- it just contributes nothing to the total.
-                    logger.error(
-                        "[PORTFOLIOS] Failed to read %s in %s: %s",
-                        cfg["id"], portfolio_id, str(exc), exc_info=True,
-                    )
+                latest = None if lifecycle == "incubating" else self.reader.fetch_summary_row(
+                    cfg["strategy_type"], portfolio_id
+                )
+                if latest and latest.get("current_portfolio_value") is not None:
+                    value = float(latest["current_portfolio_value"])
+                elif lifecycle != "incubating":
+                    bucket["strategies_awaiting_data"] += 1
                 bucket["strategies"].append(
                     {
                         "id": cfg["id"],
@@ -892,6 +940,17 @@ class ListAssignmentHistory:
 
     def execute(self, strategy_id: str, limit: int = 100) -> list[dict[str, Any]]:
         return self.registry.list_assignment_history(strategy_id, limit)
+
+
+class ListLifecycleHistory:
+    def __init__(self, registry: StrategyRegistryPort, reader: PortfolioReaderPort):
+        self.registry = registry
+        self.reader = reader
+
+    def execute(self, strategy_id: str, limit: int = 100) -> list[dict[str, Any]]:
+        if self.registry.get_any(strategy_id) is None:
+            raise StrategyNotFound(strategy_id)
+        return list(self.reader.list_lifecycle_history(strategy_id, min(limit, 100)))
 
 
 class ListBooks:

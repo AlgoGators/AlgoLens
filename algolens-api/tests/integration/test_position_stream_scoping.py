@@ -29,6 +29,7 @@ psycopg2 = pytest.importorskip("psycopg2")
 from algolens.infrastructure.portfolio.repositories import (  # noqa: E402
     PostgresPortfolioRepository,
 )
+from algolens.infrastructure.portfolio import repositories as portfolio_repositories  # noqa: E402
 
 pytestmark = pytest.mark.integration
 
@@ -56,7 +57,7 @@ TODAY = datetime.date(2026, 9, 4)
 YESTERDAY = datetime.date(2026, 9, 3)
 
 
-def _insert(cur, symbol, quantity, stream, date, updated_at):
+def _insert(cur, symbol, quantity, stream, date, updated_at, portfolio_id=BOOK):
     cur.execute(
         """
         INSERT INTO trading.positions
@@ -64,7 +65,7 @@ def _insert(cur, symbol, quantity, stream, date, updated_at):
              quantity, average_price, date, updated_at)
         VALUES (%s, 'Trend', %s, %s, %s, %s, 100.0, %s, %s)
         """,
-        (STRATEGY, BOOK, stream, symbol, quantity, date, updated_at),
+        (STRATEGY, portfolio_id, stream, symbol, quantity, date, updated_at),
     )
 
 
@@ -192,6 +193,95 @@ class TestHeldSymbolsAreOneStream:
         assert repo.held_symbols([BOOK], portfolio_type="system") == [
             "ES.v.0",
             "ZN.v.0",
+        ]
+
+
+CURRENT_BOOK = "HELD_CURRENT_PORTFOLIO"
+LAGGING_BOOK = "HELD_LAGGING_PORTFOLIO"
+FLAT_BOOK = "HELD_FLAT_PORTFOLIO"
+HELD_BOOKS = [LAGGING_BOOK, CURRENT_BOOK, LAGGING_BOOK, None, "", FLAT_BOOK]
+
+
+@pytest.fixture()
+def unequal_book_repo(repo):
+    """Requested books have different latest dates in each stream."""
+    conn = repo.connection_factory()
+    try:
+        with conn.cursor() as cur:
+            rows = [
+                # QT: current book reaches Sep 4, lagging book only Sep 3.
+                (CURRENT_BOOK, "GC.v.0", 3, "qt", TODAY),
+                (CURRENT_BOOK, "ES.v.0", 2, "qt", TODAY),
+                (CURRENT_BOOK, "CURRENT_CLOSED", 4, "qt", YESTERDAY),
+                (CURRENT_BOOK, "CURRENT_CLOSED", 0, "qt", TODAY),
+                (CURRENT_BOOK, "CURRENT_STALE", 2, "qt", YESTERDAY),
+                (LAGGING_BOOK, "ZN.v.0", 5, "qt", YESTERDAY),
+                (LAGGING_BOOK, "ES.v.0", 7, "qt", YESTERDAY),
+                (LAGGING_BOOK, "LAG_CLOSED", 5, "qt", datetime.date(2026, 9, 2)),
+                (LAGGING_BOOK, "LAG_CLOSED", 0, "qt", YESTERDAY),
+                (LAGGING_BOOK, "LAG_STALE", 4, "qt", datetime.date(2026, 9, 2)),
+                (FLAT_BOOK, "WAS_HELD", 8, "qt", YESTERDAY),
+                (FLAT_BOOK, "WAS_HELD", 0, "qt", TODAY),
+                # System: current reaches Sep 5, lagging only Sep 2. Thus the
+                # other stream is newer in current/QT and lagging/system reads.
+                (CURRENT_BOOK, "HG.v.0", 4, "system", datetime.date(2026, 9, 5)),
+                (CURRENT_BOOK, "SYS_CURRENT_CLOSED", 4, "system", TODAY),
+                (CURRENT_BOOK, "SYS_CURRENT_CLOSED", 0, "system", datetime.date(2026, 9, 5)),
+                (CURRENT_BOOK, "SYS_CURRENT_STALE", 2, "system", YESTERDAY),
+                (LAGGING_BOOK, "6E.v.0", 5, "system", datetime.date(2026, 9, 2)),
+                (LAGGING_BOOK, "HG.v.0", 3, "system", datetime.date(2026, 9, 2)),
+                (LAGGING_BOOK, "SYS_LAG_CLOSED", 4, "system", datetime.date(2026, 9, 1)),
+                (LAGGING_BOOK, "SYS_LAG_CLOSED", 0, "system", datetime.date(2026, 9, 2)),
+                (LAGGING_BOOK, "SYS_LAG_STALE", 2, "system", datetime.date(2026, 9, 1)),
+                (FLAT_BOOK, "MODEL_WAS_HELD", 8, "system", TODAY),
+                (FLAT_BOOK, "MODEL_WAS_HELD", 0, "system", datetime.date(2026, 9, 5)),
+                # An unrequested book reaches Sep 6 in both streams.
+                ("UNRELATED_PORTFOLIO", "UNRELATED_QT", 1, "qt", datetime.date(2026, 9, 6)),
+                ("UNRELATED_PORTFOLIO", "UNRELATED_SYSTEM", 1, "system", datetime.date(2026, 9, 6)),
+            ]
+            for book, symbol, quantity, stream, snapshot_date in rows:
+                _insert(cur, symbol, quantity, stream, snapshot_date, "2026-09-06 17:30", portfolio_id=book)
+            conn.commit()
+    finally:
+        conn.close()
+    return repo
+
+
+class TestHeldSymbolsUseEachBooksLatestSnapshot:
+    def test_default_qt_includes_lagging_book_without_stale_or_zero_holdings(self, unequal_book_repo):
+        # A global max drops ZN; a per-symbol max resurrects closed/stale rows;
+        # an unscoped max lets the newer system snapshot erase QT holdings.
+        assert unequal_book_repo.held_symbols(HELD_BOOKS) == [
+            "ES.v.0", "GC.v.0", "ZN.v.0",
+        ]
+
+    def test_explicit_system_uses_each_books_system_date(self, unequal_book_repo):
+        assert unequal_book_repo.held_symbols(HELD_BOOKS, portfolio_type="system") == [
+            "6E.v.0", "HG.v.0",
+        ]
+
+    def test_explicit_unscoped_read_still_uses_each_books_latest_date(self, unequal_book_repo):
+        # Without a requested stream, each book uses its newest snapshot across
+        # all streams: system/Sep 5 for current, QT/Sep 3 for lagging.
+        assert unequal_book_repo.held_symbols(HELD_BOOKS, portfolio_type=None) == [
+            "ES.v.0", "HG.v.0", "ZN.v.0",
+        ]
+
+    def test_legacy_schema_uses_each_books_latest_date(self, unequal_book_repo, monkeypatch):
+        conn = unequal_book_repo.connection_factory()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("ALTER TABLE trading.positions DROP COLUMN portfolio_type")
+                conn.commit()
+        finally:
+            conn.close()
+
+        # The disposable schema changed after earlier tests cached its columns.
+        # Reset only the cache; the real catalog query detects the legacy schema.
+        monkeypatch.setattr(portfolio_repositories, "_has_portfolio_type_cache", {})
+        monkeypatch.setattr(portfolio_repositories, "_has_portfolio_type_expires_at", 0)
+        assert unequal_book_repo.held_symbols(HELD_BOOKS) == [
+            "ES.v.0", "HG.v.0", "ZN.v.0",
         ]
 
 

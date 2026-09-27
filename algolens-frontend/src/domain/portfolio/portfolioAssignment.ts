@@ -112,6 +112,8 @@ export function canSubmit(target: string, currentPortfolioId: string, reason: st
 export type PortfolioSummary = {
   portfolio_id: string;
   total_value: number;
+  /** Live strategy values omitted from the measured book total. */
+  strategies_awaiting_data?: number;
   strategy_count: number;
   strategies: {
     id: string;
@@ -132,15 +134,22 @@ export function knownPortfolioIds(portfolios: PortfolioSummary[]): string[] {
   return Array.from(new Set(portfolios.map(p => p.portfolio_id))).sort();
 }
 
+export function awaitingQtResults(portfolio: PortfolioSummary): number {
+  return portfolio.strategies_awaiting_data ?? portfolio.strategies.filter(
+    strategy => strategy.lifecycle === 'live' && strategy.current_value === null,
+  ).length;
+}
+
 /** What share of the whole fund each portfolio represents. */
 export function portfolioWeights(
   portfolios: PortfolioSummary[],
-): { portfolio_id: string; total_value: number; percent: number }[] {
+): { portfolio_id: string; total_value: number; percent: number | null }[] {
   const total = portfolios.reduce((sum, p) => sum + p.total_value, 0);
+  const incomplete = portfolios.some(p => awaitingQtResults(p) > 0);
   return portfolios.map(p => ({
     portfolio_id: p.portfolio_id,
     total_value: p.total_value,
     // A zero-value fund would make every share NaN; report 0 instead.
-    percent: total > 0 ? (p.total_value / total) * 100 : 0,
+    percent: incomplete ? null : total > 0 ? (p.total_value / total) * 100 : 0,
   }));
 }

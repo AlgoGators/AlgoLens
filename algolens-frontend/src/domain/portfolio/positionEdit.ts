@@ -10,6 +10,65 @@
  * Ported from AlgoLens PR #32, closed August 2026 on a miscommunication.
  */
 
+import { parseFixedDecimal8 } from '../numbers/fixedDecimal8';
+
+export type ExistingPositionValue = {
+  quantity: number;
+  average_price: number | null;
+  quantity_exact?: string;
+  average_price_exact?: string | null;
+};
+
+/** Canonicalize accepted form spellings with decimal text only. */
+export function normalizeDecimal8Input(value: string): string {
+  const input = value.trim();
+  if (input.length === 0 || input.length > 128) throw new Error('invalid_fixed_decimal8');
+  const match = /^([+-]?)(?:(\d+)(?:\.(\d*))?|\.(\d+))(?:[eE]([+-]?\d{1,4}))?$/.exec(input);
+  if (!match) throw new Error('invalid_fixed_decimal8');
+  const exponent = match[5] === undefined ? 0 : parseInt(match[5], 10);
+  if (exponent < -1000 || exponent > 1000) throw new Error('invalid_fixed_decimal8');
+
+  const integerPart = match[2] ?? '0';
+  const rawDigits = integerPart + (match[3] ?? match[4] ?? '');
+  if (!/[1-9]/.test(rawDigits)) return parseFixedDecimal8('0');
+  const leading = rawDigits.search(/[1-9]/);
+  const digits = rawDigits.slice(leading);
+  const point = integerPart.length + exponent - leading;
+  if (point > 11 || point < -8) throw new Error('invalid_fixed_decimal8');
+  const integer = point <= 0 ? '0' : digits.slice(0, point).padEnd(point, '0');
+  const fraction = point <= 0 ? '0'.repeat(-point) + digits : digits.slice(point);
+  const significantFraction = fraction.replace(/0+$/, '');
+  if (significantFraction.length > 8) throw new Error('invalid_fixed_decimal8');
+  const canonical = `${match[1] === '-' ? '-' : ''}${integer}${significantFraction ? `.${significantFraction}` : ''}`;
+  return parseFixedDecimal8(canonical);
+}
+
+/** A present invalid companion never becomes a rounded legacy number. */
+export function positionValueEvidence(existing: ExistingPositionValue): {
+  valid: boolean; quantity: string; averagePrice: string;
+} {
+  let quantity = String(existing.quantity);
+  let averagePrice = existing.average_price == null ? '' : String(existing.average_price);
+  try {
+    if (existing.quantity_exact !== undefined) {
+      quantity = parseFixedDecimal8(existing.quantity_exact);
+    }
+    if (existing.average_price_exact !== undefined) {
+      if (existing.average_price_exact === null) {
+        if (existing.average_price !== null) throw new Error('invalid_position_evidence');
+        averagePrice = '';
+      } else {
+        if (existing.average_price === null) throw new Error('invalid_position_evidence');
+        averagePrice = parseFixedDecimal8(existing.average_price_exact);
+        if (averagePrice.startsWith('-')) throw new Error('invalid_position_evidence');
+      }
+    }
+    return { valid: true, quantity, averagePrice };
+  } catch {
+    return { valid: false, quantity: 'Invalid position evidence', averagePrice: '' };
+  }
+}
+
 export type RiskBreach = {
   limit: string;
   limit_value: number;
@@ -106,33 +165,42 @@ export function reduce(state: SubmitState, event: SubmitEvent): SubmitState {
 export function canSubmit(reason: string, quantity: string): boolean {
   if (reason.trim().length === 0) return false;
   if (quantity.trim().length === 0) return false;
-  // Number('') is 0, which is why the empty check comes first.
-  return Number.isFinite(Number(quantity));
+  try { normalizeDecimal8Input(quantity); return true; } catch { return false; }
+}
+
+/** Blank preserves the existing basis; a supplied price must survive JSON as itself. */
+export function isValidAveragePrice(value: string): boolean {
+  if (value.trim() === '') return true;
+  try { return !normalizeDecimal8Input(value).startsWith('-'); } catch { return false; }
 }
 
 export type DiffLine = { field: string; from: string; to: string };
 
 export function buildDiff(
-  before: { quantity: number; average_price: number | null } | null,
-  after: { quantity: number; average_price: number | null },
+  before: ExistingPositionValue | null,
+  after: { quantity: string | number; average_price: string | number | null },
 ): DiffLine[] {
   const lines: DiffLine[] = [];
 
-  const beforeQty = before ? String(before.quantity) : '-';
-  const afterQty = after.quantity === 0 ? '0 (closing)' : String(after.quantity);
-  if (!before || before.quantity !== after.quantity) {
+  const evidence = before ? positionValueEvidence(before) : null;
+  if (evidence && !evidence.valid) throw new Error('invalid_position_evidence');
+  const beforeQty = evidence ? normalizeDecimal8Input(evidence.quantity) : '-';
+  const nextQty = normalizeDecimal8Input(String(after.quantity));
+  const afterQty = nextQty === '0' ? '0 (closing)' : nextQty;
+  if (!before || beforeQty !== nextQty) {
     lines.push({ field: 'Quantity', from: beforeQty, to: afterQty });
   }
 
-  const bp = before?.average_price ?? null;
+  const bp = evidence?.averagePrice ? normalizeDecimal8Input(evidence.averagePrice) : null;
   // A blank price field means "leave it alone", not "set it to nothing" --
   // the backend only overwrites average_price when a value is present, so
   // omitting the line when after.average_price is null is correct.
-  if (after.average_price !== null && bp !== after.average_price) {
+  const nextPrice = after.average_price === null ? null : normalizeDecimal8Input(String(after.average_price));
+  if (nextPrice !== null && bp !== nextPrice) {
     lines.push({
       field: 'Average price',
       from: bp === null ? '-' : String(bp),
-      to: String(after.average_price),
+      to: nextPrice,
     });
   }
 

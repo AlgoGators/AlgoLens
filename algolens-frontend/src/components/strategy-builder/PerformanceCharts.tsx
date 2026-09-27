@@ -1,6 +1,7 @@
 import { LineChart, Line, BarChart, Bar, Cell, XAxis, YAxis, ResponsiveContainer, Tooltip } from 'recharts';
 import { formatAxisDollars, formatAxisPercent } from '../../domain/portfolio/formatPrice';
 import type { CombinedMetrics } from '../../domain/portfolio/computeCombinedMetrics';
+import { formatBarDate } from '../../domain/portfolio/formatBarDate';
 
 interface PerformanceChartsProps {
   metrics: CombinedMetrics;
@@ -17,14 +18,18 @@ export function PerformanceCharts({ metrics, theme }: PerformanceChartsProps) {
           }`}>
           Daily P&L (30D)
         </h3>
+        {!metrics.coverage.comparableDailyReturns && (
+          <p className={`mb-2 text-xs ${theme === 'dark' ? 'text-amber-400' : 'text-amber-700'}`}>
+            Unavailable: common coverage does not support comparable daily returns.
+          </p>
+        )}
         <ResponsiveContainer width="100%" height={200}>
           <BarChart data={metrics.dailyPnL}>
             <XAxis
               dataKey="date"
               tick={{ fill: theme === 'dark' ? '#6b7280' : '#9ca3af', fontSize: 10 }}
               tickFormatter={(value) => {
-                const date = new Date(value);
-                return `${date.getMonth() + 1}/${date.getDate()}`;
+                return formatBarDate(String(value), { month: 'numeric', day: 'numeric' });
               }}
               interval="preserveStartEnd"
             />
@@ -58,14 +63,18 @@ export function PerformanceCharts({ metrics, theme }: PerformanceChartsProps) {
           }`}>
           Cumulative Return (90D)
         </h3>
+        {metrics.coverage.partial && (
+          <p className={`mb-2 text-xs ${theme === 'dark' ? 'text-amber-400' : 'text-amber-700'}`}>
+            Common coverage only; {metrics.coverage.excludedDates.length} excluded {metrics.coverage.excludedDates.length === 1 ? 'date' : 'dates'}.
+          </p>
+        )}
         <ResponsiveContainer width="100%" height={200}>
           <LineChart data={metrics.historicalPerformance}>
             <XAxis
               dataKey="date"
               tick={{ fill: theme === 'dark' ? '#6b7280' : '#9ca3af', fontSize: 10 }}
               tickFormatter={(value) => {
-                const date = new Date(value);
-                return `${date.getMonth() + 1}/${date.getDate()}`;
+                return formatBarDate(String(value), { month: 'numeric', day: 'numeric' });
               }}
               interval="preserveStartEnd"
             />
@@ -92,6 +101,7 @@ export function PerformanceCharts({ metrics, theme }: PerformanceChartsProps) {
               stroke="#f97316"
               strokeWidth={2}
               dot={false}
+              connectNulls={false}
             />
           </LineChart>
         </ResponsiveContainer>

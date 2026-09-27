@@ -1,0 +1,28 @@
+{
+  "attempts": [],
+  "capture_helper": "build_live_config_inspection_capture",
+  "fixture_bytes_jsonb_text": 5766,
+  "fixture_sha256": "cacaaeacf2f57c17afc60d8e8acc28fcc196a97a6662e2dc7705a2c8eb64e46d",
+  "intents": [],
+  "membership_books": [],
+  "native_projection_helper": "project_run_consumption or typed unavailable factory",
+  "probe_argv": [
+    "runtime_publication_probe",
+    "publish_required_bad_capture_complete"
+  ],
+  "probe_jsonb_reserialized_compact_bytes": 5294,
+  "probe_sha256": "97d6c8e15ea96035ca8a4a2d77dcc1d8a1d9a88bd0690e03197449c3dc16d4f9",
+  "recorded_time_provenance": "transaction clock_timestamp",
+  "registry": {
+    "id": "trend",
+    "primary_book": "BOOK",
+    "runtime_revision": 0,
+    "strategy_type": "LIVE_TREND"
+  },
+  "system_results": [
+    {
+      "row_jsonb_text": "{\"date\": \"2026-09-22T00:00:00+00:00\", \"config\": null, \"total_pnl\": 123, \"volatility\": null, \"strategy_id\": \"LIVE_TREND\", \"portfolio_id\": \"BOOK\", \"portfolio_type\": \"system\", \"current_portfolio_value\": null, \"total_annualized_return\": null, \"total_cumulative_return\": null}",
+      "run_date": "2026-09-22"
+    }
+  ]
+}

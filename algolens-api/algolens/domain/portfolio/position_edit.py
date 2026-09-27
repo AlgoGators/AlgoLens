@@ -11,14 +11,14 @@ that turned out to be a miscommunication, so this restores the design ADR-003
 D-5 always described.
 """
 
-from math import isfinite
-from numbers import Real
+from decimal import Decimal
 
 # Set by the service, never by the caller. See
 # test_portfolio_type_cannot_be_overridden_by_the_caller for why this is not
 # merely defensive.
 from algolens.domain.portfolio.instruments import base_symbol
 from algolens.domain.portfolio.portfolio_assignment import match_book
+from algolens.domain.portfolio.position_decimal import position_decimal8
 
 QT_STREAM = "qt"
 
@@ -98,13 +98,26 @@ def _normalize_symbol(raw):
     return text.upper()
 
 
-def _require_finite_number(value, field, code):
+def _position_number(value, field, prefix):
+    if type(value) not in (int, float) and not isinstance(value, (str, Decimal)):
+        raise PositionValidationError(
+            f"{prefix}_not_a_number", f"Field '{field}' must be a number"
+        )
     try:
-        finite = isfinite(value)
-    except (OverflowError, ValueError):
-        finite = False
-    if not finite:
-        raise PositionValidationError(code, f"Field '{field}' must be a finite number")
+        return position_decimal8(value)
+    except TypeError:
+        raise PositionValidationError(
+            f"{prefix}_not_a_number", f"Field '{field}' must be a number"
+        ) from None
+    except ValueError as exc:
+        if str(exc) == "not_finite":
+            raise PositionValidationError(
+                f"{prefix}_not_finite", f"Field '{field}' must be a finite number"
+            ) from None
+        raise PositionValidationError(
+            f"{prefix}_not_representable",
+            f"Field '{field}' must be exactly representable as Decimal8",
+        ) from None
 
 
 def validate_position_payload(payload):
@@ -115,6 +128,11 @@ def validate_position_payload(payload):
     if not isinstance(payload, dict):
         raise PositionValidationError(
             "not_an_object", "Request body must be a JSON object"
+        )
+
+    if any(key in payload for key in ("date", "position_date", "positionDate")):
+        raise PositionValidationError(
+            "position_date_forbidden", "The server selects today's QT write date"
         )
 
     if "portfolio_type" in payload:
@@ -156,13 +174,7 @@ def validate_position_payload(payload):
             "is indistinguishable from an accident when read back months later",
         )
 
-    quantity = payload["quantity"]
-    # bool is a subclass of int in Python; True would otherwise become 1 contract.
-    if isinstance(quantity, bool) or not isinstance(quantity, Real):
-        raise PositionValidationError(
-            "quantity_not_a_number", "Field 'quantity' must be a number"
-        )
-    _require_finite_number(quantity, "quantity", "quantity_not_finite")
+    quantity = _position_number(payload["quantity"], "quantity", "quantity")
 
     # Optional, and only meaningful once a strategy can be in several books.
     # Validated here so a malformed value is rejected the same way as any other
@@ -182,11 +194,7 @@ def validate_position_payload(payload):
 
     average_price = payload.get("average_price")
     if average_price is not None:
-        if isinstance(average_price, bool) or not isinstance(average_price, Real):
-            raise PositionValidationError(
-                "price_not_a_number", "Field 'average_price' must be a number"
-            )
-        _require_finite_number(average_price, "average_price", "price_not_finite")
+        average_price = _position_number(average_price, "average_price", "price")
         if average_price < 0:
             raise PositionValidationError(
                 "price_negative", "Field 'average_price' must not be negative"

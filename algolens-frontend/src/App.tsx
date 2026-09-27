@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { LoginView } from './components/LoginView';
 import { RegisterView } from './components/RegisterView';
 import { Dashboard } from './components/Dashboard';
@@ -9,6 +9,10 @@ import { useAuth } from './adapters/react/useAuth';
 function AppContent() {
   const { user, logout, isLoading } = useAuth();
   const [showRegister, setShowRegister] = useState(false);
+
+  useEffect(() => {
+    if (user) setShowRegister(false);
+  }, [user]);
 
   if (isLoading) {
     return (

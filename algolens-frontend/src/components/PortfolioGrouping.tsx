@@ -3,6 +3,7 @@ import { Briefcase, ChevronDown, ChevronRight, ChevronUp } from 'lucide-react';
 
 import { useTheme } from '../adapters/react/ThemeContext';
 import {
+  awaitingQtResults,
   portfolioWeights,
   type PortfolioSummary,
 } from '../domain/portfolio/portfolioAssignment';
@@ -131,10 +132,15 @@ export function PortfolioGrouping({ onOpenStrategy, canOpen }: PortfolioGrouping
               <div className="text-sm tabular-nums">
                 ${displayedBookTotal(portfolio).toLocaleString('en-US')}
               </div>
+              {awaitingQtResults(portfolio) > 0 && (
+                <div className={`text-xs ${isDark ? 'text-amber-400' : 'text-amber-600'}`}>
+                  partial; {awaitingQtResults(portfolio)} QT result unavailable
+                </div>
+              )}
               <div className={`text-xs tabular-nums ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>
-                {weights.has(portfolio.portfolio_id)
-                  ? `${(weights.get(portfolio.portfolio_id) as number).toFixed(1)}% of fund`
-                  : 'share unknown'}
+                {weights.get(portfolio.portfolio_id) == null
+                  ? 'share unknown'
+                  : `${weights.get(portfolio.portfolio_id)!.toFixed(1)}% of fund`}
               </div>
             </div>
           </div>

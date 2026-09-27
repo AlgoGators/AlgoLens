@@ -3,12 +3,21 @@ import { useTheme } from '../adapters/react/ThemeContext';
 import { formatMetric } from '../domain/portfolio/formatMetric';
 import { MetricInfo } from './MetricInfo';
 import type { StrategyMetrics } from '../domain/portfolio/portfolioData';
+import { formatBarDate } from '../domain/portfolio/formatBarDate';
 
 interface FinancialAnalysisProps {
   metrics: StrategyMetrics;
+  executionsAvailable?: boolean;
+  executionUnavailableReason?: string | null;
+  executionDate?: string | null;
 }
 
-export function FinancialAnalysis({ metrics }: FinancialAnalysisProps) {
+export function FinancialAnalysis({
+  metrics,
+  executionsAvailable,
+  executionUnavailableReason,
+  executionDate,
+}: FinancialAnalysisProps) {
   const { theme } = useTheme();
 
   const MetricCard = ({ label, value, isPercentage = false, isPositive = true, info }: {
@@ -263,12 +272,25 @@ export function FinancialAnalysis({ metrics }: FinancialAnalysisProps) {
             }`}>
             <div className={`text-sm mb-1 ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'
               }`}>
-              Fills Today
+              {executionsAvailable === true && executionDate
+                ? `Fills \u00b7 ${formatBarDate(executionDate)}`
+                : 'Recent Fills Shown'}
             </div>
             {/* This was "Total Trades" over a count of TODAY's executions.
                 trading.live_results carries no lifetime trade count -- the
                 engine removed total_trades pending closing-trade logic. */}
-            <div className="text-lg">{metrics.executionsToday}</div>
+            <div className="text-lg">
+              {executionsAvailable === false || metrics.executionsToday == null
+                ? '\u2014'
+                : metrics.executionsToday}
+            </div>
+            <div className={`text-xs mt-1 ${theme === 'dark' ? 'text-gray-600' : 'text-gray-400'}`}>
+              {executionsAvailable === false
+                ? executionUnavailableReason || 'Unavailable for this stream'
+                : executionsAvailable === true
+                  ? 'Selected QT stream/date'
+                  : 'Legacy payload; not certified as today'}
+            </div>
           </div>
           <div className={`p-4 rounded-lg ${theme === 'dark' ? 'bg-gray-900' : 'bg-gray-50'
             }`}>

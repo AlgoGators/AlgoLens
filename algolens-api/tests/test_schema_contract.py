@@ -13,6 +13,7 @@ from algolens.infrastructure.db.schema_contract import (
     TableContract,
     check_schema,
     format_findings,
+    qt_publication_storage_ready,
 )
 
 
@@ -137,3 +138,40 @@ def test_position_override_contract_requires_portfolio_scope_for_reads_and_write
 def test_legacy_override_scope_contract_covers_the_join_columns():
     assert POSITION_OVERRIDE_LEGACY_SCOPES in CONTRACTS
     assert POSITION_OVERRIDE_LEGACY_SCOPES.reads == ("override_id", "portfolio_id")
+
+
+class _PrecisionCursor:
+    def __init__(self, columns):
+        self.columns = columns
+        self.query = None
+        self.params = None
+
+    def execute(self, query, params):
+        self.query = query
+        self.params = params
+
+    def fetchall(self):
+        return [
+            (name, data_type, precision, scale)
+            for name, (data_type, precision, scale) in self.columns.items()
+        ]
+
+
+def test_qt_publication_requires_both_exact_numeric_20_8_columns():
+    for quantity, basis, expected in (
+        (("numeric", 20, 6), ("numeric", 20, 6), False),
+        (("numeric", 20, 8), ("numeric", 20, 6), False),
+        (("numeric", 20, 8), ("numeric", 20, 8), True),
+        (("numeric", 21, 8), ("numeric", 20, 8), False),
+        (("text", None, None), ("numeric", 20, 8), False),
+    ):
+        cursor = _PrecisionCursor({"quantity": quantity, "average_price": basis})
+        assert qt_publication_storage_ready(cursor) is expected
+        assert cursor.params == ("trading", "positions", "quantity", "average_price")
+        assert "information_schema.columns" in cursor.query
+
+
+def test_qt_publication_denies_missing_or_malformed_precision_metadata():
+    assert qt_publication_storage_ready(_PrecisionCursor({})) is False
+    assert qt_publication_storage_ready(_PrecisionCursor({"quantity": ("numeric", 20, 8)})) is False
+    assert qt_publication_storage_ready(_PrecisionCursor({"quantity": ("numeric", 20, 8), "average_price": ("numeric", None, 8)})) is False

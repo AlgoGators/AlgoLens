@@ -25,8 +25,13 @@ export function AllocationCharts({ metrics, theme }: AllocationChartsProps) {
         }`}>
         <h3 className={`text-xs uppercase tracking-wider mb-3 ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'
           }`}>
-          Asset Allocation
+          {metrics.strategiesAwaitingData > 0 ? 'Measured Asset Allocation' : 'Asset Allocation'}
         </h3>
+        {metrics.strategiesAwaitingData > 0 && (
+          <p className={`mb-2 text-xs ${theme === 'dark' ? 'text-amber-400' : 'text-amber-700'}`}>
+            Percentages cover measured strategies only; excluded QT strategies have unknown weight.
+          </p>
+        )}
         <ResponsiveContainer width="100%" height={200}>
           <PieChart>
             <Pie
@@ -61,8 +66,13 @@ export function AllocationCharts({ metrics, theme }: AllocationChartsProps) {
         }`}>
         <h3 className={`text-xs uppercase tracking-wider mb-3 ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'
           }`}>
-          Strategy Split
+          {metrics.strategiesAwaitingData > 0 ? 'Measured Strategy Split' : 'Strategy Split'}
         </h3>
+        {metrics.strategiesAwaitingData > 0 && (
+          <p className={`mb-2 text-xs ${theme === 'dark' ? 'text-amber-400' : 'text-amber-700'}`}>
+            Shares are within measured strategies only, not the whole selection.
+          </p>
+        )}
         <ResponsiveContainer width="100%" height={200}>
           <PieChart>
             <Pie

@@ -8,6 +8,7 @@ import psycopg2
 from algolens.application.portfolio.ports import IncubationStorageError, BookNotEmpty
 
 from algolens.infrastructure.db.postgres import get_db_connection
+from algolens.infrastructure.portfolio.book_lock import acquire_qt_book_locks
 
 logger = logging.getLogger(__name__)
 
@@ -179,6 +180,7 @@ class PostgresStrategyRegistry:
         try:
             with conn:
                 with conn.cursor() as cursor:
+                    acquire_qt_book_locks(cursor, book["portfolio_id"])
                     cursor.execute(
                         """
                         INSERT INTO trading.portfolios
@@ -205,6 +207,7 @@ class PostgresStrategyRegistry:
         try:
             with conn:
                 with conn.cursor() as cursor:
+                    acquire_qt_book_locks(cursor, portfolio_id)
                     # Both sources of "in this book". A strategy whose primary is
                     # elsewhere but which is a member here still has positions,
                     # limits and a history keyed on this book; deleting the
@@ -295,6 +298,30 @@ class PostgresStrategyRegistry:
                 with conn.cursor() as cursor:
                     cursor.execute(
                         """
+                        SELECT portfolio_id FROM trading.strategy_registry
+                        WHERE id = %s FOR UPDATE
+                        """,
+                        (strategy_id,),
+                    )
+                    current = cursor.fetchone()
+                    if current is None:
+                        raise ValueError(f"Strategy {strategy_id} not found")
+                    cursor.execute(
+                        """
+                        SELECT portfolio_id FROM trading.strategy_book_memberships
+                        WHERE strategy_id = %s ORDER BY portfolio_id
+                        """,
+                        (strategy_id,),
+                    )
+                    current_books = [row["portfolio_id"] for row in cursor.fetchall()]
+                    acquire_qt_book_locks(
+                        cursor,
+                        current["portfolio_id"],
+                        portfolio_id,
+                        *current_books,
+                    )
+                    cursor.execute(
+                        """
                         INSERT INTO trading.strategy_book_memberships
                             (strategy_id, portfolio_id, added_by)
                         VALUES (%s, %s, %s)
@@ -319,6 +346,30 @@ class PostgresStrategyRegistry:
         try:
             with conn:
                 with conn.cursor() as cursor:
+                    cursor.execute(
+                        """
+                        SELECT portfolio_id FROM trading.strategy_registry
+                        WHERE id = %s FOR UPDATE
+                        """,
+                        (strategy_id,),
+                    )
+                    current = cursor.fetchone()
+                    if current is None:
+                        raise ValueError(f"Strategy {strategy_id} not found")
+                    cursor.execute(
+                        """
+                        SELECT portfolio_id FROM trading.strategy_book_memberships
+                        WHERE strategy_id = %s ORDER BY portfolio_id
+                        """,
+                        (strategy_id,),
+                    )
+                    current_books = [row["portfolio_id"] for row in cursor.fetchall()]
+                    acquire_qt_book_locks(
+                        cursor,
+                        current["portfolio_id"],
+                        portfolio_id,
+                        *current_books,
+                    )
                     cursor.execute(
                         """
                         DELETE FROM trading.strategy_book_memberships
@@ -392,6 +443,19 @@ class PostgresStrategyRegistry:
         try:
             with conn:
                 with conn.cursor() as cursor:
+                    cursor.execute(
+                        """
+                        SELECT portfolio_id FROM trading.strategy_registry
+                        WHERE id = %s FOR UPDATE
+                        """,
+                        (strategy_id,),
+                    )
+                    current = cursor.fetchone()
+                    if current is None:
+                        raise ValueError(f"Strategy {strategy_id} not found")
+                    acquire_qt_book_locks(
+                        cursor, current["portfolio_id"], portfolio_id
+                    )
                     cursor.execute(
                         """
                         UPDATE trading.strategy_registry

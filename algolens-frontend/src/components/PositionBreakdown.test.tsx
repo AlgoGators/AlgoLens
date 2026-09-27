@@ -18,7 +18,7 @@
 //   - The total silently including rows it could not price, so the footer
 //     disagreed with the rows above it and nothing said why.
 
-import { render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { PositionBreakdown } from './PositionBreakdown';
@@ -31,8 +31,9 @@ vi.mock('../adapters/react/ThemeContext', () => ({
 }));
 
 let role = 'subscriber';
+let userId = 'internal-one';
 vi.mock('../adapters/react/useAuth', () => ({
-  useAuth: () => ({ user: { role } }),
+  useAuth: () => ({ user: { id: userId, role } }),
 }));
 
 function position(over: Partial<Position> = {}): Position {
@@ -148,7 +149,7 @@ describe('the footer says what it excluded', () => {
       />,
     );
     expect(
-      screen.getByText(/Total excludes 1 position with no known price/),
+      screen.getByText(/Total excludes 1 position with unknown notional/),
     ).toBeTruthy();
   });
 
@@ -172,6 +173,60 @@ describe('the footer says what it excluded', () => {
 });
 
 describe('the edit controls are offered only where a write would succeed', () => {
+  it('keeps an identified model snapshot read-only even if editability is accidentally true', () => {
+    role = 'admin';
+    render(<PositionBreakdown positions={[position({ strategyName: 'MODEL_A' })]}
+      strategyId="trendfollowing" portfolioId="CONSERVATIVE_PORTFOLIO"
+      positionStream="system" positionStrategyNames={['MODEL_A']} positionsEditable={true} />);
+
+    expect(screen.getByText(/Model \/ System positions/i)).toBeTruthy();
+    expect(screen.queryByLabelText(/^Adjust /)).toBeNull();
+    expect(screen.queryByText('Add position')).toBeNull();
+  });
+
+  it('unmounts an open QT editor when the current role loses internal access', () => {
+    role = 'admin';
+    const props = {
+      positions: [position({ strategyName: 'QT_A' })], strategyId: 'trendfollowing',
+      portfolioId: 'CONSERVATIVE_PORTFOLIO', positionStream: 'qt' as const,
+      positionsEditable: true,
+    };
+    const view = render(<PositionBreakdown {...props} />);
+    fireEvent.click(screen.getByLabelText('Adjust ES.v.0 (QT_A)'));
+    expect(screen.getByRole('dialog')).toBeTruthy();
+
+    role = 'subscriber_individual';
+    view.rerender(<PositionBreakdown {...props} />);
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it.each(['strategy', 'book', 'stream', 'reader'] as const)(
+    'clears an open QT editor when the %s identity changes', change => {
+      role = 'admin';
+      userId = 'internal-one';
+      const props = {
+        positions: [position({ strategyName: 'QT_A' })],
+        strategyId: 'trendfollowing',
+        portfolioId: 'CONSERVATIVE_PORTFOLIO',
+        positionStream: 'qt' as 'qt' | 'system',
+        positionsEditable: true,
+      };
+      const view = render(<PositionBreakdown {...props} />);
+      fireEvent.click(screen.getByLabelText('Adjust ES.v.0 (QT_A)'));
+      expect(screen.getByRole('dialog')).toBeTruthy();
+
+      if (change === 'reader') userId = 'internal-two';
+      const changed = {
+        ...props,
+        strategyId: change === 'strategy' ? 'newstrategy' : props.strategyId,
+        portfolioId: change === 'book' ? 'AGGRESSIVE_PORTFOLIO' : props.portfolioId,
+        positionStream: change === 'stream' ? 'system' as const : props.positionStream,
+      };
+      view.rerender(<PositionBreakdown {...changed} />);
+      expect(screen.queryByRole('dialog')).toBeNull();
+    },
+  );
+
   it('offers nothing to a subscriber', () => {
     role = 'subscriber';
     render(<PositionBreakdown positions={[position()]} strategyId="trendfollowing" />);
@@ -192,10 +247,88 @@ describe('the edit controls are offered only where a write would succeed', () =>
         positions={[position({ symbol: 'AA.v.0', name: 'Alpha' }), position({ symbol: 'BB.v.0', name: 'Bravo' })]}
         strategyId="trendfollowing"
         portfolioId="CONSERVATIVE_PORTFOLIO"
+        positionStream="qt"
+        positionsEditable={true}
       />,
     );
     expect(screen.getByLabelText('Adjust AA.v.0')).toBeTruthy();
     expect(screen.getByLabelText('Adjust BB.v.0')).toBeTruthy();
+  });
+
+  it('fails closed when a legacy payload omits editability', () => {
+    role = 'admin';
+    render(
+      <PositionBreakdown
+        positions={[position({ strategyName: 'Engine A' } as Partial<Position>)]}
+        strategyId="trendfollowing"
+        portfolioId="CONSERVATIVE_PORTFOLIO"
+      />,
+    );
+
+    expect(screen.queryByLabelText(/^Adjust /)).toBeNull();
+    expect(screen.queryByText('Add position')).toBeNull();
+  });
+
+  it('does not invent an Add identity for an editable but empty snapshot', () => {
+    role = 'admin';
+    render(
+      <PositionBreakdown
+        positions={[]}
+        strategyId="trendfollowing"
+        portfolioId="CONSERVATIVE_PORTFOLIO"
+        positionsEditable={true}
+      />,
+    );
+
+    // The backend currently preserves zero-row identity internally but does
+    // not serialize it. No row means no engine-owned strategyName to send.
+    expect(screen.queryByText('Add position')).toBeNull();
+  });
+
+  it('uses the explicit server identity to add to an editable flat snapshot', () => {
+    role = 'admin';
+    render(
+      <PositionBreakdown
+        positions={[]}
+        strategyId="trendfollowing"
+        portfolioId="CONSERVATIVE_PORTFOLIO"
+        positionStream="qt"
+        positionsEditable={true}
+        positionStrategyNames={['Engine A']}
+      />,
+    );
+
+    expect(screen.getByText('Add position')).toBeTruthy();
+  });
+
+  it('fails closed when the server supplies more than one add identity', () => {
+    role = 'admin';
+    render(
+      <PositionBreakdown
+        positions={[]}
+        strategyId="trendfollowing"
+        portfolioId="CONSERVATIVE_PORTFOLIO"
+        positionsEditable={true}
+        positionStrategyNames={['Engine A', 'Engine B']}
+      />,
+    );
+
+    expect(screen.queryByText('Add position')).toBeNull();
+  });
+
+  it('fails the whole add capability closed when one identity entry is malformed', () => {
+    role = 'admin';
+    render(
+      <PositionBreakdown
+        positions={[]}
+        strategyId="trendfollowing"
+        portfolioId="CONSERVATIVE_PORTFOLIO"
+        positionsEditable={true}
+        positionStrategyNames={['Engine A', null] as unknown as string[]}
+      />,
+    );
+
+    expect(screen.queryByText('Add position')).toBeNull();
   });
 });
 
@@ -209,7 +342,7 @@ describe('the table says which book it is showing', () => {
       />,
     );
     const heading = document.querySelector('h3') as HTMLElement;
-    expect(heading.textContent).toContain("Today's Positions");
+    expect(heading.textContent).toContain('Unknown position stream snapshot (date unavailable)');
     expect(within(heading).getByText('CONSERVATIVE_PORTFOLIO')).toBeTruthy();
   });
 
@@ -229,7 +362,176 @@ describe('the table says which book it is showing', () => {
     expect(screen.getByRole('combobox', { name: 'Book for these positions' })).toBeTruthy();
     // And the partial-view notice points at the box rather than elsewhere.
     expect(document.body.textContent).toContain(
-      'This strategy also trades in AGGRESSIVE_PORTFOLIO. Those positions, and their risk limits, are separate; choose the book in the box above to see them.',
+      'This strategy is also registered in AGGRESSIVE_PORTFOLIO for AlgoLens reporting. Positions and risk limits appear for a book only when published by the trading runtime; choose the book in the box above to see them.',
     );
+  });
+
+  it('does not claim that registry membership proves a flat strategy trades there', () => {
+    role = 'subscriber';
+    render(
+      <PositionBreakdown
+        positions={[]}
+        portfolioId="AUDIT_BOOK_A"
+        books={['AUDIT_BOOK_A', 'AUDIT_BOOK_B']}
+      />,
+    );
+
+    expect(document.body.textContent).toContain(
+      'This strategy is also registered in AUDIT_BOOK_B for AlgoLens reporting. Positions and risk limits appear for a book only when published by the trading runtime',
+    );
+    expect(document.body.textContent).not.toContain('also trades in');
+  });
+});
+
+describe('snapshot identity and edit availability', () => {
+  it('renders exact quantity in the existing cell and seeds the editor from exact companions', () => {
+    role = 'admin';
+    render(<PositionBreakdown
+      positions={[position({ strategyName: 'Engine A', shares: 92233720368.12346,
+        quantity_exact: '92233720368.12345678', costBasis: 92233720368.12346,
+        average_price_exact: '92233720368.12345678' })]}
+      strategyId="trendfollowing" portfolioId="MACRO_BOOK" positionStream="qt"
+      positionsEditable={true}
+    />);
+    expect(cells('ES.v.0')[1]).toBe('92233720368.12345678');
+    fireEvent.click(screen.getByRole('button', { name: 'Adjust ES.v.0 (Engine A)' }));
+    expect((screen.getByLabelText('Quantity') as HTMLInputElement).value).toBe('92233720368.12345678');
+    expect((screen.getByLabelText(/Average price/) as HTMLInputElement).value).toBe('92233720368.12345678');
+  });
+
+  it('shows invalid present exact evidence instead of a rounded number and prevents that row edit', () => {
+    role = 'admin';
+    render(<PositionBreakdown
+      positions={[position({ strategyName: 'Engine A', shares: 3, quantity_exact: '3.000000001' })]}
+      strategyId="trendfollowing" portfolioId="MACRO_BOOK" positionStream="qt"
+      positionsEditable={true}
+    />);
+    expect(cells('ES.v.0')[1]).toMatch(/invalid position evidence/i);
+    expect(screen.queryByRole('button', { name: 'Adjust ES.v.0 (Engine A)' })).toBeNull();
+    expect(cells('ES.v.0')).toHaveLength(6);
+  });
+
+  it('blocks a malformed price companion even when quantity evidence is valid', () => {
+    role = 'admin';
+    render(<PositionBreakdown
+      positions={[position({ strategyName: 'Engine A', quantity_exact: '12',
+        average_price_exact: '5280.250000001' })]}
+      strategyId="trendfollowing" portfolioId="MACRO_BOOK" positionStream="qt"
+      positionsEditable={true}
+    />);
+    expect(cells('ES.v.0')[1]).toMatch(/invalid position evidence/i);
+    expect(screen.queryByRole('button', { name: 'Adjust ES.v.0 (Engine A)' })).toBeNull();
+  });
+
+  it('accepts a null price companion only with a genuinely unknown basis', () => {
+    role = 'admin';
+    render(<PositionBreakdown
+      positions={[position({ strategyName: 'Engine A', costBasis: null,
+        quantity_exact: '12', average_price_exact: null })]}
+      strategyId="trendfollowing" portfolioId="MACRO_BOOK" positionStream="qt"
+      positionsEditable={true}
+    />);
+    expect(cells('ES.v.0')[1]).toBe('12');
+    fireEvent.click(screen.getByRole('button', { name: 'Adjust ES.v.0 (Engine A)' }));
+    expect((screen.getByLabelText(/Average price/) as HTMLInputElement).value).toBe('');
+  });
+
+  it('treats a null exact price as invalid when the legacy basis is known', () => {
+    role = 'admin';
+    render(<PositionBreakdown
+      positions={[position({ strategyName: 'Engine A', costBasis: 2,
+        quantity_exact: '12', average_price_exact: null })]}
+      strategyId="trendfollowing" portfolioId="MACRO_BOOK" positionStream="qt"
+      positionsEditable={true}
+    />);
+    expect(cells('ES.v.0')[1]).toMatch(/invalid position evidence/i);
+    expect(screen.queryByRole('button', { name: 'Adjust ES.v.0 (Engine A)' })).toBeNull();
+    expect(cells('ES.v.0')).toHaveLength(6);
+  });
+
+  it('labels the actual snapshot and explains why an older snapshot is read-only', () => {
+    role = 'admin';
+    render(
+      <PositionBreakdown
+        positions={[position({ strategyName: 'Trend Engine A' } as Partial<Position>)]}
+        strategyId="trendfollowing"
+        portfolioId="MACRO_BOOK"
+        positionStream="qt"
+        positionDate="2026-09-18"
+        positionsEditable={false}
+        positionEditUnavailableReason="Only the current engine snapshot can be edited."
+      />,
+    );
+    expect(screen.getByRole('heading', { name: /QT positions snapshot 2026-09-18/i })).toBeTruthy();
+    expect(screen.queryByLabelText(/^Adjust /)).toBeNull();
+    expect(screen.getByText('Only the current engine snapshot can be edited.')).toBeTruthy();
+  });
+
+  it('renders same-symbol engine rows independently', () => {
+    render(
+      <PositionBreakdown
+        positions={[
+          position({ strategyName: 'Engine A' } as Partial<Position>),
+          position({ strategyName: 'Engine B', shares: 7 } as Partial<Position>),
+        ]}
+      />,
+    );
+    expect(screen.getAllByText('ES.v.0')).toHaveLength(2);
+  });
+});
+
+describe('the footer never promotes partial exposure to a complete total', () => {
+  function footer(): HTMLElement {
+    return screen.getByText('Total Notional').closest('div.grid') as HTMLElement;
+  }
+
+  it('renders unknown total and percentage when every notional is unknown', () => {
+    render(
+      <PositionBreakdown
+        positions={[
+          position({ symbol: 'AA.v.0', notional: null, marketPrice: null }),
+          position({ symbol: 'BB.v.0', notional: null, marketPrice: null }),
+        ]}
+      />,
+    );
+
+    expect(footer().textContent).not.toContain('$0.00');
+    expect(screen.getByText(/with unknown notional/)).toBeTruthy();
+    expect(footer().textContent).not.toContain('100.00%');
+    expect(footer().textContent).toContain('—');
+  });
+
+  it('marks a priced subtotal partial and makes no 100% completeness claim', () => {
+    render(
+      <PositionBreakdown
+        positions={[
+          position({ symbol: 'AA.v.0', notional: 600_000 }),
+          position({ symbol: 'BB.v.0', notional: null, marketPrice: null }),
+        ]}
+      />,
+    );
+
+    expect(footer().textContent).toContain('$600,000.00');
+    expect(within(footer()).getByText('partial')).toBeTruthy();
+    expect(footer().textContent).not.toContain('100.00%');
+    expect(screen.getByText('Share of known displayed exposure')).toBeTruthy();
+    expect(screen.queryByText('Share of displayed exposure')).toBeNull();
+  });
+
+  it('retains the complete total when every row is priced', () => {
+    render(<PositionBreakdown positions={[position({ notional: 600_000 })]} />);
+    expect(footer().textContent).toContain('$600,000.00');
+    expect(footer().textContent).toContain('100.00%');
+  });
+});
+
+describe('the position table remains aligned on a narrow viewport', () => {
+  it('scrolls a fixed minimum-width table instead of compressing its columns', () => {
+    render(<PositionBreakdown positions={[position()]} />);
+
+    const header = screen.getByText('Market Price').closest('div.grid') as HTMLElement;
+    const table = header.parentElement as HTMLElement;
+    expect(table.className).toContain('min-w-[760px]');
+    expect(table.parentElement?.className).toContain('overflow-x-auto');
   });
 });

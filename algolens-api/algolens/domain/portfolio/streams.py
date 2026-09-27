@@ -1,6 +1,27 @@
 """Portfolio stream names produced by the trading engine."""
 
+from datetime import datetime, timezone
+
 PORTFOLIO_STREAMS = ("qt", "system", "benchmark")
 
 # Headline dashboard values represent the real book.
 PRIMARY_STREAM = "qt"
+
+# The detail page selects positions independently of QT financial reporting.
+DEFAULT_POSITION_STREAM = "system"
+POSITION_READ_STREAMS = ("system", "qt")
+
+
+class InvalidPositionStream(ValueError):
+    code = "invalid_position_stream"
+
+
+def validate_position_stream(value):
+    if value not in POSITION_READ_STREAMS:
+        raise InvalidPositionStream("position_stream must be system or qt")
+    return value
+
+
+def current_utc_date():
+    """The engine's calendar day for snapshots, writes, and editability."""
+    return datetime.now(timezone.utc).date()

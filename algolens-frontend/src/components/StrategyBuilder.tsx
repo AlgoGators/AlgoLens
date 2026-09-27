@@ -61,6 +61,8 @@ export function StrategyBuilder({ strategies, onClose }: StrategyBuilderProps) {
     () => computeCombinedMetrics(strategies, selectedStrategies, correlations),
     [selectedStrategies, strategies, correlations]
   );
+  const allSelectedAwaitingQt = selectedStrategies.length > 0 &&
+    combinedMetrics.strategiesAwaitingData === selectedStrategies.length;
 
   return (
     <div className={`min-h-screen ${theme === 'dark' ? 'bg-black text-white' : 'bg-white text-black'
@@ -73,33 +75,58 @@ export function StrategyBuilder({ strategies, onClose }: StrategyBuilderProps) {
           theme={theme}
         />
 
-        <PerformanceOverview metrics={combinedMetrics} theme={theme} />
+        {combinedMetrics.strategiesAwaitingData > 0 && (
+          <div
+            role="status"
+            data-testid="builder-coverage"
+            className={`mb-4 p-3 border text-sm ${theme === 'dark'
+              ? 'border-amber-700 bg-amber-950 text-amber-300'
+              : 'border-amber-300 bg-amber-50 text-amber-800'}`}
+          >
+            Partial QT coverage: {combinedMetrics.strategiesAwaitingData} selected {combinedMetrics.strategiesAwaitingData === 1 ? 'strategy has' : 'strategies have'} QT performance unavailable.
+            {' '}{allSelectedAwaitingQt
+              ? 'No selected strategy has a measured QT result.'
+              : 'All derived panels below cover measured strategies only; excluded strategies have unknown value and weight.'}
+          </div>
+        )}
 
-        <PerformanceCharts metrics={combinedMetrics} theme={theme} />
+        {allSelectedAwaitingQt ? (
+          <div className={`mb-4 p-4 border ${theme === 'dark'
+            ? 'border-gray-800 bg-gray-950 text-gray-300'
+            : 'border-gray-200 bg-gray-50 text-gray-600'}`}>
+            Portfolio value, performance, allocations, and holdings are unavailable until a selected QT result is published.
+          </div>
+        ) : (
+          <>
+            <PerformanceOverview metrics={combinedMetrics} theme={theme} />
 
-        <AllocationCharts metrics={combinedMetrics} theme={theme} />
+            <PerformanceCharts metrics={combinedMetrics} theme={theme} />
 
-        <HoldingsConcentration
-          metrics={combinedMetrics}
-          theme={theme}
-          onShowAll={() => setShowHoldingsModal(true)}
-        />
+            <AllocationCharts metrics={combinedMetrics} theme={theme} />
 
-        <AdvancedSections
-          metrics={combinedMetrics}
-          theme={theme}
-          expanded={expandedSections}
-          onToggle={toggleSection}
-        />
+            <HoldingsConcentration
+              metrics={combinedMetrics}
+              theme={theme}
+              onShowAll={() => setShowHoldingsModal(true)}
+            />
 
-        <StrategySummary metrics={combinedMetrics} theme={theme} />
+            <AdvancedSections
+              metrics={combinedMetrics}
+              theme={theme}
+              expanded={expandedSections}
+              onToggle={toggleSection}
+            />
 
-        {showHoldingsModal && (
-          <HoldingsModal
-            metrics={combinedMetrics}
-            theme={theme}
-            onClose={() => setShowHoldingsModal(false)}
-          />
+            <StrategySummary metrics={combinedMetrics} theme={theme} />
+
+            {showHoldingsModal && (
+              <HoldingsModal
+                metrics={combinedMetrics}
+                theme={theme}
+                onClose={() => setShowHoldingsModal(false)}
+              />
+            )}
+          </>
         )}
       </div>
     </div>

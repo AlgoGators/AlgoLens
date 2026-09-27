@@ -1,0 +1,1007 @@
+{
+  "absent_reads": "unreached, never default-filled",
+  "all_objects_closed": true,
+  "base_contract_sha256": "d695c74986459fb432d6bbfa82ca8af0a0a987ad69d6d51bcf66e5ade1f08432",
+  "catalog_version": "qt-equity-main08b15c-run/v2",
+  "certification": "Instrumentation scope only; authentic runtime/data/full raw parity remains separately unverified.",
+  "collection_shapes": {
+    "executions": {
+      "allowed_stages": [
+        "execution"
+      ],
+      "empty_success": "valid only after the actual reached execution loop returned successfully",
+      "entry_fields": [
+        "symbol",
+        "portfolio_id",
+        "strategy_id",
+        "strategy_name",
+        "index",
+        "execution_id",
+        "reads"
+      ],
+      "execution_id": "actual unique nonempty storage identity, at most 50 bytes; never synthesized by projector",
+      "index": "integer, never bool; contiguous 0..length-1 in actual returned execution order",
+      "other_stages": "must equal []",
+      "owner": "portfolio_id/strategy_id/strategy_name equal the document run_key exactly",
+      "reads": "closed per_execution_reads object; successful calls require common+exact conditional sets in execution_cost_conditions; uncalled fields forbidden",
+      "symbol": "same symbol grammar as symbols keys",
+      "type": "array"
+    },
+    "symbols": {
+      "allowed_stages": [
+        "cost_history",
+        "preparation"
+      ],
+      "key": "actual nonempty symbol, at most 64 ASCII alphanumeric or _ . - /",
+      "other_stages": "must equal {}",
+      "required_on_success": "cost_history uses explicit cost_history_conditions; preparation keeps its own reached readset; unvisited symbols remain absent",
+      "type": "object",
+      "value": "closed reads object, without a reads wrapper"
+    }
+  },
+  "completion_rule": "All ten declared stages reached with successful actual calls or exact listed skip branch; no unavailable strategy invocation admitted as trading primary. Zero execution array is valid only after successful reached loop. Error/thrown/not-reached stage means available=false and complete=false.",
+  "conditional_readsets": {
+    "corporate_actions": {
+      "proved_action_adjusted_prior": {
+        "effective_event_count": 0,
+        "forbidden": [
+          "spinoff_child_policy_requested",
+          "spinoff_child_policy_effective"
+        ],
+        "minimum_count_sum": 1,
+        "must_match_prior_mode": "verified_desk_prior",
+        "positive_count_fields": [
+          "original_action_count",
+          "successor_action_count"
+        ],
+        "required": [
+          "path",
+          "effective_event_count",
+          "original_action_count",
+          "successor_action_count",
+          "original_action_digest",
+          "successor_action_digest",
+          "basis_frame_digest"
+        ]
+      },
+      "proved_action_free_prior": {
+        "effective_event_count": 0,
+        "forbidden": [
+          "spinoff_child_policy_requested",
+          "spinoff_child_policy_effective"
+        ],
+        "must_match_prior_mode": "verified_desk_prior",
+        "required": [
+          "path",
+          "effective_event_count"
+        ]
+      },
+      "system_history": {
+        "forbidden": [],
+        "required": [
+          "path",
+          "spinoff_child_policy_requested",
+          "spinoff_child_policy_effective",
+          "effective_event_count"
+        ]
+      }
+    },
+    "eod": {
+      "proved_desk_successor": {
+        "forbidden": [],
+        "must_match_prior_mode": "verified_desk_prior",
+        "outcome": "skipped",
+        "required": [
+          "path",
+          "previous_equity_exact",
+          "previous_total_pnl_exact",
+          "previous_total_realized_pnl_exact",
+          "previous_total_transaction_costs_exact",
+          "initial_capital_exact"
+        ],
+        "skip_reason": "proved_desk_successor",
+        "source": "proved successor totals, not system totals"
+      },
+      "system_finalization": {
+        "forbidden": [],
+        "required": [
+          "path",
+          "previous_equity_exact",
+          "previous_total_pnl_exact",
+          "previous_total_realized_pnl_exact",
+          "previous_total_transaction_costs_exact",
+          "initial_capital_exact"
+        ]
+      }
+    },
+    "non_trading_day": {
+      "all_three_skips_must_agree": true,
+      "executions": [],
+      "outcome": "skipped",
+      "reads": {},
+      "skip_reason": "non_trading_day",
+      "stages": [
+        "preparation",
+        "primary",
+        "execution"
+      ],
+      "symbols": {}
+    },
+    "prior": {
+      "system_reference": {
+        "forbidden": [
+          "valuation_day",
+          "decision_id",
+          "finalization_id",
+          "finalization_digest",
+          "finalization_source_digest",
+          "accounting_input_digest",
+          "observation_digest",
+          "results_digest"
+        ],
+        "required": [
+          "mode",
+          "source_day"
+        ]
+      },
+      "verified_desk_prior": {
+        "forbidden": [],
+        "required": [
+          "mode",
+          "source_day",
+          "valuation_day",
+          "decision_id",
+          "finalization_id",
+          "finalization_digest",
+          "finalization_source_digest",
+          "accounting_input_digest",
+          "observation_digest",
+          "results_digest"
+        ]
+      }
+    }
+  },
+  "cost_history_conditions": {
+    "common_required": [
+      "adv_lookback_days",
+      "previous_close_source",
+      "previous_close_forwarded"
+    ],
+    "no_previous_close": {
+      "equal": {
+        "previous_close_forwarded": 0
+      },
+      "forbidden": [
+        "log_return_lookback_days"
+      ]
+    },
+    "stored_previous_close": {
+      "greater_than_zero": "previous_close_forwarded",
+      "required": [
+        "log_return_lookback_days"
+      ]
+    }
+  },
+  "cost_history_source_semantics": "actual LiveDailyCycle::feed_cost_model forwards 0 for first bar; no_previous_close represents that observed value; stored_previous_close represents preceding chronological raw close, never a fabricated return",
+  "document_schema_version": "qt-equity-run-consumption/v2",
+  "enabled_helper_boundary": {
+    "no_hidden_full_run_claim": true,
+    "optimization": "effective false actual MR branch observed; any true actual pass remains unavailable until supported",
+    "risk": "actual typed pass/helper/risk reads and internal charge vectors projected; failures incomplete"
+  },
+  "execution_cost_conditions": {
+    "commission_fallback": {
+      "condition": "commission_per_unit < 0",
+      "forbidden": [
+        "min_commission_per_order",
+        "max_commission_pct",
+        "max_commission_per_order"
+      ],
+      "required": [
+        "explicit_fee_per_contract"
+      ]
+    },
+    "commission_nonnegative": {
+      "condition": "commission_per_unit >= 0",
+      "forbidden": [
+        "explicit_fee_per_contract"
+      ],
+      "order_ceiling": {
+        "condition": "max_commission_pct < 0",
+        "required": [
+          "max_commission_per_order"
+        ]
+      },
+      "percentage_ceiling": {
+        "condition": "max_commission_pct >= 0",
+        "forbidden": [
+          "max_commission_per_order"
+        ]
+      },
+      "required": [
+        "min_commission_per_order",
+        "max_commission_pct"
+      ]
+    },
+    "common_required": [
+      "quantity",
+      "reference_price",
+      "retrieved_adv",
+      "retrieved_volatility_multiplier",
+      "effective_adv",
+      "effective_volatility_multiplier",
+      "commission_per_unit",
+      "max_total_implicit_bps",
+      "point_value",
+      "baseline_spread_ticks",
+      "min_spread_ticks",
+      "max_spread_ticks",
+      "spread_cost_multiplier",
+      "tick_size",
+      "min_adv",
+      "min_participation",
+      "max_participation",
+      "max_impact_bps",
+      "selected_k_bps",
+      "apply_regulatory_fees",
+      "tick_constrained",
+      "asset_type",
+      "asset_lookup_path",
+      "input_source",
+      "commissions_fees_exact",
+      "implicit_price_impact_exact",
+      "slippage_market_impact_exact",
+      "total_transaction_costs_exact",
+      "volatility_calculation_reached"
+    ],
+    "no_execution": "executions=[] is the actual empty returned batch; no synthetic entry or per-execution reads",
+    "nonzero_actual_fill": [
+      "quantity"
+    ],
+    "positive_actual_fill": [
+      "reference_price"
+    ],
+    "regulatory_sell": {
+      "condition": "apply_regulatory_fees is true and quantity < 0",
+      "required": [
+        "sec_fee_per_million",
+        "finra_taf_per_share",
+        "finra_taf_cap_per_trade"
+      ]
+    },
+    "regulatory_unreached": {
+      "condition": "otherwise",
+      "forbidden": [
+        "sec_fee_per_million",
+        "finra_taf_per_share",
+        "finra_taf_cap_per_trade"
+      ]
+    },
+    "source": "actual TransactionCostManager::calculate_costs tracked EQUITY -> calculate_charges; actual SpreadModel early neutral branch",
+    "volatility_calculated": {
+      "condition": "volatility_calculation_reached is true",
+      "required": [
+        "volatility_lambda",
+        "volatility_min_multiplier",
+        "volatility_max_multiplier"
+      ]
+    },
+    "volatility_neutral": {
+      "condition": "volatility_calculation_reached is false",
+      "equal": {
+        "effective_volatility_multiplier": 1,
+        "retrieved_volatility_multiplier": 1
+      },
+      "forbidden": [
+        "volatility_lambda",
+        "volatility_min_multiplier",
+        "volatility_max_multiplier"
+      ]
+    }
+  },
+  "execution_limit": 4096,
+  "fixed_strategy_id": "LIVE_EQUITY_MEAN_REVERSION",
+  "fixed_strategy_name": "EQUITY_MEAN_REVERSION",
+  "native_storage": {
+    "child": "equity_run_consumption",
+    "column": "config",
+    "public_envelope": "root-owned schema3; bind actual publication/source identity separately",
+    "table": "trading.live_results"
+  },
+  "outcomes": [
+    "not_reached",
+    "returned_ok",
+    "returned_error",
+    "threw",
+    "skipped"
+  ],
+  "portfolio_invocation_contract": {
+    "actual_runtime_certification": "pending producer-to-reader gate",
+    "all_objects_closed": true,
+    "call_outcomes": [
+      "not_reached",
+      "in_progress",
+      "returned_ok",
+      "returned_error",
+      "threw"
+    ],
+    "charge_fields": [
+      "index",
+      "purpose",
+      "strategy_id",
+      "symbol",
+      "call",
+      "reads"
+    ],
+    "charge_index": "contiguous integer in each actual source charge vector",
+    "charge_limit": 4096,
+    "charge_owner": {
+      "compatibility": "empty string from actual compatibility trace",
+      "per_strategy": "LIVE_EQUITY_MEAN_REVERSION"
+    },
+    "charge_purpose": {
+      "compatibility_charges": "compatibility",
+      "strategy_charges": "per_strategy"
+    },
+    "charge_reads": "only actual optional CostChargeObservation fields, absent fields stay absent; never fill EQ fee reads into generic compatibility cost calls",
+    "charge_reads_boolean": [
+      "apply_regulatory_fees",
+      "tick_constrained",
+      "volatility_calculation_reached"
+    ],
+    "charge_reads_enums": {
+      "asset_lookup_path": [
+        "exact_symbol",
+        "pre_dot_root",
+        "fallback"
+      ],
+      "input_source": [
+        "internally_tracked",
+        "explicit_values"
+      ]
+    },
+    "charge_reads_number": [
+      "quantity",
+      "reference_price",
+      "adv_argument",
+      "volatility_multiplier_argument",
+      "retrieved_adv",
+      "retrieved_volatility_multiplier",
+      "effective_adv",
+      "effective_volatility_multiplier",
+      "explicit_fee_per_contract",
+      "commission_per_unit",
+      "min_commission_per_order",
+      "max_commission_per_order",
+      "max_commission_pct",
+      "sec_fee_per_million",
+      "finra_taf_per_share",
+      "finra_taf_cap_per_trade",
+      "max_total_implicit_bps",
+      "point_value",
+      "volatility_lambda",
+      "volatility_min_multiplier",
+      "volatility_max_multiplier",
+      "baseline_spread_ticks",
+      "min_spread_ticks",
+      "max_spread_ticks",
+      "spread_cost_multiplier",
+      "tick_size",
+      "min_adv",
+      "min_participation",
+      "max_participation",
+      "max_impact_bps",
+      "selected_k_bps"
+    ],
+    "charge_role": "portfolio internal output, not persisted Day-D execution; never relabel as final execution",
+    "full_run_certification": false,
+    "manager_source": [
+      "absent",
+      "internal",
+      "external"
+    ],
+    "optimization_boundary": "actual MR caller hardcodes effective use_optimization=false; a true pass remains explicitly unavailable until optimizer trace projection is represented",
+    "pass_fields": [
+      "index",
+      "reads",
+      "optimization_helper",
+      "risk_helper",
+      "risk"
+    ],
+    "pass_index": "contiguous integer 0..length-1 in actual source pass order",
+    "pass_limit": 5,
+    "pass_reads": {
+      "use_optimization": "boolean",
+      "use_risk_management": "boolean"
+    },
+    "risk_conditional": {
+      "called": "risk_helper returned_ok; risk.call returned_ok; skip=none; manager_source internal/external; actual risk reads only",
+      "disabled": "risk_helper=not_reached, risk.call=not_reached, risk.skip=none, risk.reads={}, no optional fields",
+      "nonfatal_failed_helper": "available=false; preserve reached reads and actual failure outcome",
+      "skipped": "risk_helper returned_ok; risk.call not_reached; reads={}; absent_risk_manager requires manager_source absent and no lookback; no_positions requires manager_source internal/external and actual lookback",
+      "unavailable_before_skip": "none with not_reached may preserve actual source/lookback only when available=false; optimizer/history/eligible skips are never risk branches"
+    },
+    "risk_fields": [
+      "call",
+      "skip",
+      "reads"
+    ],
+    "risk_optional_fields": [
+      "manager_source",
+      "lookback_period"
+    ],
+    "risk_reads": {
+      "capital_exact": "canonical Decimal8 checked int64",
+      "confidence_level": "finite number",
+      "jump_risk_limit": "finite number",
+      "max_correlation": "finite number",
+      "max_gross_leverage": "finite number",
+      "max_net_leverage": "finite number",
+      "var_limit": "finite number"
+    },
+    "risk_skips": [
+      "none",
+      "absent_risk_manager",
+      "no_positions"
+    ],
+    "root_fields": [
+      "schema_version",
+      "scope",
+      "full_run_certification",
+      "available",
+      "unavailable_reason",
+      "outcome",
+      "skip_execution_generation",
+      "passes",
+      "strategy_charges",
+      "compatibility_charges"
+    ],
+    "schema_version": "qt-equity-portfolio-consumption/v1",
+    "scope": "portfolio_invocation",
+    "skip_execution_generation": "actual optional bool, null means unobserved; no invented false",
+    "success_required_charge_reads": [
+      "quantity",
+      "reference_price",
+      "input_source",
+      "asset_lookup_path"
+    ],
+    "unknown_fields": "refuse"
+  },
+  "producer_implemented": false,
+  "profile": "mean_reversion",
+  "root_fields": [
+    "schema_version",
+    "catalog_version",
+    "scope",
+    "profile",
+    "run_key",
+    "available",
+    "complete",
+    "unavailable_reason",
+    "stages"
+  ],
+  "run_key_fields": [
+    "portfolio_id",
+    "strategy_id",
+    "strategy_name",
+    "date"
+  ],
+  "sample_status": "proposed contract, not native output or gate evidence",
+  "schema_version": "qt-equity-run-consumption-contract/v2",
+  "scope": "full_run",
+  "skip_reasons": {
+    "eod": [
+      "proved_desk_successor"
+    ],
+    "execution": [
+      "non_trading_day"
+    ],
+    "preparation": [
+      "non_trading_day"
+    ],
+    "primary": [
+      "non_trading_day"
+    ]
+  },
+  "stage_fields": [
+    "outcome",
+    "skip_reason",
+    "reads",
+    "symbols",
+    "executions"
+  ],
+  "stage_state_rules": {
+    "not_reached": "skip_reason=null; reads={}, symbols={}, executions=[]",
+    "required_keys": [
+      "outcome",
+      "skip_reason",
+      "reads",
+      "symbols",
+      "executions"
+    ],
+    "returned_error_or_threw": "skip_reason=null; preserve only actual reads before failure; unavailable/incomplete",
+    "returned_ok": "skip_reason=null; successful-stage and conditional readsets satisfied",
+    "skipped": "exact listed branch and its conditional readset only",
+    "unavailable_reason": "null iff available=true and complete=true; otherwise a nonempty closed reason"
+  },
+  "stages": {
+    "corporate_actions": {
+      "reads": {
+        "basis_frame_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "effective_event_count": {
+          "maximum": 2147483647,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "original_action_count": {
+          "maximum": 2147483647,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "original_action_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "path": {
+          "enum": [
+            "system_history",
+            "proved_action_free_prior",
+            "proved_action_adjusted_prior"
+          ]
+        },
+        "spinoff_child_policy_effective": {
+          "enum": [
+            "hold",
+            "liquidate_at_first_close"
+          ]
+        },
+        "spinoff_child_policy_requested": {
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        },
+        "successor_action_count": {
+          "maximum": 2147483647,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "successor_action_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path"
+      ]
+    },
+    "cost_history": {
+      "per_symbol_reads": {
+        "adv_lookback_days": {
+          "maximum": 2147483647,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "log_return_lookback_days": {
+          "maximum": 2147483647,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "previous_close_forwarded": {
+          "finite": true,
+          "type": "number"
+        },
+        "previous_close_source": {
+          "enum": [
+            "no_previous_close",
+            "stored_previous_close"
+          ]
+        }
+      },
+      "required": []
+    },
+    "eod": {
+      "reads": {
+        "initial_capital_exact": {
+          "format": "canonical-decimal8-checked-int64",
+          "type": "string"
+        },
+        "path": {
+          "enum": [
+            "system_finalization",
+            "proved_desk_successor"
+          ]
+        },
+        "previous_equity_exact": {
+          "format": "canonical-decimal8-checked-int64",
+          "type": "string"
+        },
+        "previous_total_pnl_exact": {
+          "format": "canonical-decimal8-checked-int64",
+          "type": "string"
+        },
+        "previous_total_realized_pnl_exact": {
+          "format": "canonical-decimal8-checked-int64",
+          "type": "string"
+        },
+        "previous_total_transaction_costs_exact": {
+          "format": "canonical-decimal8-checked-int64",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path"
+      ]
+    },
+    "execution": {
+      "per_execution_reads": {
+        "apply_regulatory_fees": {
+          "type": "boolean"
+        },
+        "asset_lookup_path": {
+          "enum": [
+            "exact_symbol",
+            "fallback"
+          ]
+        },
+        "asset_type": {
+          "const": "EQUITY"
+        },
+        "baseline_spread_ticks": {
+          "finite": true,
+          "type": "number"
+        },
+        "commission_per_unit": {
+          "finite": true,
+          "type": "number"
+        },
+        "commissions_fees_exact": {
+          "format": "canonical-decimal8-checked-int64",
+          "type": "string"
+        },
+        "effective_adv": {
+          "finite": true,
+          "type": "number"
+        },
+        "effective_volatility_multiplier": {
+          "finite": true,
+          "type": "number"
+        },
+        "explicit_fee_per_contract": {
+          "finite": true,
+          "type": "number"
+        },
+        "finra_taf_cap_per_trade": {
+          "finite": true,
+          "type": "number"
+        },
+        "finra_taf_per_share": {
+          "finite": true,
+          "type": "number"
+        },
+        "implicit_price_impact_exact": {
+          "format": "canonical-decimal8-checked-int64",
+          "type": "string"
+        },
+        "input_source": {
+          "const": "internally_tracked"
+        },
+        "max_commission_pct": {
+          "finite": true,
+          "type": "number"
+        },
+        "max_commission_per_order": {
+          "finite": true,
+          "type": "number"
+        },
+        "max_impact_bps": {
+          "finite": true,
+          "type": "number"
+        },
+        "max_participation": {
+          "finite": true,
+          "type": "number"
+        },
+        "max_spread_ticks": {
+          "finite": true,
+          "type": "number"
+        },
+        "max_total_implicit_bps": {
+          "finite": true,
+          "type": "number"
+        },
+        "min_adv": {
+          "finite": true,
+          "type": "number"
+        },
+        "min_commission_per_order": {
+          "finite": true,
+          "type": "number"
+        },
+        "min_participation": {
+          "finite": true,
+          "type": "number"
+        },
+        "min_spread_ticks": {
+          "finite": true,
+          "type": "number"
+        },
+        "point_value": {
+          "finite": true,
+          "type": "number"
+        },
+        "quantity": {
+          "finite": true,
+          "type": "number"
+        },
+        "reference_price": {
+          "finite": true,
+          "type": "number"
+        },
+        "retrieved_adv": {
+          "finite": true,
+          "type": "number"
+        },
+        "retrieved_volatility_multiplier": {
+          "finite": true,
+          "type": "number"
+        },
+        "sec_fee_per_million": {
+          "finite": true,
+          "type": "number"
+        },
+        "selected_k_bps": {
+          "finite": true,
+          "type": "number"
+        },
+        "slippage_market_impact_exact": {
+          "format": "canonical-decimal8-checked-int64",
+          "type": "string"
+        },
+        "spread_cost_multiplier": {
+          "finite": true,
+          "type": "number"
+        },
+        "tick_constrained": {
+          "type": "boolean"
+        },
+        "tick_size": {
+          "finite": true,
+          "type": "number"
+        },
+        "total_transaction_costs_exact": {
+          "format": "canonical-decimal8-checked-int64",
+          "type": "string"
+        },
+        "volatility_calculation_reached": {
+          "type": "boolean"
+        },
+        "volatility_lambda": {
+          "finite": true,
+          "type": "number"
+        },
+        "volatility_max_multiplier": {
+          "finite": true,
+          "type": "number"
+        },
+        "volatility_min_multiplier": {
+          "finite": true,
+          "type": "number"
+        }
+      },
+      "reads": {
+        "execution_price_max_staleness_days": {
+          "maximum": 2147483647,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": []
+    },
+    "market_input": {
+      "reads": {
+        "asset_type": {
+          "const": "EQUITY"
+        },
+        "data_staleness_tolerance_days": {
+          "maximum": 2147483647,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "end_day": {
+          "format": "date",
+          "type": "string"
+        },
+        "frequency": {
+          "const": "DAILY"
+        },
+        "historical_days": {
+          "maximum": 2147483647,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "start_day": {
+          "format": "date",
+          "type": "string"
+        }
+      },
+      "required": [
+        "historical_days",
+        "asset_type",
+        "frequency",
+        "start_day",
+        "end_day"
+      ]
+    },
+    "preparation": {
+      "per_symbol_reads": {
+        "lookback_period": {
+          "maximum": 2147483647,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_history_size": {
+          "maximum": 2147483647,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "vol_lookback": {
+          "maximum": 2147483647,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": []
+    },
+    "primary": {
+      "reads": {
+        "portfolio_invocation": {
+          "full_run_certification": false,
+          "ref": "qt-equity-portfolio-consumption/v1",
+          "scope": "portfolio_invocation"
+        },
+        "strategy_invocation": {
+          "full_run_certification": false,
+          "ref": "qt-equity-strategy-consumption/v1",
+          "scope": "strategy_invocation"
+        }
+      },
+      "required": [
+        "strategy_invocation",
+        "portfolio_invocation"
+      ]
+    },
+    "prior": {
+      "reads": {
+        "accounting_input_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "decision_id": {
+          "format": "canonical-uuid",
+          "type": "string"
+        },
+        "finalization_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "finalization_id": {
+          "format": "canonical-uuid",
+          "type": "string"
+        },
+        "finalization_source_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "mode": {
+          "enum": [
+            "system_reference",
+            "verified_desk_prior"
+          ]
+        },
+        "observation_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "results_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "source_day": {
+          "format": "date",
+          "type": "string"
+        },
+        "valuation_day": {
+          "format": "date",
+          "type": "string"
+        }
+      },
+      "required": [
+        "mode",
+        "source_day"
+      ]
+    },
+    "result_assembly": {
+      "reads": {
+        "currency": {
+          "const": "USD"
+        },
+        "current_portfolio_value_exact": {
+          "format": "canonical-decimal8-checked-int64",
+          "type": "string"
+        },
+        "total_realized_pnl_exact": {
+          "format": "canonical-decimal8-checked-int64",
+          "type": "string"
+        },
+        "total_transaction_costs_exact": {
+          "format": "canonical-decimal8-checked-int64",
+          "type": "string"
+        },
+        "total_unrealized_pnl_exact": {
+          "format": "canonical-decimal8-checked-int64",
+          "type": "string"
+        }
+      },
+      "required": [
+        "currency",
+        "current_portfolio_value_exact",
+        "total_realized_pnl_exact",
+        "total_unrealized_pnl_exact",
+        "total_transaction_costs_exact"
+      ]
+    },
+    "setup": {
+      "reads": {
+        "allow_fractional_positions": {
+          "type": "boolean"
+        },
+        "capital_allocation": {
+          "finite": true,
+          "type": "number"
+        },
+        "max_drawdown": {
+          "finite": true,
+          "type": "number"
+        },
+        "max_leverage": {
+          "finite": true,
+          "type": "number"
+        },
+        "reserve_capital": {
+          "finite": true,
+          "type": "number"
+        },
+        "use_optimization": {
+          "type": "boolean"
+        },
+        "use_risk_management": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "capital_allocation",
+        "max_leverage",
+        "max_drawdown",
+        "reserve_capital",
+        "use_optimization",
+        "use_risk_management",
+        "allow_fractional_positions"
+      ]
+    }
+  },
+  "supersedes_contract_sha256": "7a3cb51843bddf5ffd02a90b750999a9fefb51a6c171bf631b33f5a3181f773e",
+  "symbol_limit": 256,
+  "unavailable_reasons": [
+    "instrumentation_missing",
+    "unsupported_enabled_helper",
+    "capacity_exceeded",
+    "invalid_observed_value",
+    "invalid_observed_identity",
+    "stage_failed"
+  ],
+  "unknown_fields": "refuse",
+  "variant_path": "proved_action_adjusted_prior"
+}

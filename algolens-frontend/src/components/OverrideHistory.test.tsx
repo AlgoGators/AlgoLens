@@ -53,3 +53,24 @@ it('ignores a stale failure after a strategy switch', async () => {
   expect(screen.getByText('CURRENT')).toBeTruthy();
   expect(screen.queryByText('old error')).toBeNull();
 });
+it('refreshes the same scope after a successful edit and says the list is bounded', async () => {
+  getOverrides.mockResolvedValueOnce([]).mockResolvedValueOnce(rows('FRESH'));
+  const { rerender } = render(
+    <OverrideHistory strategyId="trend" portfolioId="primary" refreshKey={0} />,
+  );
+  await screen.findByText(/No manual edits/);
+  rerender(<OverrideHistory strategyId="trend" portfolioId="primary" refreshKey={1} />);
+  await screen.findByText('FRESH');
+  expect(getOverrides).toHaveBeenCalledTimes(2);
+  expect(screen.getByText(/Newest 100 manual edits/i)).toBeTruthy();
+});
+
+it('keeps the six-column history readable through horizontal scrolling on narrow screens', async () => {
+  getOverrides.mockResolvedValue(rows('ES'));
+  render(<OverrideHistory strategyId="trend" portfolioId="primary" />);
+
+  const header = (await screen.findByText('When')).parentElement;
+  const table = header?.parentElement;
+  expect(table?.className).toContain('min-w-[840px]');
+  expect(table?.parentElement?.className).toContain('overflow-x-auto');
+});

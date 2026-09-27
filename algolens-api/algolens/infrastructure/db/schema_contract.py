@@ -245,10 +245,13 @@ CONTRACT_METADATA = TableContract(
         "src/instruments/instrument_registry.cpp, keyed on \"Databento "
         "Symbol\" and falling back to \"IB Symbol\"."
     ),
-    reads=("Databento Symbol", "IB Symbol", "Contract Size"),
+    reads=("Databento Symbol", "IB Symbol", "Contract Size", "Asset Type"),
     notes=(
         "Column names are quoted and mixed-case, because that is how the "
         "table is really spelled.",
+        "QT edits require a unique supported Asset Type: whole FUTURE contracts "
+        "or fractional EQUITY shares. Missing/ambiguous types deny a write; "
+        "contract size and price ticks never imply quantity increments.",
         "\"Contract Size\" is the number every exposure figure on the site is "
         "multiplied by, and it is NOT reliably a price multiplier: a ten-year "
         "note is $100,000 of face quoted as a percentage of par, so its point "
@@ -282,6 +285,38 @@ def _columns(cursor, schema, table):
         else:
             out[row[0]] = (row[1], row[2])
     return out
+
+
+def qt_publication_storage_ready(cursor: object) -> bool:
+    """Admit QT publication only when both persisted exact values retain Decimal8."""
+    try:
+        cursor.execute(
+            """
+            SELECT column_name, data_type, numeric_precision, numeric_scale
+            FROM information_schema.columns
+            WHERE table_schema = %s AND table_name = %s
+              AND column_name IN (%s, %s)
+            """,
+            ("trading", "positions", "quantity", "average_price"),
+        )
+        rows = cursor.fetchall()
+        columns = {}
+        for row in rows:
+            if isinstance(row, dict):
+                name = row["column_name"]
+                shape = (row["data_type"], row["numeric_precision"], row["numeric_scale"])
+            else:
+                name = row[0]
+                shape = (row[1], row[2], row[3])
+            if name in columns:
+                return False
+            columns[name] = shape
+        return columns == {
+            "quantity": ("numeric", 20, 8),
+            "average_price": ("numeric", 20, 8),
+        }
+    except (KeyError, IndexError, TypeError, ValueError):
+        return False
 
 
 def check_schema(cursor, contracts=CONTRACTS):

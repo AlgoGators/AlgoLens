@@ -1,0 +1,809 @@
+{
+  "publication_schema_version": 1,
+  "profile": "live_portfolio_runner_futures",
+  "authority": "inspection_only",
+  "stream": "system",
+  "identity": {
+    "registry_id": "trend",
+    "registry_revision": 1,
+    "engine_strategy_id": "LIVE_TREND",
+    "portfolio_id": "BOOK",
+    "run_date": "2026-09-22",
+    "capture_id": "11111111-1111-4111-8111-111111111111",
+    "publication_id": "11111111-1111-4111-8111-111111111111",
+    "runtime_attempt_id": "11111111-1111-4111-8111-111111111111",
+    "producer_version": "synthetic.test-1",
+    "control_mode": "controlled"
+  },
+  "captured_at": "2026-09-22T15:00:00Z",
+  "publication_recorded_at": "2026-09-22T15:01:00Z",
+  "status": "available",
+  "reason": "none",
+  "supplied": {
+    "projection_version": 1,
+    "profile": "live_portfolio_runner_futures",
+    "coverage": "current_typed_fields_and_known_strategy_leaves",
+    "authority": "inspection_only",
+    "consumption_evidence": "not_collected",
+    "fields": [
+      {
+        "path": "/backtest/lookback_years",
+        "scope": "exact",
+        "classification": "unsupported_in_profile",
+        "reason": "backtest_only",
+        "condition": "no_active_profile_reader",
+        "value_type": "integer",
+        "unit": "years",
+        "value_origin": "app_config_member",
+        "value_state": "included",
+        "value": 2
+      },
+      {
+        "path": "/backtest/store_trade_details",
+        "scope": "exact",
+        "classification": "unsupported_in_profile",
+        "reason": "backtest_only",
+        "condition": "no_active_profile_reader",
+        "value_type": "boolean",
+        "unit": "flag",
+        "value_origin": "app_config_member",
+        "value_state": "included",
+        "value": false
+      },
+      {
+        "path": "/benchmark_mode",
+        "scope": "exact",
+        "classification": "source_supported_config_input",
+        "reason": "source_reader",
+        "condition": "benchmark_stage",
+        "value_type": "enum_string",
+        "unit": "mode",
+        "value_origin": "app_config_member",
+        "value_state": "included",
+        "value": "deferred"
+      },
+      {
+        "path": "/execution/commission_rate",
+        "scope": "exact",
+        "classification": "unsupported_in_profile",
+        "reason": "not_wired_to_futures_cost_model",
+        "condition": "no_active_profile_reader",
+        "value_type": "number",
+        "unit": "unverified_rate",
+        "value_origin": "app_config_member",
+        "value_state": "included",
+        "value": 0.0002
+      },
+      {
+        "path": "/execution/position_limit_backtest",
+        "scope": "exact",
+        "classification": "unsupported_in_profile",
+        "reason": "backtest_only",
+        "condition": "no_active_profile_reader",
+        "value_type": "number",
+        "unit": "contracts",
+        "value_origin": "app_config_member",
+        "value_state": "included",
+        "value": 8
+      },
+      {
+        "path": "/execution/position_limit_live",
+        "scope": "exact",
+        "classification": "source_supported_config_input",
+        "reason": "source_reader",
+        "condition": "base_position_validation",
+        "value_type": "number",
+        "unit": "contracts",
+        "value_origin": "app_config_member",
+        "value_state": "included",
+        "value": 5
+      },
+      {
+        "path": "/execution/slippage_bps",
+        "scope": "exact",
+        "classification": "unsupported_in_profile",
+        "reason": "not_wired_to_futures_cost_model",
+        "condition": "no_active_profile_reader",
+        "value_type": "number",
+        "unit": "basis_points",
+        "value_origin": "app_config_member",
+        "value_state": "included",
+        "value": 1.5
+      },
+      {
+        "path": "/initial_capital",
+        "scope": "exact",
+        "classification": "source_supported_config_input",
+        "reason": "source_reader",
+        "condition": "source_path",
+        "value_type": "number",
+        "unit": "account_currency",
+        "value_origin": "app_config_member",
+        "value_state": "included",
+        "value": 100000
+      },
+      {
+        "path": "/live/historical_days",
+        "scope": "exact",
+        "classification": "source_supported_config_input",
+        "reason": "source_reader",
+        "condition": "source_path",
+        "value_type": "integer",
+        "unit": "calendar_days",
+        "value_origin": "app_config_member",
+        "value_state": "included",
+        "value": 365
+      },
+      {
+        "path": "/optimization/asymmetric_risk_buffer",
+        "scope": "exact",
+        "classification": "unsupported_in_profile",
+        "reason": "no_active_reader",
+        "condition": "no_active_profile_reader",
+        "value_type": "number",
+        "unit": "unverified_buffer_fraction",
+        "value_origin": "app_config_member",
+        "value_state": "included",
+        "value": 0.05
+      },
+      {
+        "path": "/optimization/buffer_size_factor",
+        "scope": "exact",
+        "classification": "source_supported_config_input",
+        "reason": "source_reader",
+        "condition": "optimizer_succeeded_and_buffering_enabled",
+        "value_type": "number",
+        "unit": "multiplier",
+        "value_origin": "app_config_member",
+        "value_state": "included",
+        "value": 0.8
+      },
+      {
+        "path": "/optimization/capital",
+        "scope": "exact",
+        "classification": "read_only_metadata",
+        "reason": "derived_alias",
+        "condition": "metadata_only",
+        "value_type": "number",
+        "unit": "account_currency",
+        "value_origin": "app_config_member",
+        "value_state": "included",
+        "value": 100000
+      },
+      {
+        "path": "/optimization/convergence_threshold",
+        "scope": "exact",
+        "classification": "source_supported_config_input",
+        "reason": "source_reader",
+        "condition": "optimizer_enabled",
+        "value_type": "number",
+        "unit": "objective_difference",
+        "value_origin": "app_config_member",
+        "value_state": "included",
+        "value": 0.001
+      },
+      {
+        "path": "/optimization/cost_penalty_scalar",
+        "scope": "exact",
+        "classification": "source_supported_config_input",
+        "reason": "source_reader",
+        "condition": "optimizer_enabled",
+        "value_type": "number",
+        "unit": "multiplier",
+        "value_origin": "app_config_member",
+        "value_state": "included",
+        "value": 1.2
+      },
+      {
+        "path": "/optimization/max_iterations",
+        "scope": "exact",
+        "classification": "source_supported_config_input",
+        "reason": "source_reader",
+        "condition": "optimizer_enabled",
+        "value_type": "integer",
+        "unit": "iterations",
+        "value_origin": "app_config_member",
+        "value_state": "included",
+        "value": 50
+      },
+      {
+        "path": "/optimization/tau",
+        "scope": "exact",
+        "classification": "source_supported_config_input",
+        "reason": "source_reader",
+        "condition": "optimizer_succeeded_and_buffering_enabled",
+        "value_type": "number",
+        "unit": "risk_scale",
+        "value_origin": "app_config_member",
+        "value_state": "included",
+        "value": 0.2
+      },
+      {
+        "path": "/optimization/use_buffering",
+        "scope": "exact",
+        "classification": "source_supported_config_input",
+        "reason": "source_reader",
+        "condition": "optimizer_enabled",
+        "value_type": "boolean",
+        "unit": "flag",
+        "value_origin": "app_config_member",
+        "value_state": "included",
+        "value": true
+      },
+      {
+        "path": "/optimization/version",
+        "scope": "exact",
+        "classification": "read_only_metadata",
+        "reason": "version_metadata",
+        "condition": "metadata_only",
+        "value_type": "string",
+        "unit": "config_version",
+        "value_origin": "not_projected",
+        "value_state": "omitted"
+      },
+      {
+        "path": "/portfolio_id",
+        "scope": "exact",
+        "classification": "read_only_metadata",
+        "reason": "identity_metadata",
+        "condition": "metadata_only",
+        "value_type": "string",
+        "unit": "identity",
+        "value_origin": "not_projected",
+        "value_state": "omitted"
+      },
+      {
+        "path": "/reserve_capital_pct",
+        "scope": "exact",
+        "classification": "unsupported_in_profile",
+        "reason": "stored_metadata_only",
+        "condition": "no_active_profile_reader",
+        "value_type": "number",
+        "unit": "fraction",
+        "value_origin": "app_config_member",
+        "value_state": "included",
+        "value": 0.1
+      },
+      {
+        "path": "/risk/capital",
+        "scope": "exact",
+        "classification": "read_only_metadata",
+        "reason": "derived_alias",
+        "condition": "metadata_only",
+        "value_type": "number",
+        "unit": "account_currency",
+        "value_origin": "app_config_member",
+        "value_state": "included",
+        "value": 100000
+      },
+      {
+        "path": "/risk/corr_shock_threshold",
+        "scope": "exact",
+        "classification": "unsupported_in_profile",
+        "reason": "inactive_alternative",
+        "condition": "no_active_profile_reader",
+        "value_type": "number",
+        "unit": "annualized_volatility_fraction",
+        "value_origin": "app_config_member",
+        "value_state": "included",
+        "value": 0.5
+      },
+      {
+        "path": "/risk/jump_risk_limit",
+        "scope": "exact",
+        "classification": "source_supported_config_input",
+        "reason": "source_reader",
+        "condition": "risk_enabled",
+        "value_type": "number",
+        "unit": "fraction",
+        "value_origin": "app_config_member",
+        "value_state": "included",
+        "value": 0.1
+      },
+      {
+        "path": "/risk/jump_shock_threshold",
+        "scope": "exact",
+        "classification": "unsupported_in_profile",
+        "reason": "inactive_alternative",
+        "condition": "no_active_profile_reader",
+        "value_type": "number",
+        "unit": "annualized_volatility_fraction",
+        "value_origin": "app_config_member",
+        "value_state": "included",
+        "value": 0.6
+      },
+      {
+        "path": "/risk/max_drawdown",
+        "scope": "exact",
+        "classification": "source_supported_config_input",
+        "reason": "source_reader",
+        "condition": "base_strategy_risk_check",
+        "value_type": "number",
+        "unit": "fraction",
+        "value_origin": "app_config_member",
+        "value_state": "included",
+        "value": 0.25
+      },
+      {
+        "path": "/risk/max_gross_leverage",
+        "scope": "exact",
+        "classification": "source_supported_config_input",
+        "reason": "source_reader",
+        "condition": "risk_enabled",
+        "value_type": "number",
+        "unit": "leverage_multiple",
+        "value_origin": "app_config_member",
+        "value_state": "included",
+        "value": 2
+      },
+      {
+        "path": "/risk/max_leverage",
+        "scope": "exact",
+        "classification": "source_supported_config_input",
+        "reason": "diagnostic_reader",
+        "condition": "base_strategy_risk_check",
+        "value_type": "number",
+        "unit": "leverage_multiple",
+        "value_origin": "app_config_member",
+        "value_state": "included",
+        "value": 3
+      },
+      {
+        "path": "/risk/max_net_leverage",
+        "scope": "exact",
+        "classification": "source_supported_config_input",
+        "reason": "source_reader",
+        "condition": "risk_enabled",
+        "value_type": "number",
+        "unit": "leverage_multiple",
+        "value_origin": "app_config_member",
+        "value_state": "included",
+        "value": 1
+      },
+      {
+        "path": "/risk/var_limit",
+        "scope": "exact",
+        "classification": "source_supported_config_input",
+        "reason": "source_reader",
+        "condition": "risk_enabled",
+        "value_type": "number",
+        "unit": "annualized_volatility_fraction",
+        "value_origin": "app_config_member",
+        "value_state": "included",
+        "value": 0.2
+      },
+      {
+        "path": "/risk/version",
+        "scope": "exact",
+        "classification": "read_only_metadata",
+        "reason": "version_metadata",
+        "condition": "metadata_only",
+        "value_type": "string",
+        "unit": "config_version",
+        "value_origin": "not_projected",
+        "value_state": "omitted"
+      },
+      {
+        "path": "/risk_defaults/confidence_level",
+        "scope": "exact",
+        "classification": "source_supported_config_input",
+        "reason": "source_reader",
+        "condition": "risk_enabled",
+        "value_type": "number",
+        "unit": "probability",
+        "value_origin": "app_config_member",
+        "value_state": "included",
+        "value": 0.95
+      },
+      {
+        "path": "/risk_defaults/lookback_period",
+        "scope": "exact",
+        "classification": "source_supported_config_input",
+        "reason": "source_reader",
+        "condition": "risk_enabled",
+        "value_type": "integer",
+        "unit": "bar_records",
+        "value_origin": "app_config_member",
+        "value_state": "included",
+        "value": 100
+      },
+      {
+        "path": "/risk_defaults/max_correlation",
+        "scope": "exact",
+        "classification": "source_supported_config_input",
+        "reason": "source_reader",
+        "condition": "risk_enabled",
+        "value_type": "number",
+        "unit": "absolute_correlation",
+        "value_origin": "app_config_member",
+        "value_state": "included",
+        "value": 0.7
+      },
+      {
+        "path": "/strategies/ALPHA/config/carver_buffer_floor",
+        "scope": "exact",
+        "classification": "source_supported_config_input",
+        "reason": "source_reader",
+        "condition": "selected_known_strategy_buffering_enabled",
+        "value_type": "number",
+        "unit": "contracts",
+        "value_origin": "configured_strategy_leaf",
+        "value_state": "included",
+        "value": 1
+      },
+      {
+        "path": "/strategies/ALPHA/config/carver_buffer_position_factor",
+        "scope": "exact",
+        "classification": "source_supported_config_input",
+        "reason": "source_reader",
+        "condition": "selected_known_strategy_buffering_enabled",
+        "value_type": "number",
+        "unit": "fraction",
+        "value_origin": "configured_strategy_leaf",
+        "value_state": "included",
+        "value": 0.1
+      },
+      {
+        "path": "/strategies/ALPHA/config/ema_windows",
+        "scope": "exact",
+        "classification": "source_supported_config_input",
+        "reason": "source_reader",
+        "condition": "selected_known_strategy",
+        "value_type": "integer_pairs",
+        "unit": "short_long_bar_pairs",
+        "value_origin": "configured_strategy_leaf",
+        "value_state": "included",
+        "value": [
+          [
+            8,
+            32
+          ],
+          [
+            16,
+            64
+          ]
+        ]
+      },
+      {
+        "path": "/strategies/ALPHA/config/fdm",
+        "scope": "exact",
+        "classification": "unsupported_in_profile",
+        "reason": "typed_member_not_input_wired",
+        "condition": "no_active_profile_reader",
+        "value_type": "integer_number_pairs",
+        "unit": "rule_count_multiplier_pairs",
+        "value_origin": "not_projected",
+        "value_state": "omitted"
+      },
+      {
+        "path": "/strategies/ALPHA/config/fx_rate",
+        "scope": "exact",
+        "classification": "unsupported_in_profile",
+        "reason": "typed_member_not_input_wired",
+        "condition": "no_active_profile_reader",
+        "value_type": "number",
+        "unit": "currency_ratio",
+        "value_origin": "not_projected",
+        "value_state": "omitted"
+      },
+      {
+        "path": "/strategies/ALPHA/config/idm",
+        "scope": "exact",
+        "classification": "source_supported_config_input",
+        "reason": "source_reader",
+        "condition": "selected_known_strategy",
+        "value_type": "number",
+        "unit": "multiplier",
+        "value_origin": "configured_strategy_leaf",
+        "value_state": "included",
+        "value": 1.1
+      },
+      {
+        "path": "/strategies/ALPHA/config/max_history_size",
+        "scope": "exact",
+        "classification": "unsupported_in_profile",
+        "reason": "typed_member_not_input_wired",
+        "condition": "no_active_profile_reader",
+        "value_type": "integer",
+        "unit": "bar_records",
+        "value_origin": "not_projected",
+        "value_state": "omitted"
+      },
+      {
+        "path": "/strategies/ALPHA/config/max_symbol_concentration",
+        "scope": "exact",
+        "classification": "source_supported_config_input",
+        "reason": "source_reader",
+        "condition": "selected_known_strategy",
+        "value_type": "number",
+        "unit": "fraction",
+        "value_origin": "configured_strategy_leaf",
+        "value_state": "included",
+        "value": 0.2
+      },
+      {
+        "path": "/strategies/ALPHA/config/risk_target",
+        "scope": "exact",
+        "classification": "source_supported_config_input",
+        "reason": "source_reader",
+        "condition": "selected_known_strategy",
+        "value_type": "number",
+        "unit": "annualized_volatility_fraction",
+        "value_origin": "configured_strategy_leaf",
+        "value_state": "included",
+        "value": 0.18
+      },
+      {
+        "path": "/strategies/ALPHA/config/use_position_buffering",
+        "scope": "exact",
+        "classification": "source_supported_config_input",
+        "reason": "source_reader",
+        "condition": "selected_known_strategy",
+        "value_type": "boolean",
+        "unit": "flag",
+        "value_origin": "configured_strategy_leaf",
+        "value_state": "included",
+        "value": true
+      },
+      {
+        "path": "/strategies/ALPHA/config/vol_lookback_long",
+        "scope": "exact",
+        "classification": "source_supported_config_input",
+        "reason": "source_reader",
+        "condition": "selected_known_strategy",
+        "value_type": "integer",
+        "unit": "bar_windows",
+        "value_origin": "configured_strategy_leaf",
+        "value_state": "absent_in_input"
+      },
+      {
+        "path": "/strategies/ALPHA/config/vol_lookback_short",
+        "scope": "exact",
+        "classification": "source_supported_config_input",
+        "reason": "source_reader",
+        "condition": "selected_known_strategy",
+        "value_type": "integer",
+        "unit": "bar_windows",
+        "value_origin": "configured_strategy_leaf",
+        "value_state": "included",
+        "value": 20
+      },
+      {
+        "path": "/strategies/ALPHA/config/weight",
+        "scope": "exact",
+        "classification": "source_supported_config_input",
+        "reason": "source_reader",
+        "condition": "selected_known_strategy_buffering_enabled",
+        "value_type": "number",
+        "unit": "multiplier",
+        "value_origin": "configured_strategy_leaf",
+        "value_state": "included",
+        "value": 1.2
+      },
+      {
+        "path": "/strategies/ALPHA/default_allocation",
+        "scope": "exact",
+        "classification": "source_supported_config_input",
+        "reason": "source_reader",
+        "condition": "strategy_selection",
+        "value_type": "number",
+        "unit": "fraction",
+        "value_origin": "configured_strategy_leaf",
+        "value_state": "included",
+        "value": 0.4
+      },
+      {
+        "path": "/strategies/ALPHA/enabled_backtest",
+        "scope": "exact",
+        "classification": "unsupported_in_profile",
+        "reason": "backtest_only",
+        "condition": "no_active_profile_reader",
+        "value_type": "boolean",
+        "unit": "flag",
+        "value_origin": "configured_strategy_leaf",
+        "value_state": "included",
+        "value": false
+      },
+      {
+        "path": "/strategies/ALPHA/enabled_live",
+        "scope": "exact",
+        "classification": "source_supported_config_input",
+        "reason": "source_reader",
+        "condition": "strategy_selection",
+        "value_type": "boolean",
+        "unit": "flag",
+        "value_origin": "configured_strategy_leaf",
+        "value_state": "included",
+        "value": true
+      },
+      {
+        "path": "/strategies/ALPHA/type",
+        "scope": "exact",
+        "classification": "source_supported_config_input",
+        "reason": "source_reader",
+        "condition": "strategy_dispatch",
+        "value_type": "enum_string",
+        "unit": "strategy_type",
+        "value_origin": "configured_strategy_leaf",
+        "value_state": "included",
+        "value": "TrendFollowingStrategy"
+      },
+      {
+        "path": "/strategy_defaults/carver_buffer_floor",
+        "scope": "exact",
+        "classification": "source_supported_config_input",
+        "reason": "source_reader",
+        "condition": "strategy_config_present_leaf_absent_and_buffering_enabled",
+        "value_type": "number",
+        "unit": "contracts",
+        "value_origin": "app_config_member",
+        "value_state": "included",
+        "value": 1
+      },
+      {
+        "path": "/strategy_defaults/carver_buffer_position_factor",
+        "scope": "exact",
+        "classification": "source_supported_config_input",
+        "reason": "source_reader",
+        "condition": "strategy_config_present_leaf_absent_and_buffering_enabled",
+        "value_type": "number",
+        "unit": "fraction",
+        "value_origin": "app_config_member",
+        "value_state": "included",
+        "value": 0.1
+      },
+      {
+        "path": "/strategy_defaults/fdm",
+        "scope": "exact",
+        "classification": "unsupported_in_profile",
+        "reason": "blocked_default_fallback",
+        "condition": "no_active_profile_reader",
+        "value_type": "integer_number_pairs",
+        "unit": "rule_count_multiplier_pairs",
+        "value_origin": "app_config_member",
+        "value_state": "included",
+        "value": [
+          [
+            1,
+            1
+          ],
+          [
+            2,
+            1.1
+          ]
+        ]
+      },
+      {
+        "path": "/strategy_defaults/max_strategy_allocation",
+        "scope": "exact",
+        "classification": "source_supported_config_input",
+        "reason": "source_reader",
+        "condition": "allocation_validation",
+        "value_type": "number",
+        "unit": "fraction",
+        "value_origin": "app_config_member",
+        "value_state": "included",
+        "value": 0.6
+      },
+      {
+        "path": "/strategy_defaults/min_strategy_allocation",
+        "scope": "exact",
+        "classification": "source_supported_config_input",
+        "reason": "source_reader",
+        "condition": "allocation_validation",
+        "value_type": "number",
+        "unit": "fraction",
+        "value_origin": "app_config_member",
+        "value_state": "included",
+        "value": 0.05
+      },
+      {
+        "path": "/strategy_defaults/use_optimization",
+        "scope": "exact",
+        "classification": "source_supported_config_input",
+        "reason": "source_reader",
+        "condition": "source_path",
+        "value_type": "boolean",
+        "unit": "flag",
+        "value_origin": "app_config_member",
+        "value_state": "included",
+        "value": true
+      },
+      {
+        "path": "/strategy_defaults/use_risk_management",
+        "scope": "exact",
+        "classification": "source_supported_config_input",
+        "reason": "source_reader",
+        "condition": "source_path",
+        "value_type": "boolean",
+        "unit": "flag",
+        "value_origin": "app_config_member",
+        "value_state": "included",
+        "value": true
+      }
+    ]
+  },
+  "selected_trend": {
+    "schema_version": 1,
+    "provenance": "shared_resolver_same_inputs",
+    "slow_concentration_override": {
+      "state": "absent"
+    },
+    "strategies": [
+      {
+        "strategy_id": "ALPHA",
+        "strategy_type": "TrendFollowingStrategy",
+        "selected_allocation": 0.4,
+        "factory_resolved": {
+          "weight": 1.2,
+          "risk_target": 0.18,
+          "fx_rate": 1,
+          "idm": 1.1,
+          "max_symbol_concentration": 0.2,
+          "use_position_buffering": true,
+          "carver_buffer_floor": 1,
+          "carver_buffer_position_factor": 0.1,
+          "ema_windows": [
+            [
+              8,
+              32
+            ],
+            [
+              16,
+              64
+            ]
+          ],
+          "vol_lookback_short": 20,
+          "vol_lookback_long": 60,
+          "max_history_size": 500,
+          "fdm": [
+            [
+              1,
+              1
+            ],
+            [
+              2,
+              1.1
+            ]
+          ]
+        },
+        "constructor_normalized": {
+          "weight": 1.2,
+          "risk_target": 0.18,
+          "fx_rate": 1,
+          "idm": 1.1,
+          "max_symbol_concentration": 0.2,
+          "use_position_buffering": true,
+          "carver_buffer_floor": 1,
+          "carver_buffer_position_factor": 0.1,
+          "ema_windows": [
+            [
+              8,
+              32
+            ],
+            [
+              16,
+              64
+            ]
+          ],
+          "vol_lookback_short": 20,
+          "vol_lookback_long": 64,
+          "max_history_size": 500,
+          "fdm": [
+            [
+              1,
+              1
+            ],
+            [
+              2,
+              1.1
+            ]
+          ]
+        }
+      }
+    ]
+  },
+  "consumption": {
+    "status": "not_collected"
+  }
+}

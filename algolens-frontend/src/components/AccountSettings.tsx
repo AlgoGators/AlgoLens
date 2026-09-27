@@ -32,6 +32,7 @@ export function AccountSettings({ onBack }: AccountSettingsProps) {
       }`}>
         <button
           onClick={onBack}
+          aria-label="Back to account"
           className={`p-2 rounded-full transition-colors ${
             theme === 'dark' ? 'hover:bg-gray-900' : 'hover:bg-gray-100'
           }`}
@@ -58,6 +59,9 @@ export function AccountSettings({ onBack }: AccountSettingsProps) {
               return (
                 <button
                   key={item.label}
+                  disabled
+                  aria-disabled="true"
+                  title="Not available yet: account editing is not connected"
                   className={`w-full flex items-center justify-between p-4 transition-colors ${
                     theme === 'dark' 
                       ? 'hover:bg-gray-900' 
@@ -83,7 +87,7 @@ export function AccountSettings({ onBack }: AccountSettingsProps) {
                       <div className="mt-1">{item.value}</div>
                     </div>
                   </div>
-                  <span className="text-orange-500 text-sm">{item.action}</span>
+                  <span className="text-amber-600 text-sm">Not available yet</span>
                 </button>
               );
             })}

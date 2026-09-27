@@ -8,6 +8,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { PortfolioGrouping } from './PortfolioGrouping';
 import type { PortfolioSummary } from '../domain/portfolio/portfolioAssignment';
+import { PortfolioApiService } from '../infrastructure/api/portfolioApi';
 
 vi.mock('../adapters/react/ThemeContext', () => ({
   useTheme: () => ({ theme: 'light' }),
@@ -34,7 +35,7 @@ const summary: PortfolioSummary[] = [
 ];
 
 vi.mock('../infrastructure/api/portfolioApi', () => ({
-  PortfolioApiService: { getPortfolios: async () => summary },
+  PortfolioApiService: { getPortfolios: vi.fn(async () => summary) },
 }));
 
 async function expanded() {
@@ -42,6 +43,21 @@ async function expanded() {
 }
 
 describe('opening a strategy from its book', () => {
+  it('labels partial book values and withholds whole-fund percentages', async () => {
+    vi.mocked(PortfolioApiService.getPortfolios).mockResolvedValueOnce([
+      { ...summary[0], strategies_awaiting_data: 1,
+        strategies: [...summary[0].strategies,
+          { id: 'unknown', name: 'Unknown', strategy_type: 'LIVE_UNKNOWN', lifecycle: 'live', current_value: null }] },
+      summary[1],
+    ]);
+    render(<PortfolioGrouping />);
+    await expanded();
+
+    expect(screen.getByText(/partial.*1 QT result unavailable/i)).toBeTruthy();
+    expect(screen.getAllByText('share unknown')).toHaveLength(2);
+    expect(screen.queryByText(/% of fund/)).toBeNull();
+  });
+
   it('opens the strategy on the book of the row that was clicked', async () => {
     const onOpen = vi.fn();
     render(<PortfolioGrouping onOpenStrategy={onOpen} canOpen={id => id !== 'meanreversion'} />);

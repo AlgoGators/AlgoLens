@@ -57,6 +57,7 @@ describe('the book on a strategy card', () => {
     expect(screen.getByTestId('card-book').textContent).toBe(
       'In 2 books · figures for CONSERVATIVE_PORTFOLIO',
     );
+    expect(screen.getByTestId('card-book').getAttribute('title')).toContain('Positions snapshot');
   });
 });
 
@@ -83,5 +84,17 @@ describe('the holdings count on a card', () => {
     );
     expect(screen.getByText('0 Holdings')).toBeTruthy();
     expect(screen.getByText('2 Holdings')).toBeTruthy();
+  });
+});
+
+describe('missing QT performance with real holdings', () => {
+  it('keeps the holding count and renders unknown value without a zero substitute', () => {
+    render(<StrategyList strategies={[strategy({
+      dataAvailable: false, currentValue: null,
+      positions: [{ symbol: 'ES.v.0' }] as never,
+    })]} onSelectStrategy={() => {}} />);
+    expect(screen.getByText('1 Holding')).toBeTruthy();
+    expect(screen.getByText(/QT performance unavailable/i)).toBeTruthy();
+    expect(screen.queryByText('$0')).toBeNull();
   });
 });

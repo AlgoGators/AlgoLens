@@ -13,6 +13,11 @@ export function StrategySummary({ metrics, theme }: StrategySummaryProps) {
         }`}>
         Strategy Summary
       </h3>
+      {metrics.strategiesAwaitingData > 0 && (
+        <p className={`text-sm mb-3 ${theme === 'dark' ? 'text-amber-400' : 'text-amber-600'}`}>
+          Partial: {metrics.strategiesAwaitingData} selected {metrics.strategiesAwaitingData === 1 ? 'strategy has' : 'strategies have'} QT performance unavailable; this summary covers only measured strategies.
+        </p>
+      )}
       <div className={`border rounded-lg overflow-hidden ${theme === 'dark' ? 'border-gray-800' : 'border-gray-200'
         }`}>
         {metrics.strategies.map((strategy, index) => {
@@ -36,7 +41,7 @@ export function StrategySummary({ metrics, theme }: StrategySummaryProps) {
                   <h4 className="mb-1">{strategy.name}</h4>
                   <div className="flex items-center gap-3 text-sm">
                     <span className={theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}>
-                      {weight === null ? 'share unknown' : `${weight.toFixed(1)}% of portfolio`}
+                      {weight === null ? 'share unknown' : `${weight.toFixed(1)}% of ${metrics.strategiesAwaitingData > 0 ? 'measured strategies' : 'portfolio'}`}
                     </span>
                     <span className={strategyReturn ? 'text-orange-500' : 'text-red-500'}>
                       {formatMetric(strategy.returnPercent, 2, { suffix: '%', signed: true })}
@@ -47,7 +52,8 @@ export function StrategySummary({ metrics, theme }: StrategySummaryProps) {
                   <div className="text-lg">
                     {/* Without a maximum, toLocaleString defaults to three
                         decimals: "$592,405.719". */}
-                    ${strategy.currentValue.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                    {strategy.currentValue === null ? '—' :
+                      `$${strategy.currentValue.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`}
                   </div>
                 </div>
               </div>

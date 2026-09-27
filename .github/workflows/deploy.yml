@@ -1,64 +1,113 @@
 name: Deploy AlgoLens
 
-# Gated on CI: this runs only after the "AlgoLens CI" workflow completes
-# successfully on main, so a failing test/build never reaches production.
-# workflow_dispatch is kept for manual, on-demand deploys.
+# Prepared rollout only: CI success alone must not change production.
+# Configure protected production reviewers and complete deployment/ROLLOUT.md.
 on:
-  workflow_run:
-    workflows: ["AlgoLens CI"]
-    types: [completed]
-    branches: [main]
   workflow_dispatch:
+    inputs:
+      release_sha:
+        description: Exact main commit with successful AlgoLens CI
+        required: true
+        type: string
+      rollout_approved:
+        description: Explicit production rollout authorization obtained
+        required: true
+        type: boolean
+        default: false
+      schema_verified:
+        description: Migration 012 and compatible schema independently verified
+        required: true
+        type: boolean
+        default: false
+      backup_verified:
+        description: Recoverable backup and rollback plan verified
+        required: true
+        type: boolean
+        default: false
+      maintenance_approved:
+        description: Maintenance window and Compose host cutover approved
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: algolens-production-release
+  cancel-in-progress: false
 
 jobs:
   deploy:
+    if: ${{ inputs.rollout_approved && inputs.schema_verified && inputs.backup_verified && inputs.maintenance_approved }}
+    environment: production
     runs-on: ubuntu-24.04
-    # Deploy on a green CI run, or when manually triggered.
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
 
     steps:
-      - name: Deploy to EC2
-        uses: appleboy/ssh-action@v1
+      - name: Verify exact commit passed CI
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # reviewed v7 revision
+        env:
+          RELEASE_SHA: ${{ inputs.release_sha }}
         with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USER }}
-          key: ${{ secrets.EC2_SSH_KEY }}
-          command_timeout: 30m
           script: |
-            set -e
-
+            const sha = process.env.RELEASE_SHA;
+            if (!/^[0-9a-f]{40}$/.test(sha)) throw new Error('Exact commit SHA required');
+            const {data} = await github.rest.actions.listWorkflowRuns({
+              ...context.repo, workflow_id: 'ci.yml', head_sha: sha,
+              branch: 'main', event: 'push', status: 'completed', per_page: 100
+            });
+            const latest = data.workflow_runs
+              .filter(r => r.head_sha === sha && r.head_branch === 'main')
+              .sort((a,b) => b.id-a.id)[0];
+            if (!latest || latest.conclusion !== 'success') {
+              throw new Error('Latest completed main push CI for this exact SHA must pass');
+            }
+      - name: Deploy verified serving pair after operational approval
+        shell: bash
+        timeout-minutes: 35
+        env:
+          SSH_HOST: ${{ secrets.EC2_HOST }}
+          SSH_USER: ${{ secrets.EC2_USER }}
+          SSH_PRIVATE_KEY: ${{ secrets.EC2_SSH_KEY }}
+          SSH_KNOWN_HOSTS: ${{ vars.ALGOLENS_SSH_KNOWN_HOSTS }}
+          RELEASE_SHA: ${{ inputs.release_sha }}
+          COMPOSE_PROJECT: ${{ vars.ALGOLENS_COMPOSE_PROJECT }}
+          RUNTIME_ENV_FILE: ${{ vars.ALGOLENS_RUNTIME_ENV_FILE }}
+          PUBLIC_ORIGIN: ${{ vars.ALGOLENS_PUBLIC_ORIGIN }}
+        run: |
+            set -euo pipefail
+            : "${SSH_HOST:?Verified SSH host required}"
+            : "${SSH_USER:?SSH user required}"
+            : "${SSH_PRIVATE_KEY:?SSH key required}"
+            : "${SSH_KNOWN_HOSTS:?Out-of-band verified host key required}"
+            [[ "$SSH_HOST" =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]*$ ]]
+            [[ "$SSH_USER" =~ ^[a-zA-Z0-9_][a-zA-Z0-9_-]*$ ]]
+            umask 077
+            key_file=$(mktemp "$RUNNER_TEMP/algolens-key.XXXXXX")
+            hosts_file=$(mktemp "$RUNNER_TEMP/algolens-hosts.XXXXXX")
+            trap 'rm -f -- "$key_file" "$hosts_file"' EXIT
+            printf '%s\n' "$SSH_PRIVATE_KEY" > "$key_file"
+            printf '%s\n' "$SSH_KNOWN_HOSTS" > "$hosts_file"
+            printf -v remote_command 'env RELEASE_SHA=%q COMPOSE_PROJECT=%q RUNTIME_ENV_FILE=%q PUBLIC_ORIGIN=%q bash -se' \
+              "$RELEASE_SHA" "$COMPOSE_PROJECT" "$RUNTIME_ENV_FILE" "$PUBLIC_ORIGIN"
+            ssh -i "$key_file" -o BatchMode=yes -o IdentitiesOnly=yes \
+              -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$hosts_file" \
+              -o ConnectTimeout=15 -o ServerAliveInterval=30 -o ServerAliveCountMax=3 \
+              "$SSH_USER@$SSH_HOST" "$remote_command" <<'REMOTE'
+            set -eu
+            flock -n /tmp/algolens-release.lock bash -se <<'RELEASE'
             cd /home/ec2-user/AlgoLens
-
-            echo "Pulling latest code..."
-            git pull origin main
-
-            if [ ! -f algolens-frontend/.env ] && [ -f .env ]; then
-              echo "Migrating root frontend .env into algolens-frontend/.env..."
-              cp .env algolens-frontend/.env
-            fi
-
-            echo "Installing frontend dependencies..."
-            cd algolens-frontend
-            npm ci
-
-            echo "Building frontend..."
-            npm run build
-            cd ..
-
-            echo "Installing backend dependencies..."
-            pip3 install -r algolens-api/requirements.txt --quiet
-
-            echo "Updating service and nginx config..."
-            sudo cp deployment/algolens-backend.service /etc/systemd/system/
-            sudo cp deployment/algolens.service /etc/systemd/system/
-            sudo cp deployment/algolens.conf /etc/nginx/conf.d/algolens.conf
-            sudo systemctl daemon-reload
-            sudo nginx -t
-            sudo systemctl reload nginx
-
-            echo "Restarting services..."
-            sudo systemctl restart algolens-backend
-            sudo systemctl restart algolens
-
-            echo "Deployment complete!"
-            echo "Site: https://algolens.algogators.com"
+            test -n "$COMPOSE_PROJECT"
+            test -n "$RUNTIME_ENV_FILE"
+            test -n "$PUBLIC_ORIGIN"
+            test -z "$(git status --porcelain --untracked-files=normal)"
+            git fetch origin "$RELEASE_SHA"
+            git checkout --detach "$RELEASE_SHA"
+            test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
+            python3 deployment/release.py --sha "$RELEASE_SHA" \
+              --project "$COMPOSE_PROJECT" --env-file "$RUNTIME_ENV_FILE" \
+              --origin "$PUBLIC_ORIGIN" --rollout-approved --schema-verified \
+              --backup-verified --maintenance-approved
+            RELEASE
+            REMOTE

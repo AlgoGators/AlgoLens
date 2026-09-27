@@ -59,6 +59,51 @@ export class ApiError extends Error {
   }
 }
 
+/** The server rejected the cookie itself; callers should return to auth once. */
+export class SessionExpiredError extends Error {
+  constructor(readonly status: 401 | 422) {
+    super('Your session expired. Please sign in again.');
+    this.name = 'SessionExpiredError';
+  }
+}
+
+/** Fetch never produced an HTTP response. No retry has been attempted. */
+export class HttpTransportError extends Error {
+  constructor(message = 'The service could not be reached. Please try again.') {
+    super(message);
+    this.name = 'HttpTransportError';
+  }
+}
+
+function throwIfSessionExpired(response: Response): void {
+  if (response.status === 401 || response.status === 422) {
+    throw new SessionExpiredError(response.status);
+  }
+}
+
+async function requestOnce(url: string, init: RequestInit): Promise<Response> {
+  try {
+    const response = await fetch(url, init);
+    throwIfSessionExpired(response);
+    return response;
+  } catch (error) {
+    if (error instanceof SessionExpiredError || error instanceof ApiError) throw error;
+    if (error instanceof TypeError) throw new HttpTransportError();
+    throw error;
+  }
+}
+
+/** One credentialed read for private inspection data. Never reads or logs error bodies. */
+export function getWithAuth(url: string, signal?: AbortSignal): Promise<Response> {
+  return requestOnce(url, {
+    method: 'GET',
+    credentials: 'include',
+    cache: 'no-store',
+    headers: { Accept: 'application/json', 'Cache-Control': 'no-store' },
+    signal,
+  });
+}
+
 function parseErrorBody(body: string): { code?: string; error?: string } {
   try {
     const parsed = JSON.parse(body);
@@ -112,12 +157,11 @@ export async function fetchWithAuth(url: string): Promise<Response> {
     if (!response.ok) {
       // Handle 401 Unauthorized or 422 JWT decode errors (e.g., expired/invalid cookie)
       if (response.status === 401 || response.status === 422) {
-        log('warn', `Session error (${response.status}) - redirecting to login`);
-        // The cookie is httpOnly, so there is nothing for JS to clear; a full
-        // navigation re-runs AuthContext's /verify check, which will find no
-        // session and render the login view.
-        window.location.href = '/login';
-        throw new Error('Session expired or invalid. Please log in again.');
+        log('warn', `Session error (${response.status})`);
+        // Do not force navigation here. A request helper cannot know whether
+        // the auth shell is already restoring the session; redirecting from
+        // every concurrent 401 created loops and erased the scoped error.
+        throw new SessionExpiredError(response.status);
       }
 
       // Try to get error body for more details
@@ -160,12 +204,12 @@ export async function fetchWithAuth(url: string): Promise<Response> {
         log('error', `  Current origin: ${window.location.origin}`);
         log('error', `  API target: ${url}`);
 
-        throw new Error(`Network error: Cannot reach ${API_BASE_URL}. Possible CORS issue or backend not running. Check browser Network tab for details.`);
+        throw new HttpTransportError();
       }
 
       if (errMsg.includes('cors')) {
         log('error', '>>> DIAGNOSIS: Explicit CORS error');
-        throw new Error(`CORS error: Backend at ${API_BASE_URL} is not allowing requests from ${window.location.origin}`);
+        throw new HttpTransportError();
       }
     }
 
@@ -218,7 +262,7 @@ async function writeWithAuth(
   }
 
   log('info', `${method} ${url}`);
-  return fetch(url, {
+  return requestOnce(url, {
     method,
     credentials: 'include',
     headers: {
@@ -246,7 +290,7 @@ export async function deleteWithAuth(url: string, body?: unknown): Promise<Respo
   log('info', `DELETE ${url}`);
   // A DELETE carries a body here because removing a strategy from a book needs
   // a reason and an acknowledgement, exactly like the other write paths.
-  return fetch(url, {
+  return requestOnce(url, {
     method: 'DELETE',
     credentials: 'include',
     headers: {

@@ -50,8 +50,8 @@ class _Reader:
     def __init__(self):
         self.asked = []
 
-    def fetch_detail_rows(self, strategy_type, portfolio_id):
-        self.asked.append((strategy_type, portfolio_id))
+    def fetch_detail_rows(self, strategy_type, portfolio_id, position_stream="qt"):
+        self.asked.append((strategy_type, portfolio_id, position_stream))
         symbol = "ES" if portfolio_id == PRIMARY else "6E"
         return PortfolioDetailRows(
             # Every field build_strategy_detail reads. The numbers are not
@@ -88,6 +88,7 @@ class _Reader:
             ],
             executions=[],
             yesterday_positions=[],
+            position_stream=position_stream,
         )
 
 
@@ -100,7 +101,7 @@ def test_omitting_the_book_reads_the_primary():
     detail = GetStrategyDetail(_Registry([PRIMARY, OTHER]), reader).execute("trendfollowing")
 
     assert detail["portfolio_id"] == PRIMARY
-    assert reader.asked == [("LIVE_TREND_FOLLOWING", PRIMARY)]
+    assert reader.asked == [("LIVE_TREND_FOLLOWING", PRIMARY, "system")]
     assert _symbols(detail) == ["ES"]
 
 
@@ -112,7 +113,7 @@ def test_naming_a_book_reads_that_book():
 
     # The whole point: different book, different rows.
     assert detail["portfolio_id"] == OTHER
-    assert reader.asked == [("LIVE_TREND_FOLLOWING", OTHER)]
+    assert reader.asked == [("LIVE_TREND_FOLLOWING", OTHER, "system")]
     assert _symbols(detail) == ["6E"]
 
 
@@ -139,7 +140,7 @@ def test_the_book_is_matched_without_regard_to_case():
         "trendfollowing", "MACRO_BOOK"
     )
     # Reads the row as it is actually spelled in the database.
-    assert reader.asked == [("LIVE_TREND_FOLLOWING", "macro_book")]
+    assert reader.asked == [("LIVE_TREND_FOLLOWING", "macro_book", "system")]
     assert detail["portfolio_id"] == "macro_book"
 
 

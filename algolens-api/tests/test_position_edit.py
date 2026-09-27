@@ -8,6 +8,7 @@ layered package.
 """
 
 from pathlib import Path
+from datetime import date
 
 import pytest
 
@@ -80,13 +81,23 @@ def test_boolean_quantity_is_not_a_number():
 
 
 @pytest.mark.parametrize("field", ["quantity", "average_price"])
-@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf"), 10 ** 400],
-                         ids=["nan", "positive-infinity", "negative-infinity", "float-overflow"])
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")],
+                         ids=["nan", "positive-infinity", "negative-infinity"])
 def test_non_finite_position_numbers_are_refused(field, value):
     with pytest.raises(PositionValidationError) as exc:
         validate_position_payload(_payload(**{field: value}))
     expected = "quantity_not_finite" if field == "quantity" else "price_not_finite"
     assert exc.value.code == expected
+
+
+@pytest.mark.parametrize("field,code", [
+    ("quantity", "quantity_not_representable"),
+    ("average_price", "price_not_representable"),
+])
+def test_large_finite_integer_is_rejected_as_unrepresentable(field, code):
+    with pytest.raises(PositionValidationError) as exc:
+        validate_position_payload(_payload(**{field: 10 ** 400}))
+    assert exc.value.code == code
 
 
 def test_negative_average_price_is_refused():
@@ -312,6 +323,11 @@ class _EmptyMembershipRegistry(_Registry):
         return []
 
 
+class _FutureCatalog:
+    def resolve_asset_type(self, symbol):
+        return "FUTURE"
+
+
 class _Reader:
     def __init__(self, envelope=None, book=None):
         self.envelope = envelope
@@ -325,9 +341,24 @@ class _Reader:
     def fetch_qt_book(self, strategy_type, portfolio_id):
         return self.book
 
+    def fetch_summary_row(self, strategy_type, portfolio_id):
+        return None
+
     def write_qt_position(self, **kwargs):
+        risk_check = kwargs.pop("risk_check")
+        verdict = risk_check(
+            self.envelope,
+            self.book,
+            self.fetch_summary_row(kwargs["strategy_type"], kwargs["portfolio_id"]),
+        )
+        kwargs["verdict"] = verdict
+        kwargs["overrode_risk"] = not verdict["passed"]
         self.written = kwargs
-        return {"position": {"symbol": kwargs["normalized"]["symbol"]}, "override_id": 1}
+        return {
+            "position": {"symbol": kwargs["normalized"]["symbol"]},
+            "override_id": 1,
+            "risk_check": verdict,
+        }
 
     def fetch_overrides(self, strategy_type, portfolio_id, limit=100):
         self.override_scope = (strategy_type, portfolio_id, limit)
@@ -348,7 +379,7 @@ def test_unknown_strategy_is_not_found():
 
 def test_a_clean_edit_is_written_with_its_verdict():
     reader = _Reader()
-    result = UpsertQtPosition(_Registry(_STRATEGY), reader).execute(_payload(), user_id="7")
+    result = UpsertQtPosition(_Registry(_STRATEGY), reader, instrument_catalog=_FutureCatalog()).execute(_payload(), user_id="7")
     assert result["risk_check"]["evaluated"] is False
     assert reader.written["overrode_risk"] is False
     assert reader.written["user_id"] == "7"
@@ -372,7 +403,7 @@ def test_market_priced_edits_preserve_short_exposure(short_quantity, net_limit, 
                   "max_symbol_notional": {"SHORT": 50}},
         book=[{"symbol": "LONG", "quantity": 1}],
     )
-    result = UpsertQtPosition(_Registry(_STRATEGY), reader, MarketData()).execute(
+    result = UpsertQtPosition(_Registry(_STRATEGY), reader, MarketData(), _FutureCatalog()).execute(
         _payload(symbol="SHORT", quantity=short_quantity), "7", acknowledge_risk=True
     )
     breaches = {b["limit"]: b["actual"] for b in result["risk_check"]["breaches"]}
@@ -384,7 +415,7 @@ def test_market_priced_edits_preserve_short_exposure(short_quantity, net_limit, 
 def test_a_breach_is_refused_until_it_is_acknowledged():
     reader = _Reader(envelope={"max_symbol_position_contracts": {"ES": 1}})
     with pytest.raises(RiskAcknowledgementRequired) as excinfo:
-        UpsertQtPosition(_Registry(_STRATEGY), reader).execute(
+        UpsertQtPosition(_Registry(_STRATEGY), reader, instrument_catalog=_FutureCatalog()).execute(
             _payload(average_price=500.0), user_id="7"
         )
     assert excinfo.value.verdict["breaches"]
@@ -393,7 +424,7 @@ def test_a_breach_is_refused_until_it_is_acknowledged():
 
 def test_an_acknowledged_breach_is_written_and_recorded_as_an_override():
     reader = _Reader(envelope={"max_symbol_position_contracts": {"ES": 1}})
-    UpsertQtPosition(_Registry(_STRATEGY), reader).execute(
+    UpsertQtPosition(_Registry(_STRATEGY), reader, instrument_catalog=_FutureCatalog()).execute(
         _payload(average_price=500.0), user_id="7", acknowledge_risk=True
     )
     assert reader.written["overrode_risk"] is True
@@ -402,7 +433,7 @@ def test_an_acknowledged_breach_is_written_and_recorded_as_an_override():
 
 def test_the_write_always_targets_the_qt_stream():
     reader = _Reader()
-    UpsertQtPosition(_Registry(_STRATEGY), reader).execute(_payload(), user_id="7")
+    UpsertQtPosition(_Registry(_STRATEGY), reader, instrument_catalog=_FutureCatalog()).execute(_payload(), user_id="7")
     assert reader.written["normalized"]["portfolio_type"] == "qt"
 
 
@@ -486,6 +517,7 @@ class _RepositoryCursor:
         self.history_rows = list(history_rows)
         self.statements = []
         self._one = None
+        self._many = None
 
     def __enter__(self):
         return self
@@ -493,9 +525,35 @@ class _RepositoryCursor:
     def __exit__(self, exc_type, exc, traceback):
         return False
 
-    def execute(self, sql, params):
+    def execute(self, sql, params=()):
         self.statements.append((sql, params))
-        if "FOR UPDATE" in sql:
+        self._many = None
+        if "pg_advisory_xact_lock" in sql:
+            self._one = None
+        elif "FROM trading.qt_workflow_capabilities" in sql:
+            # This pure legacy writer case requires an explicit disabled row.
+            self._one = {"enabled": False, "version": 1}
+        elif "to_regclass('trading.strategy_book_memberships')" in sql:
+            self._one = {"memberships_present": False}
+        elif "to_regclass('trading.live_results')" in sql:
+            self._one = {"present": False}
+        elif "SELECT EXISTS" in sql and "trading.strategy_registry" in sql:
+            self._one = {"is_member": True}
+        elif "information_schema.tables" in sql:
+            self._one = None
+        elif "FROM trading.live_results" in sql:
+            self._one = None
+        elif "FROM trading.positions" in sql and "ORDER BY strategy_name, symbol" in sql:
+            self._one = None
+            self._many = []
+        elif "FROM trading.strategy_registry WHERE id" in sql:
+            self._one = {
+                "id": "trendfollowing",
+                "strategy_type": "LIVE_TREND_FOLLOWING",
+                "portfolio_id": "BOOK_A",
+                "lifecycle": "live",
+            }
+        elif "FOR UPDATE" in sql:
             self._one = None
         elif "SELECT DISTINCT strategy_name" in sql:
             self._one = {"strategy_name": "engine_name"}
@@ -508,6 +566,8 @@ class _RepositoryCursor:
         return self._one
 
     def fetchall(self):
+        if self._many is not None:
+            return self._many
         if self.statements and "SELECT DISTINCT strategy_name" in self.statements[-1][0]:
             return [self._one]
         return self.history_rows
@@ -533,26 +593,41 @@ class _RepositoryConnection:
         self.closed = True
 
 
-def test_override_repository_binds_scope_and_shares_the_write_transaction():
-    from algolens.infrastructure.portfolio.repositories import PostgresPortfolioRepository
+def test_override_repository_samples_the_utc_day_after_taking_the_book_lock(monkeypatch):
+    import algolens.infrastructure.portfolio.repositories as repositories
+
+    PostgresPortfolioRepository = repositories.PostgresPortfolioRepository
 
     write_connection = _RepositoryConnection()
     history_connection = _RepositoryConnection(history_rows=[{"id": 41, "symbol": "ES"}])
     connections = iter((write_connection, history_connection))
     repository = PostgresPortfolioRepository(connection_factory=lambda: next(connections))
+    sampled = []
+
+    def utc_day_after_lock():
+        assert any(
+            "pg_advisory_xact_lock" in sql
+            for sql, _params in write_connection.cursor_instance.statements
+        )
+        sampled.append(True)
+        return date(2099, 1, 2)
+
+    monkeypatch.setattr(
+        repositories, "current_utc_date", utc_day_after_lock, raising=False
+    )
 
     result = repository.write_qt_position(
         strategy_type="LIVE_TREND_FOLLOWING",
         portfolio_id="BOOK_A",
         normalized={
+            "strategy_id": "trendfollowing",
             "symbol": "ES",
             "quantity": 3,
             "average_price": 500.0,
             "reason": "hedging the roll",
         },
         user_id="7",
-        verdict={"passed": True},
-        overrode_risk=False,
+        risk_check=lambda *_: {"passed": True},
     )
     history = repository.fetch_overrides("LIVE_TREND_FOLLOWING", "BOOK_A", limit=7)
 
@@ -567,6 +642,7 @@ def test_override_repository_binds_scope_and_shares_the_write_transaction():
         if "FROM trading.position_overrides o" in statement[0]
     )
     assert result["override_id"] == 41
+    assert sampled == [True]
     assert write_connection.transaction_entries == 1
     assert audit_statement[1][0] == "BOOK_A"
     assert history_statement[1] == ("BOOK_A", "LIVE_TREND_FOLLOWING", 7)

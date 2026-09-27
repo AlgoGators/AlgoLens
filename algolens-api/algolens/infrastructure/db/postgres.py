@@ -15,14 +15,6 @@ load_dotenv(dotenv_path=ENV_PATH)
 logger = logging.getLogger(__name__)
 
 logger.info("=== Database module loaded ===")
-logger.info("DB_HOST: %s", os.getenv("DB_HOST"))
-logger.info("DB_PORT: %s", os.getenv("DB_PORT", "5432"))
-logger.info("DB_NAME: %s", os.getenv("DB_NAME"))
-logger.info("DB_USER: %s", os.getenv("DB_USER"))
-logger.info(
-    "DB_PASSWORD set: %s",
-    "Yes" if os.getenv("DB_PASSWORD") else "NO - THIS WILL FAIL",
-)
 
 
 def get_db_connection():
@@ -33,7 +25,6 @@ def get_db_connection():
     dbname = os.getenv("DB_NAME")
 
     logger.info("=== Attempting DB connection ===")
-    logger.info("Target: %s@%s:%s/%s", user, host, port, dbname)
 
     missing = []
     if not host:
@@ -49,15 +40,15 @@ def get_db_connection():
         error_msg = (
             "Missing required database environment variables: " + ", ".join(missing)
         )
-        logger.error(error_msg)
+        logger.error("Database configuration incomplete")
         raise ValueError(error_msg)
 
     try:
-        logger.info("Resolving hostname: %s", host)
-        resolved_ip = socket.gethostbyname(host)
-        logger.info("Hostname resolved to: %s", resolved_ip)
-    except socket.gaierror as exc:
-        logger.error("DNS resolution failed for %s: %s", host, exc)
+        logger.info("Resolving database hostname")
+        socket.gethostbyname(host)
+        logger.info("Database hostname resolved")
+    except socket.gaierror:
+        logger.error("Database hostname resolution failed")
 
     try:
         conn = psycopg2.connect(
@@ -71,28 +62,8 @@ def get_db_connection():
         )
         logger.info("Database connection established successfully")
         return conn
-    except psycopg2.OperationalError as exc:
-        error_str = str(exc)
-        logger.error("Database connection failed: %s", error_str)
-
-        if "could not connect to server" in error_str or "Connection refused" in error_str:
-            logger.error(">>> DIAGNOSIS: Database server unreachable")
-            logger.error("    Check: Is PostgreSQL running? Is the host/port correct?")
-            logger.error(
-                "    Check: Security group allows inbound on port %s?", port
-            )
-        elif "password authentication failed" in error_str:
-            logger.error(">>> DIAGNOSIS: Invalid credentials")
-            logger.error("    Check: DB_USER and DB_PASSWORD are correct")
-        elif "database" in error_str and "does not exist" in error_str:
-            logger.error(">>> DIAGNOSIS: Database does not exist")
-            logger.error("    Check: DB_NAME is correct and database is created")
-        elif "timeout" in error_str.lower():
-            logger.error(">>> DIAGNOSIS: Connection timeout")
-            logger.error(
-                "    Check: Network connectivity, firewall rules, security groups"
-            )
-
+    except psycopg2.OperationalError:
+        logger.error("Database connection failed")
         raise
 
 

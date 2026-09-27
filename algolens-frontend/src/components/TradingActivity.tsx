@@ -3,13 +3,37 @@ import { useTheme } from '../adapters/react/ThemeContext';
 import type { Execution, FinalizedPosition } from '../domain/portfolio/portfolioData';
 import { formatMetric } from '../domain/portfolio/formatMetric';
 import { formatPrice } from '../domain/portfolio/formatPrice';
+import { formatBarDate } from '../domain/portfolio/formatBarDate';
 
 interface TradingActivityProps {
   executions: Execution[];
   finalizedPositions: FinalizedPosition[];
+  executionsAvailable?: boolean;
+  executionUnavailableReason?: string | null;
+  executionDate?: string | null;
+  activityStream?: 'qt' | null;
+  finalizedPositionsAvailable?: boolean;
 }
 
-export function TradingActivity({ executions, finalizedPositions }: TradingActivityProps) {
+function formatExecutionDate(stamp: string): string {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(stamp)) {
+    return formatBarDate(stamp, { month: 'short', day: 'numeric' });
+  }
+  const instant = new Date(stamp);
+  return Number.isNaN(instant.getTime())
+    ? stamp
+    : instant.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+export function TradingActivity({
+  executions,
+  finalizedPositions,
+  executionsAvailable,
+  executionUnavailableReason,
+  executionDate,
+  activityStream,
+  finalizedPositionsAvailable,
+}: TradingActivityProps) {
   const { theme } = useTheme();
 
   // Only fills whose contract size is known contribute to the total, and the
@@ -28,19 +52,34 @@ export function TradingActivity({ executions, finalizedPositions }: TradingActiv
 
   return (
     <div className="space-y-6">
-      {/* Daily Executions */}
+      {/* The endpoint returns newest-first rows capped at 100. It does not
+          certify that every row is from today. */}
       <div>
         <h3 className={`text-sm uppercase tracking-wider mb-4 ${
           theme === 'dark' ? 'text-gray-400' : 'text-gray-500'
         }`}>
-          Daily Executions
+          {executionsAvailable === true && executionDate
+            ? `Executions \u00b7 ${formatBarDate(executionDate)}`
+            : 'Recent Executions'}
         </h3>
+        <p className={`-mt-2 mb-3 text-xs ${theme === 'dark' ? 'text-gray-500' : 'text-gray-500'}`}>
+          {executionsAvailable === true
+            ? 'Attributed fills for the selected QT stream and execution date.'
+            : 'Newest, up to 100 records from a legacy payload; not certified as a complete daily ledger.'}
+        </p>
         
-        <div className={`border rounded-lg overflow-hidden ${
+        {executionsAvailable === false ? (
+          <div className={`rounded-lg border p-4 text-sm ${
+            theme === 'dark' ? 'border-gray-800 text-amber-400' : 'border-gray-200 text-amber-700'
+          }`}>
+            {executionUnavailableReason || 'Execution activity is unavailable for this strategy and stream.'}
+          </div>
+        ) : (
+        <div className={`border rounded-lg overflow-x-auto ${
           theme === 'dark' ? 'border-gray-800' : 'border-gray-200'
         }`}>
           {/* Header */}
-          <div className={`grid grid-cols-7 gap-4 p-4 text-sm border-b ${
+          <div className={`grid min-w-[760px] grid-cols-7 gap-4 p-4 text-sm border-b ${
             theme === 'dark'
               ? 'bg-gray-900 border-gray-800 text-gray-400'
               : 'bg-gray-50 border-gray-200 text-gray-500'
@@ -58,7 +97,7 @@ export function TradingActivity({ executions, finalizedPositions }: TradingActiv
           {executions.map((execution, index) => (
             <div
               key={`${execution.symbol}-${index}`}
-              className={`grid grid-cols-7 gap-4 p-4 transition-colors ${
+              className={`grid min-w-[760px] grid-cols-7 gap-4 p-4 transition-colors ${
                 theme === 'dark' ? 'hover:bg-gray-900' : 'hover:bg-gray-50'
               } ${
                 index !== executions.length - 1
@@ -70,7 +109,7 @@ export function TradingActivity({ executions, finalizedPositions }: TradingActiv
             >
               <div className={`text-sm ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>
                 {execution.date
-                  ? new Date(execution.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+                  ? formatExecutionDate(execution.date)
                   : '-'}
               </div>
               <div>{execution.symbol}</div>
@@ -97,25 +136,37 @@ export function TradingActivity({ executions, finalizedPositions }: TradingActiv
           ))}
 
           {/* Summary */}
-          <div className={`grid grid-cols-7 gap-4 p-4 border-t ${
+          <div className={`grid min-w-[760px] grid-cols-7 gap-4 p-4 border-t ${
             theme === 'dark'
               ? 'bg-gray-900 border-gray-800'
               : 'bg-gray-50 border-gray-200'
           }`}>
-            <div className="col-span-5">Trades: {executions.length}</div>
+            <div className="col-span-5">
+              {executionsAvailable === true ? 'Fills' : 'Fills shown'}: {executions.length}
+              {unpricedFills > 0 && (
+                <span className={`ml-2 text-sm ${theme === 'dark' ? 'text-amber-400' : 'text-amber-700'}`}>
+                  ({unpricedFills} {unpricedFills === 1 ? 'fill has' : 'fills have'} unknown notional; total is partial)
+                </span>
+              )}
+            </div>
             <div className="text-right">
               <div className={`text-sm ${
                 theme === 'dark' ? 'text-gray-400' : 'text-gray-500'
               }`}>
                 Total
               </div>
-              <div>${totalNotional.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+              <div>
+                {priced.length === 0
+                  ? '\u2014'
+                  : `$${totalNotional.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+              </div>
             </div>
             <div className="text-right">
               ${totalCommissions.toFixed(2)}
             </div>
           </div>
         </div>
+        )}
       </div>
 
       {/* Finalized Positions */}
@@ -123,9 +174,15 @@ export function TradingActivity({ executions, finalizedPositions }: TradingActiv
         <h3 className={`text-sm uppercase tracking-wider mb-4 ${
           theme === 'dark' ? 'text-gray-400' : 'text-gray-500'
         }`}>
-          Yesterday's Finalized Position Results
+          QT Finalized Position Results
         </h3>
-        
+        {activityStream !== 'qt' || finalizedPositionsAvailable !== true ? (
+          <div role="status" className={`rounded-lg border p-4 text-sm ${
+            theme === 'dark' ? 'border-gray-800 text-amber-400' : 'border-gray-200 text-amber-700'
+          }`}>
+            QT closed-position comparison unavailable. Fills above remain independently reported.
+          </div>
+        ) : (
         <div className={`border rounded-lg overflow-hidden ${
           theme === 'dark' ? 'border-gray-800' : 'border-gray-200'
         }`}>
@@ -213,6 +270,7 @@ export function TradingActivity({ executions, finalizedPositions }: TradingActiv
             </div>
           </div>
         </div>
+        )}
       </div>
     </div>
   );

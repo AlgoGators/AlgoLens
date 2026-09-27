@@ -1,11 +1,12 @@
 services:
   frontend:
-    image: ghcr.io/algogators/algolens-frontend:latest
+    image: algolens-frontend:${ALGOLENS_RELEASE_SHA:?Exact tested release SHA required}
     build:
       context: ./algolens-frontend
       dockerfile: Dockerfile
       args:
         VITE_API_URL: ${VITE_API_URL:-https://algolens.algogators.com}
+        APP_RELEASE_SHA: ${ALGOLENS_RELEASE_SHA:?Exact tested release SHA required}
     ports:
       - "127.0.0.1:3000:80"
     depends_on:
@@ -13,13 +14,27 @@ services:
     restart: unless-stopped
 
   backend:
-    image: ghcr.io/algogators/algolens-backend:latest
+    image: algolens-backend:${ALGOLENS_RELEASE_SHA:?Exact tested release SHA required}
+    build:
+      context: ./algolens-api
+      dockerfile: Dockerfile
     ports:
       - "127.0.0.1:5000:5000"
     env_file:
-      - .env
+      - ${ALGOLENS_RUNTIME_ENV_FILE:?Verified absolute runtime env file required}
+    environment:
+      APP_RELEASE_SHA: ${ALGOLENS_RELEASE_SHA:?Exact tested release SHA required}
+      QT_RUNTIME_CONFIG_MANIFEST: /app/runtime-control/manifest.json
     volumes:
       - backend-logs:/app/logs
+      # Empty allowlist by default. Only a separately reviewed, credential-free
+      # manifest may replace it; mounting it does not enable runtime control.
+      - type: bind
+        source: ${ALGOLENS_RUNTIME_MANIFEST_FILE:-./deployment/runtime-control.disabled.json}
+        target: /app/runtime-control/manifest.json
+        read_only: true
+        bind:
+          create_host_path: false
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5000/health"]

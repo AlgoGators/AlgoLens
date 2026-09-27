@@ -160,6 +160,24 @@ describe('portfolio summaries', () => {
     expect(portfolioWeights([moved])[0].total_value).toBe(100);
   });
 
+  it('withholds every whole-fund percentage when any live book value is incomplete', () => {
+    const incomplete: PortfolioSummary = {
+      portfolio_id: 'INCOMPLETE', total_value: 100, strategy_count: 2,
+      strategies_awaiting_data: 1,
+      strategies: [
+        { id: 'a', name: 'A', strategy_type: 'A', lifecycle: 'live', current_value: 100 },
+        { id: 'b', name: 'B', strategy_type: 'B', lifecycle: 'live', current_value: null },
+      ],
+    };
+    const other: PortfolioSummary = {
+      portfolio_id: 'OTHER', total_value: 300, strategy_count: 1,
+      strategies: [{ id: 'c', name: 'C', strategy_type: 'C', lifecycle: 'live', current_value: 300 }],
+    };
+    const weights = portfolioWeights([incomplete, other]);
+    expect(weights.map(w => w.percent)).toEqual([null, null]);
+    expect(weights.map(w => w.total_value)).toEqual([100, 300]);
+  });
+
   it('reports zero rather than NaN when the fund is empty', () => {
     const empty = portfolioWeights([
       { portfolio_id: 'A', total_value: 0, strategy_count: 0, strategies: [] },

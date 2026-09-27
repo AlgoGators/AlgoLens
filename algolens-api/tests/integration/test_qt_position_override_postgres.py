@@ -44,6 +44,20 @@ def repository(test_dsn):
         claim_schema(cursor)
         cursor.execute(
             """
+            CREATE TABLE trading.strategy_registry (
+                id TEXT PRIMARY KEY, strategy_type TEXT NOT NULL,
+                portfolio_id TEXT NOT NULL,
+                lifecycle TEXT NOT NULL DEFAULT 'live'
+            );
+            -- Audit/serialization cases exercise explicit disabled legacy QT.
+            CREATE TABLE trading.qt_workflow_capabilities (
+                book_id TEXT PRIMARY KEY, enabled BOOLEAN NOT NULL,
+                version INTEGER NOT NULL CHECK (version > 0)
+            );
+            CREATE TABLE trading.strategy_book_memberships (
+                strategy_id TEXT NOT NULL, portfolio_id TEXT NOT NULL,
+                PRIMARY KEY (strategy_id, portfolio_id)
+            );
             CREATE TABLE trading.positions (
                 symbol TEXT NOT NULL, quantity NUMERIC NOT NULL,
                 average_price NUMERIC NOT NULL,
@@ -93,6 +107,20 @@ def repository(test_dsn):
                 ON DELETE TO trading.position_override_legacy_scopes DO INSTEAD NOTHING;
             """
         )
+        cursor.execute(
+            "INSERT INTO trading.strategy_registry (id, strategy_type, portfolio_id) "
+            "VALUES (%s, %s, %s)",
+            (STRATEGY, STRATEGY, BOOK_A),
+        )
+        cursor.executemany(
+            "INSERT INTO trading.qt_workflow_capabilities VALUES (%s, false, 1)",
+            [(BOOK_A,), (BOOK_B,)],
+        )
+        cursor.executemany(
+            "INSERT INTO trading.strategy_book_memberships (strategy_id, portfolio_id) "
+            "VALUES (%s, %s)",
+            ((STRATEGY, BOOK_A), (STRATEGY, BOOK_B)),
+        )
         cursor.executemany(
             """
             INSERT INTO trading.positions
@@ -122,14 +150,19 @@ def _write(repository, book, quantity, reason, symbol=SYMBOL):
         strategy_type=STRATEGY,
         portfolio_id=book,
         normalized={
+            "strategy_id": STRATEGY,
             "symbol": symbol,
             "quantity": quantity,
             "average_price": 100,
             "reason": reason,
         },
         user_id=42,
-        verdict={"evaluated": True, "passed": True, "breaches": [], "checked": []},
-        overrode_risk=False,
+        risk_check=lambda *_: {
+            "evaluated": True,
+            "passed": True,
+            "breaches": [],
+            "checked": [],
+        },
     )
 
 
@@ -223,36 +256,42 @@ def test_audit_insert_failure_rolls_back_a_new_identity_reservation(repository):
     assert repository.fetch_overrides(STRATEGY, BOOK_A) == []
 
 
-def _wait_until_both_inserts_are_blocked(control_connection):
-    """Wait on observed Postgres lock state, never an arbitrary sleep."""
+def _wait_until_writers_are_serialized(control_connection):
+    """Observe one trigger waiter and one registry-row waiter without sleeping."""
     deadline = monotonic() + 5
     waiter = Event()
     while monotonic() < deadline:
         with control_connection.cursor() as cursor:
             cursor.execute(
                 """
-                SELECT count(*)
+                SELECT
+                    count(*) FILTER (
+                        WHERE locks.locktype = 'advisory' AND NOT locks.granted
+                    ) AS trigger_waiters,
+                    count(*) FILTER (
+                        WHERE locks.locktype = 'transactionid' AND NOT locks.granted
+                    ) AS registry_waiters
                 FROM pg_locks AS locks
                 JOIN pg_stat_activity AS activity USING (pid)
-                WHERE locks.locktype = 'advisory'
-                  AND NOT locks.granted
-                  AND activity.application_name = 'algolens-qt-contention-test'
+                WHERE activity.application_name = 'algolens-qt-contention-test'
                 """
             )
-            if cursor.fetchone()["count"] == 2:
+            waiters = cursor.fetchone()
+            if waiters["trigger_waiters"] == 1 and waiters["registry_waiters"] == 1:
                 return
         waiter.wait(0.01)
-    pytest.fail("both writers did not reach the controlled INSERT contention point")
+    pytest.fail("writers did not serialize at the registry row before INSERT")
 
 
 def test_concurrent_new_identity_preserves_the_second_audit_before_state(
     repository, test_dsn
 ):
-    """A unique-index wait must occur before the second writer snapshots state.
+    """The registry-row lock must serialize writers before either snapshot lies.
 
-    The trigger blocks both first INSERT attempts on a session lock.  That
-    proves each transaction has reached the same absent identity without using
-    timing guesses; releasing the lock then lets Postgres select one winner.
+    The trigger blocks the first INSERT on a session lock while the second
+    transaction waits for that writer's registry-row lock. Releasing the
+    trigger lets the first writer commit; only then may the second writer
+    acquire eligibility and snapshot the committed position as before_state.
     """
     lock_key = 812_045_117
     setup = repository.connection_factory()
@@ -315,7 +354,7 @@ def test_concurrent_new_identity_preserves_the_second_audit_before_state(
             second = pool.submit(write, 17)
             try:
                 started.wait()
-                _wait_until_both_inserts_are_blocked(control)
+                _wait_until_writers_are_serialized(control)
             finally:
                 # A failing wait must release the sessions before the executor
                 # joins them. Otherwise its workers remain blocked forever in
@@ -331,8 +370,8 @@ def test_concurrent_new_identity_preserves_the_second_audit_before_state(
             if entry["symbol"] == "NQ"
         ]
         assert len(entries) == 2
-        # Exactly one transaction created the position.  The other must have
-        # waited on the unique identity and audited the winning row as before.
+        # Exactly one transaction created the position. The other must have
+        # waited on lifecycle eligibility and audited the winning row as before.
         before_quantities = [entry["before_state"].get("quantity") for entry in entries]
         assert before_quantities.count(None) == 1
         assert {float(quantity) for quantity in before_quantities if quantity is not None} <= {

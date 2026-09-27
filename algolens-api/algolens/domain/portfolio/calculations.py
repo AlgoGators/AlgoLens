@@ -4,6 +4,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from algolens.domain.portfolio.instruments import base_symbol, notional
+from algolens.domain.portfolio.position_decimal import canonical_position_decimal8
 
 
 def _get(row: Any, key: str, default: Any = None) -> Any:
@@ -30,7 +31,7 @@ def build_historical_data(equity_curve: Sequence[Any]) -> list[dict[str, Any]]:
 
 def transform_positions(
     positions: Sequence[Any],
-    current_value: float,
+    current_value: float | None,
     prices: Mapping[str, float] | None = None,
     multipliers: Mapping[str, float] | None = None,
 ) -> list[dict[str, Any]]:
@@ -53,8 +54,13 @@ def transform_positions(
     multipliers = multipliers or {}
     transformed = []
     for pos in positions:
-        quantity = float(_get(pos, "quantity"))
+        raw_quantity = _get(pos, "quantity")
         raw_price = _get(pos, "average_price")
+        quantity_exact = canonical_position_decimal8(raw_quantity)
+        average_price_exact = (
+            canonical_position_decimal8(raw_price) if raw_price is not None else None
+        )
+        quantity = float(raw_quantity)
         average_price = float(raw_price) if raw_price is not None else None
 
         symbol = _get(pos, "symbol")
@@ -68,10 +74,13 @@ def transform_positions(
         transformed.append(
             {
                 "symbol": symbol,
+                "strategyName": _get(pos, "strategy_name"),
                 "name": root,
                 "shares": quantity,
                 "quantity": quantity,
+                "quantity_exact": quantity_exact,
                 "costBasis": average_price,
+                "average_price_exact": average_price_exact,
                 "priceUnknown": average_price is None,
                 # Named for what they are. None means "not known", and every
                 # consumer renders that as unknown rather than as zero.
@@ -83,7 +92,7 @@ def transform_positions(
                 "currentValue": exposure,
                 "percentOfTotal": (
                     (exposure / current_value * 100)
-                    if exposure is not None and current_value > 0
+                    if exposure is not None and current_value is not None and current_value > 0
                     else None
                 ),
             }
@@ -183,7 +192,9 @@ def transform_finalized(yesterday_positions: Sequence[Any], positions: Sequence[
         yesterday_qty = float(_get(yesterday, "quantity"))
         yesterday_price = float_or_none(_get(yesterday, "average_price"))
 
-        today_pos = next((p for p in positions if _get(p, "symbol") == symbol), None)
+        strategy_name = _get(yesterday, "strategy_name")
+        today_pos = next((p for p in positions if _get(p, "symbol") == symbol
+                          and _get(p, "strategy_name") == strategy_name), None)
         today_qty = float(_get(today_pos, "quantity")) if today_pos else 0
         # A lot that is gone today exited at a price nobody here knows; carrying
         # yesterday's entry price forward as the "exit" was a guess dressed as
@@ -195,6 +206,7 @@ def transform_finalized(yesterday_positions: Sequence[Any], positions: Sequence[
             transformed.append(
                 {
                     "symbol": symbol.replace(".v.0", ""),
+                    "strategyName": strategy_name,
                     "quantity": yesterday_qty,
                     "entryPrice": yesterday_price,
                     "exitPrice": today_price,

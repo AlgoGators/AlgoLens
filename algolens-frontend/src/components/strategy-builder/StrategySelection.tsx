@@ -64,9 +64,9 @@ export function StrategySelection({ strategies, selectedStrategies, onToggle, th
                 </div>
               </div>
 
-              {strategy.dataAvailable === false ? (
+              {strategy.dataAvailable === false || strategy.currentValue === null ? (
                 <div className={`text-xs ${theme === 'dark' ? 'text-amber-400' : 'text-amber-600'}`}>
-                  awaiting engine data
+                  QT performance unavailable
                 </div>
               ) : (
               <div className="grid grid-cols-3 gap-2 text-xs">

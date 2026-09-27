@@ -24,7 +24,7 @@ export function AdvancedSections({ metrics, theme, expanded, onToggle }: Advance
     <div className="space-y-3">
       {/* Correlation Matrix */}
       <button onClick={() => onToggle('diversification')} className={headerClass}>
-        <span className={labelClass}>Correlation Matrix (Top 5)</span>
+        <span className={labelClass}>Correlation Matrix (Top 5, QT Holdings Source)</span>
         {expanded.diversification ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
       </button>
 
@@ -34,8 +34,8 @@ export function AdvancedSections({ metrics, theme, expanded, onToggle }: Advance
           {metrics.advancedMetrics.correlationMatrix.length === 0 ? (
             <div className={`text-xs ${theme === 'dark' ? 'text-gray-500' : 'text-gray-500'
               }`}>
-              Correlation unavailable for these holdings — the price pipeline has no
-              overlapping history for at least one of them.
+              Correlation unavailable for these holdings — QT holdings correlation data
+              with overlapping price history is unavailable for at least one selected symbol.
             </div>
           ) : (
             <>
@@ -90,7 +90,7 @@ export function AdvancedSections({ metrics, theme, expanded, onToggle }: Advance
                 }`}>
                 Pearson correlation of daily log returns over{' '}
                 {metrics.advancedMetrics.correlationObservations} trading days, from the
-                daily bars in the market data pipeline.
+                daily bars in the market data pipeline for symbols held in QT.
               </div>
             </>
           )}

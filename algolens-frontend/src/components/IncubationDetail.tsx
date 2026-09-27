@@ -23,7 +23,10 @@ import {
   formatMockCapital,
 } from '../domain/portfolio/incubationUtils';
 import { useTheme } from '../adapters/react/ThemeContext';
+import { useAuth } from '../adapters/react/useAuth';
 import { IncubationActions } from './IncubationActions';
+import { ConfigurationInspectionPanel } from './ConfigurationInspectionPanel';
+import { formatBarDate } from '../domain/portfolio/formatBarDate';
 
 interface IncubationDetailProps {
   strategy: IncubatingStrategy;
@@ -45,6 +48,7 @@ export function IncubationDetail({
 }: IncubationDetailProps) {
   const [selectedPeriod, setSelectedPeriod] = useState('1M');
   const { theme } = useTheme();
+  const { user } = useAuth();
   const periods = ['1W', '1M', '3M', 'ALL'];
 
   const historicalData = useMemo(
@@ -115,6 +119,13 @@ export function IncubationDetail({
           </span>
         </div>
       </div>
+
+      <ConfigurationInspectionPanel
+        registryId={strategy.id}
+        portfolioId={strategy.portfolio_id}
+        userId={user?.id}
+        role={user?.role}
+      />
 
       {isLoading ? (
         <div className="flex items-center justify-center min-h-[320px]">
@@ -234,7 +245,7 @@ export function IncubationDetail({
                     'Mock Equity',
                   ]}
                   labelFormatter={label =>
-                    new Date(label).toLocaleDateString('en-US', {
+                    formatBarDate(String(label), {
                       month: 'short',
                       day: 'numeric',
                       year: 'numeric',

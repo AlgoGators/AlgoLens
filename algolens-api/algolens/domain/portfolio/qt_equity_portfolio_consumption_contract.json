@@ -1,0 +1,152 @@
+{
+  "schema_version": "qt-equity-portfolio-consumption/v1",
+  "scope": "portfolio_invocation",
+  "full_run_certification": false,
+  "root_fields": [
+    "schema_version",
+    "scope",
+    "full_run_certification",
+    "available",
+    "unavailable_reason",
+    "outcome",
+    "skip_execution_generation",
+    "passes",
+    "strategy_charges",
+    "compatibility_charges"
+  ],
+  "call_outcomes": [
+    "not_reached",
+    "in_progress",
+    "returned_ok",
+    "returned_error",
+    "threw"
+  ],
+  "pass_limit": 5,
+  "charge_limit": 4096,
+  "pass_fields": [
+    "index",
+    "reads",
+    "optimization_helper",
+    "risk_helper",
+    "risk"
+  ],
+  "pass_reads": {
+    "use_optimization": "boolean",
+    "use_risk_management": "boolean"
+  },
+  "pass_index": "contiguous integer 0..length-1 in actual source pass order",
+  "risk_fields": [
+    "call",
+    "skip",
+    "reads"
+  ],
+  "risk_optional_fields": [
+    "manager_source",
+    "lookback_period"
+  ],
+  "risk_skips": [
+    "none",
+    "absent_risk_manager",
+    "no_positions"
+  ],
+  "manager_source": [
+    "absent",
+    "internal",
+    "external"
+  ],
+  "risk_reads": {
+    "var_limit": "finite number",
+    "jump_risk_limit": "finite number",
+    "max_correlation": "finite number",
+    "max_gross_leverage": "finite number",
+    "max_net_leverage": "finite number",
+    "confidence_level": "finite number",
+    "capital_exact": "canonical Decimal8 checked int64"
+  },
+  "risk_conditional": {
+    "disabled": "risk_helper=not_reached, risk.call=not_reached, risk.skip=none, risk.reads={}, no optional fields",
+    "called": "risk_helper returned_ok; risk.call returned_ok; skip=none; manager_source internal/external; actual risk reads only",
+    "skipped": "risk_helper returned_ok; risk.call not_reached; reads={}; absent_risk_manager requires manager_source absent and no lookback; no_positions requires manager_source internal/external and actual lookback",
+    "nonfatal_failed_helper": "available=false; preserve reached reads and actual failure outcome",
+    "unavailable_before_skip": "none with not_reached may preserve actual source/lookback only when available=false; optimizer/history/eligible skips are never risk branches"
+  },
+  "optimization_boundary": "actual MR caller hardcodes effective use_optimization=false; a true pass remains explicitly unavailable until optimizer trace projection is represented",
+  "charge_fields": [
+    "index",
+    "purpose",
+    "strategy_id",
+    "symbol",
+    "call",
+    "reads"
+  ],
+  "charge_index": "contiguous integer in each actual source charge vector",
+  "charge_purpose": {
+    "strategy_charges": "per_strategy",
+    "compatibility_charges": "compatibility"
+  },
+  "charge_owner": {
+    "per_strategy": "LIVE_EQUITY_MEAN_REVERSION",
+    "compatibility": "empty string from actual compatibility trace"
+  },
+  "charge_role": "portfolio internal output, not persisted Day-D execution; never relabel as final execution",
+  "charge_reads_number": [
+    "quantity",
+    "reference_price",
+    "adv_argument",
+    "volatility_multiplier_argument",
+    "retrieved_adv",
+    "retrieved_volatility_multiplier",
+    "effective_adv",
+    "effective_volatility_multiplier",
+    "explicit_fee_per_contract",
+    "commission_per_unit",
+    "min_commission_per_order",
+    "max_commission_per_order",
+    "max_commission_pct",
+    "sec_fee_per_million",
+    "finra_taf_per_share",
+    "finra_taf_cap_per_trade",
+    "max_total_implicit_bps",
+    "point_value",
+    "volatility_lambda",
+    "volatility_min_multiplier",
+    "volatility_max_multiplier",
+    "baseline_spread_ticks",
+    "min_spread_ticks",
+    "max_spread_ticks",
+    "spread_cost_multiplier",
+    "tick_size",
+    "min_adv",
+    "min_participation",
+    "max_participation",
+    "max_impact_bps",
+    "selected_k_bps"
+  ],
+  "charge_reads_boolean": [
+    "apply_regulatory_fees",
+    "tick_constrained",
+    "volatility_calculation_reached"
+  ],
+  "charge_reads_enums": {
+    "input_source": [
+      "internally_tracked",
+      "explicit_values"
+    ],
+    "asset_lookup_path": [
+      "exact_symbol",
+      "pre_dot_root",
+      "fallback"
+    ]
+  },
+  "charge_reads": "only actual optional CostChargeObservation fields, absent fields stay absent; never fill EQ fee reads into generic compatibility cost calls",
+  "success_required_charge_reads": [
+    "quantity",
+    "reference_price",
+    "input_source",
+    "asset_lookup_path"
+  ],
+  "skip_execution_generation": "actual optional bool, null means unobserved; no invented false",
+  "unknown_fields": "refuse",
+  "all_objects_closed": true,
+  "actual_runtime_certification": "pending producer-to-reader gate"
+}

@@ -7,10 +7,27 @@ interface PerformanceOverviewProps {
 }
 
 export function PerformanceOverview({ metrics, theme }: PerformanceOverviewProps) {
+  const measuredSubset = metrics.strategiesAwaitingData > 0;
+  const allResultsUnavailable = measuredSubset && metrics.strategies.length === 0;
   const isPositive = (metrics.totalReturn ?? 0) >= 0;
+
+  if (allResultsUnavailable) {
+    return (
+      <div className={`mb-4 p-4 border ${theme === 'dark' ? 'bg-gray-950 border-gray-800' : 'bg-gray-50 border-gray-200'}`}>
+        <div className="text-xs mb-1">PORTFOLIO VALUE UNAVAILABLE</div>
+        <div className="text-2xl">—</div>
+        <div className="text-sm mt-1">QT performance unavailable for every selected strategy.</div>
+      </div>
+    );
+  }
 
   return (
     <div className="mb-4">
+      {measuredSubset && (
+        <p className={`mb-2 text-xs ${theme === 'dark' ? 'text-amber-400' : 'text-amber-700'}`}>
+          Value, returns, and risk metrics cover measured strategies only; {metrics.strategiesAwaitingData} selected {metrics.strategiesAwaitingData === 1 ? 'strategy is' : 'strategies are'} awaiting QT results.
+        </p>
+      )}
       {/* Main Performance Bar */}
       <div className={`p-4 border mb-3 ${theme === 'dark' ? 'bg-gray-950 border-gray-800' : 'bg-gray-50 border-gray-200'
         }`}>
@@ -18,7 +35,7 @@ export function PerformanceOverview({ metrics, theme }: PerformanceOverviewProps
           <div className="md:col-span-2">
             <div className={`text-xs mb-1 ${theme === 'dark' ? 'text-gray-500' : 'text-gray-400'
               }`}>
-              PORTFOLIO VALUE
+              {measuredSubset ? 'MEASURED STRATEGY VALUE' : 'PORTFOLIO VALUE'}
             </div>
             <div className="text-2xl">{formatThousands(metrics.totalValue)}</div>
             {/* A selection containing a strategy with no starting equity on
@@ -67,6 +84,12 @@ export function PerformanceOverview({ metrics, theme }: PerformanceOverviewProps
             <div className={`text-xs mt-1 ${theme === 'dark' ? 'text-gray-600' : 'text-gray-400'}`}>of daily returns</div>
           </div>
         </div>
+        {metrics.coverage.partial && (
+          <div className={`mt-3 text-xs ${theme === 'dark' ? 'text-amber-400' : 'text-amber-700'}`}>
+            Performance history is limited to dates shared by every selected strategy;
+            {' '}{metrics.coverage.excludedDates.length} {metrics.coverage.excludedDates.length === 1 ? 'date was' : 'dates were'} excluded.
+          </div>
+        )}
       </div>
 
       {/* Risk Metrics Grid - Bloomberg style */}
@@ -74,9 +97,8 @@ export function PerformanceOverview({ metrics, theme }: PerformanceOverviewProps
         <div className={`p-3 border ${theme === 'dark' ? 'bg-gray-950 border-gray-800' : 'bg-gray-50 border-gray-200'
           }`}>
           <div className={`text-xs mb-1 ${theme === 'dark' ? 'text-gray-500' : 'text-gray-400'}`}>SORTINO</div>
-          {/* null means there is no downside to divide by. Show that rather than a
-              number -- this used to fall back to a hardcoded 0.1 denominator, which
-              reported a Sortino of 100.00 for a book that had simply never lost. */}
+          {/* Null can reflect missing comparable coverage, insufficient observations,
+              or an undefined denominator. Do not invent a number or a specific cause. */}
           <div className="text-base">
             {metrics.advancedMetrics.sortinoRatio === null
               ? '—'
@@ -84,7 +106,7 @@ export function PerformanceOverview({ metrics, theme }: PerformanceOverviewProps
           </div>
           <div className={`text-xs ${theme === 'dark' ? 'text-gray-600' : 'text-gray-400'}`}>
             {metrics.advancedMetrics.sortinoRatio === null
-              ? 'No measurable downside'
+              ? 'Unavailable'
               : 'Combined book'}
           </div>
         </div>
@@ -92,9 +114,8 @@ export function PerformanceOverview({ metrics, theme }: PerformanceOverviewProps
         <div className={`p-3 border ${theme === 'dark' ? 'bg-gray-950 border-gray-800' : 'bg-gray-50 border-gray-200'
           }`}>
           <div className={`text-xs mb-1 ${theme === 'dark' ? 'text-gray-500' : 'text-gray-400'}`}>INFO RATIO</div>
-          {/* null means the ratio could not be computed against a real benchmark
-              series. Show that rather than a number -- the caption used to read
-              "vs SPX" while the figure was derived from a hardcoded constant. */}
+          {/* A present benchmark does not guarantee comparable returns or nonzero
+              tracking error. Null alone does not identify why this is unavailable. */}
           <div className="text-base">
             {metrics.advancedMetrics.informationRatio === null
               ? '—'
@@ -102,7 +123,7 @@ export function PerformanceOverview({ metrics, theme }: PerformanceOverviewProps
           </div>
           <div className={`text-xs ${theme === 'dark' ? 'text-gray-600' : 'text-gray-400'}`}>
             {metrics.advancedMetrics.informationRatio === null
-              ? 'Needs a benchmark stream'
+              ? 'Unavailable'
               : 'vs benchmark stream'}
           </div>
         </div>

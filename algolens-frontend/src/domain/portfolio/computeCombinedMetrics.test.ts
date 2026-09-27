@@ -18,11 +18,11 @@ function metrics(overrides: Partial<StrategyMetrics> = {}): StrategyMetrics {
 }
 
 function pos(symbol: string, currentValue: number): Position {
-  return { symbol, name: symbol, shares: 1, costBasis: currentValue, currentValue };
+  return { symbol, strategyName: 'engine-a', name: symbol, shares: 1, costBasis: currentValue, currentValue };
 }
 
 function fin(symbol: string, realizedPnL: number): FinalizedPosition {
-  return { symbol, quantity: 1, entryPrice: 0, exitPrice: 0, realizedPnL };
+  return { symbol, strategyName: 'engine-a', quantity: 1, entryPrice: 0, exitPrice: 0, realizedPnL };
 }
 
 function strategy(over: Partial<Strategy> & { id: string }): Strategy {
@@ -34,6 +34,10 @@ function strategy(over: Partial<Strategy> & { id: string }): Strategy {
     return: 0,
     returnPercent: 0,
     positions: [],
+    positionStrategyNames: [],
+    positionDate: null,
+    positionsEditable: false,
+    positionEditUnavailableReason: 'test fixture',
     historicalData: [],
     bestDay: 0,
     worstDay: 0,
@@ -47,6 +51,66 @@ function strategy(over: Partial<Strategy> & { id: string }): Strategy {
 }
 
 describe('computeCombinedMetrics', () => {
+  it('does not turn a staggered strategy inception into profit or extreme risk', () => {
+    const a = strategy({
+      id: 'a',
+      historicalData: [
+        { date: '2026-09-19', value: 100_000 },
+        { date: '2026-09-20', value: 100_000 },
+        { date: '2026-09-21', value: 100_000 },
+      ],
+    });
+    const b = strategy({
+      id: 'b',
+      historicalData: [
+        { date: '2026-09-20', value: 100_000 },
+        { date: '2026-09-21', value: 100_000 },
+      ],
+    });
+
+    const out = computeCombinedMetrics([a, b], ['a', 'b']);
+
+    expect(out.historicalPerformance).toEqual([
+      { date: '2026-09-19', return: null },
+      { date: '2026-09-20', return: 0 },
+      { date: '2026-09-21', return: 0 },
+    ]);
+    expect(out.dailyPnL).toEqual([{ date: '2026-09-21', pnl: 0 }]);
+    expect(out.metrics.volatility).toBe(0);
+    expect(out.coverage.partial).toBe(true);
+    expect(out.coverage.excludedDates).toEqual([
+      { date: '2026-09-19', missingSeries: ['b'] },
+    ]);
+  });
+
+  it('withholds aggregate risk when an internal coverage hole prevents comparable returns', () => {
+    const a = strategy({
+      id: 'a',
+      historicalData: [
+        { date: '2026-09-19', value: 100 },
+        { date: '2026-09-20', value: 110 },
+        { date: '2026-09-21', value: 120 },
+      ],
+    });
+    const b = strategy({
+      id: 'b',
+      historicalData: [
+        { date: '2026-09-19', value: 100 },
+        { date: '2026-09-21', value: 100 },
+      ],
+    });
+
+    const out = computeCombinedMetrics([a, b], ['a', 'b']);
+
+    expect(out.dailyPnL).toEqual([]);
+    expect(out.metrics.volatility).toBeNull();
+    expect(out.metrics.maxDrawdown).toBeNull();
+    expect(out.metrics.winRate).toBeNull();
+    expect(out.advancedMetrics.sortinoRatio).toBeNull();
+    expect(out.advancedMetrics.var95).toBeNull();
+    expect(out.coverage.comparableDailyReturns).toBe(false);
+  });
+
   it('invents no series at all when nothing is selected', () => {
     // This used to generate 91 dated points at exactly 0% and 31 at exactly
     // $0, and recharts drew them: a flat three-month line and a row of empty
@@ -114,7 +178,7 @@ describe('computeCombinedMetrics', () => {
       id: 'a',
       finalizedPositions: [
         fin('ES', 1200),
-        { symbol: 'ZB', quantity: 8, entryPrice: 119.5, exitPrice: null, realizedPnL: null },
+        { symbol: 'ZB', strategyName: 'engine-a', quantity: 8, entryPrice: 119.5, exitPrice: null, realizedPnL: null },
       ],
     });
     const out = computeCombinedMetrics([s], ['a']);
@@ -250,7 +314,7 @@ describe('computeCombinedMetrics', () => {
     expect(out.historicalPerformance[2].return).toBeCloseTo(17.5, 6); // 235/200 - 1
 
     // Daily PnL is the day-over-day dollar change of that combined curve.
-    expect(out.dailyPnL.map(p => p.pnl)).toEqual([0, 10000, 25000]);
+    expect(out.dailyPnL.map(p => p.pnl)).toEqual([10000, 25000]);
   });
 });
 
@@ -343,6 +407,25 @@ describe('information ratio', () => {
     );
     const out = computeCombinedMetrics([a, b], ['a', 'b']);
     expect(out.advancedMetrics.informationRatio).toBeCloseTo(9.7211, 3);
+  });
+
+  it('uses common benchmark coverage across selected strategies', () => {
+    // B has no benchmark point on d1. Its absence is not a zero benchmark
+    // contribution and must not become a fictitious +102% benchmark return.
+    // On shared d2-d4, active returns are -1%, +3%; IR = sqrt(252)/2.
+    const a = withStreams(
+      'a',
+      [['2026-01-01', 50], ['2026-01-02', 51], ['2026-01-03', 51], ['2026-01-04', 53.04]],
+      [['2026-01-01', 50], ['2026-01-02', 50.5], ['2026-01-03', 51.005], ['2026-01-04', 51.51505]],
+    );
+    const b = withStreams(
+      'b',
+      [['2026-01-01', 50], ['2026-01-02', 51], ['2026-01-03', 51], ['2026-01-04', 53.04]],
+      [['2026-01-02', 50.5], ['2026-01-03', 51.005], ['2026-01-04', 51.51505]],
+    );
+
+    const out = computeCombinedMetrics([a, b], ['a', 'b']);
+    expect(out.advancedMetrics.informationRatio).toBeCloseTo(7.9373, 3);
   });
 
   it('ignores dates the benchmark does not cover', () => {
@@ -468,6 +551,16 @@ describe('sortino ratio', () => {
 });
 
 describe('placeholder strategies', () => {
+  it('excludes a missing measured value even when the availability flag is absent', () => {
+    const priced = strategy({ id: 'a', currentValue: 100000, invested: 90000 });
+    const positionOnly = strategy({ id: 'b', currentValue: null, invested: 50000 });
+    const out = computeCombinedMetrics([priced, positionOnly], ['a', 'b']);
+    expect(out.strategies.map(s => s.id)).toEqual(['a']);
+    expect(out.totalValue).toBe(100000);
+    expect(out.strategyAllocation.map(s => s.value)).toEqual([100000]);
+    expect(out.strategiesAwaitingData).toBe(1);
+  });
+
   it('excludes a strategy the engine has not published from every aggregate', () => {
     // Its zeros are shape-fillers. Letting it in would produce a 0% allocation
     // slice and a $0 summary line that both read as measurements.

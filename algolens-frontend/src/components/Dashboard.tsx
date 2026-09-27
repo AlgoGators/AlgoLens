@@ -17,6 +17,7 @@ import { isInternalRole } from '../domain/identity/user';
 import { useAuth } from '../adapters/react/useAuth';
 import { useTheme } from '../adapters/react/ThemeContext';
 import { BooksScreen } from './BooksScreen';
+import { useDialogLifecycle } from './useDialogLifecycle';
 
 interface DashboardProps {
   onLogout: () => void;
@@ -30,7 +31,6 @@ export function Dashboard({ onLogout }: DashboardProps) {
   // The book the strategy was opened on. Undefined means its primary.
   const [selectedBook, setSelectedBook] = useState<string | undefined>(undefined);
   const [settingsScreen, setSettingsScreen] = useState<SettingsScreen>(null);
-  const [showBuilder, setShowBuilder] = useState(false);
   const [activeTab, setActiveTab] = useState<ActiveTab>('portfolio');
   const [portfolioData, setPortfolioData] = useState<PortfolioData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -71,8 +71,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
       console.error('  import("./application/portfolio/portfolioService").then(m => m.PortfolioApplicationService.testConnectivity())');
       console.error('  Or open Network tab and look for failed requests');
 
-      // Include the actual error message for debugging
-      setError(`Failed to load portfolio data: ${errorMessage}`);
+      setError('Could not load portfolio data.');
     } finally {
       setIsLoading(false);
       console.log('[Dashboard] fetchPortfolioData complete');
@@ -106,8 +105,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
   // not published yet. The second case matters -- a fund whose strategies are
   // all still awaiting data is not an empty fund, and the overview is where the
   // "excludes N strategies" notice lives.
-  const hasPositions = portfolioData?.strategies && portfolioData.strategies.length > 0 &&
-    portfolioData.strategies.some(s => s.positions.length > 0 || s.dataAvailable === false);
+  const hasPortfolioContent = Boolean(portfolioData?.strategies?.length);
 
   const handleTabChange = (tab: string) => {
     if (tab === 'incubation' && !isInternalMember) {
@@ -118,18 +116,17 @@ export function Dashboard({ onLogout }: DashboardProps) {
     setSelectedStrategy(null);
 
     if (tab === 'builder') {
-      setShowBuilder(true);
+      setSettingsScreen(null);
     } else if (tab === 'profile') {
       setSettingsScreen('profile');
     } else {
-      setShowBuilder(false);
       setSettingsScreen(null);
     }
   };
 
   // Opens on the primary book unless one is named. A card click names none:
   // the book is chosen on the strategy page itself, in the box beside
-  // "Today's Positions". A row inside a book on the Portfolios section names
+  // "Positions snapshot". A row inside a book on the Portfolios section names
   // its book, so that one opens straight onto it.
   const openStrategy = (strategyId: string, portfolioId?: string) => {
     setSelectedBook(portfolioId);
@@ -137,7 +134,6 @@ export function Dashboard({ onLogout }: DashboardProps) {
   };
 
   const handleBuilderClose = () => {
-    setShowBuilder(false);
     setActiveTab('portfolio');
   };
 
@@ -152,28 +148,28 @@ export function Dashboard({ onLogout }: DashboardProps) {
         <Header
           activeTab={activeTab}
           onProfileClick={() => {
+            setSelectedStrategy(null);
             setSettingsScreen('profile');
             setActiveTab('profile');
           }}
           onBuilderClick={() => {
-            setShowBuilder(true);
+            setSettingsScreen(null);
+            setSelectedStrategy(null);
             setActiveTab('builder');
           }}
           onHomeClick={() => {
-            setShowBuilder(false);
+            setSettingsScreen(null);
             setActiveTab('portfolio');
             setSelectedStrategy(null);
           }}
           onBooksClick={() => {
             if (!isInternalMember) return;
-            setShowBuilder(false);
             setSettingsScreen(null);
             setActiveTab('books');
             setSelectedStrategy(null);
           }}
           onIncubationClick={() => {
             if (!isInternalMember) return;
-            setShowBuilder(false);
             setSettingsScreen(null);
             setActiveTab('incubation');
             setSelectedStrategy(null);
@@ -193,49 +189,32 @@ export function Dashboard({ onLogout }: DashboardProps) {
           ) : error ? (
             <div className="flex items-center justify-center min-h-[400px]">
               <div className="text-center max-w-lg">
-                <div className="mb-4 p-4 bg-red-100 dark:bg-red-900/30 rounded-lg">
-                  <p className="text-red-600 dark:text-red-400 text-sm font-mono break-words text-left max-h-40 overflow-auto">
+                <div role="alert" className="mb-4 p-4 bg-red-100 dark:bg-red-900/30 rounded-lg">
+                  <p className="text-red-600 dark:text-red-400 text-sm">
                     {error}
                   </p>
                 </div>
-                <div className={`text-sm mb-4 text-left p-3 rounded ${theme === 'dark' ? 'bg-gray-800 text-gray-300' : 'bg-gray-100 text-gray-700'}`}>
-                  <p className="font-semibold mb-2">Debug Steps:</p>
-                  <ol className="list-decimal list-inside space-y-1 text-xs">
-                    <li>Open browser DevTools (F12)</li>
-                    <li>Check Console tab for detailed error logs</li>
-                    <li>Check Network tab for failed API requests</li>
-                    <li>Look for CORS or connection errors</li>
-                  </ol>
-                </div>
-                <div className="flex gap-2 justify-center">
+                <p className={`mb-4 text-sm ${theme === 'dark' ? 'text-gray-400' : 'text-gray-600'}`}>
+                  Retry this portfolio request. No account or book changes will be made.
+                </p>
+                <div className="flex justify-center">
                   <button
-                    onClick={() => window.location.reload()}
+                    onClick={() => void fetchPortfolioData()}
                     className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
                   >
                     Retry
                   </button>
-                  <button
-                    onClick={() => {
-                      console.log('[Dashboard] Running connectivity test...');
-                      PortfolioApplicationService.testConnectivity();
-                    }}
-                    className={`px-4 py-2 rounded-lg ${theme === 'dark' ? 'bg-gray-700 text-white hover:bg-gray-600' : 'bg-gray-200 text-gray-800 hover:bg-gray-300'}`}
-                  >
-                    Run Debug Test
-                  </button>
                 </div>
               </div>
             </div>
-          ) : !portfolioData || !hasPositions ? (
-            <EmptyPortfolioScreen onClose={() => {
-              // Close action - could navigate to a help page or do nothing
-            }} />
+          ) : !portfolioData || !hasPortfolioContent ? (
+            <EmptyPortfolioScreen />
           ) : !selectedStrategy ? (
             <>
               <PortfolioOverview
                 data={portfolioData}
                 onBuilderClick={() => {
-                  setShowBuilder(true);
+                  setSettingsScreen(null);
                   setActiveTab('builder');
                 }}
                 onOpenStrategy={openStrategy}
@@ -282,29 +261,52 @@ export function Dashboard({ onLogout }: DashboardProps) {
       )}
 
       {settingsScreen === 'account' && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-end md:items-center justify-center">
-          <div className={`w-full md:w-[500px] h-full md:h-[80vh] md:rounded-2xl overflow-hidden ${theme === 'dark' ? 'bg-black text-white' : 'bg-white text-black'
-            }`}>
+        <SettingsDialog title="Account Settings" theme={theme} onClose={() => setSettingsScreen('profile')}>
             <AccountSettings onBack={() => setSettingsScreen('profile')} />
-          </div>
-        </div>
+        </SettingsDialog>
       )}
 
       {settingsScreen === 'privacy' && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-end md:items-center justify-center">
-          <div className={`w-full md:w-[500px] h-full md:h-[80vh] md:rounded-2xl overflow-hidden ${theme === 'dark' ? 'bg-black text-white' : 'bg-white text-black'
-            }`}>
+        <SettingsDialog title="Privacy & Security" theme={theme} onClose={() => setSettingsScreen('profile')}>
             <PrivacySettings onBack={() => setSettingsScreen('profile')} />
-          </div>
-        </div>
+        </SettingsDialog>
       )}
 
-      {showBuilder && portfolioData && (
+      {activeTab === 'builder' && portfolioData && (
         <StrategyBuilder
           strategies={portfolioData.strategies}
           onClose={handleBuilderClose}
         />
       )}
+    </div>
+  );
+}
+
+function SettingsDialog({
+  title,
+  theme,
+  onClose,
+  children,
+}: {
+  title: string;
+  theme: string;
+  onClose: () => void;
+  children: React.ReactNode;
+}) {
+  const dialogRef = useDialogLifecycle(onClose);
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-end md:items-center justify-center">
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        className={`w-full md:w-[500px] h-full md:h-[80vh] md:rounded-2xl overflow-hidden ${
+          theme === 'dark' ? 'bg-black text-white' : 'bg-white text-black'
+        }`}
+      >
+        {children}
+      </div>
     </div>
   );
 }

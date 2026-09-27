@@ -6,6 +6,7 @@ Lock behavior is not claimed here; this pins identity selection and mutations.
 import sqlite3
 import re
 from datetime import date, timedelta
+from decimal import Decimal
 
 import pytest
 
@@ -13,10 +14,13 @@ from algolens.application.portfolio.ports import StrategyNameUnresolved
 from algolens.domain.portfolio.position_edit import validate_position_payload
 from algolens.infrastructure.portfolio.repositories import PostgresPortfolioRepository
 
+FIXED_DAY = date(2026, 9, 25)
+
 
 class Cursor:
     def __init__(self, db):
         self.cursor = db.cursor()
+        self.synthetic = None
 
     def __enter__(self):
         return self
@@ -24,20 +28,48 @@ class Cursor:
     def __exit__(self, *args):
         self.cursor.close()
 
-    def execute(self, sql, params):
+    def execute(self, sql, params=()):
+        self.synthetic = None
+        if "pg_advisory_xact_lock" in sql:
+            self.synthetic = []
+            return
+        if "to_regclass('trading.strategy_book_memberships')" in sql:
+            self.synthetic = [{"memberships_present": False}]
+            return
+        if "to_regclass('trading.live_results')" in sql:
+            self.synthetic = [{"present": False}]
+            return
+        if "SELECT EXISTS" in sql and "trading.strategy_registry" in sql:
+            self.synthetic = [{"is_member": True}]
+            return
+        if "information_schema.tables" in sql or "FROM trading.live_results" in sql:
+            self.synthetic = []
+            return
         # Equivalent DISTINCT ON semantics for the legacy risk-book query.
         distinct = re.search(r'SELECT DISTINCT ON \(symbol\)(.*?)FROM(.*?)ORDER BY symbol, updated_at DESC', sql, re.S)
         if distinct:
             sql = ('SELECT * FROM (SELECT ' + distinct[1] +
                    ', ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY updated_at DESC) AS rn FROM ' +
                    distinct[2] + ') WHERE rn = 1')
-        self.cursor.execute(sql.replace('%s', '?').replace('FOR UPDATE', '').replace('now()', 'CURRENT_TIMESTAMP'), params)
+        # psycopg2 binds Decimal to NUMERIC; sqlite3's adapter needs exact
+        # decimal text for this identity-only SQL fixture. Precision is proven
+        # separately against real PostgreSQL, never against SQLite affinity.
+        sqlite_params = tuple(str(value) if isinstance(value, Decimal) else value
+                              for value in params)
+        self.cursor.execute(sql.replace('%s', '?').replace('FOR UPDATE', '').replace('now()', 'CURRENT_TIMESTAMP'), sqlite_params)
 
     def fetchone(self):
+        if self.synthetic is not None:
+            return self.synthetic[0] if self.synthetic else None
         row = self.cursor.fetchone()
-        return dict(row) if row else None
+        result = dict(row) if row else None
+        if result is not None and 'enabled' in result:
+            result['enabled'] = bool(result['enabled'])  # SQLite BOOLEAN adapter.
+        return result
 
     def fetchall(self):
+        if self.synthetic is not None:
+            return list(self.synthetic)
         return [dict(row) for row in self.cursor.fetchall()]
 
 
@@ -60,11 +92,14 @@ class Connection:
 
 
 @pytest.fixture
-def book():
+def book(monkeypatch):
+    monkeypatch.setattr('algolens.infrastructure.portfolio.repositories.current_utc_date', lambda: FIXED_DAY)
     db = sqlite3.connect(':memory:')
     db.row_factory = sqlite3.Row
     db.execute("ATTACH DATABASE ':memory:' AS trading")
     db.executescript('''
+      CREATE TABLE trading.qt_workflow_capabilities (book_id TEXT PRIMARY KEY, enabled BOOLEAN, version INTEGER);
+      INSERT INTO trading.qt_workflow_capabilities VALUES ('BOOK',false,1);
       CREATE TABLE trading.positions (
         portfolio_id TEXT, strategy_id TEXT, strategy_name TEXT, date DATE,
         symbol TEXT, portfolio_type TEXT, quantity NUMERIC, average_price NUMERIC,
@@ -75,6 +110,12 @@ def book():
         id INTEGER PRIMARY KEY, portfolio_id TEXT, user_id TEXT, source_app TEXT,
         strategy_id TEXT, symbol TEXT, before_state TEXT, after_state TEXT,
         reason TEXT, risk_check_result TEXT, overrode_risk BOOLEAN);
+      CREATE TABLE trading.strategy_registry (
+        id TEXT PRIMARY KEY, strategy_type TEXT, portfolio_id TEXT,
+        lifecycle TEXT NOT NULL);
+      INSERT INTO trading.strategy_registry
+        (id, strategy_type, portfolio_id, lifecycle)
+        VALUES ('combined', 'COMBINED', 'BOOK', 'live');
     ''')
     yield db
     db.close()
@@ -84,7 +125,7 @@ def seed(book, name, symbol, quantity, *, day=None, stream='qt', portfolio='BOOK
     book.execute('''INSERT INTO trading.positions
         (portfolio_id,strategy_id,strategy_name,date,symbol,portfolio_type,quantity,average_price,updated_at)
         VALUES (?, 'COMBINED', ?, ?, ?, ?, ?, 100, ?)''',
-        (portfolio, name, day or date.today(), symbol, stream, quantity,
+        (portfolio, name, day or FIXED_DAY, symbol, stream, quantity,
          '2099-01-01' if name == 'OTHER' else '2026-01-01'))
     book.commit()
 
@@ -94,7 +135,7 @@ def edit(book, **extra):
     payload.update(extra)
     normalized = validate_position_payload(payload)
     return PostgresPortfolioRepository(connection_factory=lambda: Connection(book)).write_qt_position(
-        'COMBINED', 'BOOK', normalized, '7', {'passed': True}, False)
+        'COMBINED', 'BOOK', normalized, '7', lambda *_: {'passed': True})
 
 
 def test_edit_binds_the_symbol_not_the_most_recent_unrelated_strategy(book):
@@ -163,15 +204,35 @@ def test_named_risk_projection_replaces_only_the_intended_strategy():
 def test_risk_book_keeps_both_current_strategy_identities_and_excludes_old_rows(book):
     seed(book, 'TARGET', 'ES', 12)
     seed(book, 'OTHER', 'ES', 99)
-    seed(book, 'TARGET', 'OLD', 15, day=date.today()-timedelta(days=1))
+    seed(book, 'TARGET', 'OLD', 15, day=FIXED_DAY-timedelta(days=1))
     seed(book, 'TARGET', 'CLOSED', 0)
     rows = PostgresPortfolioRepository(connection_factory=lambda: Connection(book)).fetch_qt_book('COMBINED', 'BOOK')
     assert sorted((r.get('strategy_name'), r['symbol'], r['quantity']) for r in rows) == [('OTHER', 'ES', 99), ('TARGET', 'CLOSED', 0), ('TARGET', 'ES', 12)]
 
 
-@pytest.mark.parametrize('foreign', [dict(stream='system'), dict(day=date.today()-timedelta(days=1)), dict(portfolio='OTHER')])
+def test_risk_book_selects_the_utc_day_not_the_server_local_day(book, monkeypatch):
+    import algolens.infrastructure.portfolio.repositories as repositories
+
+    utc_day = date(2099, 1, 2)
+    monkeypatch.setattr(repositories, "current_utc_date", lambda: utc_day, raising=False)
+    seed(book, 'TARGET', 'ES', 12, day=utc_day)
+    rows = PostgresPortfolioRepository(
+        connection_factory=lambda: Connection(book)
+    ).fetch_qt_book('COMBINED', 'BOOK')
+    assert [(row['symbol'], row['date']) for row in rows] == [('ES', '2099-01-02')]
+
+
+@pytest.mark.parametrize('foreign', [dict(stream='system'), dict(day=FIXED_DAY-timedelta(days=1)), dict(portfolio='OTHER')])
 def test_wrong_stream_date_or_book_cannot_supply_identity(book, foreign):
     seed(book, 'TARGET', 'ES', 12, **foreign)
     with pytest.raises(StrategyNameUnresolved):
         edit(book, average_price=100)
+    assert book.execute('SELECT count(*) FROM trading.position_overrides').fetchone()[0] == 0
+
+
+@pytest.mark.parametrize('name', [None, '', '   '])
+def test_missing_engine_name_cannot_become_a_write_identity(book, name):
+    seed(book, name, 'ES', 12)
+    with pytest.raises(StrategyNameUnresolved):
+        edit(book)
     assert book.execute('SELECT count(*) FROM trading.position_overrides').fetchone()[0] == 0

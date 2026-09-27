@@ -1,5 +1,5 @@
 import React from 'react';
-import { Home, TrendingUp, FileText, FlaskConical, User } from 'lucide-react';
+import { Home, TrendingUp, FileText, FlaskConical, Library, User } from 'lucide-react';
 import { isInternalRole } from '../domain/identity/user';
 import { useAuth } from '../adapters/react/useAuth';
 import { useTheme } from '../adapters/react/ThemeContext';
@@ -17,7 +17,10 @@ export function BottomNav({ activeTab = 'portfolio', onTabChange }: BottomNavPro
   const tabs = [
     { id: 'portfolio', label: 'Portfolio', icon: Home },
     ...(isInternalMember
-      ? [{ id: 'incubation', label: 'Incubation', icon: FlaskConical }]
+      ? [
+          { id: 'books', label: 'Books', icon: Library },
+          { id: 'incubation', label: 'Incubation', icon: FlaskConical },
+        ]
       : []),
     { id: 'builder', label: 'Builder', icon: TrendingUp },
     { id: 'news', label: 'News', icon: FileText },
@@ -31,7 +34,7 @@ export function BottomNav({ activeTab = 'portfolio', onTabChange }: BottomNavPro
         : 'bg-white border-gray-200'
     }`}>
       <div
-        className={isInternalMember ? 'grid grid-cols-5' : 'grid grid-cols-4'}
+        className={isInternalMember ? 'grid grid-cols-6' : 'grid grid-cols-4'}
       >
         {tabs.map((tab) => {
           const Icon = tab.icon;

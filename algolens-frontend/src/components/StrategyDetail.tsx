@@ -9,18 +9,23 @@ import {
 } from '../domain/portfolio/historySegments';
 import { ArrowLeft, TrendingUp, TrendingDown } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, ResponsiveContainer, Tooltip } from 'recharts';
-import type { Strategy } from '../domain/portfolio/portfolioData';
+import type { PositionStream, Strategy } from '../domain/portfolio/portfolioData';
 import { useTheme } from '../adapters/react/ThemeContext';
 import { useAuth } from '../adapters/react/useAuth';
 import { isInternalRole } from '../domain/identity/user';
 import { FinancialAnalysis } from './FinancialAnalysis';
 import { PositionBreakdown } from './PositionBreakdown';
 import { PortfolioApiService } from '../infrastructure/api/portfolioApi';
+import { QtPreviewApi } from '../infrastructure/api/qtPreviewApi';
+import { QtRecovery } from '../infrastructure/api/qtRecovery';
+import type { QtProposal } from '../domain/portfolio/qtPreview';
+import { QtProposalWorkspace } from './QtProposalWorkspace';
 import { ApiError } from '../infrastructure/api/httpClient';
 import { OverrideHistory } from './OverrideHistory';
 import { TradingActivity } from './TradingActivity';
 import { AlphaAttribution } from './AlphaAttribution';
 import { BookSelect } from './BookSelect';
+import { ConfigurationInspectionPanel } from './ConfigurationInspectionPanel';
 
 interface StrategyDetailProps {
   strategy: Strategy;
@@ -47,70 +52,165 @@ export function StrategyDetail({
   // different limits, in each book it belongs to; the view used to show the
   // primary one and offer no way to reach the others, so the rest of a
   // strategy's positions were simply unreachable from the app.
+  const { theme } = useTheme();
+  const { user } = useAuth();
+  useEffect(() => {
+    if (!user?.id) return;
+    try { QtRecovery.activateActor(sessionStorage, user.id); }
+    catch { /* Required-workspace actions independently block when recovery storage is unavailable. */ }
+  }, [user?.id]);
+  const canReadOverrideHistory = isInternalRole(user?.role);
   const books = strategy.books ?? (strategy.portfolio_id ? [strategy.portfolio_id] : []);
-  const [book, setBook] = useState<string | undefined>(initialBook ?? strategy.portfolio_id);
-  // The detail for `book`. Null means "use the prop", which is the primary.
-  const [bookDetail, setBookDetail] = useState<Strategy | null>(null);
-  const [bookLoading, setBookLoading] = useState(false);
-  const [bookError, setBookError] = useState<string | null>(null);
-  // Set when the chosen book is one the engine has not published anything for
-  // yet -- the normal state of a strategy just added to a book. Nothing is
-  // drawn for it, rather than the primary book's numbers under its name.
-  const [emptyBook, setEmptyBook] = useState<string | null>(null);
-  // Only the newest request may land. Switching books quickly must not let a
-  // slow answer for the first book overwrite the second.
+  const owner = JSON.stringify([strategy.id, strategy.portfolio_id, initialBook, user?.id, user?.role]);
+  const defaultBook = initialBook ?? strategy.portfolio_id;
+  const [selection, setSelection] = useState<{ owner: string; book?: string; stream: PositionStream }>({
+    owner, book: defaultBook, stream: 'system',
+  });
+  const book = selection.owner === owner ? selection.book : defaultBook;
+  const positionStream = selection.owner === owner ? selection.stream : 'system';
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
+  const scope = JSON.stringify([owner, book, positionStream, refreshKey]);
+  const contextEpoch = useRef({ scope, epoch: 0 });
+  if (contextEpoch.current.scope !== scope) {
+    contextEpoch.current = { scope, epoch: contextEpoch.current.epoch + 1 };
+  }
+  const selectionEpoch = contextEpoch.current.epoch;
+  const [loaded, setLoaded] = useState<{ scope: string; owner: string; book?: string;
+    stream: PositionStream; refreshKey: number; detail: Strategy } | null>(null);
+  const [empty, setEmpty] = useState<{ scope: string; book: string } | null>(null);
+  const [failure, setFailure] = useState<{ scope: string; message: string } | null>(null);
+  const [bookErrorState, setBookErrorState] = useState<{ owner: string; message: string } | null>(null);
+  const [loadingScope, setLoadingScope] = useState<string | null>(null);
   const latestRequest = useRef(0);
+  const latestScope = useRef(scope);
+  const lastAccepted = useRef<typeof loaded>(null);
+  const skipReloadScope = useRef<string | null>(null);
+  latestScope.current = scope;
 
-  // Everything on this screen is scoped to one book: the API reads value,
-  // history, metrics, executions and positions all by (strategy, book). So the
-  // whole page renders from the chosen book, not just the positions table.
-  const shown = bookDetail ?? strategy;
-  const shownPortfolioId = shown.portfolio_id ?? book;
+  // A prop from dashboard aggregation is QT-scoped. Only a response that
+  // proves this exact requested identity may supply page data.
+  const shown = loaded?.scope === scope ? loaded.detail : null;
+  const emptyBook = empty?.scope === scope ? empty.book : null;
+  const requestError = failure?.scope === scope ? failure.message : null;
+  const bookError = bookErrorState?.owner === owner ? bookErrorState.message : null;
+  const bookLoading = loadingScope === scope;
+  const shownPortfolioId = shown?.portfolio_id ?? book;
+  const bookOnScreen = emptyBook ?? shown?.portfolio_id ?? book;
+  const awaitingBook = !shown && !emptyBook && !requestError;
+  const qtSnapshot = positionStream === 'qt' && shown?.positionStream === 'qt';
+  const workflowBook = qtSnapshot ? shown?.portfolio_id : undefined;
+  const sourceDay = qtSnapshot ? shown?.positionDate : undefined;
+  const workflowScope = JSON.stringify([scope, selectionEpoch, workflowBook, sourceDay]);
+  const latestWorkflowScope = useRef(workflowScope);
+  latestWorkflowScope.current = workflowScope;
+  const [workflow, setWorkflow] = useState<{
+    scope: string; proposal: QtProposal | null; reason: string;
+  } | null>(null);
+  const matchingProposal = workflow?.scope === workflowScope ? workflow.proposal : null;
+  const workflowRequired = matchingProposal?.capability?.required === true;
+  const workflowAvailable = matchingProposal?.capability?.available === true;
+  const legacyEditingAllowed = workflowAvailable && matchingProposal?.capability?.required === false;
+  const mountWorkspace = workflowRequired && workflowAvailable && !!user?.id && !!workflowBook && !!sourceDay;
+  const workflowReason = positionStream !== 'qt' ? '' : !qtSnapshot || !workflowBook || !sourceDay
+    ? 'QT workflow source identity and date are unavailable. Position changes are disabled.'
+    : !user?.id ? 'Sign in before changing QT positions.'
+    : workflow?.scope !== workflowScope ? 'Loading QT workflow capability. Position changes are disabled.'
+    : workflow.reason;
+  const positionEditReason = workflowRequired && workflowAvailable
+    ? 'Review and confirm changes in the QT proposal workspace.'
+    : workflowReason || shown?.positionEditUnavailableReason;
 
-  // `onScreen` is the book currently rendered. If loading `target` fails for
-  // any reason other than "no data yet", the picker goes back to it, so the
-  // name in the picker and the numbers below it never disagree.
-  const loadBook = useCallback(async (target: string | undefined, onScreen?: string) => {
-    const request = ++latestRequest.current;
-    setBookError(null);
-    if (!target || sameBook(target, strategy.portfolio_id)) {
-      setEmptyBook(null);
-      setBookDetail(null);
-      setBookLoading(false);
+  useEffect(() => {
+    if (!qtSnapshot || !workflowBook || !sourceDay || !user?.id) return;
+    const controller = new AbortController();
+    let live = true;
+    void (async () => {
+      try {
+        const proposal = await QtPreviewApi.getProposal(workflowBook, controller.signal);
+        if (!live || latestWorkflowScope.current !== workflowScope) return;
+        if (proposal.book_id !== workflowBook || proposal.source_day !== sourceDay ||
+            typeof proposal.capability?.available !== 'boolean' || typeof proposal.capability?.required !== 'boolean') {
+          throw new Error('unmatched_workflow_capability');
+        }
+        setWorkflow({ scope: workflowScope, proposal,
+          reason: proposal.capability.available ? '' :
+            proposal.read_only_reason ?? 'QT workflow is unavailable. Position changes are disabled.' });
+      } catch (error) {
+        if (!live || latestWorkflowScope.current !== workflowScope ||
+            (error instanceof DOMException && error.name === 'AbortError')) return;
+        setWorkflow({ scope: workflowScope, proposal: null,
+          reason: 'QT workflow capability is unavailable. Position changes are disabled.' });
+      }
+    })();
+    return () => { live = false; controller.abort(); };
+  }, [qtSnapshot, workflowBook, sourceDay, workflowScope, user?.id]);
+
+  useEffect(() => {
+    if (!book) {
+      setFailure({ scope, message: 'No book is available for this strategy.' });
       return;
     }
-    setBookLoading(true);
-    try {
-      const detail = await PortfolioApiService.getStrategy(strategy.id, target);
-      if (request !== latestRequest.current) return;
-      setEmptyBook(null);
-      setBookDetail(detail);
-    } catch (err) {
-      if (request !== latestRequest.current) return;
-      if (err instanceof ApiError && err.code === 'no_data_for_book') {
-        setBookDetail(null);
-        setEmptyBook(target);
-      } else {
-        setBook(onScreen);
-        // The server's own sentence when it gave one; never the raw body.
-        setBookError(
-          (err instanceof ApiError && err.serverMessage) || `Could not load ${target}.`
-        );
-      }
-    } finally {
-      if (request === latestRequest.current) setBookLoading(false);
+    if (skipReloadScope.current === scope) {
+      skipReloadScope.current = null;
+      setLoadingScope(null);
+      return;
     }
-  }, [strategy.id, strategy.portfolio_id]);
-
-  const bookOnScreen = emptyBook ?? shown.portfolio_id ?? strategy.portfolio_id;
-  // The picker names a book whose data has not arrived yet. Whatever is loaded
-  // belongs to a different book, so it is not drawn in the meantime.
-  const awaitingBook = book !== undefined && !sameBook(book, bookOnScreen);
+    const request = ++latestRequest.current;
+    setLoadingScope(scope);
+    setFailure(null);
+    setEmpty(null);
+    const load = async () => {
+      try {
+        const detail = await PortfolioApiService.getStrategy(strategy.id, book, positionStream);
+        if (request !== latestRequest.current || latestScope.current !== scope) return;
+        if (detail.id !== strategy.id || !sameBook(detail.portfolio_id, book)
+          || (detail.positionStream != null && detail.positionStream !== positionStream)) {
+          throw new Error('The strategy response does not match the requested book and position stream.');
+        }
+        const accepted = { scope, owner, book, stream: positionStream, refreshKey, detail };
+        lastAccepted.current = accepted;
+        setLoaded(accepted);
+        setBookErrorState(null);
+      } catch (err) {
+        if (request !== latestRequest.current || latestScope.current !== scope) return;
+        if (err instanceof ApiError && err.code === 'no_data_for_book') {
+          setEmpty({ scope, book });
+          setBookErrorState(null);
+        } else {
+          const message = (err instanceof ApiError && err.serverMessage)
+            || (err instanceof Error && !(err instanceof ApiError) ? err.message : null)
+            || `Could not load ${book}.`;
+          const prior = lastAccepted.current;
+          if (prior && prior.owner === owner && prior.stream === positionStream
+            && prior.book && !sameBook(prior.book, book) && prior.refreshKey === refreshKey) {
+            // A failed book change can return to the last proven book. A
+            // failed stream change cannot show the other stream as a fallback.
+            skipReloadScope.current = prior.scope;
+            setSelection({ owner, book: prior.book, stream: positionStream });
+            setBookErrorState({ owner, message });
+          } else {
+            setFailure({ scope, message });
+          }
+        }
+      } finally {
+        if (request === latestRequest.current && latestScope.current === scope) {
+          setLoadingScope(null);
+        }
+      }
+    };
+    void load();
+    return () => { latestRequest.current += 1; };
+  }, [scope, owner, book, positionStream, strategy.id, refreshKey]);
 
   const selectBook = (target: string) => {
-    const previous = bookOnScreen;
-    setBook(target);
-    void loadBook(target, previous);
+    setSelection({ owner, book: target, stream: positionStream });
+    setBookErrorState(null);
+  };
+
+  const selectStream = (stream: PositionStream) => {
+    setSelection({ owner, book, stream });
+    setBookErrorState(null);
   };
 
   const hasSeveralBooks = books.length > 1;
@@ -130,56 +230,44 @@ export function StrategyDetail({
     />
   );
 
-  // A strategy was opened: start on the book the reader chose, or the primary.
-  useEffect(() => {
-    const target = initialBook ?? strategy.portfolio_id;
-    setBookDetail(null);
-    setBookError(null);
-    setEmptyBook(null);
-    setBook(target);
-    void loadBook(target, strategy.portfolio_id);
-  }, [strategy.id, strategy.portfolio_id, initialBook, loadBook]);
-
-  // An edit landed. Re-read whichever book is on screen, and let the dashboard
-  // re-read the primary.
+  // A QT edit landed. Re-read the same QT book and let dashboard refresh.
   const handlePositionsChanged = useCallback(() => {
-    void loadBook(book, book);
+    if (positionStream !== 'qt' || latestScope.current !== scope || contextEpoch.current.epoch !== selectionEpoch) return;
+    setHistoryRefreshKey(key => key + 1);
+    setRefreshKey(key => key + 1);
     onPositionsChanged?.();
-  }, [book, loadBook, onPositionsChanged]);
+  }, [positionStream, scope, selectionEpoch, onPositionsChanged]);
 
   const [selectedPeriod, setSelectedPeriod] = useState('1M');
   const [selectedTab, setSelectedTab] = useState<'positions' | 'analysis' | 'activity'>('positions');
-  const { theme } = useTheme();
-  const { user } = useAuth();
-  const canReadOverrideHistory = isInternalRole(user?.role);
-  const isPositive = (shown.return ?? 0) >= 0;
   const periods = ['1W', '1M', '3M', '1Y', 'ALL'];
 
   // Filter data based on selected period
   const filteredData = useMemo(
-    () => filterByPeriod(shown.historicalData, selectedPeriod),
-    [selectedPeriod, shown.historicalData]
+    () => filterByPeriod(shown?.historicalData ?? [], selectedPeriod),
+    [selectedPeriod, shown?.historicalData]
   );
 
   // Where this window's curve changes book. Only breaks a reader can actually
   // see on the chart are worth drawing or naming.
   const visibleBreaks = useMemo(
-    () => breaksWithin(filteredData, shown.historyBreaks),
-    [filteredData, shown.historyBreaks]
+    () => breaksWithin(filteredData, shown?.historyBreaks),
+    [filteredData, shown?.historyBreaks]
   );
 
   // The plotted series lifts the pen at each break. `connectNulls` is
   // deliberately not set: connecting them is exactly what must not happen.
   const plotted = useMemo(
-    () => withBreakGaps(filteredData, shown.historyBreaks),
-    [filteredData, shown.historyBreaks]
+    () => withBreakGaps(filteredData, shown?.historyBreaks),
+    [filteredData, shown?.historyBreaks]
   );
 
   // The window's return, measured over the newest unbroken stretch only. A
   // return that spans a book change adds up two different portfolios.
   const windowReturn = useMemo(() => {
+    if (!shown || shown.dataAvailable === false) return null;
     return periodReturn(latestSegment(filteredData, shown.historyBreaks));
-  }, [filteredData, shown.historyBreaks]);
+  }, [filteredData, shown]);
   // The window's direction, for chart colours. An unknown window is
   // drawn in the neutral-positive colour rather than not drawn at all.
   const gaining = (windowReturn?.value ?? 0) >= 0;
@@ -208,7 +296,16 @@ export function StrategyDetail({
             </p>
             <div className={`text-sm mt-2 ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'
               }`}>
-              {shown.lastUpdate}
+              {!shown ? (
+                requestError ? <>Selected book and position stream unavailable.</> :
+                emptyBook ? <>No result for the selected book and position stream.</> :
+                <>QT performance and positions loading for the selected book and stream.</>
+              ) : shown.dataAvailable === false ? (
+                <>QT performance unavailable{shown.positionDate ? `; positions snapshot ${shown.positionDate}` : ''}.</>
+              ) : shown.resultDate ? (
+                <>QT performance as of {shown.resultDate}{shown.positionDate && shown.positionDate !== shown.resultDate
+                  ? `; positions snapshot ${shown.positionDate}` : ''}.</>
+              ) : shown.lastUpdate}
             </div>
           </div>
         </div>
@@ -238,6 +335,24 @@ export function StrategyDetail({
               ? `In ${books.length} books. Everything below is for the one selected; each has its own positions, history and risk limits.`
               : 'Everything below is for this book.'}
           </span>
+          <label className="flex items-center gap-2 text-sm" htmlFor="position-stream-view">
+            <span>Position stream</span>
+            <select
+              id="position-stream-view"
+              aria-label="Position stream"
+              value={positionStream}
+              onChange={event => selectStream(event.target.value as PositionStream)}
+              className={`rounded-lg border px-2 py-1 ${theme === 'dark'
+                ? 'border-gray-700 bg-gray-900 text-gray-200'
+                : 'border-gray-300 bg-white text-gray-800'}`}
+            >
+              <option value="system">Model / System</option>
+              <option value="qt">QT</option>
+            </select>
+          </label>
+          <span className={`text-xs ${theme === 'dark' ? 'text-gray-400' : 'text-gray-600'}`}>
+            Selector changes positions only. Performance and trading activity remain QT.
+          </span>
           {/* A refresh of the book already on screen. Loading a different
               book is announced below, in place of the numbers. */}
           {bookLoading && !awaitingBook && (
@@ -254,6 +369,15 @@ export function StrategyDetail({
         )}
       </div>
 
+      {canReadOverrideHistory && (shown || emptyBook) && bookOnScreen && (
+        <ConfigurationInspectionPanel
+          registryId={strategy.id}
+          portfolioId={bookOnScreen}
+          userId={user?.id}
+          role={user?.role}
+        />
+      )}
+
       {awaitingBook ? (
         <div
           role="status"
@@ -263,6 +387,10 @@ export function StrategyDetail({
           }`}
         >
           Loading {strategy.name} in <span className="font-mono">{book}</span>…
+        </div>
+      ) : requestError ? (
+        <div role="alert" className="rounded-lg border border-red-500/50 bg-red-500/10 px-4 py-3 text-sm text-red-600 dark:text-red-400">
+          {requestError}
         </div>
       ) : emptyBook ? (
         <div
@@ -287,11 +415,12 @@ export function StrategyDetail({
             </div>
           )}
         </div>
-      ) : (
+      ) : shown ? (
       <>
       <div className="mb-6">
         <div className="text-3xl md:text-4xl mb-2">
-          ${shown.currentValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+          {shown.dataAvailable === false || shown.currentValue === null ? '—' :
+            `$${shown.currentValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
         </div>
         {/* Null means the window holds fewer than two points, so there is no
             return to state. This used to state "$0.00 (+0.00%)" -- a flat
@@ -368,7 +497,11 @@ export function StrategyDetail({
       {/* Is QT's judgement adding value? Renders an explanation instead of a
           chart until both streams exist. */}
       <div className="mb-8">
-        <AlphaAttribution equityByStream={shown.equityByStream} theme={theme} />
+        <AlphaAttribution
+          equityByStream={shown.equityByStream}
+          historyBreaks={shown.historyBreaks}
+          theme={theme}
+        />
       </div>
 
       <div className={`flex items-center justify-between mb-8 border-b ${theme === 'dark' ? 'border-gray-800' : 'border-gray-200'
@@ -393,9 +526,9 @@ export function StrategyDetail({
       </div>
 
       {/* Tab Navigation */}
-      <div className={`flex items-center justify-between mb-6 border-b ${theme === 'dark' ? 'border-gray-800' : 'border-gray-200'
+      <div className={`flex flex-wrap items-start justify-between gap-3 mb-6 border-b ${theme === 'dark' ? 'border-gray-800' : 'border-gray-200'
         }`}>
-        <div className="flex items-center gap-4">
+        <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2">
           <button
             onClick={() => setSelectedTab('positions')}
             className={`pb-3 px-1 transition-colors relative ${selectedTab === 'positions'
@@ -442,7 +575,7 @@ export function StrategyDetail({
 
         <button
           onClick={onBack}
-          className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors ${theme === 'dark'
+          className={`flex shrink-0 items-center gap-2 px-4 py-2 rounded-lg transition-colors ${theme === 'dark'
               ? 'text-gray-300 hover:text-white hover:bg-gray-900'
               : 'text-gray-700 hover:text-black hover:bg-gray-100'
             }`}
@@ -456,35 +589,65 @@ export function StrategyDetail({
       {selectedTab === 'positions' && (
         <>
           <PositionBreakdown
+            key={scope}
             positions={shown.positions}
+            positionStream={shown.positionStream}
+            positionStrategyNames={shown.positionStrategyNames}
             strategyId={strategy.id}
             portfolioId={shown.portfolio_id ?? book}
+            positionDate={shown.positionDate}
+            positionsEditable={legacyEditingAllowed && shown.positionsEditable === true}
+            positionEditUnavailableReason={positionEditReason}
             books={books}
             bookControl={hasSeveralBooks ? bookBox('Book for these positions') : undefined}
             onEdited={handlePositionsChanged}
           />
+          {workflowReason && <p role="status" aria-label="QT workflow availability"
+            className={`mt-4 text-sm ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>
+            {workflowReason}
+          </p>}
+          {mountWorkspace && workflowBook && sourceDay && user?.id && (
+            <div className="mt-8">
+              <QtProposalWorkspace key={workflowScope} actorId={user.id} bookId={workflowBook}
+                sourceDay={sourceDay} onPublished={handlePositionsChanged} />
+            </div>
+          )}
           {/* The audit trail sits directly under the book it describes. It was
               being written on every edit and read by nobody. */}
           {canReadOverrideHistory && shownPortfolioId && (
             <div className="mt-8">
-              <OverrideHistory strategyId={strategy.id} portfolioId={shownPortfolioId} />
+              <OverrideHistory
+                strategyId={strategy.id}
+                portfolioId={shownPortfolioId}
+                refreshKey={historyRefreshKey}
+              />
             </div>
           )}
         </>
       )}
 
       {selectedTab === 'analysis' && (
-        <FinancialAnalysis metrics={shown.metrics} />
+        <FinancialAnalysis
+          metrics={shown.metrics}
+          executionsAvailable={shown.executionsAvailable}
+          executionUnavailableReason={shown.executionUnavailableReason}
+          executionDate={shown.executionDate}
+        />
       )}
 
       {selectedTab === 'activity' && (
         <TradingActivity
           executions={shown.executions}
           finalizedPositions={shown.finalizedPositions}
+          activityStream={shown.activityStream}
+          finalizedPositionsAvailable={shown.finalizedPositionsAvailable}
+          executionsAvailable={shown.executionsAvailable}
+          executionUnavailableReason={shown.executionUnavailableReason}
+          executionDate={shown.executionDate}
         />
       )}
       </>
-      )}
+      ) : null}
     </div>
   );
 }

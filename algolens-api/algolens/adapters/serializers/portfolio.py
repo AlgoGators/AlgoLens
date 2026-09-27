@@ -65,6 +65,7 @@ def serialize_portfolio(portfolio):
     return {
         "portfolio_id": portfolio["portfolio_id"],
         "total_value": _float_or_none(portfolio["total_value"]),
+        "strategies_awaiting_data": portfolio.get("strategies_awaiting_data", 0),
         "strategy_count": len(portfolio["strategies"]),
         "strategies": [
             {
@@ -111,6 +112,23 @@ def serialize_assignment_history(rows):
                 "reason": row["reason"],
                 "consequences": row["consequences"],
                 "acknowledged": row["acknowledged"],
+                "created_at": _isoformat(row["created_at"]),
+            }
+            for row in rows
+        ]
+    }
+
+
+def serialize_lifecycle_history(rows):
+    return {
+        "history": [
+            {
+                "id": row["id"],
+                "strategy_id": row["strategy_id"],
+                "before_state": row["before_state"],
+                "after_state": row["after_state"],
+                "reason": row["reason"],
+                "user_id": row["user_id"],
                 "created_at": _isoformat(row["created_at"]),
             }
             for row in rows
