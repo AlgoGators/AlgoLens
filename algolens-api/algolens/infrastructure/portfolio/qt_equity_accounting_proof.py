@@ -41,8 +41,11 @@ def _load_equity_local_context(cursor, decision, accounting, *, current=False):
     cursor.execute('SELECT * FROM trading.qt_equity_desk_evidence_sources WHERE source_id=ANY(%s)', (basis_ids,))
     basis=[dict(row) for row in cursor.fetchall()]
     snapshot=one('SELECT * FROM trading.qt_evaluation_snapshots WHERE snapshot_id=%s', (output['producer_authority']['snapshot_id'],))
+    # prior_binding / action_candidates are filled by the lineage loader only when the input market is
+    # not the market of the finalization that produced the anchor (equity day 2); otherwise they stay unread.
     accounting['equity_sources']={'market_row':market,'model_publication':model,'actions_row':actions,
-                                 'basis_rows':basis,'evaluation_snapshot':snapshot}
+                                 'basis_rows':basis,'evaluation_snapshot':snapshot,
+                                 'prior_binding':None,'action_candidates':None}
     if source.get('schema_version')=='qt-equity-accounting-input-empty-owner/v2':
         # No position sentinel exists for this source kind. A real scoped QT
         # totals row supplies the prior day; complete rows/curve are proved below.
@@ -362,7 +365,9 @@ def _metadata(a,b):
 
 def _source_input(accounting,decision,selection,*,prior_anchor_validator=None):
     inputs,final=accounting['input_row'],accounting['finalization_row'];source,anchor=inputs['payload'],final['payload']
-    context=accounting['equity_sources'];_shape(context,{'market_row','model_publication','actions_row','basis_rows','evaluation_snapshot'})
+    context=accounting['equity_sources']
+    base={'market_row','model_publication','actions_row','basis_rows','evaluation_snapshot'}
+    _need(type(context) is dict and set(context) in (base,base|{'prior_binding','action_candidates'}))
     market,events=context['market_row'],context['actions_row'];_row_digest(inputs);_row_digest(final);_row_digest(market);_row_digest(events)
     m=market['payload'];e=events['payload'];book,day=decision['book_id'],str(decision['source_day'])
     _shape(m,{'schema_version','calculation_version','book_id','source_day','model_publication_id','previous_day','valuation_time','day_mode','currency','cost_config','instruments','actions_source_id','actions_source_digest'})

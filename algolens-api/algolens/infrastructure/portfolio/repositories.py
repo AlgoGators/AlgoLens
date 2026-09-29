@@ -9,6 +9,7 @@ from datetime import datetime, time as day_time, timedelta, timezone
 import psycopg2
 
 from algolens.application.portfolio.ports import (
+    DeskFinalizationPendingError,
     IncubationError,
     IncubationPerformanceRows,
     IncubationStorageError,
@@ -550,12 +551,17 @@ class PostgresPortfolioRepository:
                 portfolio_id = registry_row["portfolio_id"]
                 incubation_start = registry_row["incubation_started_at"]
 
+                # The MODEL is the system stream. Every non-empty publication also
+                # writes qt (and, with migration 015, qt_proposal) rows for the same
+                # symbol-day, and other streams share equity_curve, so both reads
+                # select the system stream only: one row per symbol-day.
                 cursor.execute(
                     """
                     SELECT updated_at AS date, symbol, quantity,
                            average_price AS entry_price
                     FROM trading.positions
                     WHERE strategy_id = %s AND portfolio_id = %s AND updated_at >= %s
+                      AND portfolio_type = 'system'
                     ORDER BY updated_at ASC, symbol ASC
                     """,
                     (strategy_type, portfolio_id, incubation_start),
@@ -567,6 +573,7 @@ class PostgresPortfolioRepository:
                     SELECT timestamp AS date, equity
                     FROM trading.equity_curve
                     WHERE strategy_id = %s AND portfolio_id = %s AND timestamp >= %s
+                      AND portfolio_type = 'system'
                     ORDER BY timestamp ASC
                     """,
                     (strategy_type, portfolio_id, incubation_start),
@@ -703,6 +710,66 @@ class PostgresPortfolioRepository:
         if unreliable:
             raise PositionsUnavailableError("Reliable position evidence is unavailable")
 
+    def _require_desk_days_finalized(self, cursor, books):
+        """Refuse a lifecycle change away from live while a desk day awaits finalization.
+
+        An unfinalized QT desk day is a processed desk decision whose stored
+        accounting (trading.desk_run_results, written in the desk processor's
+        processing transaction) has no trading.qt_desk_finalizations row yet.
+        The next-day finalizers write qt-stream positions, live_results and
+        equity_curve rows for that day; once the strategy is no longer live,
+        only migration 025's scope check would stand between them and a
+        non-live scope. Days are matched by book over every book the lifecycle
+        change locks (the caller holds those canonical book locks, which the
+        finalizer's upstream fence also takes).
+
+        Only days the shipped finalizer can still finalize count (N5 r3): the
+        next-day prepare finalizes day D only on D+1, so a pending day dated
+        before yesterday (UTC, by the database clock) can never be finalized and
+        never blocks. Unqualified clock_timestamp(), as the finalizer uses it, so
+        a test clock applies identically. Any future tool that can finalize an
+        older day must carry its own live-owner check. Without trading.desk_run_results
+        there is nothing to finalize; with it but without the finalization
+        table, every stored day counts as unfinalized (fail closed).
+        """
+        cursor.execute(
+            """
+            SELECT to_regclass('trading.desk_run_results') IS NOT NULL AS accounting,
+                   to_regclass('trading.qt_desk_finalizations') IS NOT NULL AS finalizations
+            """
+        )
+        present = cursor.fetchone()
+        if not present["accounting"]:
+            return
+        canonical = sorted({str(book).strip().upper() for book in books if book is not None})
+        finalized = (
+            "AND NOT EXISTS (SELECT 1 FROM trading.qt_desk_finalizations AS finalization"
+            " WHERE finalization.decision_id = accounting.decision_id)"
+            if present["finalizations"] else ""
+        )
+        cursor.execute(
+            """
+            SELECT accounting.portfolio_id AS book_id, accounting.date AS source_day,
+                   accounting.decision_id
+            FROM trading.desk_run_results AS accounting
+            WHERE upper(btrim(accounting.portfolio_id)) = ANY(%s)
+              AND accounting.date >= (clock_timestamp() AT TIME ZONE 'UTC')::date - 1
+            """ + finalized + """
+            ORDER BY accounting.date, accounting.portfolio_id, accounting.decision_id
+            """,
+            (canonical,),
+        )
+        pending = cursor.fetchall()
+        if pending:
+            days = ", ".join(
+                f"{row['book_id']} {row['source_day']}" for row in pending[:5]
+            )
+            more = f" and {len(pending) - 5} more" if len(pending) > 5 else ""
+            raise DeskFinalizationPendingError(
+                "QT desk day(s) awaiting next-day finalization: "
+                f"{days}{more}. Finalize them before changing the lifecycle away from live."
+            )
+
     def _insert_lifecycle_audit(
         self, cursor, strategy_id, before_state, after_state, reason, user_id
     ):
@@ -739,6 +806,9 @@ class PostgresPortfolioRepository:
                         self._require_effectively_flat(
                             cursor, row, books, ever_live=True
                         )
+                    # Live -> incubating (and retired -> incubating) must not reopen
+                    # a desk day to a finalizer under a non-live scope.
+                    self._require_desk_days_finalized(cursor, books)
                     cursor.execute(
                         """
                         UPDATE trading.strategy_registry
@@ -817,6 +887,8 @@ class PostgresPortfolioRepository:
                     self._require_effectively_flat(
                         cursor, row, books, ever_live=ever_live
                     )
+                    if current_state == "live":
+                        self._require_desk_days_finalized(cursor, books)
                     cursor.execute(
                         """
                         UPDATE trading.strategy_registry

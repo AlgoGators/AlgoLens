@@ -240,7 +240,8 @@ def _incubation_error_status(exc):
     """
     if isinstance(exc, StrategyNotInRegistry):
         return 404
-    if getattr(exc, "code", None) in {"open_positions", "positions_unavailable"}:
+    if getattr(exc, "code", None) in {"open_positions", "positions_unavailable",
+                                      "desk_finalization_pending"}:
         return 409
     return 400
 
@@ -249,6 +250,9 @@ def _incubation_error_body(exc):
     code = getattr(exc, "code", None)
     if code in {"open_positions", "positions_unavailable"}:
         return {"error": code}
+    if code == "desk_finalization_pending":
+        # The reason names the book/day(s) still awaiting next-day finalization.
+        return {"error": code, "reason": str(exc)}
     return {"error": str(exc)}
 
 

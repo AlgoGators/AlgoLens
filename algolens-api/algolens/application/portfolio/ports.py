@@ -30,6 +30,17 @@ class PositionsUnavailableError(IncubationError):
     code = "positions_unavailable"
 
 
+class DeskFinalizationPendingError(IncubationError):
+    """A processed QT desk day on the strategy's books awaits its next-day finalization.
+
+    The desk finalizers write qt-stream rows for that day. Changing the lifecycle
+    away from live first would let them finalize a non-live scope, so the change
+    waits until every such day is finalized.
+    """
+
+    code = "desk_finalization_pending"
+
+
 class StrategyNameUnresolved(Exception):
     """Cannot determine the engine's strategy_name from existing rows.
 

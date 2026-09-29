@@ -14,6 +14,7 @@ import tempfile
 from algolens.domain.portfolio.qt_workflow_errors import QtWorkflowError
 from algolens.infrastructure.portfolio.qt_evaluation_inputs import canonical_qt_input_bytes
 from algolens.infrastructure.portfolio.qt_equity_accounting_proof import canonical_equity_accounting_output_bytes
+from algolens.infrastructure.portfolio.qt_equity_finalization_proof import FINALIZATION_MARKET_SCHEMA
 from algolens.infrastructure.portfolio.qt_equity_recompute_client import (
     _AUTHORITY, _INPUT, _need, _shape, _digest, _text, _uuid, _day, _utc, _pairs, _reject_number)
 from algolens.infrastructure.portfolio.qt_evaluator_process import QtEvaluatorProcess, QtEvaluatorUnavailable
@@ -119,9 +120,14 @@ class QtEquityFinalizationRecomputeClient:
                   and p['predecessor_finalization_source_id'] == i['prior_finalization_source_id']
                   and p['predecessor_finalization_digest'] == i['prior_finalization_digest'])
             _shape(m, _MARKET); _shape(e, {'schema_version','book_id','source_day','previous_day','valuation_time','events'})
-            _need(m['schema_version'] == ('qt-equity-accounting-market-empty-owner/v2' if empty_owner else 'qt-equity-accounting-market/v1') and m['calculation_version'] == i['calculation_version']
+            # The finalization-only market (equity day 2) binds no model and is only for a non-empty-owner S->D finalization.
+            finalization_only = not empty_owner and m['schema_version'] == FINALIZATION_MARKET_SCHEMA
+            _need((finalization_only or m['schema_version'] == ('qt-equity-accounting-market-empty-owner/v2' if empty_owner else 'qt-equity-accounting-market/v1'))
+                  and m['calculation_version'] == i['calculation_version']
                   and m['day_mode'] == 'open' and m['currency'] == 'USD' and e['schema_version'] == 'qt-equity-actions-source/v1')
-            _day(m['source_day']); _uuid(m['model_publication_id'])
+            _day(m['source_day'])
+            if finalization_only: _need(m['model_publication_id'] is None)
+            else: _uuid(m['model_publication_id'])
             _need(m['source_day'] > d['source_day'] and m['previous_day'] == d['source_day']
                   and m['book_id'] == d['book_id'] and m['valuation_time'] == m['source_day']+'T00:00:00Z')
             for key in ('book_id','source_day','previous_day','valuation_time'): _need(e[key] == m[key])

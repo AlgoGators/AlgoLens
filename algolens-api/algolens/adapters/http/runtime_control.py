@@ -18,7 +18,7 @@ MESSAGES = {
     'runtime_storage_unavailable': 'Runtime control data is unavailable. Refresh before retrying.',
     'runtime_request_stale': 'This request is no longer current. Refresh and submit a new request.',
     'runtime_request_not_found': 'Runtime request not found.',
-    'runtime_lifecycle_conflict': 'Run requests require an active live strategy; stop requests require a retired strategy.',
+    'runtime_lifecycle_conflict': 'Run requests require an active live or incubating strategy; stop requests require a retired strategy.',
     'strategy_not_found': 'Strategy not found.',
 }
 

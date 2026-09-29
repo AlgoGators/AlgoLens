@@ -5,6 +5,7 @@ from psycopg2.extras import RealDictCursor
 import pytest
 
 from algolens.infrastructure.config.dependencies import create_portfolio_dependencies
+from tests.conftest import client, current_users  # noqa: F401  (fixtures; location-independent)
 from tests.integration.conftest import claim_schema, require_test_dsn
 from tests.test_incubation_routes import _set_jwt_cookie
 
@@ -43,12 +44,14 @@ def synthetic_books(monkeypatch):
                     id integer PRIMARY KEY, strategy_id text NOT NULL,
                     portfolio_id text NOT NULL, updated_at timestamptz NOT NULL,
                     symbol text NOT NULL, quantity numeric NOT NULL,
-                    average_price numeric NOT NULL
+                    average_price numeric NOT NULL,
+                    portfolio_type text NOT NULL DEFAULT 'system'
                 );
                 CREATE TABLE trading.equity_curve (
                     id integer PRIMARY KEY, strategy_id text NOT NULL,
                     portfolio_id text NOT NULL, timestamp timestamptz NOT NULL,
-                    equity numeric NOT NULL
+                    equity numeric NOT NULL,
+                    portfolio_type text NOT NULL DEFAULT 'system'
                 );
                 CREATE TABLE trading.portfolio_assignments (
                     id integer PRIMARY KEY, strategy_id text NOT NULL,
@@ -90,6 +93,16 @@ def synthetic_books(monkeypatch):
                      '2026-09-02T12:00:00Z', 'POST_BASE', 17, 417),
                     (6, 'LIVE_OTHER_ENGINE', 'EQUITY_MR_PORTFOLIO',
                      '2026-09-02T13:00:00Z', 'OTHER_ENGINE', 19, 519);
+                -- N5 r2 (F4): the same symbol-days in the qt and qt_proposal
+                -- streams, which every non-empty MODEL publication also writes.
+                INSERT INTO trading.positions (id, strategy_id, portfolio_id,
+                    updated_at, symbol, quantity, average_price, portfolio_type) VALUES
+                    (7, 'LIVE_EQUITY_MEAN_REVERSION', 'EQUITY_MR_PORTFOLIO',
+                     '2026-09-01T12:00:00Z', 'EQ_A', 4, 127.25, 'qt'),
+                    (8, 'LIVE_EQUITY_MEAN_REVERSION', 'EQUITY_MR_PORTFOLIO',
+                     '2026-09-01T12:00:00Z', 'EQ_A', 5, 127.25, 'qt_proposal'),
+                    (9, 'LIVE_EQUITY_MEAN_REVERSION', 'EQUITY_MR_PORTFOLIO',
+                     '2026-09-02T14:00:00Z', 'EQ_B', 8, 238.50, 'qt');
                 INSERT INTO trading.equity_curve VALUES
                     (1, 'LIVE_EQUITY_MEAN_REVERSION', 'EQUITY_MR_PORTFOLIO',
                      '2026-08-31T12:00:00Z', 300111),
@@ -103,6 +116,12 @@ def synthetic_books(monkeypatch):
                      '2026-09-02T12:00:00Z', 704417),
                     (6, 'LIVE_OTHER_ENGINE', 'EQUITY_MR_PORTFOLIO',
                      '2026-09-02T13:00:00Z', 805519);
+                INSERT INTO trading.equity_curve (id, strategy_id, portfolio_id,
+                    timestamp, equity, portfolio_type) VALUES
+                    (7, 'LIVE_EQUITY_MEAN_REVERSION', 'EQUITY_MR_PORTFOLIO',
+                     '2026-09-01T12:00:00Z', 310999, 'qt'),
+                    (8, 'LIVE_EQUITY_MEAN_REVERSION', 'EQUITY_MR_PORTFOLIO',
+                     '2026-09-02T14:00:00Z', 399999, 'benchmark');
                 INSERT INTO trading.portfolio_assignments VALUES
                     (1, 'inc_tf_base', 'BASE_PORTFOLIO', 'BASE_PORTFOLIO');
                 """

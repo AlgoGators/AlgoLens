@@ -84,7 +84,10 @@ class PostgresRuntimeControlRepository:
                 or registry['strategy_type'] != scope['engine_strategy_id']
                 or registry['portfolio_id'] != scope['portfolio_id']):
             raise RuntimeControlError('runtime_scope_unsupported')
-        if ((action == 'run' and (registry['lifecycle'] != 'live' or registry['is_active'] is not True))
+        # A run publishes the MODEL (system stream): live or incubating, and active (the engine's
+        # publishes_model rule and migration 025). The QT desk stays live-only (qt_workflow).
+        if ((action == 'run' and (registry['lifecycle'] not in ('live', 'incubating')
+                                  or registry['is_active'] is not True))
                 or (action == 'stop' and registry['lifecycle'] != 'retired')):
             raise RuntimeControlError('runtime_lifecycle_conflict')
 

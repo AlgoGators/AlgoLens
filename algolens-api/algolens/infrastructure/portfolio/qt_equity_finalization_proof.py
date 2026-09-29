@@ -4,9 +4,12 @@ Implementation follows actual native S/D behavioral RED. Original publication
 and native recomputation factories are separate, obligatory authorities.
 """
 from copy import deepcopy
+import json
+import math
+import re
 from uuid import UUID
 from hashlib import sha256
-from datetime import date
+from datetime import date, datetime, timezone
 from decimal import Decimal
 
 from algolens.domain.portfolio.qt_workflow_errors import QtWorkflowError
@@ -30,6 +33,7 @@ _ANCHOR={'schema_version','calculation_version','book_id','source_day','currency
     'previous_positions','previous_totals','finalization_id','finalization_digest'}
 _FAILURES=(ValueError,TypeError,KeyError,AttributeError,ArithmeticError,QtWorkflowError,
            UnicodeError,RecursionError,QtEvaluatorUnavailable)
+FINALIZATION_MARKET_SCHEMA='qt-equity-finalization-market/v1'
 _MAX_NODES=4096
 _MAX_RECORD_BYTES=256*1024*1024
 
@@ -184,6 +188,31 @@ def _prove_anchor_record(accounting,successor,record,basis_rows):
     return expected
 
 
+def _prove_market_scope(m,market,model,*,book,day,valuation,empty_owner):
+    """Bind the S-to-D market M to its D model publication, or (finalization-only schema) to none.
+
+    Only the finalization proof's M checks accept ``qt-equity-finalization-market/v1``. This is the native
+    ``market()`` + ``qt_equity_finalization_only_market_row`` rule: the row is sealed, the payload has exactly
+    the accounting-market key set, the row column and the payload model are both null (no publication is
+    loaded), and the row's book and day equal the payload's. Every other schema keeps the publication/seed
+    proof unchanged, and the empty-owner path never accepts the new schema.
+    """
+    _original_core._row_digest(m)
+    finalization_only=market['schema_version']==FINALIZATION_MARKET_SCHEMA
+    _need(not(finalization_only and empty_owner))
+    _need(m['book_id']==book and str(m['source_day'])==valuation and market['previous_day']==day)
+    if finalization_only:
+        _shape(market,_MARKET_PAYLOAD)
+        _need('model_publication_id' in m and m['model_publication_id'] is None and market['model_publication_id'] is None and model is None)
+        for name in ('book_id','source_day'):_need(_text(market[name]) and str(m[name])==market[name])
+        return
+    _need(model is not None)
+    for name in ('book_id','source_day','model_publication_id'):_need(str(m[name])==market[name])
+    _need(model['portfolio_id']==book and str(model['source_day'])==valuation
+        and str(model['publication_id'])==market['model_publication_id']
+        and model['seed_digest']==qt_digest_v1({'seed_rows':model['system_components']}))
+
+
 def _prove_successor(node,original_output,factory):
     d=node['decision'];accounting=node['accounting'];linked=accounting.get('successor')
     if linked is None:return None
@@ -204,18 +233,14 @@ def _prove_successor(node,original_output,factory):
     else:
         _need(source['payload']['schema_version']=='qt-equity-accounting-input/v1'
             and original_output['schema_version']=='qt-equity-accounting/v1'
-            and market['schema_version']=='qt-equity-accounting-market/v1')
+            and market['schema_version'] in {'qt-equity-accounting-market/v1',FINALIZATION_MARKET_SCHEMA})
     book,day=d['book_id'],str(d['source_day']);valuation=successor['valuation_day']
     _need(str(f['decision_id'])==str(d['decision_id'])==successor['decision_id']
         and f['book_id']==book and str(f['source_day'])==day and str(f['valuation_day'])==valuation
         and str(f['finalization_id'])==successor['finalization_id'] and str(f['market_source_id'])==str(m['source_id'])
         and f['source_version']=='qt-finalization/'+successor['finalization_id']
         and f['input_digest']==source['content_digest'] and f['output_digest']==accounting['content_digest'])
-    for name in ('book_id','source_day','model_publication_id'):_need(str(m[name])==market[name])
-    _need(m['book_id']==book and str(m['source_day'])==valuation and market['previous_day']==day
-        and model['portfolio_id']==book and str(model['source_day'])==valuation
-        and str(model['publication_id'])==market['model_publication_id']
-        and model['seed_digest']==qt_digest_v1({'seed_rows':model['system_components']}))
+    _prove_market_scope(m,market,model,book=book,day=day,valuation=valuation,empty_owner=empty_owner)
     _need(type(f['policy_revision']) is int and 0<f['policy_revision']<(1<<63)
         and f['policy_revision']==m['policy_revision']==events['policy_revision'])
     _original_core._metadata(f,m);_original_core._metadata(f,source);_original_core._metadata(events,m)
@@ -316,9 +341,7 @@ def _prove_graph(evidence,original_factory,finalizer_factory,*,root_successor=Fa
             _need(preceding is not None and preceding_node is not None)
             expected=_prove_anchor_record(preceding_node['accounting'],preceding,accounting['finalization_row'],
                 accounting['equity_sources']['basis_rows'])
-            source=accounting['input_row']['payload']
-            _need(preceding['market_source_id']==source['market_source_id']
-                  and preceding['market_source_digest']==source['market_source_digest']
+            _need(_market_continues(preceding,preceding_node,node)
                   and preceding['source_day']==str(preceding_node['decision']['source_day'])
                   and preceding['valuation_day']==str(node['decision']['source_day']))
             def validator(actual,decision,expected=expected,target=accounting):
@@ -375,3 +398,357 @@ def validate_qt_equity_finalized_anchor(evidence, *, recompute_client_factory=No
         _prove_graph(evidence,recompute_client_factory,finalization_recompute_client_factory)
         return deepcopy(evidence['accounting']['finalization_row']['payload'])
     except _FAILURES:raise ValueError('qt_equity_finalized_anchor_unavailable') from None
+
+
+
+# ---------------------------------------------------------------------------------------------
+# Equity day 2 (verified-desk-prior): "same market or proven continuation".
+#
+# Python port of trade-ngin ``validate_qt_equity_verified_prior_continuation`` (lane N4,
+# src/apps/qt_equity_prior_continuation.cpp): pure, no SQL, the same rules in the same order.
+# The D input market A (bound to the D model publication P2) may stand in for the S->D
+# finalization's market M only when rules (a)-(d) hold.  The restatement mirrors
+# equity_model_action_frame.cpp:80 exactly: the Decimal (1e-8, C++ ``Decimal(double)``) screening
+# of every price, IEEE double division, events in the order (symbol, split before dividend),
+# factor = value for a split and 1+value/close for a dividend, and the ``Decimal::to_string``
+# spelling of the result.  Failure is always the fixed code below.
+# ---------------------------------------------------------------------------------------------
+CONTINUATION_UNAVAILABLE='qt_equity_prior_continuation_unavailable'
+_ENGINE='LIVE_EQUITY_MEAN_REVERSION'
+_OWNER='EQUITY_MEAN_REVERSION'
+_CONTINUATION_INPUTS={'decision','prior_decision','finalization_market','input_market','finalization','anchor',
+    'binding','actions_row','candidate_action_sources'}
+_MARKET_PAYLOAD={'schema_version','calculation_version','book_id','source_day','model_publication_id','previous_day',
+    'valuation_time','day_mode','currency','cost_config','instruments','actions_source_id','actions_source_digest'}
+_ANCHOR_PAYLOAD={'schema_version','calculation_version','book_id','source_day','currency','policy_revision',
+    'previous_positions','previous_totals','finalization_id','finalization_digest'}
+_BINDING={'publication_id','book_id','source_day','strategy_id','decision_id','finalization_id','finalization_digest',
+    'finalization_source_id','finalization_source_digest','actions_source_id','actions_source_digest','replay_reference',
+    'replay_reference_digest','created_at'}
+_REPLAY_V1={'schema_version','mode','book_id','source_day','valuation_day','decision_id','finalization_id',
+    'finalization_digest','finalization_source_id','finalization_source_digest','model_publication_id','model_seed_digest',
+    'accounting_input_id','accounting_input_digest','attempt_id','observation_id','observation_digest','results_digest',
+    'basis_positions','action_admission'}
+_REPLAY_V2=_REPLAY_V1|{'action_frame','action_frame_digest'}
+_ACTION_FRAME={'schema_version','owner','original_action_count','original_action_digest','successor_action_count',
+    'successor_action_digest','original_basis_positions','derived_model_basis_positions','actions_source','policy_identity',
+    'raw_capture','adjustments'}
+_ACTIONS_PAYLOAD={'schema_version','book_id','source_day','previous_day','valuation_time','events'}
+_ACTION_EVENT={'key','type','ex_date','value_model_number','basis_provenance','basis_provenance_evidence',
+    'frame_before','frame_after','raw_close_model_number','eligible_quantity_exact'}
+_EVENT_KEY={'portfolio_id','strategy_id','strategy_name','date','symbol','portfolio_type'}
+_INSTRUMENT={'symbol','asset_type','reference','mark','cost_evidence','cost_parameters'}
+_QUOTE={'source_id','source_digest','date','price_frame_id','price_model_number'}
+_HEX64=re.compile(r'[0-9a-f]{64}\Z')
+_MODEL_NUMBER=re.compile(r'-?(0|[1-9][0-9]*)(\.[0-9]+)?([eE][+-]?[0-9]+)?\Z')
+_CONTINUATION_FAILURES=_FAILURES+(OverflowError,)
+_LOADED_ROWS={'finalization_market','prior_decision','binding','actions_row'}
+_DECIMAL_SCALE=100000000
+_INT64=(-(1<<63),(1<<63)-1)
+
+
+def _text(value):
+    """Non-empty text of at most 4096 UTF-8 BYTES (native ``text()``); a lone surrogate is refused, not raised."""
+    _need(type(value) is str and 0<len(value.encode('utf-8'))<=4096)
+    return value
+
+
+def _eq(left,right):
+    """JSON equality as nlohmann has it: a boolean equals only a boolean, numbers compare numerically."""
+    if type(left) is bool or type(right) is bool:return type(left) is type(right) and left==right
+    if type(left) is dict:return type(right) is dict and left.keys()==right.keys() and all(_eq(left[name],right[name]) for name in left)
+    if type(left) is list:return type(right) is list and len(left)==len(right) and all(_eq(a,b) for a,b in zip(left,right))
+    if type(left) in (int,float):return type(right) in (int,float) and left==right
+    return type(left) is type(right) and left==right
+
+
+def _digest_hex(value):_need(type(_text(value)) is str and _HEX64.match(value) is not None)
+
+
+def _sealed(row):
+    _need(type(row) is dict);_digest_hex(row['content_digest']);_need(row['content_digest']==_hash(row['payload']))
+
+
+def _metadata_same(a,b):
+    for name in ('producer_id','policy_version'):_need(_text(a[name])==_text(b[name]))
+
+
+def _pg_timestamp(value):
+    """A timestamptz as ``to_jsonb`` writes it in a UTC session (trailing fraction zeros dropped)."""
+    _need(value.tzinfo is not None and value.utcoffset() is not None);value=value.astimezone(timezone.utc)
+    fraction=('.'+format(value.microsecond,'06d').rstrip('0')) if value.microsecond else ''
+    return value.strftime('%Y-%m-%dT%H:%M:%S')+fraction+'+00:00'
+
+
+def _jsonb(value,depth=0):
+    """The to_jsonb image of a row the way the native validator receives it (UUID/date/datetime as text)."""
+    _need(depth<=40)
+    if type(value) is dict:
+        _need(all(type(name) is str for name in value));return {name:_jsonb(item,depth+1) for name,item in value.items()}
+    if type(value) is list:return [_jsonb(item,depth+1) for item in value]
+    if type(value) is UUID:return str(value)
+    if type(value) is datetime:return _pg_timestamp(value)
+    if type(value) is date:return value.isoformat()
+    return value
+
+
+def _model_number(value):
+    """A positive finite IEEE double from a model-number string (native ``price()``/``number()``, n>0)."""
+    _text(value);_need(len(value)<=64 and _MODEL_NUMBER.match(value) is not None)
+    number=float(value);_need(math.isfinite(number) and number>0)
+    return number
+
+
+def _decimal8(value):
+    """C++ ``Decimal(double)`` as the native ``checked()``: raw int64 of value*1e8 rounded half away from zero."""
+    scaled=value*100000000.0+(0.5 if value>=0 else -0.5)
+    _need(math.isfinite(scaled) and _INT64[0]<=scaled<=_INT64[1])
+    _need(not(value>float(_INT64[1])/_DECIMAL_SCALE or value<float(_INT64[0])/_DECIMAL_SCALE))
+    return int(scaled)
+
+
+def _decimal8_double(raw):return float(raw)/_DECIMAL_SCALE
+
+
+def _decimal8_text(raw):
+    """C++ ``Decimal::to_string``: no exponent, fraction without trailing zeros, no '.' for whole values."""
+    magnitude=-raw if raw<0 else raw;whole,fraction=divmod(magnitude,_DECIMAL_SCALE)
+    result=('-' if raw<0 else '')+str(whole)
+    if fraction:
+        digits=format(fraction,'08d').rstrip('0')
+        if digits:result+='.'+digits
+    return result
+
+
+def _namespace(identity):
+    """The source-id namespace of a quote: the text before the last '/'."""
+    _text(identity);slash=identity.rfind('/');_need(slash>0)
+    return identity[:slash]
+
+
+def _instruments(payload):
+    rows=payload['instruments'];_need(type(rows) is list and len(rows)<=4096);result={}
+    for row in rows:
+        _need(type(row) is dict and set(row)==_INSTRUMENT and row['asset_type']=='EQUITY')
+        for field in ('reference','mark'):
+            quote=row[field];_need(type(quote) is dict and set(quote)==_QUOTE)
+            _text(quote['source_id']);_digest_hex(quote['source_digest']);_need(_eq(quote['date'],payload['previous_day']))
+            _text(quote['price_frame_id']);_model_number(quote['price_model_number'])
+        _need(row['reference']['price_frame_id']==row['mark']['price_frame_id'])
+        cost=row['cost_evidence'];_need(type(cost) is dict and 'date' in cost and _eq(cost['date'],payload['previous_day']))
+        symbol=_text(row['symbol']);_need(symbol not in result);result[symbol]=row
+    return result
+
+
+_INSTANT=re.compile(r'([0-9]{4})-([0-9]{2})-([0-9]{2})[T ]([0-9]{2}):([0-9]{2}):([0-9]{2})(?:\.([0-9]{1,6}))?(Z|[+-][0-9]{2}(?::?[0-9]{2})?)\Z')
+
+
+def _instant(value):
+    """An ISO-8601 instant in microseconds since the epoch (native ``instant()``): offsets Z, +HH, +HHMM, +HH:MM.
+
+    A row captured under another session time zone spells the same instant with another offset.
+    """
+    _text(value);found=_INSTANT.match(value);_need(found is not None)
+    year,month,day,hour,minute,second,fraction,zone=found.groups()
+    _need(int(hour)<24 and int(minute)<60 and int(second)<60)
+    days=(date(int(year),int(month),int(day))-date(1970,1,1)).days
+    micros=((days*24+int(hour))*60+int(minute))*60*1000000+int(second)*1000000+int((fraction or '').ljust(6,'0'))
+    if zone!='Z':
+        sign=-1 if zone[0]=='-' else 1;hours=int(zone[1:3]);minutes=int(zone[-2:]) if len(zone)>3 else 0
+        _need(hours<24 and minutes<60);micros-=sign*(hours*60+minutes)*60*1000000
+    return micros
+
+
+def _whole_row_equal(actual,captured):
+    """``act==applied``: the WHOLE row, digest included; ``created_at`` is compared as an instant."""
+    _need(type(actual) is dict and type(captured) is dict and len(actual)==len(captured))
+    for name,value in captured.items():
+        _need(name in actual)
+        if name=='created_at':_need(_instant(actual[name])==_instant(value))
+        else:_need(_eq(actual[name],value))
+
+
+def _restated(price_text,steps):
+    """equity_model_action_frame.cpp:80 with the mark in the basis position; returns the Decimal text.
+
+    The mark is read as a double; the quotient of every step is screened to Decimal (1e-8) before the next.
+    """
+    current=_model_number(price_text);restated=None
+    for event in steps:
+        dividend=event['type']=='DIVIDEND';value=_model_number(event['value_model_number'])
+        if dividend:
+            close=_model_number(event['raw_close_model_number']);_text(event['eligible_quantity_exact'])
+            factor=1+value/close
+        else:
+            _need(value!=1 and event['raw_close_model_number'] is None and event['eligible_quantity_exact'] is None)
+            factor=value
+        _need(math.isfinite(factor) and factor>0)
+        restated=_decimal8(current/factor);_need(restated>0);current=_decimal8_double(restated)
+    return _decimal8_text(restated)
+
+
+def _prove_continuation(inputs):
+    _need(type(inputs) is dict and set(inputs)==_CONTINUATION_INPUTS)
+    names=('decision','prior_decision','finalization_market','input_market','finalization','anchor','binding','actions_row')
+    for name in names:
+        _need(type(inputs[name]) is dict)
+        # PG ``to_jsonb(row)::text`` spells ', ' and ': '; the native wrapper refuses a LOADED row (M, S, binding, actions)
+        # above 2 MiB of that text (qt_equity_prior_continuation_db.cpp:11), the pure validator any row above 8 MiB.
+        loaded=name in _LOADED_ROWS
+        size=len(json.dumps(_jsonb(inputs[name]),separators=(', ',': ') if loaded else (',',':'),ensure_ascii=False).encode('utf-8'))
+        _need(size<=(2 if loaded else 8)*1024*1024)
+    d,s,m,a,f,anchor,b,act=(_jsonb(inputs[name]) for name in names)
+    candidate_list=inputs['candidate_action_sources'];_need(type(candidate_list) is list and len(candidate_list)<=4096)
+    book,day,publication=_text(d['book_id']),_text(d['source_day']),_text(d['model_publication_id']);_text(d['decision_id'])
+    # Same market is the unchanged old path, never a continuation.
+    _text(m['source_id']);_text(a['source_id']);_need(not _eq(m['source_id'],a['source_id']))
+    for row in (m,a,f,anchor,act):_sealed(row)
+    mp,ap=m['payload'],a['payload'];_shape(mp,_MARKET_PAYLOAD);_shape(ap,_MARKET_PAYLOAD)
+    _need(mp['schema_version']==FINALIZATION_MARKET_SCHEMA and m['model_publication_id'] is None and mp['model_publication_id'] is None)
+    _need(ap['schema_version']=='qt-equity-accounting-market/v1' and a['model_publication_id']==publication
+          and ap['model_publication_id']==publication)
+    # (b) A equals M on every valuation field, policy revision and metadata; only the model differs.
+    for name in ('calculation_version','book_id','source_day','previous_day','valuation_time','day_mode','currency','cost_config'):
+        _need(_eq(ap[name],mp[name]))
+    for name in ('book_id','source_day'):_need(_eq(m[name],mp[name]) and _eq(a[name],ap[name]))
+    _need(ap['book_id']==book and ap['source_day']==day);_text(m['source_version']);_text(a['source_version'])
+    revision=a['policy_revision'];_need(type(revision) is int and revision>0 and _eq(m['policy_revision'],revision))
+    _metadata_same(a,m)
+    # F finalized this S decision against M, and the anchor is F's derived v2 anchor.
+    fid=_text(f['finalization_id']);fp=f['payload'];_need(type(fp) is dict)
+    _need(f['market_source_id']==m['source_id'] and fp['market_source_id']==m['source_id']
+          and fp['market_source_digest']==m['content_digest'])
+    _need(_eq(fp['actions_source_id'],mp['actions_source_id']) and _eq(fp['actions_source_digest'],mp['actions_source_digest']))
+    _need(_eq(fp['finalization_id'],fid) and _eq(fp['decision_id'],f['decision_id']) and f['source_version']=='qt-finalization/'+fid)
+    _need(_eq(f['decision_id'],s['decision_id']) and _eq(s['book_id'],book) and _text(s['source_day'])<day
+          and len(_text(s['model_publication_id']))>0)
+    _need(_eq(f['book_id'],book) and _eq(f['source_day'],s['source_day']) and _eq(f['valuation_day'],day)
+          and _eq(ap['previous_day'],f['source_day']))
+    _need(_eq(f['policy_revision'],a['policy_revision']));_metadata_same(f,a)
+    np=anchor['payload']
+    _need(anchor['source_id']=='qt-finalization/'+fid and _eq(anchor['source_version'],anchor['source_id'])
+          and _eq(anchor['book_id'],book) and _eq(anchor['source_day'],f['source_day']));_metadata_same(anchor,f)
+    _shape(np,_ANCHOR_PAYLOAD)
+    _need(np['schema_version']=='qt-equity-finalized-accounting/v2' and _eq(np['book_id'],book)
+          and _eq(np['source_day'],f['source_day']) and _eq(np['currency'],ap['currency']))
+    _need(_eq(np['finalization_id'],fid) and _eq(np['finalization_digest'],f['content_digest'])
+          and _eq(np['policy_revision'],f['policy_revision']))
+    basis=np['previous_positions'];_need(type(basis) is list and len(basis)<=4096);held=set()
+    for position in basis:
+        key=position['key'];_need(key['portfolio_id']==book);held.add(_text(key['symbol']))
+    # (a) P2's binding: this decision's model, this finalization and its anchor, and the anchor's basis.
+    _shape(b,_BINDING)
+    _need(b['publication_id']==publication and b['book_id']==book and b['source_day']==day and b['strategy_id']==_ENGINE)
+    _need(_eq(b['decision_id'],s['decision_id']) and _eq(b['finalization_id'],fid) and _eq(b['finalization_digest'],f['content_digest']))
+    _need(_eq(b['finalization_source_id'],anchor['source_id']) and _eq(b['finalization_source_digest'],anchor['content_digest']))
+    rr=b['replay_reference'];_digest_hex(b['replay_reference_digest']);_need(type(rr) is dict and _hash(rr)==b['replay_reference_digest'])
+    v2=rr.get('schema_version')=='qt-equity-model-prior/v2'
+    _shape(rr,_REPLAY_V2 if v2 else _REPLAY_V1)
+    _need(rr['schema_version']==('qt-equity-model-prior/v2' if v2 else 'qt-equity-model-prior/v1')
+          and rr['mode']=='verified_desk_prior'
+          and rr['action_admission']==('proved_action_adjusted_prior' if v2 else 'action_free_only'))
+    _need(_eq(rr['book_id'],book) and _eq(rr['source_day'],f['source_day']) and _eq(rr['valuation_day'],day)
+          and _eq(rr['decision_id'],s['decision_id']))
+    _need(_eq(rr['finalization_id'],fid) and _eq(rr['finalization_digest'],f['content_digest'])
+          and _eq(rr['finalization_source_id'],anchor['source_id']) and _eq(rr['finalization_source_digest'],anchor['content_digest']))
+    _need(_eq(rr['model_publication_id'],s['model_publication_id']) and _eq(rr['basis_positions'],basis))
+    applied=None
+    if v2:
+        frame=rr['action_frame'];_digest_hex(rr['action_frame_digest']);_need(type(frame) is dict and _hash(frame)==rr['action_frame_digest'])
+        _shape(frame,_ACTION_FRAME)
+        _need(frame['schema_version']=='qt-equity-model-action-frame/v1' and _eq(frame['original_basis_positions'],basis))
+        _need(_eq(frame['owner'],{'portfolio_id':book,'strategy_id':_ENGINE,'strategy_name':_OWNER,
+                                  'source_day':f['source_day'],'valuation_day':day}))
+        applied=frame['actions_source'];_need(type(applied) is dict);applied_events=applied['payload']['events']
+        _need(type(applied_events) is list)
+        _need(frame['successor_action_digest']==_hash(applied_events) and type(frame['successor_action_count']) is int
+              and frame['successor_action_count']==len(applied_events))
+        _need(_eq(b['actions_source_id'],applied['source_id']) and _eq(b['actions_source_digest'],applied['content_digest']))
+    else:_need(b['actions_source_id'] is None and b['actions_source_digest'] is None)
+    # (c) A's actions are exactly the row the MODEL applied, and no other candidate D action row exists.
+    ep=act['payload']
+    _need(_eq(act['source_id'],ap['actions_source_id']) and _eq(act['content_digest'],ap['actions_source_digest'])
+          and act['purpose']=='actions' and _eq(act['source_version'],act['source_id']))
+    _need(_eq(act['book_id'],book) and _eq(act['source_day'],day) and _eq(act['policy_revision'],a['policy_revision']));_metadata_same(act,a)
+    _shape(ep,_ACTIONS_PAYLOAD);_need(ep['schema_version']=='qt-equity-actions-source/v1')
+    for name in ('book_id','source_day','previous_day','valuation_time'):_need(_eq(ep[name],ap[name]))
+    events=ep['events'];_need(type(events) is list and len(events)<=4096)
+    if v2:_whole_row_equal(act,applied)
+    if not events:_need(_eq(ap['actions_source_id'],mp['actions_source_id']) and _eq(ap['actions_source_digest'],mp['actions_source_digest']))
+    else:_need(v2)
+    candidates=set()
+    for item in candidate_list:
+        _need(type(item) is str and 0<len(item.encode('utf-8'))<=4096 and item not in candidates);candidates.add(item)
+    if not events:_need(not candidates)
+    else:_need(len(candidates)==1 and _eq(next(iter(candidates)),_text(act['source_id'])))
+    # (d) Instruments: M's marks, with action symbols restated by the MODEL's arithmetic.
+    before,after=_instruments(mp),_instruments(ap);actions={};previous=('',-1)
+    for event in events:
+        _shape(event,_ACTION_EVENT);key=event['key'];_shape(key,_EVENT_KEY)
+        _need(key['portfolio_id']==book and key['strategy_id']==_ENGINE and key['strategy_name']==_OWNER
+              and key['date']==day and key['portfolio_type']=='qt' and event['ex_date']==day)
+        symbol=_text(key['symbol']);_need(symbol in before and symbol in held)
+        kind=_text(event['type']);dividend=kind=='DIVIDEND';_need(dividend or kind in {'SPLIT','ADR_SPLIT'})
+        order=(symbol,1 if dividend else 0);_need(order>previous);previous=order
+        actions.setdefault(symbol,[]).append(event)
+    for symbol,row in before.items():
+        _need(symbol in after);expected=deepcopy(row)
+        if symbol in actions:
+            steps=actions[symbol];frame_id=_text(row['mark']['price_frame_id'])
+            for event in steps:
+                _need(event['frame_before']==frame_id);following=_text(event['frame_after']);_need(following!=frame_id);frame_id=following
+            for field in ('reference','mark'):
+                expected[field]['price_frame_id']=frame_id
+                expected[field]['price_model_number']=_restated(row[field]['price_model_number'],steps)
+        _need(_eq(after[symbol],expected))
+    # Spec default 6: an open on D, never a held owner, never an action symbol; priced by the same governed source
+    # as M: its quotes share M's single source-id namespace (dates and frame are checked by _instruments()).
+    # M's quote-id namespaces are consulted ONLY when an open exists (nothing constrains the spelling of a quote id
+    # otherwise): the opens then share M's single namespace.
+    opens=[symbol for symbol in after if symbol not in before]
+    if opens:
+        namespaces={_namespace(item[field]['source_id']) for item in before.values() for field in ('reference','mark')}
+        _need(len(namespaces)==1);governed=next(iter(namespaces))
+        for symbol in opens:
+            row=after[symbol];_need(symbol not in held and symbol not in actions)
+            for field in ('reference','mark'):_need(_namespace(row[field]['source_id'])==governed)
+
+
+def validate_qt_equity_verified_prior_continuation(inputs):
+    """Port of the native validator; ``inputs`` has exactly the nine operands of its input struct.
+
+    Returns None when the D input market A is a proven continuation of the finalization market M.
+    Any failure, including a malformed operand, is the single fixed code.
+    """
+    try:_prove_continuation(inputs)
+    except _CONTINUATION_FAILURES:raise ValueError(CONTINUATION_UNAVAILABLE) from None
+
+
+def qt_equity_prior_continuation_holds(inputs):
+    try:validate_qt_equity_verified_prior_continuation(inputs)
+    except ValueError:return False
+    return True
+
+
+def _continuation_inputs(preceding_node,node):
+    linked=preceding_node['accounting']['successor'];accounting=node['accounting'];sources=accounting['equity_sources']
+    return {'decision':node['decision'],'prior_decision':preceding_node['decision'],
+        'finalization_market':linked['market_row'],'input_market':sources['market_row'],
+        'finalization':linked['transition_row'],'anchor':accounting['finalization_row'],
+        'binding':sources['prior_binding'],'actions_row':sources['actions_row'],
+        'candidate_action_sources':sources['action_candidates']}
+
+
+def _market_continues(preceding,preceding_node,node):
+    """The D input market is F's market (the old path, byte for byte) or a proven continuation of it."""
+    source=node['accounting']['input_row']['payload']
+    if (preceding['market_source_id']==source['market_source_id']
+            and preceding['market_source_digest']==source['market_source_digest']):
+        return True
+    try:
+        inputs=_continuation_inputs(preceding_node,node);market=inputs['input_market']
+        # The accounting input must name exactly the market row the continuation was proved for.
+        return (str(market['source_id'])==str(source['market_source_id'])
+                and market['content_digest']==source['market_source_digest']
+                and qt_equity_prior_continuation_holds(inputs))
+    except _CONTINUATION_FAILURES:return False
