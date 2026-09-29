@@ -179,10 +179,43 @@ def test_http_accounting_report_and_separate_release(future_connected_db, tmp_pa
     monkeypatch.setattr(routes, '_publication_service', lambda: QtInvestorPublicationService(
         routes._read_service(), QtInvestorPublicationRepository(lambda: psycopg2.connect(dsn))))
     # Executes real HTTP fraction refusal, MODEL lineage, exact seven draft,
-    # bundled evaluator, confirmation, native processing and byte-for-byte
-    # report comparison with only current quantity cells changed.
+    # bundled evaluator, confirmation, native processing, and report rows
+    # independently checked against the saved position (not a pre-decision
+    # baseline plus a substituted cell -- see
+    # test_qt_connected_multiowner.py's assert_html_quantities_only callers).
+    #
+    # average_price_exact='100' (not the standalone flow's default '101'):
+    # this fixture's desk() is the accounting producer (`process`, monkeypatch
+    # above), not the standalone observe()/desk() pair. The producer's basis
+    # comes from qt_desk_cycle.cpp:107
+    # (`basis = row.at("average_price_exact").is_null() ? price :
+    # dec(row.at("average_price_exact"))`), where `row` is the confirmed
+    # decision's selection row. That row's average_price_exact is NOT read
+    # off the current 'qt' position at confirmation time -- it is carried
+    # from the model publication's seed through this chain: the draft row
+    # inherits `source.average_price_exact` from the provenance-resolved
+    # editable row (algolens qt_workflow_models.py:138-146), which is built
+    # from `provenance.seed_rows` (qt_workflow.py:132-137,
+    # `chosen.average_price_exact`), which is the model publication's
+    # `system_components` (qt_provenance.py:252), required equal to the
+    # current 'system' rows (qt_provenance.py:258-264). Here that publication
+    # is the FUTURE seed inserted by future_connected_db, quantity_exact='4',
+    # average_price_exact='100' (test_qt_connected_multiowner.py:367), and
+    # the current 'system' row it must match is the renamed base seed at
+    # average_price 100 (test_qt_a3_read_set_postgres.py:77-78). It is not
+    # from accounting_input()'s instruments[0].price_exact='101' (line 88
+    # here, only a fallback for a genuinely new, average_price_exact-null
+    # position) nor from its previous_positions[0].average_price_exact='100'
+    # (line 84 here, a *different*, prior-day row consumed only by the
+    # accounting producer's own admission checks) nor from the saved 'qt'
+    # position's own average_price column (which happens to also be '100'
+    # here, carried unchanged from the same base seed through connected_db's
+    # quantity update and future_connected_db's symbol-only rename to 'FUT',
+    # but is not what qt_desk_cycle.cpp:107 actually reads). Multiplier 50
+    # and market price 102 are unaffected by this producer swap (see the
+    # callee's own comment).
     flow.test_actual_future_fraction_refuses_without_writes_then_whole_seven_publishes_and_renders(
-        dsn, tmp_path, monkeypatch)
+        dsn, tmp_path, monkeypatch, average_price_exact='100')
     assert prior_evidence(dsn) == captured['prior_evidence']
     assert query(dsn, 'SELECT count(*) FROM trading.desk_run_results') == [(1,)]
     diagnostics = query(dsn, 'SELECT payload FROM trading.desk_run_results')[0][0]['desk_diagnostics']

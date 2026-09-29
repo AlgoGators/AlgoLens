@@ -139,7 +139,7 @@ def test_zero_inclusion_and_full_key_mapping_are_independently_required(monkeypa
     evidence = processed_fixture(monkeypatch)
     before, after = evidence['receipt']['publication_payload']['before_accounting'], evidence['receipt']['publication_payload']['after_accounting']
     before[0]['quantity_exact'] = '0'
-    assert reader().report_row_manifest(before, after, evidence['preview']['payload']['selection_rows']) is None
+    assert reader().report_row_manifest(before, after, evidence['preview']['payload']['selection_rows']) == qt_digest_v1({'component_keys': [before[0]['key']]})
     before[0]['quantity_exact'] = '1'
     assert reader().report_row_manifest(before, after, evidence['preview']['payload']['selection_rows']) == evidence['receipt']['row_manifest_digest']
     after[0]['key']['strategy_id'] = 'another-owner'
@@ -173,7 +173,7 @@ def test_closure_keeps_same_symbol_owners_and_unchanged_hidden_zero(monkeypatch)
     expected = qt_digest_v1({'component_keys': [row['key'] for row in before[:2]]})
     assert reader().report_row_manifest(before, after, selected) == expected
     after[-1]['quantity_exact'] = '1'
-    assert reader().report_row_manifest(before, after, selected) is None
+    assert reader().report_row_manifest(before, after, selected) == qt_digest_v1({'component_keys': [row['key'] for row in before]})
 
 
 def test_exact_closed_existing_row_allows_full_current_report_proof(monkeypatch):

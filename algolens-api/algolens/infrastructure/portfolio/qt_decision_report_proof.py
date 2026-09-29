@@ -53,9 +53,18 @@ def _prove_processed(evidence, *, recompute_client_factory=None, finalization_re
                  'strategy_names': owner['configured_owner_names'], 'portfolio_type':'qt','date':day}
     else:
         manifest = report_row_manifest(pub['before_accounting'], pub['after_accounting'], payload['selection_rows'])
-        first = next(iter(old))
-        scope = {'portfolio_id': book, 'strategy_id': first.strategy_id,
-                 'strategy_names': sorted({key.strategy_name for key in old}), 'portfolio_type': 'qt', 'date': day}
+        # Mirror the native processor (qt_desk_processor.cpp report(), ~line
+        # 321-326): scope ids and names come from before UNION after, never
+        # from `old` alone. A newly opened position -- no `before` row at
+        # all, or a new strategy_name -- must not hold the report back
+        # (F3/decision 2), so book and day are already the decision's own
+        # (`book`/`day` above, not derived from any row); only strategy_id
+        # and strategy_names are recomputed here, from the union.
+        ids = {key.strategy_id for key in old} | {key.strategy_id for key in new}
+        _require(len(ids) == 1)
+        scope = {'portfolio_id': book, 'strategy_id': next(iter(ids)),
+                 'strategy_names': sorted({key.strategy_name for key in old} | {key.strategy_name for key in new}),
+                 'portfolio_type': 'qt', 'date': day}
     _require(manifest is not None and r['report_eligibility_status'] == 'eligible' and not r['report_reason_codes'] and manifest == r['row_manifest_digest'])
     _require(pub['report_scope'] == scope)
 

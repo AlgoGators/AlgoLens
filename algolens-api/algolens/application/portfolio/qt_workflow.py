@@ -19,6 +19,7 @@ from algolens.domain.portfolio.qt_workflow_models import (
 
 from algolens.application.portfolio.qt_ports import (QtWorkflowRepositoryPort, QtEvidencePort,
     QtInputLoaderPort, QtEvaluatorPort, QtAuthorizationPort)
+from algolens.domain.portfolio.qt_instrument_type_resolution import registry_asset_class
 
 
 class QtWorkflowService:
@@ -49,7 +50,7 @@ class QtWorkflowService:
         accounts = tx.lock_authorities([actor_id])
         self._account_eligible(accounts, actor_id)
         registry_ids = tx.registry_ids_for_book()
-        tx.lock_registries(registry_ids)
+        registries = tx.lock_registries(registry_ids)
         tx.lock_books([book_id])
         day = tx.utc_source_day()
         tx.lock_mutable(source_day=day)
@@ -57,7 +58,11 @@ class QtWorkflowService:
         if facts["source_day"] != day.isoformat():
             raise QtWorkflowError("draft_stale", "QT source day changed during this request")
         self._authorized(facts, actor_id, registry_ids)
-        return day, facts
+        # Catalog first; only when it is silent, fall back PER KEY to that
+        # key's own registered strategy's declared asset class -- never
+        # unioned across the book's other strategies, never invented from a
+        # name, never a price table.
+        return day, facts, registry_asset_class(registries)
 
     @staticmethod
     def _account_eligible(accounts, actor_id):
@@ -105,12 +110,12 @@ class QtWorkflowService:
         return source, provenance
 
     def _context(self, tx, book_id: str, actor_id: int):
-        day, facts = self._locked_context(tx, book_id, actor_id)
+        day, facts, registry_kind = self._locked_context(tx, book_id, actor_id)
         source, provenance = self._source_context(tx, book_id, day, facts)
-        return day, facts, source, provenance
+        return day, facts, source, provenance, registry_kind
 
     @staticmethod
-    def _base_rows(tx, source, provenance):
+    def _base_rows(tx, source, provenance, registry_kind=None):
         overlay = {row.key: row for row in provenance.draft_overlay}
         def proposal_key(key):
             return QtKey(key.portfolio_id, key.strategy_id, key.strategy_name,
@@ -123,7 +128,7 @@ class QtWorkflowService:
         independent_saved = [key for key in saved_keys if QtKey(
             key.portfolio_id, key.strategy_id, key.strategy_name, key.date,
             key.symbol, "qt_proposal") not in proposal_keys]
-        types = tx.resolve_instrument_types((*proposal_keys, *independent_saved))
+        types = tx.resolve_instrument_types((*proposal_keys, *independent_saved), registry_kind)
         editable = {}
         positions = {proposal_key(row.key): row for row in provenance.seed_rows}
         positions.update(overlay)
@@ -210,8 +215,8 @@ class QtWorkflowService:
 
     def get_draft(self, book_id: str, actor_id: int) -> QtDraftResponse:
         with self.repository.transaction(book_id, actor_id) as tx:
-            day, _, source, provenance = self._context(tx, book_id, actor_id)
-            base, immutable = self._base_rows(tx, source, provenance)
+            day, _, source, provenance, registry_kind = self._context(tx, book_id, actor_id)
+            base, immutable = self._base_rows(tx, source, provenance, registry_kind)
             head = tx.get_draft_head(day)
             if head is None:
                 return self._response(book_id, day, provenance, (*base.values(), *immutable))
@@ -232,7 +237,7 @@ class QtWorkflowService:
         request_wire = request.to_wire()
         request_digest = qt_digest_v1(request_wire)
         with self.repository.transaction(book_id, actor_id) as tx:
-            day, facts = self._locked_context(tx, book_id, actor_id)
+            day, facts, registry_kind = self._locked_context(tx, book_id, actor_id)
             replay = tx.get_idempotent("save_draft", day.isoformat(), request.idempotency_key, request_digest)
             if replay is not None:
                 if replay.get("book_id") != book_id or replay.get("source_day") != day.isoformat():
@@ -250,7 +255,7 @@ class QtWorkflowService:
             if head is not None and (head["source_digest"] != provenance.observed_source_digest
                                      or head["provenance_digest"] != provenance.legacy_audit_chain_digest) and not successor:
                 raise QtWorkflowError("draft_stale", "A prior QT draft belongs to different source evidence")
-            base, immutable = self._base_rows(tx, source, provenance)
+            base, immutable = self._base_rows(tx, source, provenance, registry_kind)
             saved = self._stored_rows(head) if head and not successor else ()
             if head is not None and not successor and not self._immutable_matches(saved, immutable):
                 raise QtWorkflowError("draft_stale", "An independent saved QT component changed")
@@ -273,7 +278,7 @@ class QtWorkflowService:
                     raise QtWorkflowError("draft_identity_unresolved", "New QT component ownership is ambiguous")
             if not set(base).issubset(submitted):
                 raise QtWorkflowError("invalid_qt_key", "Complete QT editable selection is required")
-            kinds = tx.resolve_instrument_types(submitted)
+            kinds = tx.resolve_instrument_types(submitted, registry_kind)
             rows = parse_qt_selection(request_wire["selection_rows"], frozenset(submitted), kinds,
                                       source_rows=editable, immutable_rows=immutable)
             draft_id = str(uuid4())
@@ -307,14 +312,14 @@ class QtWorkflowService:
     def _engine_key(key):
         return QtKey(key.portfolio_id, key.strategy_id, key.strategy_name, key.date, key.symbol, "qt_proposal")
 
-    def _validate_catalog(self, tx, inputs, rows, facts):
+    def _validate_catalog(self, tx, inputs, rows, facts, registry_kind=None):
         expected = {self._engine_key(row.key): row for row in rows}
         if len(expected) != len(rows):
             raise QtWorkflowError("preview_unavailable", "QT engine identity is ambiguous")
         catalog = {QtKey.from_wire(item["key"]): item for item in inputs.instrument_catalog}
         if set(catalog) != set(expected):
             raise QtWorkflowError("preview_unavailable", "Governed catalog does not cover the selected book")
-        current_types = tx.resolve_instrument_types(expected)
+        current_types = tx.resolve_instrument_types(expected, registry_kind)
         for key, row in expected.items():
             item = catalog[key]
             owners = self._book_owners(facts, key.strategy_id, key.portfolio_id)
@@ -398,7 +403,7 @@ class QtWorkflowService:
         request_digest = qt_digest_v1(request.to_wire())
         book_id = request.book_id
         with self.repository.transaction(book_id, actor_id) as tx:
-            day, facts = self._locked_context(tx, book_id, actor_id)
+            day, facts, registry_kind = self._locked_context(tx, book_id, actor_id)
             scope = day.isoformat() + ":" + request.draft_id
             replay = tx.get_idempotent("create_preview", scope, request.idempotency_key, request_digest)
             if replay is not None:
@@ -414,7 +419,7 @@ class QtWorkflowService:
                     or head["provenance_digest"] != provenance.legacy_audit_chain_digest):
                 raise QtWorkflowError("draft_stale")
             rows = self._stored_rows(head)
-            base, immutable = self._base_rows(tx, source, provenance)
+            base, immutable = self._base_rows(tx, source, provenance, registry_kind)
             if not self._immutable_matches(rows, immutable): raise QtWorkflowError("draft_stale")
             diagnostic_rows = (*base.values(), *immutable)
             selected_digest = self._target_digest(rows)
@@ -444,7 +449,7 @@ class QtWorkflowService:
                     reasons.append("evaluator_not_configured")
                 else:
                     try:
-                        self._validate_catalog(tx, inputs, rows, facts)
+                        self._validate_catalog(tx, inputs, rows, facts, registry_kind)
                         client = self.evaluator.create_client(inputs)
                         selected_request = self._engine_request(rows, facts["saved_accounting"], head, inputs, read_set, "selected_book")
                         client.validate_request(selected_request)
@@ -501,7 +506,7 @@ class QtWorkflowService:
             tx.insert_idempotent("create_preview", scope, request.idempotency_key, request_digest, response.to_wire())
             return response
 
-    def _validate_preview_evidence(self, tx, preview, book_id, day, facts):
+    def _validate_preview_evidence(self, tx, preview, book_id, day, facts, registry_kind=None):
         try:
             payload = QtPreviewResponse.from_wire(preview["payload"]).to_wire()
             if (qt_digest_v1({key: value for key, value in payload.items() if key != "payload_digest"}) != preview["payload_digest"]
@@ -527,7 +532,7 @@ class QtWorkflowService:
             if qt_digest_v1({"selection_rows": payload["selection_rows"]}) != head["draft_digest"]:
                 raise QtWorkflowError("preview_mismatch")
             saved_rows = self._stored_rows(head)
-            base, immutable = self._base_rows(tx, source, provenance)
+            base, immutable = self._base_rows(tx, source, provenance, registry_kind)
             if (self._target_digest(saved_rows) != payload["selected_book_digest"]
                     or self._target_digest((*base.values(), *immutable)) != payload["optimizer_book_digest"]):
                 raise QtWorkflowError("preview_mismatch")
@@ -578,7 +583,8 @@ class QtWorkflowService:
         with self.repository.transaction(book_id, actor_id) as tx:
             self._account_eligible(tx.lock_authorities([actor_id]), actor_id)
             registry_ids = tx.registry_ids_for_book()
-            tx.lock_registries(registry_ids)
+            registries = tx.lock_registries(registry_ids)
+            registry_kind = registry_asset_class(registries)
             tx.lock_books([book_id])
             day = tx.utc_source_day()
             tx.lock_mutable(source_day=day, preview_ids=[preview_id])
@@ -597,7 +603,7 @@ class QtWorkflowService:
             if preview["state"] != "pending": raise QtWorkflowError("preview_consumed")
             if request.expected_digest != preview["payload_digest"]: raise QtWorkflowError("preview_mismatch")
             if preview["availability"] != "ready": raise QtWorkflowError("preview_unavailable")
-            payload, provenance, inputs, policy = self._validate_preview_evidence(tx, preview, book_id, day, facts)
+            payload, provenance, inputs, policy = self._validate_preview_evidence(tx, preview, book_id, day, facts, registry_kind)
             risk, costs, optimizer = (payload["evaluation"][name] for name in ("selected_risk", "selected_costs", "optimizer"))
             breaches = {entry["code"] for entry in risk["breaches"]}
             warnings = bool(breaches or any(stage["diagnostics"] for stage in (risk, costs, optimizer)))
@@ -652,7 +658,8 @@ class QtWorkflowService:
             accounts = tx.lock_authorities(users)
             self._account_eligible(accounts, actor_id)
             registry_ids = tx.registry_ids_for_book()
-            tx.lock_registries(registry_ids)
+            registries = tx.lock_registries(registry_ids)
+            registry_kind = registry_asset_class(registries)
             tx.lock_books([book_id])
             day = tx.utc_source_day()
             tx.lock_mutable(source_day=day, preview_ids=[route["preview_id"]],
@@ -686,7 +693,7 @@ class QtWorkflowService:
             self._authorized(facts, submitter, registry_ids)
             if preview["state"] != "pending_override" or preview["availability"] != "ready":
                 raise QtWorkflowError("preview_unavailable")
-            payload, provenance, inputs, policy = self._validate_preview_evidence(tx, preview, book_id, day, facts)
+            payload, provenance, inputs, policy = self._validate_preview_evidence(tx, preview, book_id, day, facts, registry_kind)
             expected_reference = {"schema_version": "qt-desk-decision/v1", "decision_id": str(decision["decision_id"]),
                 "preview_id": str(preview["preview_id"]), "book_id": book_id, "source_day": day.isoformat(),
                 "preview_payload_digest": preview["payload_digest"], "selected_book_digest": preview["selected_book_digest"],

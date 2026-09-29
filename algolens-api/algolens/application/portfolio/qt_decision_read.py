@@ -7,6 +7,7 @@ from algolens.application.portfolio.qt_workflow import QtWorkflowService
 from algolens.application.portfolio.qt_ports import (QtDecisionReadRepositoryPort, QtEvidencePort, QtInputLoaderPort, QtAuthorizationPort, QtDecisionReadQueriesPort)
 from algolens.domain.portfolio.qt_workflow_models import (SCHEMA_VERSION, QtKey, QtSelectionRow,
     QtProposalResponse, QtDecisionResponse)
+from algolens.domain.portfolio.qt_instrument_type_resolution import registry_asset_class
 
 
 
@@ -83,7 +84,7 @@ class QtDecisionReadService:
     def _read_context(self, tx, actor):
         accounts = tx.lock_authorities([actor])
         ids = tx.registry_ids_for_book()
-        tx.lock_registries(ids)
+        registries = tx.lock_registries(ids)
         tx.lock_books([tx.book_id])
         day = tx.utc_source_day()
         tx.lock_mutable(source_day=day)
@@ -95,11 +96,11 @@ class QtDecisionReadService:
         provenance = self.evidence.reconcile_source(tx.book_id, day, source['publications'], source['source_rows'],
             source['audits'], observed_saved_rows=source['saved_rows'], observed_system_rows=source['system_rows'],
             observed_saved_accounting=source['saved_accounting'], processed_publications=source['processed_publications'])
-        return day, facts, source, provenance
+        return day, facts, source, provenance, registries
 
     def get_proposal(self, book_id, actor_id):
         with self.repository.transaction(book_id, actor_id) as tx:
-            day, facts, source, provenance = self._read_context(tx, actor_id)
+            day, facts, source, provenance, registries = self._read_context(tx, actor_id)
             cap = facts['capability']
             available = cap['status'] == 'present' and type(cap.get('version')) is int and cap['version'] > 0
             if available and cap['enabled']: available = self._enabled_prerequisites(tx)
@@ -117,7 +118,11 @@ class QtDecisionReadService:
             seedkeys = [QtKey(row.key.portfolio_id, row.key.strategy_id, row.key.strategy_name,
                                row.key.date, row.key.symbol, 'qt_proposal') for row in provenance.seed_rows] if verified else []
             keys = [*seedkeys, *(QtKey.from_wire(row['key']) for row in source['saved_rows'])]
-            types = tx.resolve_instrument_types(keys)
+            # Catalog first; only when it is silent, fall back PER KEY to
+            # that key's own registered strategy's declared asset class --
+            # never unioned across the book's other strategies, never
+            # invented from a name, never a price table.
+            types = tx.resolve_instrument_types(keys, registry_asset_class(registries))
             for key, row in zip(seedkeys, provenance.seed_rows):
                 seeds.append(QtSelectionRow(key, row.quantity_exact, 'preserved_source',
                     row.average_price_exact, types[key], True, 'verified_model_seed').to_wire())
@@ -144,11 +149,14 @@ class QtDecisionReadService:
 
     def get_draft(self, book_id, actor_id):
         with self.repository.transaction(book_id, actor_id) as tx:
-            day, facts, source, provenance = self._read_context(tx, actor_id)
+            day, facts, source, provenance, registries = self._read_context(tx, actor_id)
             head = tx.get_draft_head(day)
             if provenance.status != 'ready' or not facts['capability'].get('enabled'):
                 return QtWorkflowService._response(book_id, day, provenance, (), head=head, state='provenance_unresolved')
-            base, immutable = QtWorkflowService._base_rows(tx, source, provenance)
+            # GET /draft is routed here (algolens/adapters/http/qt_workflow.py),
+            # not through QtWorkflowService.get_draft -- same registry fallback
+            # as get_proposal, or this route alone stays catalog-only.
+            base, immutable = QtWorkflowService._base_rows(tx, source, provenance, registry_asset_class(registries))
             QtWorkflowService._preview_access(facts, {'selection_rows': [row.to_wire() for row in base.values()]})
             if head is None: return QtWorkflowService._response(book_id, day, provenance, (*base.values(), *immutable))
             rows = QtWorkflowService._stored_rows(head)
@@ -176,7 +184,7 @@ class QtDecisionReadService:
         if route is not None:
             return self._read_decision(route, actor_id, latest_scope=(book_id, requested_day, explicit))
         with self.repository.transaction(book_id, actor_id) as tx:
-            day, _, _, _ = self._read_context(tx, actor_id)
+            day, _, _, _, _ = self._read_context(tx, actor_id)
             if not explicit and requested_day != day: raise QtWorkflowError('authorization_changed', retryable=True)
             if self.queries.latest_decision_id(tx, book_id, requested_day) is not None: raise QtWorkflowError('authorization_changed', retryable=True)
             return QtBookDecisionView(book_id, requested_day)
@@ -196,7 +204,7 @@ class QtDecisionReadService:
             if release_action is not None:
                 release_action.authorize(tx)
             ids = tx.registry_ids_for_book()
-            tx.lock_registries(ids)
+            registries = tx.lock_registries(ids)
             tx.lock_books([book])
             day = tx.utc_source_day()
             tx.lock_mutable(source_day=day, preview_ids=[d['preview_id']], decision_ids=[decision_id],
@@ -249,7 +257,13 @@ class QtDecisionReadService:
                     person = self.authorization.resolve(actor_id, tx)
                     QtWorkflowService._authorized(facts, submitter, ids)
                     QtWorkflowService._account_eligible(accounts, submitter)
-                    _, _, _, policy = self.workflow._validate_preview_evidence(tx, preview, book, day, facts)
+                    # Same registry fallback as get_proposal/get_draft: for an
+                    # equity book the catalog alone raises
+                    # draft_identity_unresolved, which the except below
+                    # swallows into can_approve staying False, so the
+                    # approve button never appears (F2).
+                    _, _, _, policy = self.workflow._validate_preview_evidence(
+                        tx, preview, book, day, facts, registry_asset_class(registries))
                     can_approve = (self._enabled_prerequisites(tx) and preview['state'] == 'pending_override' and
                         context['request']['required_approvals'] == 2 and counted_current and
                         context['request']['eligibility_version'] == policy['version']) and not any(

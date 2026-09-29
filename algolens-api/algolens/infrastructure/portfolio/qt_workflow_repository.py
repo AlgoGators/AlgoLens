@@ -22,6 +22,7 @@ from algolens.infrastructure.portfolio.book_lock import acquire_qt_book_locks
 from algolens.infrastructure.portfolio.qt_provenance import reconcile_qt_source
 from algolens.infrastructure.portfolio.instrument_catalog import _lookup, _ROLL_SYMBOL
 from algolens.domain.portfolio.position_edit import PositionValidationError
+from algolens.domain.portfolio.qt_instrument_type_resolution import resolve_asset_type
 
 
 _INSERT_COLUMNS = {
@@ -123,7 +124,7 @@ class QtTransaction:
             if not isinstance(registry_id, str) or not registry_id:
                 raise ValueError("invalid_qt_registry_id")
             self.cursor.execute(
-                "SELECT id, portfolio_id, is_active FROM trading.strategy_registry "
+                "SELECT id, strategy_type, portfolio_id, is_active, lifecycle, asset_class FROM trading.strategy_registry "
                 "WHERE id = %s FOR UPDATE",
                 (registry_id,),
             )
@@ -566,8 +567,32 @@ class QtTransaction:
         if self.cursor.fetchone() is None:
             raise QtWorkflowError("draft_stale")
 
-    def resolve_instrument_types(self, keys: Iterable[object]) -> dict:
+    def resolve_instrument_types(self, keys: Iterable[object], registry_asset_class: Mapping[str, str] | None = None) -> dict:
+        """Resolve each key's asset type from the catalog, falling back --
+        PER KEY, from that key's own strategy's registry row only -- to
+        `registry_asset_class` only when the catalog has no row.
+
+        `registry_asset_class` is the mapping domain.portfolio
+        .qt_instrument_type_resolution.registry_asset_class returns: a
+        registered strategy's strategy_type (== a key's strategy_id; NOT the
+        registry row's own 'id' primary key) to that strategy's single
+        declared asset_class, present only when that strategy_type has
+        exactly one reachable registry row (any is_active/lifecycle --
+        `_validate_catalog`'s own type-gate rule, qt_workflow.py:324-326;
+        active+live is a separate, editable-row-only ownership concern
+        `_preview_access`/`save_draft`/`_validate_catalog` enforce on their
+        own) declaring a recognized class. A key is looked up by its own
+        strategy_id (`registry_asset_class.get(key.strategy_id)`); a key
+        whose strategy_id has no entry -- a NULL or unrecognized class, zero
+        or several reachable rows (even several agreeing ones -- ownership
+        identity itself must be unambiguous first), or a missing/unknown
+        strategy_type for THAT strategy -- gets no fallback, regardless of
+        what any other strategy in the same book declares. `registry_asset_class`
+        is optional, and None (or anything that is not a mapping) means no
+        fallback for every key, so existing callers that do not pass it keep
+        their exact prior behavior."""
         self._require_mutable()
+        fallback = registry_asset_class if isinstance(registry_asset_class, Mapping) else {}
         resolved = {}
         for key in sorted(set(keys)):
             try:
@@ -576,8 +601,7 @@ class QtTransaction:
                     roll = _ROLL_SYMBOL.fullmatch(key.symbol)
                     if roll is not None and _lookup(self.cursor, roll.group(1)) == "FUTURE":
                         kind = "FUTURE"
-                if kind is None:
-                    raise PositionValidationError("instrument_type_unavailable", "Instrument type unavailable")
+                kind = resolve_asset_type(kind, fallback.get(key.strategy_id))
             except (PositionValidationError, PostgresError):
                 raise QtWorkflowError("draft_identity_unresolved", "QT instrument type is unavailable") from None
             resolved[key] = kind

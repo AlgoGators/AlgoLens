@@ -8,8 +8,6 @@ from datetime import timedelta
 from decimal import Decimal
 from hashlib import sha256
 from html.parser import HTMLParser
-import csv
-import io
 import json
 import os
 import subprocess
@@ -27,7 +25,9 @@ from algolens.infrastructure.portfolio.qt_workflow_repository import QtWorkflowR
 from tests.integration.test_qt_a3_read_set_postgres import a3_db, PUBLICATION, REVISION
 from tests.integration.test_qt_a8_http_postgres import http_harness
 from tests.integration.test_qt_preview_evaluator import preview_db, authority, query
-from tests.integration.test_qt_connected_workflow import connected_db, desk, REPORT, DELIVERY_GUARD, OBSERVATION
+from tests.integration.test_qt_connected_workflow import (
+    assert_positions_rows_match_saved, connected_db, desk, REPORT, DELIVERY_GUARD, OBSERVATION,
+)
 from tests.qt_native_evaluator import native_evaluator_configuration
 
 
@@ -290,29 +290,6 @@ def report_multiowner(preview, directory):
                           env={**os.environ, 'LD_PRELOAD': str(DELIVERY_GUARD)})
 
 
-def assert_csv_quantities_only(before, after, old, selected):
-    baseline = list(csv.reader(io.StringIO(before)))
-    projected = list(csv.reader(io.StringIO(after)))
-    expected = deepcopy(baseline)
-    seen = set()
-    for row in expected:
-        if len(row) < 3 or (row[0], row[1]) not in old:
-            continue
-        key = (row[0], row[1])
-        assert key not in seen and row[2] == old[key]
-        seen.add(key)
-        row[2] = selected[key]
-    assert seen == set(old) == set(selected) and projected == expected
-    # Retain raw quoting, line endings, headers and every non-quantity byte.
-    expected_bytes = before
-    for key in old:
-        prefix = ','.join(key) + ','
-        old_cell = prefix + old[key] + ','
-        assert expected_bytes.count(old_cell) == 1
-        expected_bytes = expected_bytes.replace(old_cell, prefix + selected[key] + ',', 1)
-    assert after == expected_bytes
-
-
 @pytest.mark.parametrize('quantities', [
     {'ONE': '5', 'TWO': '1'}, {'ONE': '5', 'TWO': '-5'}, {'ONE': '2.5', 'TWO': '-1.25'},
 ], ids=['split-4-2-to-5-1', 'same-symbol-net-zero-5-minus5', 'equity-fractions'])
@@ -356,10 +333,17 @@ def test_actual_multiowner_decision_keeps_complete_keys_and_only_report_quantiti
     output = json.loads(rendered.stdout)
     assert output['delivery_guard_loaded'] is True and output['delivery_calls'] == 0
     assert output['quantities'] == {'ONE': {'SYN': quantities['ONE']}, 'TWO': {'SYN': quantities['TWO']}, 'HELD': {'IMM': '8'}}
-    old = {('One', 'SYN'): '4', ('Two', 'SYN'): '2', ('Held', 'IMM'): '8'}
-    selected = {('One', 'SYN'): quantities['ONE'], ('Two', 'SYN'): quantities['TWO'], ('Held', 'IMM'): '8'}
-    assert_html_quantities_only(output['baseline_html'], output['report_html'], old, selected)
-    assert_csv_quantities_only(output['baseline_csv'], output['report_csv'], old, selected)
+    # ONE and TWO's saved average_price is 101 after desk processing
+    # (observe_multiowner's fill); HELD/IMM is carried, unchanged, at 25.
+    # SYN and IMM are both equities: multiplier 1. Market price is the
+    # probe's fixed 102 for every symbol (qt_processed_report_probe.cpp:
+    # 79,81,84).
+    assert_positions_rows_match_saved(output['report_html'], output['report_csv'],
+        output['baseline_html'], output['baseline_csv'], [
+            ('One', 'SYN', quantities['ONE'], '101', '1', '102'),
+            ('Two', 'SYN', quantities['TWO'], '101', '1', '102'),
+            ('Held', 'IMM', '8', '25', '1', '102'),
+        ])
     print('QT_MULTIOWNER_REPORT_EVIDENCE=' + json.dumps({'selected_quantities_exact': quantities,
           'source_day': preview['source_day'], **output}, sort_keys=True, separators=(',', ':')), flush=True)
 
@@ -430,7 +414,14 @@ def full_future_refusal_state(dsn):
 
 
 def test_actual_future_fraction_refuses_without_writes_then_whole_seven_publishes_and_renders(
-        future_connected_db, tmp_path, monkeypatch):
+        future_connected_db, tmp_path, monkeypatch, average_price_exact='101'):
+    # average_price_exact is the true saved basis for FUT after this flow's
+    # desk processing, which differs by which producer writes it. The
+    # standalone flow (this function's default) writes it via observe()'s
+    # synthetic fill (average_price_exact='101', test_qt_connected_workflow.py
+    # :95). test_qt_accounting_connected.py wraps this same function with its
+    # own accounting-producer desk() and observe() and must pass its own
+    # actual basis -- see that module's call site for the derivation.
     from tests.integration.test_qt_connected_workflow import observe, report
     dsn = future_connected_db
     config = native_evaluator_configuration()
@@ -495,7 +486,14 @@ def test_actual_future_fraction_refuses_without_writes_then_whole_seven_publishe
     output = json.loads(rendered.stdout)
     assert output['delivery_guard_loaded'] is True and output['delivery_calls'] == 0
     assert output['quantities'] == {'ONE': {'FUT': '7'}}
-    assert_html_quantities_only(output['baseline_html'], output['report_html'], {('One', 'FUT'): '5'}, {('One', 'FUT'): '7'})
-    assert_csv_quantities_only(output['baseline_csv'], output['report_csv'], {('One', 'FUT'): '5'}, {('One', 'FUT'): '7'})
+    # average_price_exact (default '101', overridden by
+    # test_qt_accounting_connected.py) is the true saved basis for this
+    # fixture -- see the function-level comment above. FUT's multiplier is 50
+    # (explicit_future_authority's price_multiplier, this file:390) and the
+    # probe's market price is the fixed 102 (qt_processed_report_probe.cpp:
+    # 79,81,84).
+    assert_positions_rows_match_saved(output['report_html'], output['report_csv'],
+        output['baseline_html'], output['baseline_csv'],
+        [('One', 'FUT', '7', average_price_exact, '50', '102')])
     print('QT_FUTURES_REPORT_EVIDENCE=' + json.dumps({'selected_quantity_exact': '7',
           'source_day': preview['source_day'], **output}, sort_keys=True, separators=(',', ':')), flush=True)

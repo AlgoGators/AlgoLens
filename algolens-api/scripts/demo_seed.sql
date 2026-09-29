@@ -45,7 +45,8 @@ CREATE TABLE trading.strategy_registry (
     lifecycle             TEXT NOT NULL DEFAULT 'live',
     sort_order            INT  NOT NULL DEFAULT 0,
     mock_capital          NUMERIC,
-    incubation_started_at TIMESTAMPTZ
+    incubation_started_at TIMESTAMPTZ,
+    asset_class           TEXT CHECK (asset_class IS NULL OR asset_class IN ('EQUITY', 'FUTURE'))
 );
 
 CREATE TABLE trading.equity_curve (
@@ -466,6 +467,17 @@ VALUES
   ('meanreversion', 'LIVE_MEAN_REVERSION', 'CONSERVATIVE_PORTFOLIO',
    'Mean Reversion', 'Short-horizon reversal on index futures', 100000,
    ARRAY['Quant Team'], TRUE, 'incubating', 3);
+
+-- asset_class: every demo strategy trades futures (trend following, carry,
+-- breakout, and Mean Reversion, which reverses index futures such as
+-- ES.v.0 -- see the trading.positions seed below). None of the four is an
+-- equity strategy, so none is set to 'EQUITY'; this seed carries no
+-- LIVE_EQUITY_MEAN_REVERSION row to classify (that book's registry entry is
+-- not part of the local demo). Set as a separate UPDATE, not inline in the
+-- VALUES list above, so a future column reorder there cannot silently shift
+-- this value onto the wrong row.
+UPDATE trading.strategy_registry SET asset_class = 'FUTURE'
+  WHERE id IN ('trendfollowing', 'carry', 'breakout', 'meanreversion');
 
 UPDATE trading.strategy_registry
    SET mock_capital = 100000,

@@ -94,7 +94,7 @@ class DraftTransaction:
         return {"source_day": date.fromisoformat(DAY), "publications": [], "audits": [],
                 "source_rows": [], "saved_rows": list(self.saved_rows), "system_rows": []}
 
-    def resolve_instrument_types(self, keys):
+    def resolve_instrument_types(self, keys, registry_asset_class=None):
         return {item: "FUTURE" if item.symbol == "ES" else "EQUITY" for item in keys}
 
     def get_draft_head(self, day):

@@ -153,7 +153,7 @@ STRATEGY_REGISTRY = TableContract(
     reads=(
         "id", "strategy_type", "portfolio_id", "name", "description",
         "initial_equity", "managers", "is_active", "lifecycle", "sort_order",
-        "mock_capital", "incubation_started_at", "updated_at",
+        "mock_capital", "incubation_started_at", "updated_at", "asset_class",
     ),
     writes=("portfolio_id", "lifecycle", "mock_capital", "incubation_started_at", "updated_at"),
     notes=(

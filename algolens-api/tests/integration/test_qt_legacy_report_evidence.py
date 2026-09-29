@@ -7,7 +7,7 @@ import pytest
 from tests.integration.test_qt_a3_read_set_postgres import a3_db
 from tests.integration.test_qt_preview_evaluator import preview_db
 from tests.integration.test_qt_connected_workflow import (
-    connected_db, desk, observe, prepare, query, report,
+    assert_positions_rows_match_saved, connected_db, desk, observe, prepare, query, report,
 )
 
 
@@ -44,12 +44,10 @@ def test_real_v1_receipt_report_preserves_optional_v2_boundary(
     output = json.loads(rendered.stdout)
     assert output["delivery_guard_loaded"] is True and output["delivery_calls"] == 0
     assert output["quantities"] == {"ONE": {"SYN": "7"}}
-    old_cell = "<td>SYN</td>\n<td>5</td>"
-    assert old_cell in output["baseline_html"]
-    assert output["report_html"] == output["baseline_html"].replace(
-        old_cell, "<td>SYN</td>\n<td>7</td>", 1)
-    assert output["baseline_csv"].count(",SYN,5,") == 1
-    assert output["report_csv"] == output["baseline_csv"].replace(",SYN,5,", ",SYN,7,", 1)
+    # Same saved SYN row as test_qt_connected_workflow.py: average_price 101,
+    # equity multiplier 1, probe market price 102.
+    assert_positions_rows_match_saved(output["report_html"], output["report_csv"],
+        output["baseline_html"], output["baseline_csv"], [("One", "SYN", "7", "101", "1", "102")])
     assert immutable_rows(connected_db) == before
     query(connected_db, "UPDATE trading.positions SET daily_realized_pnl=9 "
                         "WHERE portfolio_type='qt'")

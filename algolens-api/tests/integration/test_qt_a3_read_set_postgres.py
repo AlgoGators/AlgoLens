@@ -34,7 +34,8 @@ def a3_db():
                 CREATE TABLE trading.strategy_registry (
                     id text PRIMARY KEY, strategy_type text NOT NULL,
                     portfolio_id text NOT NULL, is_active boolean NOT NULL,
-                    lifecycle text NOT NULL, updated_at timestamptz NOT NULL);
+                    lifecycle text NOT NULL, updated_at timestamptz NOT NULL,
+                    asset_class text CHECK (asset_class IS NULL OR asset_class IN ('EQUITY', 'FUTURE')));
                 CREATE TABLE trading.strategy_book_memberships (
                     strategy_id text NOT NULL REFERENCES trading.strategy_registry(id), portfolio_id text NOT NULL,
                     PRIMARY KEY (strategy_id, portfolio_id));
@@ -67,7 +68,7 @@ def a3_db():
             """)
             cursor.execute("""
                 INSERT INTO trading.strategy_registry VALUES
-                  ('ui-one', 'engine-one', 'BOOK', true, 'live', now());
+                  ('ui-one', 'engine-one', 'BOOK', true, 'live', now(), NULL);
                 INSERT INTO trading.strategy_book_memberships VALUES ('ui-one', 'BOOK');
                 INSERT INTO trading.qt_workflow_capabilities VALUES ('BOOK', true, 1);
                 INSERT INTO trading.qt_action_grants

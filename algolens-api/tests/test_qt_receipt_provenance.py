@@ -146,7 +146,7 @@ def test_genuinely_new_key_keeps_absent_before_and_becomes_editable_human_choice
     add_new_choice(evidence)
     result = reconcile(evidence, source, system, publication)
     assert result.status == "ready" and len(result.draft_overlay) == 2
-    tx = SimpleNamespace(resolve_instrument_types=lambda keys: {key: "EQUITY" for key in keys})
+    tx = SimpleNamespace(resolve_instrument_types=lambda keys, registry_asset_class=None: {key: "EQUITY" for key in keys})
     base, immutable = QtWorkflowService._base_rows(tx, {"saved_rows": evidence["current_facts"]["saved_rows"]}, result)
     new = next(row for key, row in base.items() if key.symbol == "NEW")
     assert new.editable and new.quantity_exact == "3" and new.average_price_exact == "102"
@@ -160,7 +160,7 @@ def test_complete_book_audit_does_not_relabel_immutable_carried_holding(monkeypa
     add_new_choice(evidence, immutable=True)
     result = reconcile(evidence, source, system, publication)
     assert result.status == "ready" and len(result.draft_overlay) == 1
-    tx = SimpleNamespace(resolve_instrument_types=lambda keys: {key: "EQUITY" for key in keys})
+    tx = SimpleNamespace(resolve_instrument_types=lambda keys, registry_asset_class=None: {key: "EQUITY" for key in keys})
     base, immutable = QtWorkflowService._base_rows(tx, {"saved_rows": evidence["current_facts"]["saved_rows"]}, result)
     assert len(base) == 1 and len(immutable) == 1
     assert immutable[0].key.symbol == "IMM" and immutable[0].origin == "immutable" and not immutable[0].editable

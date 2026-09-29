@@ -84,13 +84,23 @@ def _flat(row):
 
 
 def report_row_manifest(before, after, selection_rows):
-    """Mirror the accepted native existing-row projection; never group owners."""
+    """Mirror the native saved-position row rule; never group owners.
+
+    `after` must cover every key `before` has: a `before` key missing from
+    `after` refuses (a saved row the report would silently drop). An
+    `after`-only key -- a symbol that never had an earlier position row, for
+    example a genuinely new key the desk opened today -- is not a refusal:
+    it is treated as `before = 0` for the closed-today/shown-row rule below,
+    exactly like a key that already had an explicit zero row. It still goes
+    through the same asset-type and whole-FUTURE-quantity checks as every
+    other shown row, from its own selection row.
+    """
     try:
-        _require(bool(before))
-        first = QtKey.from_wire(before[0]['key'])
+        _require(bool(after))
+        first = QtKey.from_wire(after[0]['key'])
         old = _accounting(before, first.portfolio_id, first.date)
         new = _accounting(after, first.portfolio_id, first.date)
-        _require(set(old) == set(new) and len({key.strategy_id for key in old}) == 1)
+        _require(set(old) <= set(new) and len({key.strategy_id for key in new}) == 1)
         types = {}
         for row in selection_rows:
             key = QtKey.from_wire({**row['key'], 'portfolio_type': 'qt'})
@@ -99,14 +109,14 @@ def report_row_manifest(before, after, selection_rows):
         _require(set(types) == set(new))
         display = set()
         keys = []
-        for key in sorted(old):
-            previous, current = _exact(old[key]['quantity_exact']), _exact(new[key]['quantity_exact'])
-            # Existing rendered rows keep their identity even when the chosen
-            # quantity is zero. Reopening a hidden before-zero row adds a row.
-            _require(previous != 0 or current == 0)
+        for key in sorted(new):
+            previous = _exact(old[key]['quantity_exact']) if key in old else Decimal(0)
+            current = _exact(new[key]['quantity_exact'])
             if types[key] == 'FUTURE':
                 _require(previous == previous.to_integral_value() and current == current.to_integral_value())
-            if previous != 0:
+            # Shown rows: saved nonzero, or closed today (nonzero before, zero after).
+            # An after-only key with current == 0 is absent -> 0: not shown.
+            if previous != 0 or current != 0:
                 row_identity = (key.strategy_name, key.symbol)
                 _require(row_identity not in display)
                 display.add(row_identity)

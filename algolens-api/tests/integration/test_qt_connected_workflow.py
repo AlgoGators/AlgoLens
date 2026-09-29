@@ -112,6 +112,92 @@ def desk(decision):
         capture_output=True,text=True,timeout=30,env=os.environ.copy())
 
 
+def assert_positions_rows_match_saved(report_html, report_csv, baseline_html, baseline_csv, rows):
+    """Prove report_html/report_csv render exactly the saved positions -- not
+    a stale pre-decision baseline plus a substituted cell (spec: 'Row values
+    come from the saved position through the renderers' existing formulas').
+
+    rows: iterable of (strategy_display_name, symbol, quantity_exact,
+    average_price_exact, multiplier_exact, market_price_exact) -- e.g.
+    ('One', 'SYN', '7', '101', '1', '102').
+
+    Quantity is checked as the renderer's exact string: email_sender.cpp's
+    format_single_strategy_table streams `qty` (quantity_exact or
+    position.quantity.to_string(), a std::string) with `std::setprecision(0)`
+    applied -- a no-op on a string, so the cell is the exact decimal, not a
+    rounded double (email_sender.cpp:3153,3165).
+
+    HTML and CSV render notional from two different price bases -- neither is
+    tautological against the other, so both are independently recomputed from
+    caller-supplied, fixture-specific values (PLAN13; PLAN12 conflated them
+    into one `signed_notional` and both callers and this helper were wrong
+    about which basis feeds which cell):
+
+    - HTML: quantity * average_price_exact * multiplier, formatted
+      $<abs(...) with commas, 2 decimals> (email_sender.cpp:3143-3146 computes
+      `position.quantity.as_double() * position.average_price.as_double() *
+      contract_multiplier`; line 3167 does `std::abs(notional)` before
+      formatting). `position.average_price` is the position's *saved* average
+      price -- the fill/accounting basis actually written to
+      trading.positions for this row, which callers must supply as the true
+      basis for their fixture (see each call site's comment).
+
+    - CSV: quantity * market_price_exact * multiplier, signed, no abs().
+      qt_processed_report_probe.cpp:81,84 calls export_current_positions with
+      an explicit (empty) StrategyInstancesMap, which selects the overload at
+      csv_exporter.cpp:477-489 and fixes model_columns_absent=false -- the
+      other, desk/QT `model_columns_absent=true` overload is never reached by
+      this probe. That overload's row loop (csv_exporter.cpp:631-639) starts
+      `market_price` as a fallback to the position's own saved average price
+      (`market_price = pos_it->second.average_price.as_double(); // Default
+      fallback`) and only overwrites it from `market_prices[symbol]` when the
+      symbol is present there -- a symbol missing from market_prices silently
+      renders at the average-price basis instead of failing. The probe always
+      supplies all three symbols (market_prices = {'SYN':102,'IMM':102,
+      'FUT':102}, qt_processed_report_probe.cpp:79,81,84, to both the HTML and
+      CSV/baseline builders), so market_price_exact is '102' for every symbol
+      in every test that uses this probe, and that fallback never triggers
+      here. `calculate_notional(symbol, quantity, market_price)`
+      (csv_exporter.cpp:63-88) then computes
+      `quantity * price * contract_multiplier`, signed.
+
+    Avoiding an exact-string dependency on C++'s std::defaultfloat double
+    formatting, the CSV check compares Decimal(row[notional]) numerically
+    rather than a formatted string.
+
+    Margin (a strategy/portfolio summary line, not a per-row cell) and % of
+    total are not independently re-derived here -- % of total needs every
+    other row's notional in the same strategy table to reproduce, and margin
+    needs the native instrument registry's per-symbol margin requirement,
+    neither available to this Python-side test. Both, and every other byte
+    outside the rows above, are proven correct by whole-document identity
+    against baseline_html/baseline_csv instead: qt_processed_report_probe.cpp
+    builds both from the identical saved snapshot (build_qt_saved_report_
+    snapshot), baseline_* with no projection pointer and report_* with one,
+    and email_sender.cpp:3094's row-drawing condition
+    (`quantity != 0 || listed`) only differs between the two for a row the
+    projection lists at zero quantity (closed today) -- the one case none of
+    this helper's callers exercise. That makes the identity a proof for
+    these specific tests, not an assumption.
+    """
+    assert report_html == baseline_html
+    assert report_csv == baseline_csv
+    csv_rows = list(csv.reader(io.StringIO(report_csv)))
+    header = next(row for row in csv_rows if row and row[0] == "strategy")
+    column = {name: header.index(name) for name in ("strategy", "symbol", "quantity", "notional")}
+    for owner, symbol, quantity_exact, average_price_exact, multiplier_exact, market_price_exact in rows:
+        html_notional = Decimal(quantity_exact) * Decimal(average_price_exact) * Decimal(multiplier_exact)
+        csv_notional = Decimal(quantity_exact) * Decimal(market_price_exact) * Decimal(multiplier_exact)
+        assert ("<td>" + symbol + "</td>\n<td>" + quantity_exact + "</td>") in report_html
+        assert ("$" + format(abs(html_notional), ",.2f")) in report_html
+        matches = [row for row in csv_rows if len(row) > max(column.values())
+                   and row[column["strategy"]] == owner and row[column["symbol"]] == symbol]
+        assert len(matches) == 1, (owner, symbol, matches)
+        row = matches[0]
+        assert row[column["quantity"]] == quantity_exact
+        assert Decimal(row[column["notional"]]) == csv_notional
+
+
 def report(preview, directory):
     directory.mkdir()
     assert DELIVERY_GUARD.is_file(), 'Build the test-only delivery guard first'
@@ -136,17 +222,12 @@ def test_actual_decision_saved_quantity_is_the_only_report_change(connected_db,t
     output = json.loads(rendered.stdout)
     assert output['delivery_guard_loaded'] is True and output['delivery_calls'] == 0
     assert output["quantities"] == {"ONE":{"SYN":quantity}}
-    old_cell = "<td>SYN</td>\n<td>5</td>"
-    assert old_cell in output["baseline_html"]
-    assert output["report_html"] == output["baseline_html"].replace(old_cell,"<td>SYN</td>\n<td>"+quantity+"</td>",1)
-    before = list(csv.reader(io.StringIO(output["baseline_csv"])))
-    after = list(csv.reader(io.StringIO(output["report_csv"])))
-    rows = [index for index,row in enumerate(before) if len(row)>2 and row[1]=="SYN"]
-    assert len(rows)==1
-    expected=deepcopy(before);assert expected[rows[0]][2]=="5";expected[rows[0]][2]=quantity
-    assert after == expected
-    assert output['baseline_csv'].count(',SYN,5,') == 1
-    assert output['report_csv'] == output['baseline_csv'].replace(',SYN,5,', ',SYN,' + quantity + ',', 1)
+    # SYN's saved average_price is 101 (observe()'s fill, average_price_exact
+    # field, test_qt_connected_workflow.py:95) and its multiplier is 1 (an
+    # equity), matching FULL-API-BUILD11-FAILURE-TRIAGE-1.md. Market price is
+    # the probe's fixed 102 (qt_processed_report_probe.cpp:79,81,84).
+    assert_positions_rows_match_saved(output["report_html"], output["report_csv"],
+        output["baseline_html"], output["baseline_csv"], [("One", "SYN", quantity, "101", "1", "102")])
     print('QT_REPORT_EVIDENCE=' + json.dumps({'selected_quantity_exact':quantity,
         'source_day':preview['source_day'], **output}, sort_keys=True, separators=(',', ':')), flush=True)
     query(connected_db,"UPDATE trading.positions SET daily_realized_pnl=9 WHERE portfolio_type='qt'")
