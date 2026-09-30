@@ -131,8 +131,10 @@ export function StrategyDetail({
   // workspace can actually mount, and the request is dropped if it never can,
   // so an unavailable workflow just leaves its visible reason.
   // The window belongs to one owner/book/stream: changing any of them closes it
-  // and forgets that it was ever opened, so a stale workspace never lingers. A
-  // refresh after a publication keeps it, so the reader is not thrown out.
+  // and forgets that it was ever opened, so a stale workspace never lingers.
+  // After a publication the page reloads its data: the window closes while the
+  // page loads and opens again with a fresh workspace, which reloads the
+  // server's decision review, so nothing from the published choice lingers.
   // The epoch makes leaving and coming back a fresh start, never a revival.
   const editorPlace = JSON.stringify([owner, book, positionStream]);
   const editorEpoch = useRef({ place: editorPlace, epoch: 0 });
@@ -664,7 +666,7 @@ export function StrategyDetail({
               title={`Edit QT positions - ${workflowBook}`} onClose={closeEditor}
               returnFocusTo={() => document.querySelector<HTMLElement>('[data-qt-edit-entry]')}>
               <QtProposalWorkspace embedded key={workflowScope} actorId={user.id} bookId={workflowBook}
-                sourceDay={sourceDay} onPublished={handlePositionsChanged} />
+                sourceDay={sourceDay} focusStrategyName={strategy.name} onPublished={handlePositionsChanged} />
             </QtEditDialog>
           )}
           {/* The audit trail sits directly under the book it describes. It was

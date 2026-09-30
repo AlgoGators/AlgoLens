@@ -21,7 +21,29 @@ type Props = {
    * own vertical spacing. The dialog also owns scrolling and focus.
    */
   embedded?: boolean;
+  /**
+   * The strategy the reader opened this window from. A book is shared by several
+   * strategies but has one MODEL owner per day; when every row of this strategy
+   * is a locked holding while another strategy's rows are editable, the guide
+   * says so instead of leaving the locked boxes unexplained. Presentation only.
+   */
+  focusStrategyName?: string;
 };
+const sameName = (a: string, b: string) => {
+  const flat = (value: string) => value.toLowerCase().replace(/[^a-z0-9]/g, '');
+  return flat(a) !== '' && flat(a) === flat(b);
+};
+/** Names the editable strategies when the focus strategy's own rows are all locked; otherwise null. */
+function focusLockedNote(rows: QtSelectionRow[], focus: string | undefined): string | null {
+  if (!focus) return null;
+  const own = rows.filter(row => sameName(row.key.strategy_name, focus));
+  if (own.length === 0 || own.some(row => row.editable)) return null;
+  const owners = [...new Set(rows.filter(row => row.editable).map(row => row.key.strategy_name))];
+  if (owners.length === 0) return null;
+  const names = owners.join(' and ');
+  return `${focus} cannot be changed in this window: this book's QT desk feed comes from ${names}, ` +
+    `so ${focus}'s positions are shown as locked holdings. You can change ${names}'s quantities here.`;
+}
 function selectionRows(rows: QtSelectionRow[], selection: Readonly<Record<string, string>>) {
   return rows.filter(row => row.editable).map(row => ({
     key: row.key, quantity_exact: normalizeQtSelectionInput(selection[qtComponentKey(row.key)] ?? row.quantity_exact, row.asset_type),
@@ -49,7 +71,7 @@ function problem(error: unknown): { message: string; revoke: boolean } {
   return { message: 'QT data is unavailable. Refresh and try again.', revoke: false };
 }
 
-export function QtProposalWorkspace({ actorId, bookId, sourceDay, onPublished, embedded = false }: Props) {
+export function QtProposalWorkspace({ actorId, bookId, sourceDay, onPublished, embedded = false, focusStrategyName }: Props) {
   const context = qtContextKey(actorId, bookId, sourceDay);
   const ui = qtStyles(useQtDark());
   const [state, setState] = useState<QtState>(() => makeQtState(context));
@@ -437,7 +459,8 @@ export function QtProposalWorkspace({ actorId, bookId, sourceDay, onPublished, e
       <p>No positions for {proposal?.empty_owner?.configured_owner_names[0]}. Save this empty choice, then evaluate and confirm it.</p>
       {draft?.state === 'consumed' && <p>Your previous choice was processed. Save to start a new choice; the previous decision remains in the audit history.</p>}
     </section>}
-    {proposal && <QtEditGuide step={guideStep} changed={changedFromModel} editable={editableRows.length} lockedReason={guideLocked} note={guideNote} />}
+    {proposal && <QtEditGuide step={guideStep} changed={changedFromModel} editable={editableRows.length} lockedReason={guideLocked} note={guideNote}
+      focusNote={focusLockedNote(chosenRows, focusStrategyName)} />}
     {proposal && <div className={ui.card}>
       <QtSelectionTable sourceRows={sourceRows} chosenRows={chosenRows} previousQtRows={proposal.saved_qt_rows} selection={visible.selection}
         onEdit={edit} locked={tableLocked} />

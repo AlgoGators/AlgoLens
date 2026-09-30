@@ -1,11 +1,10 @@
 // @vitest-environment jsdom
 //
-// The "Edit positions" entry point. John could not find where to edit QT
-// positions: when the QT proposal workflow is required, the page hides the old
-// editor and the real one is a panel far below the table. This button is the
-// way in, and it must be there for every internal reader on every strategy
-// page -- enabled when it can take them somewhere, disabled with the reason
-// written on the page when it cannot, and absent for everyone else.
+// The "Edit positions" entry point. When the QT proposal workflow is required,
+// the page shows this button as the way into the editing window. It must be there
+// for every internal reader on every strategy page -- enabled when it can take
+// them somewhere, disabled with the reason written on the page when it cannot,
+// and absent for everyone else.
 //
 // It only navigates. Nothing here can make a write succeed that the server
 // would refuse, so these tests pin what it offers and what it never offers.

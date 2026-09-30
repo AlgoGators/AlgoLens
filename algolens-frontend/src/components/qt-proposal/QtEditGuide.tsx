@@ -14,10 +14,15 @@ const steps: { title: string; detail: string }[] = [
  * Presentation only: `step` and `changed` are derived by the workspace from its
  * own state; nothing here can enable an action.
  */
-export function QtEditGuide({ step, changed, editable, lockedReason, note = null }: {
+export function QtEditGuide({ step, changed, editable, lockedReason, note = null, focusNote = null }: {
   step: QtEditStep; changed: number; editable: number; lockedReason: string | null;
   /** Extra context shown under the summary while editing is open (never shown when locked). */
   note?: string | null;
+  /**
+   * Says why the strategy the reader came from has no editable boxes while another
+   * strategy's do. Announced as a note; shown only while editing is open.
+   */
+  focusNote?: string | null;
 }) {
   const ui = qtStyles(useQtDark());
   const summary = editable === 0 ? 'There are no editable components in this book.'
@@ -42,6 +47,7 @@ export function QtEditGuide({ step, changed, editable, lockedReason, note = null
         </ol>
         <p role="status" aria-live="polite">{summary}</p>
         {note && <p className="text-xs">{note}</p>}
+        {focusNote && <p role="note" className="text-xs font-medium">{focusNote}</p>}
       </>}
     <ul className="list-disc space-y-1 pl-5 text-xs">
       <li>Futures trade in whole contracts; equities may be fractional. Nothing is rounded for you.</li>

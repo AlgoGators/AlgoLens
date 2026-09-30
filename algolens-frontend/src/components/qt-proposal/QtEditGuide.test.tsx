@@ -121,3 +121,20 @@ describe('the optional note', () => {
     expect(screen.getByText('Locked for a synthetic reason.')).toBeTruthy();
   });
 });
+
+describe('the optional focus note', () => {
+  const focusNote = 'Synthetic cannot be changed in this window: synthetic reason.';
+
+  it('is announced as a note while editing is open, next to the summary', () => {
+    render(<QtEditGuide step={1} changed={0} editable={2} lockedReason={null} focusNote={focusNote} />);
+    expect(screen.getByRole('note').textContent).toBe(focusNote);
+    expect(screen.getAllByRole('status')).toHaveLength(1);
+  });
+
+  it('is absent by default and whenever editing is locked', () => {
+    const { rerender } = render(<QtEditGuide step={1} changed={0} editable={2} lockedReason={null} />);
+    expect(screen.queryByRole('note')).toBeNull();
+    rerender(<QtEditGuide step={5} changed={0} editable={2} lockedReason="Locked for a synthetic reason." focusNote={focusNote} />);
+    expect(screen.queryByRole('note')).toBeNull();
+  });
+});
