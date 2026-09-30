@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useId, useState } from 'react';
 import { formatPrice } from '../domain/portfolio/formatPrice';
 import { Pencil, Plus } from 'lucide-react';
 import { useTheme } from '../adapters/react/ThemeContext';
@@ -26,6 +26,17 @@ interface PositionBreakdownProps {
   positionDate?: string | null;
   positionsEditable?: boolean;
   positionEditUnavailableReason?: string | null;
+  /**
+   * Present when edits are made in the QT proposal workspace instead of the
+   * legacy dialog. Renders an "Edit positions" button that takes the reader
+   * there. It only navigates; it never enables a write.
+   */
+  onEditInWorkspace?: () => void;
+  /**
+   * When set, the "Edit positions" button is still shown to internal readers
+   * but disabled, and this sentence is on the page beside it explaining why.
+   */
+  workspaceEditUnavailableReason?: string | null;
   /** Every AlgoLens registry book membership; more than one means this table may be partial. */
   books?: string[];
   /**
@@ -52,6 +63,8 @@ export function PositionBreakdown({
   positionDate,
   positionsEditable,
   positionEditUnavailableReason,
+  onEditInWorkspace,
+  workspaceEditUnavailableReason,
   books,
   bookControl,
   onEdited,
@@ -81,6 +94,17 @@ export function PositionBreakdown({
     : [];
   const canAdd = canEdit && addStrategyNames.length === 1;
   const columns = canEdit ? 'grid-cols-6' : 'grid-cols-5';
+
+  // The way in to editing for an internal reader whose legacy editor is not
+  // available. With a reason it is disabled and the reason is written on the
+  // page (the grey box below when it already says the same thing, otherwise a
+  // line of its own), never only in a tooltip.
+  const statusBoxId = useId();
+  const reasonId = useId();
+  const editEntryReason = workspaceEditUnavailableReason?.trim() || null;
+  const showEditEntry = isInternalMember && !canEdit && (!!editEntryReason || !!onEditInWorkspace);
+  const statusBoxShown = isInternalMember && !canEdit && !!positionEditUnavailableReason;
+  const reasonInStatusBox = statusBoxShown && editEntryReason === positionEditUnavailableReason?.trim();
 
   // Only rows whose exposure could actually be computed contribute to the
   // total. A row missing a price or a contract size is counted as missing, not
@@ -114,6 +138,34 @@ export function PositionBreakdown({
           </h3>
           {bookControl}
         </div>
+        {showEditEntry && (
+          <div className="flex flex-col items-end gap-1">
+            <button
+              type="button"
+              data-qt-edit-entry=""
+              disabled={!!editEntryReason}
+              onClick={editEntryReason ? undefined : onEditInWorkspace}
+              aria-describedby={editEntryReason ? (reasonInStatusBox ? statusBoxId : reasonId) : undefined}
+              className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-1 ${
+                editEntryReason
+                  ? theme === 'dark'
+                    ? 'cursor-not-allowed bg-gray-800 text-gray-400'
+                    : 'cursor-not-allowed bg-gray-100 text-gray-600'
+                  : 'bg-blue-600 text-white hover:bg-blue-700'
+              }`}
+            >
+              <Pencil className="w-4 h-4" />
+              Edit positions
+            </button>
+            {editEntryReason && !reasonInStatusBox && (
+              <p id={reasonId} className={`max-w-xs text-right text-xs ${
+                theme === 'dark' ? 'text-gray-400' : 'text-gray-600'
+              }`}>
+                {editEntryReason}
+              </p>
+            )}
+          </div>
+        )}
         {canAdd && (
           <button
             onClick={() => setEditing({ symbol: null, strategyName: addStrategyNames[0], existing: null })}
@@ -129,8 +181,8 @@ export function PositionBreakdown({
         )}
       </div>
 
-      {isInternalMember && !canEdit && positionEditUnavailableReason && (
-        <div role="status" className={`mb-4 rounded-lg border px-4 py-3 text-sm ${
+      {statusBoxShown && (
+        <div id={statusBoxId} role="status" className={`mb-4 rounded-lg border px-4 py-3 text-sm ${
           theme === 'dark' ? 'border-gray-800 bg-gray-900 text-gray-300' : 'border-gray-200 bg-gray-50 text-gray-700'
         }`}>
           {positionEditUnavailableReason}

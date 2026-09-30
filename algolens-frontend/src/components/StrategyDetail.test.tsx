@@ -77,6 +77,7 @@ vi.mock('./PositionBreakdown', async importOriginal => {
       <div data-testid="position-provenance">{p.positionStream ?? 'unknown'}</div>
       <div data-testid="position-edit-reason">{p.positionEditUnavailableReason ?? ''}</div>
       <button onClick={p.onEdited}>Simulate completed edit</button>
+      <button disabled={!p.onEditInWorkspace} onClick={p.onEditInWorkspace}>Edit positions</button>
       {p.bookControl}
     </div>
   ) };
@@ -168,6 +169,12 @@ function serveQtDetail(over: Partial<Strategy> & { tag: string }) {
   getStrategyImpl = async (_id, book, stream) => stream === 'qt'
     ? strategy({ ...over, portfolio_id: book, positionStream: 'qt' })
     : strategy({ tag: 'MODEL', portfolio_id: book, positionStream: 'system' });
+}
+
+/** The QT workspace lives in a window opened by "Edit positions"; wait until the button is usable, then click it. */
+async function openEditor() {
+  await waitFor(() => expect((screen.getByRole('button', { name: 'Edit positions' }) as HTMLButtonElement).disabled).toBe(false));
+  fireEvent.click(screen.getByRole('button', { name: 'Edit positions' }));
 }
 
 async function selectQt() {
@@ -407,12 +414,15 @@ describe('QT proposal capability cutover', () => {
     qtApi.getProposal.mockResolvedValue(qtProposal('CONSERVATIVE_PORTFOLIO', '2026-09-23', true));
     render(<StrategyDetail strategy={qtDetail()} onBack={() => {}} />);
     await selectQt();
+    await waitFor(() => expect((screen.getByRole('button', { name: 'Edit positions' }) as HTMLButtonElement).disabled).toBe(false));
+    expect(screen.queryByTestId('qt-workspace-context')).toBeNull();
+    await openEditor();
     expect((await screen.findByTestId('qt-workspace-context')).textContent)
       .toBe('101:CONSERVATIVE_PORTFOLIO:2026-09-23');
     expect(screen.getByTestId('positions').textContent).toBe('CONSERVATIVE_PORTFOLIO:QT-POS');
     expect(screen.getByTestId('position-identities').textContent).toBe('Engine A');
     expect(screen.getByTestId('positions-editable').textContent).toBe('false');
-    expect(screen.getByTestId('position-edit-reason').textContent).toContain('QT proposal workspace');
+    expect(screen.getByTestId('position-edit-reason').textContent).toContain('Use Edit positions to change a quantity');
   });
 
   it('cannot mount the real old edit modal in a required book, even when the snapshot says editable', async () => {
@@ -424,9 +434,12 @@ describe('QT proposal capability cutover', () => {
     render(<StrategyDetail strategy={qtDetail()} onBack={() => {}} />);
     await screen.findByText(/Model \/ System positions snapshot/i);
     fireEvent.change(screen.getByRole('combobox', { name: 'Position stream' }), { target: { value: 'qt' } });
+    await openEditor();
     await screen.findByTestId('qt-workspace-context');
     expect(screen.queryByRole('button', { name: /Adjust SYN/ })).toBeNull();
-    expect(screen.queryByRole('dialog')).toBeNull();
+    // The QT window is itself a dialog now; the old position editor is the one that must not exist.
+    expect(document.getElementById('position-editor-title')).toBeNull();
+    expect(screen.queryByRole('dialog', { name: /Edit position|Adjust/i })).toBeNull();
     expect(savePositionCalls).toEqual([]);
   });
 
@@ -486,6 +499,7 @@ describe('QT proposal capability cutover', () => {
     await waitFor(() => expect(qtApi.getProposal).toHaveBeenCalledTimes(1));
     fireEvent.change(topBox(), { target: { value: 'AGGRESSIVE_PORTFOLIO' } });
     expect(screen.queryByTestId('qt-workspace-context')).toBeNull();
+    await openEditor();
     expect((await screen.findByTestId('qt-workspace-context')).textContent)
       .toBe('101:AGGRESSIVE_PORTFOLIO:2026-09-23');
     await act(async () => previous.resolve(qtProposal()));
@@ -499,11 +513,11 @@ describe('QT proposal capability cutover', () => {
     qtApi.getProposal.mockImplementation(async (book: string) => qtProposal(book, '2026-09-23', true));
     const onPositionsChanged = vi.fn();
     render(<StrategyDetail strategy={qtDetail()} onBack={() => {}} onPositionsChanged={onPositionsChanged} />);
-    await selectQt(); await screen.findByTestId('qt-workspace-context');
+    await selectQt(); await openEditor(); await screen.findByTestId('qt-workspace-context');
     const previousCallback = workspaceCallbacks.at(-1)!;
     fireEvent.change(topBox(), { target: { value: 'AGGRESSIVE_PORTFOLIO' } });
     expect(screen.queryByTestId('qt-workspace-context')).toBeNull();
-    await screen.findByTestId('qt-workspace-context');
+    await openEditor(); await screen.findByTestId('qt-workspace-context');
     const calls = getStrategyCalls.length;
     await act(async () => previousCallback());
     expect(getStrategyCalls).toHaveLength(calls);
@@ -539,7 +553,7 @@ describe('QT proposal capability cutover', () => {
       ? pendingBook.promise : originalGetStrategy(id, book, stream);
     const onPositionsChanged = vi.fn();
     render(<StrategyDetail strategy={qtDetail()} onBack={() => {}} onPositionsChanged={onPositionsChanged} />);
-    await selectQt(); await screen.findByTestId('qt-workspace-context');
+    await selectQt(); await openEditor(); await screen.findByTestId('qt-workspace-context');
     const priorPublication = workspaceCallbacks.at(-1)!;
     fireEvent.change(topBox(), { target: { value: 'AGGRESSIVE_PORTFOLIO' } });
     fireEvent.change(topBox(), { target: { value: 'CONSERVATIVE_PORTFOLIO' } });
@@ -561,7 +575,7 @@ describe('QT proposal capability cutover', () => {
     qtApi.getProposal.mockImplementation(async (book: string) => qtProposal(book, '2026-09-23', userId === '101'));
     qtApi.confirmPreview.mockRejectedValue(new QtMutationUncertainError());
     const view = render(<StrategyDetail strategy={qtDetail()} onBack={() => {}} />);
-    await selectQt(); await screen.findByTestId('qt-workspace-context');
+    await selectQt(); await openEditor(); await screen.findByTestId('qt-workspace-context');
     // The child is stubbed here; arrange its real recovery lifecycle/uncertain request.
     QtRecovery.activateActor(sessionStorage, '101');
     const intent = { actor_id: '101', book_id: 'CONSERVATIVE_PORTFOLIO',
@@ -586,6 +600,7 @@ describe('QT proposal capability cutover', () => {
 
     userId = '101'; view.rerender(<StrategyDetail strategy={qtDetail()} onBack={() => {}} />);
     if ((screen.getByRole('combobox', { name: 'Position stream' }) as HTMLSelectElement).value === 'system') await selectQt();
+    await openEditor();
     expect((await screen.findByTestId('qt-workspace-context')).textContent).toContain('101:');
     expect(QtRecovery.loadConfirmation(sessionStorage, '101', intent.book_id)).toBeNull();
     expect(QtRecovery.loadApproval(sessionStorage, '101', intent.book_id)).toBeNull();
@@ -597,7 +612,7 @@ describe('QT proposal capability cutover', () => {
     qtApi.getProposal.mockImplementation(async (book: string) => qtProposal(book, '2026-09-23', true));
     qtApi.confirmPreview.mockRejectedValue(new QtMutationUncertainError());
     render(<StrategyDetail strategy={qtDetail()} onBack={() => {}} />);
-    await selectQt(); await screen.findByTestId('qt-workspace-context');
+    await selectQt(); await openEditor(); await screen.findByTestId('qt-workspace-context');
     QtRecovery.activateActor(sessionStorage, '101');
     const intent = { actor_id: '101', book_id: 'CONSERVATIVE_PORTFOLIO',
       preview_id: fixtures.preview_clean.preview_id, expected_digest: fixtures.preview_clean.payload_digest,

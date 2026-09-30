@@ -19,7 +19,9 @@ import { PortfolioApiService } from '../infrastructure/api/portfolioApi';
 import { QtPreviewApi } from '../infrastructure/api/qtPreviewApi';
 import { QtRecovery } from '../infrastructure/api/qtRecovery';
 import type { QtProposal } from '../domain/portfolio/qtPreview';
+import { qtWorkflowReasonText } from '../domain/portfolio/qtWorkflowReason';
 import { QtProposalWorkspace } from './QtProposalWorkspace';
+import { QtEditDialog } from './qt-proposal/QtEditDialog';
 import { ApiError } from '../infrastructure/api/httpClient';
 import { OverrideHistory } from './OverrideHistory';
 import { TradingActivity } from './TradingActivity';
@@ -118,8 +120,55 @@ export function StrategyDetail({
     : workflow?.scope !== workflowScope ? 'Loading QT workflow capability. Position changes are disabled.'
     : workflow.reason;
   const positionEditReason = workflowRequired && workflowAvailable
-    ? 'Review and confirm changes in the QT proposal workspace.'
+    ? 'These are the saved QT positions. Use Edit positions to change a quantity: you will review, save, evaluate and confirm it in a window.'
     : workflowReason || shown?.positionEditUnavailableReason;
+
+  // "Edit positions". It only opens the editing window: the QT proposal
+  // workspace lives inside <QtEditDialog>, never on the page, and every write
+  // stays behind the workspace's own server-checked controls. From Model /
+  // System the button first selects QT (the same state the selector holds,
+  // nothing else is persisted); the window is then opened only once the QT
+  // workspace can actually mount, and the request is dropped if it never can,
+  // so an unavailable workflow just leaves its visible reason.
+  // The window belongs to one owner/book/stream: changing any of them closes it
+  // and forgets that it was ever opened, so a stale workspace never lingers. A
+  // refresh after a publication keeps it, so the reader is not thrown out.
+  // The epoch makes leaving and coming back a fresh start, never a revival.
+  const editorPlace = JSON.stringify([owner, book, positionStream]);
+  const editorEpoch = useRef({ place: editorPlace, epoch: 0 });
+  if (editorEpoch.current.place !== editorPlace) {
+    editorEpoch.current = { place: editorPlace, epoch: editorEpoch.current.epoch + 1 };
+  }
+  const editorKey = JSON.stringify([editorPlace, editorEpoch.current.epoch]);
+  const [editor, setEditor] = useState<{ key: string; open: boolean; everOpened: boolean } | null>(null);
+  const editorOpen = editor?.key === editorKey && editor.open;
+  const editorEverOpened = editor?.key === editorKey && editor.everOpened;
+  const openEditor = useCallback(
+    () => setEditor({ key: editorKey, open: true, everOpened: true }), [editorKey]);
+  const closeEditor = useCallback(
+    () => setEditor(prior => prior ? { ...prior, open: false } : prior), []);
+  const [pendingOpenOwner, setPendingOpenOwner] = useState<string | null>(null);
+  const pendingOpen = pendingOpenOwner === owner;
+  const editInQt = () => {
+    setPendingOpenOwner(owner);
+    setSelection({ owner, book, stream: 'qt' });
+    setBookErrorState(null);
+  };
+  useEffect(() => {
+    if (!pendingOpen) return;
+    if (positionStream !== 'qt') { setPendingOpenOwner(null); return; }
+    if (mountWorkspace) { setPendingOpenOwner(null); openEditor(); return; }
+    if (requestError || emptyBook || (!!shown && !qtSnapshot) || (workflow?.scope === workflowScope)) setPendingOpenOwner(null);
+  }, [pendingOpen, positionStream, mountWorkspace, requestError, emptyBook, shown, qtSnapshot, workflow, workflowScope, openEditor]);
+  // Everything the button needs to say, for an internal reader on any stream.
+  // Legacy editing keeps its own controls, so nothing new is offered there.
+  const legacyEditingOpen = legacyEditingAllowed && shown?.positionsEditable === true;
+  const editEntryReason = legacyEditingOpen ? null
+    : positionStream === 'system' ? (user?.id ? null : 'Sign in before changing QT positions.')
+    : mountWorkspace ? null
+    : workflowReason || shown?.positionEditUnavailableReason || 'QT position changes are unavailable for this book.';
+  const editEntryAction = legacyEditingOpen || editEntryReason ? undefined
+    : positionStream === 'system' ? editInQt : openEditor;
 
   useEffect(() => {
     if (!qtSnapshot || !workflowBook || !sourceDay || !user?.id) return;
@@ -135,7 +184,7 @@ export function StrategyDetail({
         }
         setWorkflow({ scope: workflowScope, proposal,
           reason: proposal.capability.available ? '' :
-            proposal.read_only_reason ?? 'QT workflow is unavailable. Position changes are disabled.' });
+            qtWorkflowReasonText(proposal.read_only_reason) });
       } catch (error) {
         if (!live || latestWorkflowScope.current !== workflowScope ||
             (error instanceof DOMException && error.name === 'AbortError')) return;
@@ -204,11 +253,13 @@ export function StrategyDetail({
   }, [scope, owner, book, positionStream, strategy.id, refreshKey]);
 
   const selectBook = (target: string) => {
+    setPendingOpenOwner(null);
     setSelection({ owner, book: target, stream: positionStream });
     setBookErrorState(null);
   };
 
   const selectStream = (stream: PositionStream) => {
+    setPendingOpenOwner(null);
     setSelection({ owner, book, stream });
     setBookErrorState(null);
   };
@@ -598,6 +649,8 @@ export function StrategyDetail({
             positionDate={shown.positionDate}
             positionsEditable={legacyEditingAllowed && shown.positionsEditable === true}
             positionEditUnavailableReason={positionEditReason}
+            onEditInWorkspace={editEntryAction}
+            workspaceEditUnavailableReason={editEntryReason}
             books={books}
             bookControl={hasSeveralBooks ? bookBox('Book for these positions') : undefined}
             onEdited={handlePositionsChanged}
@@ -607,10 +660,12 @@ export function StrategyDetail({
             {workflowReason}
           </p>}
           {mountWorkspace && workflowBook && sourceDay && user?.id && (
-            <div className="mt-8">
-              <QtProposalWorkspace key={workflowScope} actorId={user.id} bookId={workflowBook}
+            <QtEditDialog open={editorOpen} keepMounted={editorEverOpened}
+              title={`Edit QT positions - ${workflowBook}`} onClose={closeEditor}
+              returnFocusTo={() => document.querySelector<HTMLElement>('[data-qt-edit-entry]')}>
+              <QtProposalWorkspace embedded key={workflowScope} actorId={user.id} bookId={workflowBook}
                 sourceDay={sourceDay} onPublished={handlePositionsChanged} />
-            </div>
+            </QtEditDialog>
           )}
           {/* The audit trail sits directly under the book it describes. It was
               being written on every edit and read by nobody. */}

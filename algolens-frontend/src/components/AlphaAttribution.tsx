@@ -63,6 +63,9 @@ function mergeByDate(
     );
 }
 
+/** A bar's own calendar day; the same key commonCoverage matches on. */
+const calendarDay = (stamp: string) => String(stamp).slice(0, 10);
+
 const money = (n: number) =>
     `$${n.toLocaleString('en-US', { maximumFractionDigits: 0 })}`;
 
@@ -100,16 +103,30 @@ export function AlphaAttribution({ equityByStream, historyBreaks, theme }: Props
         ]);
         const comparisonDate = common.coverage.lastCommonDate;
         if (!comparisonDate) return null;
-        const qtFinal = qt.find(point => point.date === comparisonDate)!.value;
-        const benchFinal = bench.find(point => point.date === comparisonDate)!.value;
+        // `lastCommonDate` is a calendar day, not a stamp: commonCoverage reduces
+        // every point to its first ten characters (the bar's own day, with no
+        // timezone conversion) before matching. The API sends full ISO stamps,
+        // so match on that same day key, and take the day's last point as
+        // commonCoverage does when a day has several.
+        const lastOnDay = (points: HistoricalDataPoint[]) => {
+            for (let index = points.length - 1; index >= 0; index -= 1) {
+                if (calendarDay(points[index].date) === comparisonDate) return points[index];
+            }
+            return undefined;
+        };
+        const qtPoint = lastOnDay(qt);
+        const benchPoint = lastOnDay(bench);
+        if (!qtPoint || !benchPoint) return null;
+        const qtFinal = qtPoint.value;
+        const benchFinal = benchPoint.value;
         return {
             qtFinal,
             benchFinal,
             diff: qtFinal - benchFinal,
             comparisonDate,
             coverage: common.coverage,
-            qtLatest: qt[qt.length - 1].date,
-            benchmarkLatest: bench[bench.length - 1].date,
+            qtLatest: calendarDay(qt[qt.length - 1].date),
+            benchmarkLatest: calendarDay(bench[bench.length - 1].date),
         };
     }, [equityByStream, historyBreaks]);
 
