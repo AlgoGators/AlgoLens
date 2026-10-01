@@ -15,11 +15,11 @@ from algolens.domain.shared.fixed_decimal8 import parse_fixed_decimal8
 from .qt_equity_portfolio_consumption import validate_equity_portfolio_invocation
 
 _BYTES=(Path(__file__).parent/'qt_equity_run_consumption_contract.json').read_bytes()
-if sha256(_BYTES).hexdigest()!='d695c74986459fb432d6bbfa82ca8af0a0a987ad69d6d51bcf66e5ade1f08432':
+if sha256(_BYTES).hexdigest()!='cc869bed56a7ec679bded0c4be169d87bd251be8b2db804fc79dea2103c4176d':
     raise ValueError('equity_run_contract_pin_mismatch')
 _C=json.loads(_BYTES)
 _ACTION_BYTES=(Path(__file__).parent/'qt_equity_run_consumption_action_contract.json').read_bytes()
-if sha256(_ACTION_BYTES).hexdigest()!='ae4a443f84a7e6e636068a2540c60e229828244cc9b294fe831a4dc6bc3e2ce6':
+if sha256(_ACTION_BYTES).hexdigest()!='fbe6b7d2e37873d1135f3468a038c82f32e715eae756b32514d617c5ce967332':
     raise ValueError('equity_run_contract_pin_mismatch')
 _ACTION_C=json.loads(_ACTION_BYTES)
 if _ACTION_C['base_contract_sha256']!=sha256(_BYTES).hexdigest():

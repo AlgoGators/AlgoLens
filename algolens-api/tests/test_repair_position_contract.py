@@ -7,6 +7,7 @@ import pytest
 from algolens.application.portfolio.use_cases import build_strategy_detail
 from algolens.domain.portfolio.calculations import transform_finalized, transform_positions
 from algolens.domain.portfolio.position_edit import PositionValidationError, validate_position_payload
+from algolens.domain.portfolio.streams import current_utc_date
 from tests.test_position_edit_routes import FakeReader, FakeRegistry, _BODY, _patch, _set_jwt_cookie
 from tests.test_strategy_detail_book import _Reader, _Registry, PRIMARY
 
@@ -21,7 +22,7 @@ def no_market_database(monkeypatch):
 
 def position(name, quantity=2, day=None):
     return dict(symbol="ES", strategy_name=name, quantity=quantity,
-                average_price=100, daily_realized_pnl=0, date=day or date.today())
+                average_price=100, daily_realized_pnl=0, date=day or current_utc_date())
 
 
 def test_position_identity_survives_display_and_previous_snapshot_comparison():
@@ -35,7 +36,7 @@ def test_position_identity_survives_display_and_previous_snapshot_comparison():
 
 @pytest.mark.parametrize("age,name,editable", [(0, "FAST", True), (3, "FAST", False), (0, None, False)])
 def test_detail_discloses_actual_snapshot_and_safe_editability(age, name, editable):
-    day = date.today() - timedelta(days=age)
+    day = current_utc_date() - timedelta(days=age)
     rows = replace(_Reader().fetch_detail_rows("TREND", PRIMARY), positions=[position(name, day=day)])
     detail = build_strategy_detail(_Registry([PRIMARY]).get("trendfollowing"), rows)
     assert detail.get("positionDate") == day.isoformat()
@@ -112,7 +113,7 @@ def test_empty_utc_snapshot_is_editable_even_when_the_server_local_day_differs(m
 
 def test_snapshot_engine_names_are_explicit_unique_and_not_guessed():
     rows = replace(_Reader().fetch_detail_rows("TREND", PRIMARY), positions=[],
-                   position_date=date.today(), position_strategy_names=("FAST", "SLOW", "FAST"))
+                   position_date=current_utc_date(), position_strategy_names=("FAST", "SLOW", "FAST"))
     cfg = _Registry([PRIMARY]).get("trendfollowing")
     assert build_strategy_detail(cfg, rows)["positionStrategyNames"] == ["FAST", "SLOW"]
     unknown = replace(rows, position_strategy_names=())
@@ -140,7 +141,7 @@ def test_model_positions_keep_qt_financials_without_cross_stream_closes():
         positions=[position("MODEL_FAST", 2), position("MODEL_SLOW", 5)],
         position_stream="system",
         qt_positions=qt_today,
-        yesterday_positions=[position("QT_DESK", 17, date.today() - timedelta(days=1))],
+        yesterday_positions=[position("QT_DESK", 17, current_utc_date() - timedelta(days=1))],
         activity_stream="qt",
         finalized_positions_available=True,
     )
@@ -158,9 +159,9 @@ def test_model_positions_keep_qt_financials_without_cross_stream_closes():
 
 def test_qt_closed_book_requires_a_valid_comparison_even_when_fills_exist():
     base = _Reader().fetch_detail_rows("TREND", PRIMARY)
-    previous = [position("QT_DESK", 17, date.today() - timedelta(days=1))]
+    previous = [position("QT_DESK", 17, current_utc_date() - timedelta(days=1))]
     rows = replace(
-        base, positions=[], position_date=date.today(),
+        base, positions=[], position_date=current_utc_date(),
         position_strategy_names=("QT_DESK",), position_stream="qt",
         qt_positions=[], yesterday_positions=previous,
         activity_stream="qt", finalized_positions_available=True,
@@ -184,7 +185,7 @@ def test_detail_preserves_today_qt_snapshot_without_financial_result(positions):
         _Reader().fetch_detail_rows("TREND", PRIMARY),
         latest=None,
         positions=positions,
-        position_date=date.today(),
+        position_date=current_utc_date(),
         position_strategy_names=("FAST",),
         position_stream="qt",
         execution_date=None,
@@ -194,7 +195,7 @@ def test_detail_preserves_today_qt_snapshot_without_financial_result(positions):
                                    prices={"ES": 125}, multipliers={"ES": 50})
     assert detail is not None
     assert detail["positionsEditable"] is True
-    assert detail["positionDate"] == date.today().isoformat()
+    assert detail["positionDate"] == current_utc_date().isoformat()
     assert detail["positionStrategyNames"] == ["FAST"]
     assert detail["dataAvailable"] is False
     assert detail["resultSource"] == "qt"
@@ -214,8 +215,8 @@ def test_detail_preserves_today_qt_snapshot_without_financial_result(positions):
 def test_missing_result_does_not_make_old_or_unknown_snapshot_editable():
     base = _Reader().fetch_detail_rows("TREND", PRIMARY)
     cfg = _Registry([PRIMARY]).get("trendfollowing")
-    for day, names in ((date.today() - timedelta(days=1), ("FAST",)),
-                       (date.today(), ())):
+    for day, names in ((current_utc_date() - timedelta(days=1), ("FAST",)),
+                       (current_utc_date(), ())):
         rows = replace(base, latest=None, positions=[], position_date=day,
                        position_strategy_names=names, position_stream="qt")
         detail = build_strategy_detail(cfg, rows)
@@ -233,13 +234,13 @@ def test_empty_book_without_result_or_qt_snapshot_remains_no_data():
 
 def test_older_qt_result_date_remains_distinct_from_today_position_snapshot():
     base = _Reader().fetch_detail_rows("TREND", PRIMARY)
-    result_day = date.today() - timedelta(days=5)
+    result_day = current_utc_date() - timedelta(days=5)
     rows = replace(base, latest={**base.latest, "date": result_day},
-                   positions=[position("FAST")], position_date=date.today(),
+                   positions=[position("FAST")], position_date=current_utc_date(),
                    position_strategy_names=("FAST",), position_stream="qt")
     detail = build_strategy_detail(_Registry([PRIMARY]).get("trendfollowing"), rows)
     assert detail["dataAvailable"] is True
     assert detail["resultSource"] == "qt"
     assert detail["resultDate"] == result_day.isoformat()
-    assert detail["positionDate"] == date.today().isoformat()
+    assert detail["positionDate"] == current_utc_date().isoformat()
     assert detail["positionsEditable"] is True

@@ -8,7 +8,7 @@ import re
 from algolens.domain.shared.fixed_decimal8 import parse_fixed_decimal8
 
 _BYTES=(Path(__file__).parent/'qt_equity_portfolio_consumption_contract.json').read_bytes()
-if sha256(_BYTES).hexdigest()!='c37b7f1d7453f814af24030f912d61e1f8accda9ac4ad9e188cd365e6855273d':
+if sha256(_BYTES).hexdigest()!='94ca88b15ca2a9a6d99d40ed169cd0e196cd3ec9cb4c1dab757c93196fda8cfe':
     raise ValueError('equity_portfolio_contract_pin_mismatch')
 _C=json.loads(_BYTES)
 _SYMBOL=re.compile(r'[A-Za-z0-9_.\-/]{1,64}\Z',re.ASCII)

@@ -1,7 +1,7 @@
 {
   "absent_reads": "unreached, never default-filled",
   "all_objects_closed": true,
-  "base_contract_sha256": "d695c74986459fb432d6bbfa82ca8af0a0a987ad69d6d51bcf66e5ade1f08432",
+  "base_contract_sha256": "cc869bed56a7ec679bded0c4be169d87bd251be8b2db804fc79dea2103c4176d",
   "catalog_version": "qt-equity-main08b15c-run/v2",
   "certification": "Instrumentation scope only; authentic runtime/data/full raw parity remains separately unverified.",
   "collection_shapes": {

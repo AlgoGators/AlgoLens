@@ -342,7 +342,7 @@ describe('the table says which book it is showing', () => {
       />,
     );
     const heading = document.querySelector('h3') as HTMLElement;
-    expect(heading.textContent).toContain('Unknown position stream snapshot (date unavailable)');
+    expect(heading.textContent).toContain('Legacy / Unscoped positions snapshot (date unavailable)');
     expect(within(heading).getByText('CONSERVATIVE_PORTFOLIO')).toBeTruthy();
   });
 

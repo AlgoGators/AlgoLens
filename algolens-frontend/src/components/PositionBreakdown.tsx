@@ -126,7 +126,7 @@ export function PositionBreakdown({
             theme === 'dark' ? 'text-gray-400' : 'text-gray-500'
           }`}>
             {positionStream === 'system' ? 'Model / System positions'
-              : positionStream === 'qt' ? 'QT positions' : 'Unknown position stream'}
+              : positionStream === 'qt' ? 'QT positions' : 'Legacy / Unscoped positions'}
             {' '}snapshot {positionDate ?? '(date unavailable)'}
             {!bookControl && portfolioId && (
               <span className={`ml-2 font-mono normal-case ${
