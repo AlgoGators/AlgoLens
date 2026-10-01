@@ -360,6 +360,13 @@ def test_draft_save_request_trims_rationale():
     assert QtDraftSaveRequest.from_wire(request).to_wire()["rationale"] == "Reduce concentration."
 
 
+def test_draft_rationale_changes_the_immutable_draft_digest():
+    rows = [{"key": KEY_A, "quantity_exact": "1"}]
+    assert qt_digest_v1({"rationale": "Reduce concentration.", "selection_rows": rows}) != qt_digest_v1(
+        {"rationale": "Increase liquidity.", "selection_rows": rows}
+    )
+
+
 def test_proposal_accepts_complete_saved_qt_display_row():
     fixture = json.loads((Path(__file__).parents[2] / "contracts" / "qt-workflow-v1.json").read_text(encoding="utf-8"))
     proposal = deepcopy(fixture["proposal_ready"])

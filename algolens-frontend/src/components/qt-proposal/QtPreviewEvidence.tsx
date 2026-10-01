@@ -47,17 +47,18 @@ export function QtPreviewEvidence({ preview }: { preview: QtPreview }) {
   const weight = (rows: typeof optimizer.current_weights, instrument: string, symbol: string) =>
     rows.find(row => row.instrument_type === instrument && row.symbol === symbol)?.weight_diagnostic ?? 'unavailable';
   return <section aria-label="QT preview evidence" className={ui.card}>
-    <h3 className={ui.cardTitle}>Preview of my chosen quantities</h3>
+    <h3 className={ui.cardTitle}>Post-change review for my chosen quantities</h3>
+    <p className={`${ui.body} break-words`}>Server evaluator results for proposed selected-book digest {preview.selected_book_digest}. Review the proposed quantities, risk, and costs before confirming.</p>
     <p className={ui.callout(preview.availability === 'ready' && preview.confirmable ? 'success' : preview.availability === 'ready' ? 'warning' : 'danger')}>Evidence: {preview.availability}; confirmation {preview.confirmable ? 'available' : 'blocked'}.</p>
     {preview.unavailable_reasons.length > 0 && <p className={ui.callout('danger')}>Unavailable: {preview.unavailable_reasons.join(', ')}</p>}
-    <section aria-label="Aggregate optimizer advice" className={sub}>
-      <h4 className={ui.subTitle}>Aggregate optimizer advice</h4>
+    <section aria-label="Proposed optimizer impact" className={sub}>
+      <h4 className={ui.subTitle}>Proposed optimizer impact</h4>
       <p className={ui.body}>Stage: {optimizer.status}. This advice is aggregate and does not change QT component quantities.</p>
       <p className={ui.body}>Actual optimizer iterations: {iterations ?? 'unavailable'}.</p>
       {evaluated && <>
         <p className={ui.body}>Tracking error: {diagnostic(tracking) ? tracking : 'unavailable'}; cost penalty: {optimizer.cost_penalty ?? 'unavailable'}.</p>
         {optimizer.solved_weights.length > 0 && <div className={ui.tableWrap}><table aria-label="Optimizer aggregate weights" className={`${ui.table} min-w-[480px]`}>
-          <thead><tr><th className={ui.th}>Instrument</th><th className={ui.thRight}>Previous weight</th><th className={ui.thRight}>Proposed weight</th><th className={ui.thRight}>Solved weight</th></tr></thead>
+          <thead><tr><th className={ui.th}>Instrument</th><th className={ui.thRight}>Current weight</th><th className={ui.thRight}>Proposed target weight</th><th className={ui.thRight}>Optimizer solution</th></tr></thead>
           <tbody>{optimizer.solved_weights.map(row => <tr key={`${row.instrument_type}:${row.symbol}`} className={ui.tr}>
             <td className={ui.td}>{row.instrument_type} {row.symbol}</td>
             <td className={ui.tdNum}>{weight(optimizer.current_weights, row.instrument_type, row.symbol)}</td>
@@ -78,8 +79,9 @@ export function QtPreviewEvidence({ preview }: { preview: QtPreview }) {
       </p>)}
       {optimizer.diagnostics.map((message, index) => <p key={index} className={ui.callout('warning')}>{message}</p>)}
     </section>
-    <section aria-label="Selected book risk" className={sub}>
-      <h4 className={ui.subTitle}>Selected book risk</h4>
+    <section aria-label="Proposed post-change risk" className={sub}>
+      <h4 className={ui.subTitle}>Proposed post-change risk</h4>
+      <p className={`${ui.body} break-words`}>These metrics are calculated by the server evaluator for proposed selected-book digest {preview.selected_book_digest}.</p>
       <p className={ui.badge(risk.status === 'evaluated' ? risk.passed ? 'success' : 'warning' : 'neutral')}>Stage: {risk.status}; {risk.status === 'evaluated' ? risk.passed ? 'passed' : 'known breach' : 'unavailable'}.</p>
       {risk.metrics.map((metric, index) => <p key={`${metric.code}:${index}`} className={`${ui.body} break-words`}>
         {metric.code}: {metric.value_diagnostic ?? 'unavailable'} {metric.unit}; source {metric.source_id ?? 'unavailable'}.
@@ -89,8 +91,8 @@ export function QtPreviewEvidence({ preview }: { preview: QtPreview }) {
       </p>)}
       {risk.diagnostics.map((message, index) => <p key={index} className={ui.callout('warning')}>{message}</p>)}
     </section>
-    <section aria-label="Selected book costs" className={sub}>
-      <h4 className={ui.subTitle}>Selected book costs</h4>
+    <section aria-label="Proposed transaction costs" className={sub}>
+      <h4 className={ui.subTitle}>Proposed transaction costs</h4>
       <p className={ui.body}>Stage: {costs.status}; estimated selected-book cost {costs.total_exact ?? 'unavailable'}.</p>
       {costs.by_component.map(component => <p key={JSON.stringify(component.key)} className={`${ui.body} break-words`}>
         {component.key.strategy_name} {component.key.symbol}: {component.prior_quantity_exact} to

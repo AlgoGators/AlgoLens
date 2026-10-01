@@ -16,14 +16,14 @@ describe('staged API to UI empty-owner contract (synthetic examples)', () => {
     const proposal = decodeQtProposal(examples.proposal);
     const draft = decodeQtDraft(examples[name]);
     expect(proposal).toEqual(examples.proposal);
-    expect(draft).toEqual(examples[name]);
+    expect(draft).toEqual({ ...examples[name], rationale: null });
     expect(qtEmptyOwnerMatches(proposal, draft)).toBe(true);
   });
 
   it('matches the consumed draft only to its new current source authority', () => {
     const draft = decodeQtDraft(examples.draft_consumed);
     const current = decodeQtProposal(examples.proposal_consumed);
-    expect(draft).toEqual(examples.draft_consumed);
+    expect(draft).toEqual({ ...examples.draft_consumed, rationale: null });
     expect(current).toEqual(examples.proposal_consumed);
     expect(qtEmptyOwnerMatches(current, draft)).toBe(true);
     expect(qtEmptyOwnerMatches(decodeQtProposal(examples.proposal), draft)).toBe(false);

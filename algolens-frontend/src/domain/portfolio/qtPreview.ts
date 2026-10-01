@@ -216,7 +216,9 @@ export function decodeQtProposal(value: unknown): QtProposal {
 }
 
 export function decodeQtDraft(value: unknown): QtDraft {
-  const item = choiceObject(value, ['schema_version', 'book_id', 'source_day', 'state', 'draft_id', 'draft_revision', 'draft_digest', 'source_digest', 'provenance_digest', 'rationale', 'selection_rows'], true);
+  const legacy = value !== null && typeof value === 'object' && !Array.isArray(value) &&
+    !Object.prototype.hasOwnProperty.call(value, 'rationale') ? { ...value, rationale: null } : value;
+  const item = choiceObject(legacy, ['schema_version', 'book_id', 'source_day', 'state', 'draft_id', 'draft_revision', 'draft_digest', 'source_digest', 'provenance_digest', 'rationale', 'selection_rows'], true);
   const book = string(item.book_id); const day = date(item.source_day);
   const state = literal(item.state, item.schema_version === 'qt-workflow/v2' ?
     ['absent', 'saved', 'consumed'] : ['absent', 'saved', 'stale', 'provenance_unresolved']);

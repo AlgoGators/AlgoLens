@@ -325,9 +325,35 @@ describe('QT proposal workspace', () => {
     await userEvent.setup().click(screen.getByRole('button', { name: 'Evaluate my selection' }));
     expect(api.createPreview).toHaveBeenCalledWith(expect.objectContaining({ draft_id: draft().draft_id,
       draft_revision: 1, draft_digest: draft().draft_digest }));
-    expect(await screen.findByText(/Aggregate optimizer advice/)).toBeTruthy();
+    expect(await screen.findByText(/Proposed optimizer impact/)).toBeTruthy();
     expect((within(first).getByRole('textbox') as HTMLInputElement).value).toBe('5');
     expect((within(second).getByRole('textbox') as HTMLInputElement).value).toBe('1');
+  });
+
+  it('shows evaluator-owned proposed risk only after evaluation and before confirmation', async () => {
+    api.createPreview.mockResolvedValue(clean());
+    render(<QtProposalWorkspace {...props} onPublished={vi.fn()} />);
+    expect(screen.queryByRole('region', { name: 'Proposed post-change risk' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Confirm these quantities' })).toBeNull();
+    await userEvent.setup().click(await screen.findByRole('button', { name: 'Evaluate my selection' }));
+    const risk = await screen.findByRole('region', { name: 'Proposed post-change risk' });
+    expect(within(risk).getByText(/calculated by the server evaluator for proposed selected-book digest/i).textContent)
+      .toContain(clean().selected_book_digest);
+    expect(within(risk).getByText(/synthetic_exposure_ratio: 0.12345678901234566 ratio/)).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Confirm these quantities' })).toBeTruthy();
+  });
+
+  it('drops stale evaluated risk when the saved rationale changes', async () => {
+    api.createPreview.mockResolvedValue(clean());
+    render(<QtProposalWorkspace {...props} onPublished={vi.fn()} />);
+    await userEvent.setup().click(await screen.findByRole('button', { name: 'Evaluate my selection' }));
+    await screen.findByRole('region', { name: 'Proposed post-change risk' });
+    const rationale = screen.getByRole('textbox', { name: 'Why should this position change be made?' });
+    await userEvent.setup().clear(rationale);
+    await userEvent.setup().type(rationale, 'Updated reason after reviewing the proposed risk.');
+    expect(screen.queryByRole('region', { name: 'Proposed post-change risk' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Confirm these quantities' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Save draft' })).toHaveProperty('disabled', false);
   });
 
   it('attributes the request, requires a rationale, and sends its trimmed value without a claimed actor', async () => {

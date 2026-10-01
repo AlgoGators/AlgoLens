@@ -72,7 +72,8 @@ describe('the edit guide in the workspace', () => {
 
   it('goes back to Save draft and recounts as soon as a quantity is edited', async () => {
     render(<QtProposalWorkspace {...props} onPublished={vi.fn()} />);
-    const [alpha] = await screen.findAllByRole('textbox');
+    await screen.findAllByRole('textbox');
+    const [alpha] = editorInputs();
     fireEvent.change(alpha, { target: { value: '4' } });
     // alpha now equals MODEL (4); beta is still 1 against MODEL 2.
     await waitFor(() => expect(within(guide()).getByRole('status').textContent)

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import fixtures from '../../../contracts/qt-workflow-v1.json';
@@ -70,7 +70,8 @@ describe('verified empty QT selection', () => {
     const save = await screen.findByRole('button', { name: 'Save draft' });
     await waitFor(() => expect(save.hasAttribute('disabled')).toBe(false));
     expect(screen.getByRole('region', { name: 'Verified empty selection' }).textContent).toContain('EQUITY_MEAN_REVERSION');
-    expect(screen.queryByRole('textbox')).toBeNull();
+    expect(screen.getByRole('textbox', { name: 'Why should this position change be made?' })).toBeTruthy();
+    expect(within(screen.getByRole('table', { name: 'QT component quantities' })).queryByRole('textbox')).toBeNull();
     expect(screen.getByRole('button', { name: 'Evaluate my selection' }).hasAttribute('disabled')).toBe(true);
     await userEvent.setup().click(save);
     await waitFor(() => expect(api.saveDraft).toHaveBeenCalledTimes(1));

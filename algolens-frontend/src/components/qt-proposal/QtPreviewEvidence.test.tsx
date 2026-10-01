@@ -24,7 +24,7 @@ function preview() {
 describe('QT optimizer recommendation diagnostics', () => {
   it('shows actual iterations and readable existing optimizer diagnostics', () => {
     render(<QtPreviewEvidence preview={preview()} />);
-    const advice = within(screen.getByRole('region', { name: 'Aggregate optimizer advice' }));
+    const advice = within(screen.getByRole('region', { name: 'Proposed optimizer impact' }));
     expect(advice.getByText('Actual optimizer iterations: 7.')).toBeTruthy();
     expect(advice.getByText('Tracking error: 0.001; cost penalty: 0.31.')).toBeTruthy();
     expect(advice.getByText('Buffer branch: applied.')).toBeTruthy();
@@ -40,13 +40,13 @@ describe('QT optimizer recommendation diagnostics', () => {
 
   it('preserves optimizer weight units and distinguishes proposal advice from exact chosen quantities', () => {
     render(<QtPreviewEvidence preview={preview()} />);
-    const advice = within(screen.getByRole('region', { name: 'Aggregate optimizer advice' }));
-    expect(advice.getByRole('columnheader', { name: 'Proposed weight' })).toBeTruthy();
+    const advice = within(screen.getByRole('region', { name: 'Proposed optimizer impact' }));
+    expect(advice.getByRole('columnheader', { name: 'Proposed target weight' })).toBeTruthy();
     expect(advice.queryByRole('columnheader', { name: 'Chosen weight' })).toBeNull();
     expect(advice.queryByText(/Solver quantities|Buffered quantities/)).toBeNull();
     expect(advice.getByText('Solver weights: 0.023.')).toBeTruthy();
     expect(advice.getByText('Buffered weights after rounding: 0.022.')).toBeTruthy();
-    expect(screen.getByRole('region', { name: 'Selected book costs' })).toBeTruthy();
+    expect(screen.getByRole('region', { name: 'Proposed transaction costs' })).toBeTruthy();
   });
 
   it('labels preview costs as estimates', () => {

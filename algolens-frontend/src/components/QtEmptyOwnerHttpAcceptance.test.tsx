@@ -69,7 +69,7 @@ describe('actual empty-owner native, PostgreSQL and HTTP evidence in the fronten
       if (row.route.endsWith('/proposal')) result = await QtPreviewApi.getProposal(body.book_id);
       else if (row.route.endsWith('/draft')) result = await QtPreviewApi.getDraft(body.book_id);
       else result = await QtPreviewApi.getDecision(body.decision_id);
-      expect(result).toEqual(body);
+      expect(result).toEqual(row.route.endsWith('/draft') ? { ...body, rationale: null } : body);
       expect(String(fetch.mock.calls.at(-1)?.[0])).toContain(row.route);
     }
     expect(fetch).toHaveBeenCalledTimes(rows.length);
@@ -91,7 +91,7 @@ describe('actual empty-owner native, PostgreSQL and HTTP evidence in the fronten
     expect(processed.report_ready).toBe(true);
     expect(processed.preview_id).toBe(preview.preview_id);
     render(<QtPreviewEvidence preview={preview} />);
-    expect(within(screen.getByRole('region', { name: 'Selected book risk' })).getByText(
+    expect(within(screen.getByRole('region', { name: 'Proposed post-change risk' })).getByText(
       'This selection has no instruments; price and correlation history are not applicable.')).toBeTruthy();
     const view = render(<QtDecisionStatus decision={confirmed} phase="processing"
       verifiedContext onRefresh={vi.fn()} onApprove={vi.fn()} busy={false} />);
