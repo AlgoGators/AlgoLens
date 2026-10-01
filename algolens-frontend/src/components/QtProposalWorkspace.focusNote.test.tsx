@@ -4,7 +4,7 @@
 // rows of the other strategies are saved QT rows and are shown as locked
 // holdings. On a strategy page whose own rows are ALL locked while another
 // strategy's rows are editable, the window used to give no reason. With
-// `focusStrategyName` the guide now says whose quantities can be changed.
+// `focusStrategyName` the quantity section says whose quantities can be changed.
 // Presentation only: it never changes which row is editable.
 
 import { render, screen, waitFor, within } from '@testing-library/react';
@@ -42,9 +42,9 @@ function serve(rows: Array<[string, string, boolean]>) {
   api.getDraft.mockResolvedValue(decodeQtDraft({ ...structuredClone(fixtures.draft_saved), selection_rows: chosen }));
 }
 const note = () => screen.queryByRole('note');
-const guide = () => screen.getByRole('region', { name: 'How QT position changes work' });
+const quantities = () => screen.getByRole('region', { name: 'Position quantities' });
 async function ready() {
-  await screen.findByRole('region', { name: 'How QT position changes work' });
+  await screen.findByRole('region', { name: 'Position quantities' });
   await waitFor(() => expect(api.getDraft).toHaveBeenCalled());
   await screen.findByRole('table', { name: 'QT component quantities' });
 }
@@ -66,7 +66,7 @@ describe('the note for a strategy whose rows are all locked', () => {
     expect(note()!.textContent).toBe("Carry cannot be changed in this window: this book's QT desk feed comes from " +
       "Trend Following and Mean Reversion, so Carry's positions are shown as locked holdings. " +
       "You can change Trend Following and Mean Reversion's quantities here.");
-    expect(guide().contains(note())).toBe(true);
+    expect(quantities().contains(note())).toBe(true);
     expect(note()!.textContent).toContain(NOTE);
   });
 
@@ -136,14 +136,14 @@ describe('the note is absent everywhere else', () => {
     expect(note()).toBeNull();
   });
 
-  it('when the whole choice is locked by an existing decision (the guide already explains the lock)', async () => {
+  it('when the whole choice is locked by an existing decision (the quantity section already explains the lock)', async () => {
     serve([['Carry', '6E', false], ['Trend Following', 'ES', true]]);
     const decided = { schema_version: 'qt-workflow/v1', book_id: props.bookId, source_day: props.sourceDay,
       decision: structuredClone(fixtures.decision_pending), preview: structuredClone(fixtures.preview_clean) };
     api.getBookDecision.mockResolvedValue(decided);
     render(<QtProposalWorkspace {...props} embedded focusStrategyName="Carry" onPublished={vi.fn()} />);
     await screen.findByRole('region', { name: 'Immutable QT decision review' });
-    await waitFor(() => expect(within(guide()).getByText(/A decision already exists for this source day/)).toBeTruthy());
+    await waitFor(() => expect(within(quantities()).getByText(/A decision already exists for this source day/)).toBeTruthy());
     expect(note()).toBeNull();
   });
 });

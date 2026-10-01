@@ -8,7 +8,6 @@ import { QtApiError, QtMutationUncertainError, QtPreviewApi } from '../infrastru
 import { QtRecovery, QtRecoveryStorageError } from '../infrastructure/api/qtRecovery';
 import { SessionExpiredError } from '../infrastructure/api/httpClient';
 import { QtDecisionStatus } from './qt-proposal/QtDecisionStatus';
-import { QtEditGuide, type QtEditStep } from './qt-proposal/QtEditGuide';
 import { QtPreviewEvidence } from './qt-proposal/QtPreviewEvidence';
 import { QtSelectionTable } from './qt-proposal/QtSelectionTable';
 import { qtStyles, useQtDark, type QtTone } from './qt-proposal/qtStyles';
@@ -24,7 +23,7 @@ type Props = {
   /**
    * The strategy the reader opened this window from. A book is shared by several
    * strategies but has one MODEL owner per day; when every row of this strategy
-   * is a locked holding while another strategy's rows are editable, the guide
+   * is a locked holding while another strategy's rows are editable, the quantity section
    * says so instead of leaving the locked boxes unexplained. Presentation only.
    */
   focusStrategyName?: string;
@@ -221,7 +220,7 @@ export function QtProposalWorkspace({ actorId, actorLabel, bookId, sourceDay, on
   // While it is still in flight (waiting for approvals, or confirmed and being processed) the
   // choice above it can no longer change, so the boxes and the write buttons close. Once it has
   // finished (processed, report-blocked or failed) a reader may start a new choice, so nothing
-  // locks; the guide says so. A verified empty selection has no boxes and may always start a new
+  // locks; the quantity section says so. A verified empty selection has no boxes and may always start a new
   // choice, so a discovered decision does not change what it says. The backend stays the
   // authority either way: this only stops offering an edit that could not take effect.
   const reviewedPhase = reviewedDecision ? decisionPhase(reviewedDecision) : null;
@@ -457,35 +456,37 @@ export function QtProposalWorkspace({ actorId, actorLabel, bookId, sourceDay, on
     const model = modelQuantity.get(qtComponentKey({ ...row.key, portfolio_type: 'qt' }));
     return model !== undefined && !sameQuantity(chosen, model, row.asset_type);
   }).length;
-  const guideStep: QtEditStep = decisionExists ? 5 : visible.preview ? 4 : !savedSelection ? (draft ? 2 : 1) : 3;
-  const guideLocked = decisionExists ? 'A decision already exists for this source day, so these quantities can no longer be changed. Its review and approvals are shown below.'
+  const editorNotice = decisionExists ? 'A decision already exists for this source day, so these quantities can no longer be changed. Its review and approvals are shown below.'
     : proposal && (!sourceReady || !proposal.action_grants.can_save_draft) ? 'Editing is unavailable until the current source and your permissions are ready.'
       : proposal && draft && !editorAllowsEdit ? 'Editing is paused right now. Check the messages and status on this page, or refresh the QT source.' : null;
-  const guideNote = !guideLocked && reviewedDecision && !verifiedEmptySelection ?
+  const previousDecisionNote = !editorNotice && reviewedDecision && !verifiedEmptySelection ?
     `A previous decision for this source day ${reviewedPhase === 'unavailable' ? 'could not be processed' : 'was processed'}. Editing starts a new choice; the previous decision stays in the audit history below.` : null;
+  const focusedOwnerNote = !editorNotice ? focusLockedNote(chosenRows, focusStrategyName) : null;
   const sourceTone: QtTone = sourceReady ? 'success' : 'warning';
   const draftTone: QtTone = !draft ? 'neutral' : draft.state === 'saved' ? 'success' : draft.state === 'consumed' ? 'neutral' : 'warning';
   const savePrimary = !savedSelection;
   const hasRecoveryAction = hasConfirmationRecovery || hasApprovalRecovery;
 
   return <section id="qt-proposal-workspace" tabIndex={-1} aria-label="QT proposal workspace" className={embedded ? ui.panelEmbedded : ui.panel}>
-    <div className="space-y-1">
-      {/* Inside the dialog its own title is the h2, so this heading drops one level. */}
-      {embedded ? <h3 className={ui.panelTitle}>QT proposal for {bookId}</h3> : <h2 className={ui.panelTitle}>QT proposal for {bookId}</h2>}<p className={`${ui.body} ${ui.muted}`}>Source day {sourceDay}</p>
+    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+      <div className="space-y-1">
+        {/* Inside the dialog its own title is the h2, so this heading drops one level. */}
+        {embedded ? <h3 className={ui.panelTitle}>QT proposal for {bookId}</h3> : <h2 className={ui.panelTitle}>QT proposal for {bookId}</h2>}
+        <p className={`${ui.body} ${ui.muted}`}>Source day {sourceDay}</p>
+      </div>
+      {(proposal || draft) && <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+        {proposal && <p className={ui.badge(sourceTone)}>Source: {proposal.workflow_state}. {proposal.read_only_reason ?? ''}</p>}
+        {draft && <p className={ui.badge(draftTone)}>Draft revision {draft.draft_revision} ({draft.state})</p>}
+      </div>}
     </div>
     {message && <p role="alert" className={ui.callout('danger')}>{message}</p>}
-    {(proposal || draft) && <div className="flex flex-wrap items-center gap-2">
-      {proposal && <p className={ui.badge(sourceTone)}>Source: {proposal.workflow_state}. {proposal.read_only_reason ?? ''}</p>}
-      {draft && <p className={ui.badge(draftTone)}>Draft revision {draft.draft_revision} ({draft.state})</p>}
-    </div>}
     {!proposal && !message && <p role="status" className={`${ui.body} ${ui.muted}`}>Loading QT source</p>}
     {verifiedEmptySelection && <section aria-label="Verified empty selection" className={`space-y-2 ${ui.callout('info')}`}>
       <p>No positions for {proposal?.empty_owner?.configured_owner_names[0]}. Save this empty choice, then evaluate and confirm it.</p>
       {draft?.state === 'consumed' && <p>Your previous choice was processed. Save to start a new choice; the previous decision remains in the audit history.</p>}
     </section>}
-    {proposal && <QtEditGuide step={guideStep} changed={changedFromModel} editable={editableRows.length} lockedReason={guideLocked} note={guideNote}
-      focusNote={focusLockedNote(chosenRows, focusStrategyName)} />}
     {proposal && <section aria-label="Position change request" className={ui.card}>
+      <h4 className={ui.cardTitle}>Change details</h4>
       <div className="grid gap-3 sm:grid-cols-2">
         <div><p className={ui.subTitle}>Authenticated actor</p>
           <p className={ui.body}>{actorLabel || `Account ${actorId}`}</p></div>
@@ -508,7 +509,14 @@ export function QtProposalWorkspace({ actorId, actorLabel, bookId, sourceDay, on
         <p className={ui.note}>{rationaleBytes}/1000 bytes</p>
       </div>
     </section>}
-    {proposal && <div className={ui.card}>
+    {proposal && <section aria-label="Position quantities" className={ui.card}>
+      <div className="space-y-1">
+        <h4 className={ui.cardTitle}>Position quantities</h4>
+        <p className={ui.note}>Review the MODEL recommendation, your chosen quantity, and the signed difference.</p>
+      </div>
+      {editorNotice && <p role="status" className={ui.callout('warning')}>{editorNotice}</p>}
+      {previousDecisionNote && <p className={ui.note}>{previousDecisionNote}</p>}
+      {focusedOwnerNote && <p role="note" className={`${ui.note} font-medium`}>{focusedOwnerNote}</p>}
       <QtSelectionTable sourceRows={sourceRows} chosenRows={chosenRows} previousQtRows={proposal.saved_qt_rows} selection={visible.selection}
         onEdit={edit} locked={tableLocked} />
       <div className="space-y-3">
@@ -522,7 +530,7 @@ export function QtProposalWorkspace({ actorId, actorLabel, bookId, sourceDay, on
         {!savedSelection && <p className={ui.note}>Save the current selection before evaluation.</p>}
         {savedSelection && !rationaleMatchesSaved && <p className={ui.note}>Save this rationale before evaluation.</p>}
       </div>
-    </div>}
+    </section>}
     {visible.preview && <QtPreviewEvidence preview={visible.preview} />}
     {visible.preview && !decision && <div className={ui.buttonRow}><button type="button"
       className={visible.preview.requires_override ? ui.btnWarning : ui.btnPrimary} onClick={confirm} disabled={!canConfirm}>
