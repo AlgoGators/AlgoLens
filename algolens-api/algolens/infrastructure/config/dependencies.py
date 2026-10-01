@@ -56,6 +56,15 @@ def create_portfolio_dependencies(connection_factory=None):
     return registry, reader
 
 
+def create_investor_book_service(connection_factory=None):
+    """Compose the published system-only investor read boundary."""
+    from algolens.application.portfolio.investor_books import InvestorBookService
+    from algolens.infrastructure.portfolio.investor_books import (
+        PostgresInvestorBookRepository,
+    )
+    return InvestorBookService(PostgresInvestorBookRepository(connection_factory))
+
+
 def create_market_data(connection_factory=None):
     """Prices and contract sizes, from the schemas data-ngin owns."""
     return PostgresMarketData(connection_factory=connection_factory)

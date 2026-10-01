@@ -18,6 +18,7 @@ from algolens.adapters.http.portfolio import portfolio_bp
 from algolens.adapters.http.qt_workflow import qt_workflow_bp
 from algolens.adapters.http.runtime_control import runtime_control_bp
 from algolens.adapters.http.configuration_inspection import configuration_inspection_bp
+from algolens.adapters.http.investor_books import investor_books_bp
 from algolens.infrastructure.db.postgres import get_db_connection
 from extensions import limiter
 
@@ -208,6 +209,7 @@ def create_app():
     app.config['QT_EVALUATOR_BUNDLE_DIR'] = os.getenv('QT_EVALUATOR_BUNDLE_DIR') or None
     app.register_blueprint(runtime_control_bp, url_prefix="/portfolio")
     app.register_blueprint(configuration_inspection_bp, url_prefix="/portfolio")
+    app.register_blueprint(investor_books_bp, url_prefix="/portfolio")
 
     release_sha = os.getenv("APP_RELEASE_SHA", "")
     release_sha = release_sha.lower() if re.fullmatch(r"[0-9a-fA-F]{40}", release_sha) else None
