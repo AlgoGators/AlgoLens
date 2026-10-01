@@ -63,7 +63,7 @@ function placeholderStrategy(summary: {
     dataAvailable: false,
     invested: null,
     currentValue: null,
-    resultSource: 'qt',
+    resultSource: 'system',
     resultDate: null,
     return: null,
     returnPercent: null,
@@ -72,7 +72,7 @@ function placeholderStrategy(summary: {
     positionStrategyNames: [],
     positionDate: null,
     positionsEditable: false,
-    positionEditUnavailableReason: 'No dated QT snapshot is available.',
+    positionEditUnavailableReason: 'No dated system snapshot is available.',
     historicalData: [],
     bestDay: null,
     worstDay: null,
@@ -90,7 +90,7 @@ function placeholderStrategy(summary: {
     executions: [],
     executionsAvailable: false,
     executionDate: null,
-    executionUnavailableReason: 'QT result date is unavailable; fills cannot be attributed to a reporting day.',
+    executionUnavailableReason: 'System result date is unavailable; fills cannot be attributed to a reporting day.',
     finalizedPositions: [],
     activityStream: null,
     finalizedPositionsAvailable: false,
@@ -155,7 +155,8 @@ export class PortfolioApiService {
    * One strategy's detail, scoped to one book.
    *
    * Omitting `portfolioId` gets the primary book. The positions-only selector
-   * defaults to model/system; dashboard aggregation asks for QT explicitly.
+   * defaults to model/system. Dashboard aggregation uses the same explicit
+   * system stream; QT is entered only through the detail-page selector/editor.
    */
   static async getStrategy(
     strategyId: string,
@@ -246,7 +247,7 @@ export class PortfolioApiService {
 
     // Fetch detailed data for each strategy.
     //
-    // A missing result can coexist with a real QT position snapshot. Ask for
+    // A missing result can coexist with a real system position snapshot. Ask for
     // detail regardless of the summary; only a genuinely empty book gets a
     // placeholder. Other API failures remain failures.
     log('info', 'Fetching detailed data for each strategy...');
@@ -254,19 +255,12 @@ export class PortfolioApiService {
       strategySummaries.map(async (summary: any, index: number) => {
         log('info', `Fetching strategy ${index + 1}/${strategySummaries.length}: ${summary.id}`);
         try {
-          const strategy = await this.getStrategy(summary.id, summary.portfolio_id, 'qt');
+          const strategy = await this.getStrategy(summary.id, summary.portfolio_id, 'system');
           log('info', `Strategy ${summary.id} fetched successfully`);
           return strategy;
         } catch (error) {
           if (error instanceof ApiError && error.code === 'no_data_for_book') {
-            try {
-              return await this.getStrategy(summary.id, summary.portfolio_id, 'system');
-            } catch (systemError) {
-              if (systemError instanceof ApiError && systemError.code === 'no_data_for_book') {
-                return placeholderStrategy(summary);
-              }
-              throw systemError;
-            }
+            return placeholderStrategy(summary);
           }
           throw error;
         }

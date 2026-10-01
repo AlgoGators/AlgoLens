@@ -133,23 +133,24 @@ def test_unknown_stream_and_date_are_readable_but_not_editable():
     assert detail["executionUnavailableReason"]
 
 
-def test_model_positions_keep_qt_financials_without_cross_stream_closes():
+def test_model_positions_keep_system_financials_without_cross_stream_closes():
     base = _Reader().fetch_detail_rows("TREND", PRIMARY)
-    qt_today = [position("QT_DESK", 17)]
+    system_today = [position("MODEL_FAST", 2), position("MODEL_SLOW", 5)]
     rows = replace(
         base,
         positions=[position("MODEL_FAST", 2), position("MODEL_SLOW", 5)],
         position_stream="system",
-        qt_positions=qt_today,
-        yesterday_positions=[position("QT_DESK", 17, current_utc_date() - timedelta(days=1))],
-        activity_stream="qt",
+        qt_positions=system_today,
+        yesterday_positions=[position("MODEL_FAST", 2, current_utc_date() - timedelta(days=1)),
+                             position("MODEL_SLOW", 5, current_utc_date() - timedelta(days=1))],
+        activity_stream="system",
         finalized_positions_available=True,
     )
 
     detail = build_strategy_detail(_Registry([PRIMARY]).get("trendfollowing"), rows)
 
     assert detail["positionStream"] == "system"
-    assert detail["activityStream"] == "qt"
+    assert detail["activityStream"] == "system"
     assert detail["finalizedPositionsAvailable"] is True
     assert detail["finalizedPositions"] == []
     assert detail["positionEditUnavailableReason"] and "model" in detail["positionEditUnavailableReason"].lower()
@@ -198,7 +199,7 @@ def test_detail_preserves_today_qt_snapshot_without_financial_result(positions):
     assert detail["positionDate"] == current_utc_date().isoformat()
     assert detail["positionStrategyNames"] == ["FAST"]
     assert detail["dataAvailable"] is False
-    assert detail["resultSource"] == "qt"
+    assert detail["resultSource"] == "system"
     assert detail["resultDate"] is None
     assert detail["currentValue"] is None
     assert detail["return"] is None
@@ -240,7 +241,7 @@ def test_older_qt_result_date_remains_distinct_from_today_position_snapshot():
                    position_strategy_names=("FAST",), position_stream="qt")
     detail = build_strategy_detail(_Registry([PRIMARY]).get("trendfollowing"), rows)
     assert detail["dataAvailable"] is True
-    assert detail["resultSource"] == "qt"
+    assert detail["resultSource"] == "system"
     assert detail["resultDate"] == result_day.isoformat()
     assert detail["positionDate"] == current_utc_date().isoformat()
     assert detail["positionsEditable"] is True

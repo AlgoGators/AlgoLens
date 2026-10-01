@@ -20,6 +20,6 @@ it('discloses that a selected position-only strategy is missing from the measure
   const metrics = computeCombinedMetrics([priced, positionOnly], ['priced', 'position-only']);
   render(<StrategySummary metrics={metrics} theme="light" />);
 
-  expect(screen.getByText(/partial.*1 selected strategy.*QT performance unavailable/i)).toBeTruthy();
+  expect(screen.getByText(/partial.*1 selected strategy.*system-model performance unavailable/i)).toBeTruthy();
   expect(screen.queryByText('Position Only')).toBeNull();
 });

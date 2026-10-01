@@ -93,7 +93,7 @@ export function StrategyList({ strategies, onSelectStrategy }: StrategyListProps
                   </div>
                   {strategy.dataAvailable === false || strategy.currentValue === null ? (
                     <div className={`text-sm ${theme === 'dark' ? 'text-amber-400' : 'text-amber-600'}`}>
-                      QT performance unavailable
+                      System-model performance unavailable
                     </div>
                   ) : (
                     <div className="text-lg">

@@ -659,7 +659,7 @@ describe('QT result availability beside a real position snapshot', () => {
     await waitFor(() => expect(screen.getByTestId('positions').textContent).toBe('CONSERVATIVE_PORTFOLIO:QT-POS'));
     expect(screen.getByTestId('position-identities').textContent).toBe('Engine A');
     await waitFor(() => expect(screen.getByTestId('positions-editable').textContent).toBe('true'));
-    expect(screen.getByText(/QT performance unavailable/i)).toBeTruthy();
+    expect(screen.getByText(/System-model performance unavailable/i)).toBeTruthy();
     expect(screen.queryByText('$0.00')).toBeNull();
   });
 
@@ -671,7 +671,7 @@ describe('QT result availability beside a real position snapshot', () => {
     serveQtDetail({ ...qt, tag: 'QT' });
     render(<StrategyDetail strategy={qt} onBack={() => {}} />);
     await selectQt();
-    await waitFor(() => expect(screen.getByText(/QT performance unavailable/i)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/System-model performance unavailable/i)).toBeTruthy());
     expect(screen.queryByText('$0.00')).toBeNull();
   });
 
@@ -684,7 +684,7 @@ describe('QT result availability beside a real position snapshot', () => {
     render(<StrategyDetail strategy={qt} onBack={() => {}} />);
     await selectQt();
 
-    await waitFor(() => expect(screen.getByText(/QT performance as of 2026-09-18/i)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/System-model performance as of 2026-09-18/i)).toBeTruthy());
     expect(screen.getAllByText(/positions snapshot 2026-09-23/i).length).toBeGreaterThan(0);
   });
 });

@@ -53,7 +53,7 @@ describe('opening a strategy from its book', () => {
     render(<PortfolioGrouping />);
     await expanded();
 
-    expect(screen.getByText(/partial.*1 QT result unavailable/i)).toBeTruthy();
+    expect(screen.getByText(/partial.*1 system result unavailable/i)).toBeTruthy();
     expect(screen.getAllByText('share unknown')).toHaveLength(2);
     expect(screen.queryByText(/% of fund/)).toBeNull();
   });

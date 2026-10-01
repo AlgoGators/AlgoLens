@@ -147,7 +147,7 @@ export interface Strategy {
    */
   dataAvailable?: boolean;
   /** The selected result stream and its reporting date, separate from positionDate. */
-  resultSource?: 'qt';
+  resultSource?: PositionStream;
   resultDate?: string | null;
   /** Starting equity. Null when none is on record and no curve supplies one. */
   invested: number | null;
@@ -193,9 +193,9 @@ export interface Strategy {
   /** Server-selected live-results date used to scope attributed fills. */
   executionDate?: string | null;
   finalizedPositions: FinalizedPosition[];
-  /** Closed-position comparisons remain QT, independently of positionStream. */
-  activityStream?: 'qt' | null;
-  /** False when the QT comparison snapshot is absent, rather than known empty. */
+  /** Closed-position comparisons remain on the system reporting stream, independently of positionStream. */
+  activityStream?: PositionStream | null;
+  /** False when the reporting-stream comparison snapshot is absent, rather than known empty. */
   finalizedPositionsAvailable?: boolean;
   managers: string[];
   lastUpdate: string;

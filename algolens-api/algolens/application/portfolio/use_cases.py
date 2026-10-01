@@ -185,9 +185,9 @@ def build_strategy_detail(
         "executionsAvailable": rows.executions_available,
         "executionUnavailableReason": (
             None if rows.executions_available else
-            "QT result date is unavailable; fills cannot be attributed to a reporting day."
+            "System result date is unavailable; fills cannot be attributed to a reporting day."
             if not result_available else
-            "Execution stream metadata is unavailable; legacy fills cannot be attributed to QT."
+            "Execution stream metadata is unavailable; legacy fills cannot be attributed to the system model."
         ),
         "finalizedPositions": transformed_finalized,
         "activityStream": rows.activity_stream,

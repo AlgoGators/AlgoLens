@@ -53,7 +53,7 @@ class _Registry:
 
 
 class _Reader:
-    """The default matches today's reader, making an unwired route return QT."""
+    """The default matches today's reader, making an unwired route return system."""
 
     def __init__(self, *, empty_system=False):
         self.calls = []
@@ -77,7 +77,7 @@ class _Reader:
 
         return PortfolioDetailRows(
             latest={
-                "date": QT_DAY,
+                "date": SYSTEM_DAY,
                 "current_portfolio_value": 250000,
                 "total_annualized_return": 8.0,
                 "total_cumulative_return": 8.0,
@@ -101,10 +101,10 @@ class _Reader:
             position_date=position_date,
             position_strategy_names=names,
             position_stream=position_stream,
-            execution_date=QT_DAY,
+            execution_date=SYSTEM_DAY,
             executions_available=True,
             qt_positions=[_position("QT_DESK", 17, QT_DAY)],
-            activity_stream="qt",
+            activity_stream="system",
             finalized_positions_available=True,
         )
 
@@ -137,7 +137,7 @@ def _get_detail(client, query_string=None):
     return client.get("/portfolio/strategy/trendfollowing", query_string=query_string)
 
 
-def test_omitted_stream_returns_model_components_with_qt_performance(client, route_reader):
+def test_omitted_stream_returns_model_components_with_system_performance(client, route_reader):
     response = _get_detail(client)
 
     assert response.status_code == 200
@@ -152,12 +152,12 @@ def test_omitted_stream_returns_model_components_with_qt_performance(client, rou
     assert detail["positionsEditable"] is False
     assert "model" in detail["positionEditUnavailableReason"].lower()
     assert [p["percentOfTotal"] for p in detail["positions"]] == [None, None]
-    assert detail["resultSource"] == "qt"
+    assert detail["resultSource"] == "system"
     assert detail["currentValue"] == 250000.0
     assert detail["metrics"]["executionsToday"] == 1
     assert detail["executions"][0]["notional"] == 5000.0
     assert detail["finalizedPositions"] == []
-    assert detail["activityStream"] == "qt"
+    assert detail["activityStream"] == "system"
     assert detail["finalizedPositionsAvailable"] is True
 
 
@@ -175,8 +175,8 @@ def test_explicit_qt_returns_qt_snapshot_and_retains_qt_percentage(client, route
     assert detail["positionStrategyNames"] == ["QT_DESK"]
     assert detail["positionsEditable"] is True
     assert detail["positions"][0]["percentOfTotal"] == 42.5
-    assert detail["resultSource"] == "qt"
-    assert detail["activityStream"] == "qt"
+    assert detail["resultSource"] == "system"
+    assert detail["activityStream"] == "system"
     assert detail["finalizedPositionsAvailable"] is True
 
 

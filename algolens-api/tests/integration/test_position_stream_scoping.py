@@ -129,32 +129,32 @@ def _yesterday(repo, **kwargs):
 
 class TestCurrentPositionsAreOneStream:
     def test_the_default_is_the_real_book(self, repo):
-        # PRIMARY_STREAM. Every other headline figure on the page means the qt
-        # book, including the equity curve directly above this table.
-        assert _by_symbol(_current(repo)) == {"ES.v.0": 25.0, "GC.v.0": 7.0}
+        # PRIMARY_STREAM. Every headline figure on the landing dashboard means
+        # the system/model book, including the equity curve above this table.
+        assert _by_symbol(_current(repo)) == {"ES.v.0": 10.0, "ZN.v.0": 40.0}
 
     def test_the_other_stream_is_not_blended_in(self, repo):
         # ZN is a system-only holding. Before the stream predicate it appeared
         # in the desk's table, because DISTINCT ON had no reason to exclude it.
-        assert "ZN.v.0" not in _by_symbol(_current(repo))
+        assert "GC.v.0" not in _by_symbol(_current(repo))
 
     def test_the_quantity_is_the_requested_streams_not_the_newest_rows(self, repo):
         # The two streams disagree about ES: 10 in the model, 25 on the desk.
         # An unscoped read returns 25 here too -- but only because the qt row
         # happens to have been written later. It would return 10 if the engine
         # ran after the desk edit, which is the same bug with the opposite sign.
-        assert _by_symbol(_current(repo))["ES.v.0"] == 25.0
+        assert _by_symbol(_current(repo))["ES.v.0"] == 10.0
 
     def test_an_explicit_stream_is_honoured(self, repo):
-        rows = _current(repo, portfolio_type="system")
-        assert _by_symbol(rows) == {"ES.v.0": 10.0, "ZN.v.0": 40.0}
+        rows = _current(repo, portfolio_type="qt")
+        assert _by_symbol(rows) == {"ES.v.0": 25.0, "GC.v.0": 7.0}
 
 
 class TestYesterdayComesFromTheSameStream:
     def test_the_comparison_column_is_not_a_different_book(self, repo):
         # The panel puts today beside yesterday. If they come from different
         # streams the difference is a composition change, not a trade.
-        assert _by_symbol(_yesterday(repo)) == {"ES.v.0": 20.0}
+        assert _by_symbol(_yesterday(repo)) == {"ES.v.0": 10.0, "ZN.v.0": 40.0}
 
     def test_the_snapshot_date_is_found_within_the_stream(self, repo):
         # The qt stream has no row for a date the system stream reached alone.
@@ -176,23 +176,23 @@ class TestYesterdayComesFromTheSameStream:
         finally:
             conn.close()
 
-        # The system stream now reaches one day further than qt. The desk's
-        # current view must still be its own latest day, not empty.
-        assert _by_symbol(_current(repo)) == {"ES.v.0": 25.0, "GC.v.0": 7.0}
-        # And its previous day is still its own, not the system stream's.
-        assert _by_symbol(_yesterday(repo)) == {"ES.v.0": 20.0}
+        # The system stream now reaches one day further than qt. The dashboard
+        # must use that latest model snapshot, not the newer-written QT rows.
+        assert _by_symbol(_current(repo)) == {"CL.v.0": 5.0}
+        # And its previous day is still the system stream's own snapshot.
+        assert _by_symbol(_yesterday(repo)) == {"ES.v.0": 10.0, "ZN.v.0": 40.0}
 
 
 class TestHeldSymbolsAreOneStream:
     def test_the_correlation_matrix_is_built_from_one_book(self, repo):
         # held_symbols feeds the correlation matrix. Unioning both streams
         # would correlate a portfolio nobody holds.
-        assert repo.held_symbols([BOOK]) == ["ES.v.0", "GC.v.0"]
+        assert repo.held_symbols([BOOK]) == ["ES.v.0", "ZN.v.0"]
 
     def test_an_explicit_stream_is_honoured(self, repo):
-        assert repo.held_symbols([BOOK], portfolio_type="system") == [
+        assert repo.held_symbols([BOOK], portfolio_type="qt") == [
             "ES.v.0",
-            "ZN.v.0",
+            "GC.v.0",
         ]
 
 
@@ -248,16 +248,16 @@ def unequal_book_repo(repo):
 
 
 class TestHeldSymbolsUseEachBooksLatestSnapshot:
-    def test_default_qt_includes_lagging_book_without_stale_or_zero_holdings(self, unequal_book_repo):
+    def test_default_system_includes_lagging_book_without_stale_or_zero_holdings(self, unequal_book_repo):
         # A global max drops ZN; a per-symbol max resurrects closed/stale rows;
         # an unscoped max lets the newer system snapshot erase QT holdings.
         assert unequal_book_repo.held_symbols(HELD_BOOKS) == [
-            "ES.v.0", "GC.v.0", "ZN.v.0",
+            "6E.v.0", "HG.v.0",
         ]
 
-    def test_explicit_system_uses_each_books_system_date(self, unequal_book_repo):
-        assert unequal_book_repo.held_symbols(HELD_BOOKS, portfolio_type="system") == [
-            "6E.v.0", "HG.v.0",
+    def test_explicit_qt_uses_each_books_qt_date(self, unequal_book_repo):
+        assert unequal_book_repo.held_symbols(HELD_BOOKS, portfolio_type="qt") == [
+            "ES.v.0", "GC.v.0", "ZN.v.0",
         ]
 
     def test_explicit_unscoped_read_still_uses_each_books_latest_date(self, unequal_book_repo):

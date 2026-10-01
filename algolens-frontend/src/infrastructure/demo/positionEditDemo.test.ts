@@ -48,8 +48,8 @@ describe('local position-edit visual demo', () => {
       id: 'component-1',
       name: 'Synthetic Alpha',
       portfolio_id: 'synthetic-book-A',
-      positionStream: 'qt',
-      positionsEditable: true,
+      positionStream: 'system',
+      positionsEditable: false,
       dataAvailable: true,
     });
     expect(portfolio.strategies[0].positions).toHaveLength(1);

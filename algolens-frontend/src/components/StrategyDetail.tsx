@@ -93,7 +93,7 @@ export function StrategyDetail({
   const skipReloadScope = useRef<string | null>(null);
   latestScope.current = scope;
 
-  // A prop from dashboard aggregation is QT-scoped. Only a response that
+  // A prop from dashboard aggregation is system-scoped. Only a response that
   // proves this exact requested identity may supply page data.
   const shown = loaded?.scope === scope ? loaded.detail : null;
   const emptyBook = empty?.scope === scope ? empty.book : null;
@@ -286,7 +286,8 @@ export function StrategyDetail({
     />
   );
 
-  // A QT edit landed. Re-read the same QT book and let dashboard refresh.
+  // A QT edit landed. Re-read the explicit QT view; the dashboard refresh
+  // remains independently pinned to Model / System.
   const handlePositionsChanged = useCallback(() => {
     if (positionStream !== 'qt' || latestScope.current !== scope || contextEpoch.current.epoch !== selectionEpoch) return;
     setHistoryRefreshKey(key => key + 1);
@@ -355,11 +356,11 @@ export function StrategyDetail({
               {!shown ? (
                 requestError ? <>Selected book and position stream unavailable.</> :
                 emptyBook ? <>No result for the selected book and position stream.</> :
-                <>QT performance and positions loading for the selected book and stream.</>
+                <>System-model performance and positions loading for the selected book and stream.</>
               ) : shown.dataAvailable === false ? (
-                <>QT performance unavailable{shown.positionDate ? `; positions snapshot ${shown.positionDate}` : ''}.</>
+                <>System-model performance unavailable{shown.positionDate ? `; positions snapshot ${shown.positionDate}` : ''}.</>
               ) : shown.resultDate ? (
-                <>QT performance as of {shown.resultDate}{shown.positionDate && shown.positionDate !== shown.resultDate
+                <>System-model performance as of {shown.resultDate}{shown.positionDate && shown.positionDate !== shown.resultDate
                   ? `; positions snapshot ${shown.positionDate}` : ''}.</>
               ) : shown.lastUpdate}
             </div>
@@ -407,7 +408,7 @@ export function StrategyDetail({
             </select>
           </label>
           <span className={`text-xs ${theme === 'dark' ? 'text-gray-400' : 'text-gray-600'}`}>
-            Selector changes positions only. Performance and trading activity remain QT.
+            Selector changes positions only. Performance and trading activity remain Model / System.
           </span>
           {/* A refresh of the book already on screen. Loading a different
               book is announced below, in place of the numbers. */}

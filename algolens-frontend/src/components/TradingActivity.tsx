@@ -1,6 +1,6 @@
 import React from 'react';
 import { useTheme } from '../adapters/react/ThemeContext';
-import type { Execution, FinalizedPosition } from '../domain/portfolio/portfolioData';
+import type { Execution, FinalizedPosition, PositionStream } from '../domain/portfolio/portfolioData';
 import { formatMetric } from '../domain/portfolio/formatMetric';
 import { formatPrice } from '../domain/portfolio/formatPrice';
 import { formatBarDate } from '../domain/portfolio/formatBarDate';
@@ -11,7 +11,7 @@ interface TradingActivityProps {
   executionsAvailable?: boolean;
   executionUnavailableReason?: string | null;
   executionDate?: string | null;
-  activityStream?: 'qt' | null;
+  activityStream?: PositionStream | null;
   finalizedPositionsAvailable?: boolean;
 }
 
@@ -49,6 +49,9 @@ export function TradingActivity({
   const settled = finalizedPositions.filter(p => p.realizedPnL != null);
   const unsettledLots = finalizedPositions.length - settled.length;
   const totalRealized = settled.reduce((sum, p) => sum + (p.realizedPnL as number), 0);
+  const activityLabel = activityStream === 'system'
+    ? 'Model / System'
+    : activityStream === 'qt' ? 'QT' : 'Position';
 
   return (
     <div className="space-y-6">
@@ -64,7 +67,7 @@ export function TradingActivity({
         </h3>
         <p className={`-mt-2 mb-3 text-xs ${theme === 'dark' ? 'text-gray-500' : 'text-gray-500'}`}>
           {executionsAvailable === true
-            ? 'Attributed fills for the selected QT stream and execution date.'
+            ? `Attributed fills for the ${activityLabel} stream and execution date.`
             : 'Newest, up to 100 records from a legacy payload; not certified as a complete daily ledger.'}
         </p>
         
@@ -174,13 +177,13 @@ export function TradingActivity({
         <h3 className={`text-sm uppercase tracking-wider mb-4 ${
           theme === 'dark' ? 'text-gray-400' : 'text-gray-500'
         }`}>
-          QT Finalized Position Results
+          {activityLabel} Finalized Position Results
         </h3>
-        {activityStream !== 'qt' || finalizedPositionsAvailable !== true ? (
+        {!activityStream || finalizedPositionsAvailable !== true ? (
           <div role="status" className={`rounded-lg border p-4 text-sm ${
             theme === 'dark' ? 'border-gray-800 text-amber-400' : 'border-gray-200 text-amber-700'
           }`}>
-            QT closed-position comparison unavailable. Fills above remain independently reported.
+            {activityLabel} closed-position comparison unavailable. Fills above remain independently reported.
           </div>
         ) : (
         <div className={`border rounded-lg overflow-hidden ${

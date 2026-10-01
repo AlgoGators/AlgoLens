@@ -87,14 +87,14 @@ describe('the holdings count on a card', () => {
   });
 });
 
-describe('missing QT performance with real holdings', () => {
+describe('missing system performance with real holdings', () => {
   it('keeps the holding count and renders unknown value without a zero substitute', () => {
     render(<StrategyList strategies={[strategy({
       dataAvailable: false, currentValue: null,
       positions: [{ symbol: 'ES.v.0' }] as never,
     })]} onSelectStrategy={() => {}} />);
     expect(screen.getByText('1 Holding')).toBeTruthy();
-    expect(screen.getByText(/QT performance unavailable/i)).toBeTruthy();
+    expect(screen.getByText(/System-model performance unavailable/i)).toBeTruthy();
     expect(screen.queryByText('$0')).toBeNull();
   });
 });

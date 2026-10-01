@@ -29,7 +29,7 @@ function demoStrategy(stream: PositionStream): Strategy {
     name: 'Synthetic Alpha',
     description: 'LOCAL VISUAL DEMO — mock data only; no connected database writes.',
     dataAvailable: true,
-    resultSource: 'qt',
+    resultSource: 'system',
     resultDate: '2026-09-25',
     invested: 500000,
     currentValue: 534820,

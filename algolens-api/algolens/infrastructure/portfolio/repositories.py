@@ -250,9 +250,9 @@ class PostgresPortfolioRepository:
     # three now do too. See AlgoLens issue #83; this predicate is what unblocks
     # applying migration 002 to production.
     #
-    # The default is PRIMARY_STREAM -- the real book -- because that is what
-    # every other headline figure on the page already means, including the
-    # equity curve directly above the table.
+    # The default is PRIMARY_STREAM -- the model/system book shown on login --
+    # because every other headline figure on the landing page uses that same
+    # source, including the equity curve directly above the table.
     #
     # has_portfolio_type exists because the column does not, on a database that
     # has not had migration 001. There the predicate is dropped, which is

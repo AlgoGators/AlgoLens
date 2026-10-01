@@ -47,7 +47,7 @@ export interface AdvancedMetrics {
 }
 
 export interface CombinedMetrics {
-  /** Selected strategies omitted because QT performance has no measured value. */
+  /** Selected strategies omitted because system performance has no measured value. */
   strategiesAwaitingData: number;
   totalInvested: number;
   totalValue: number;

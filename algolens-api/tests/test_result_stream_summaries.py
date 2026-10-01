@@ -1,4 +1,4 @@
-"""QT summary availability and incomplete book totals."""
+"""System-model summary availability and incomplete book totals."""
 from datetime import date
 
 import pytest
@@ -16,11 +16,11 @@ def _cfg(strategy_id):
     }
 
 
-def test_strategy_summary_names_qt_result_source_and_date_without_inventing_missing_values():
+def test_strategy_summary_names_system_result_source_and_date_without_inventing_missing_values():
     cfg = _cfg("known")
     absent = build_strategy_summary(cfg, None)
     assert absent["dataAvailable"] is False
-    assert absent["resultSource"] == "qt"
+    assert absent["resultSource"] == "system"
     assert absent["resultDate"] is None
     assert absent["currentValue"] is None
     assert absent["portfolio_id"] == "BOOK"
@@ -30,7 +30,7 @@ def test_strategy_summary_names_qt_result_source_and_date_without_inventing_miss
         "volatility": 2, "total_annualized_return": 5,
     })
     assert present["dataAvailable"] is True
-    assert present["resultSource"] == "qt"
+    assert present["resultSource"] == "system"
     assert present["resultDate"] == "2026-09-18"
     assert present["currentValue"] == 120
     assert present["portfolio_id"] == "BOOK"

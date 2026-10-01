@@ -45,7 +45,7 @@ describe('strategy position stream requests', () => {
     expect(detail.positionStream).toBe('qt');
   });
 
-  it('loads dashboard aggregates from QT detail explicitly', async () => {
+  it('loads dashboard aggregates from the system model explicitly', async () => {
     const urls: URL[] = [];
     vi.stubGlobal('fetch', vi.fn(async (input: string) => {
       const url = new URL(String(input));
@@ -54,8 +54,8 @@ describe('strategy position stream requests', () => {
         return response({ strategies: [{ id: 'trendfollowing', name: 'Trend Following' }] });
       }
       return response({
-        id: 'trendfollowing', portfolio_id: 'BASE_PORTFOLIO', positionStream: 'qt',
-        positionStrategyNames: ['QT_A'], positions: [], dataAvailable: true,
+        id: 'trendfollowing', portfolio_id: 'BASE_PORTFOLIO', positionStream: 'system',
+        positionStrategyNames: ['MODEL_A'], positions: [], dataAvailable: true,
         invested: 100, currentValue: 110, historicalData: [],
       });
     }));
@@ -63,8 +63,8 @@ describe('strategy position stream requests', () => {
     const portfolio = await PortfolioApiService.getPortfolioData();
 
     expect(urls.filter(url => url.pathname.endsWith('/portfolio/strategy/trendfollowing'))
-      .map(url => url.searchParams.getAll('position_stream'))).toEqual([['qt']]);
-    expect(portfolio.strategies[0].positionStream).toBe('qt');
+      .map(url => url.searchParams.getAll('position_stream'))).toEqual([['system']]);
+    expect(portfolio.strategies[0].positionStream).toBe('system');
   });
 });
 

@@ -55,7 +55,7 @@ describe('StrategyBuilder QT coverage disclosure', () => {
 
     const warning = screen.getByTestId('builder-coverage');
     const headline = screen.getByText('MEASURED STRATEGY VALUE');
-    expect(warning.textContent).toMatch(/1 selected strategy.*QT performance unavailable/i);
+    expect(warning.textContent).toMatch(/1 selected strategy.*system-model performance unavailable/i);
     expect(warning.compareDocumentPosition(headline) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(screen.getByText('Measured Strategy Split')).toBeTruthy();
     expect(screen.getByText('Measured Asset Allocation')).toBeTruthy();
@@ -65,7 +65,7 @@ describe('StrategyBuilder QT coverage disclosure', () => {
   it('withholds all derived panels when every selected result is unavailable', () => {
     render(<StrategyBuilder strategies={[strategy('Awaiting', null)]} onClose={() => {}} />);
 
-    expect(screen.getByTestId('builder-coverage').textContent).toMatch(/1 selected strategy.*QT performance unavailable/i);
+    expect(screen.getByTestId('builder-coverage').textContent).toMatch(/1 selected strategy.*system-model performance unavailable/i);
     expect(screen.getByText(/portfolio value, performance, allocations, and holdings are unavailable/i)).toBeTruthy();
     expect(screen.queryByText('PORTFOLIO VALUE')).toBeNull();
     expect(screen.queryByText(/no starting equity on record/i)).toBeNull();

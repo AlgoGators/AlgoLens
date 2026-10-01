@@ -4,10 +4,12 @@ from datetime import date, datetime, timezone
 
 PORTFOLIO_STREAMS = ("qt", "system", "benchmark")
 
-# Headline dashboard values represent the real book.
-PRIMARY_STREAM = "qt"
+# The signed-in dashboard and every headline portfolio value show the engine's
+# model/system book. QT remains an explicit review/edit stream and cannot become
+# the landing view merely because a QT decision was published.
+PRIMARY_STREAM = "system"
 
-# The detail page selects positions independently of QT financial reporting.
+# The detail page selects positions independently of system financial reporting.
 DEFAULT_POSITION_STREAM = "system"
 POSITION_READ_STREAMS = ("system", "qt")
 

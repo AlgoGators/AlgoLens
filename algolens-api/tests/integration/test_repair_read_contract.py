@@ -280,10 +280,10 @@ def test_selected_stream_http_bytes_and_qt_activity_are_separate(
         assert detail['positionStrategyNames'] == expected_names
         assert sorted(p['quantity'] for p in detail['positions']) == sorted(expected_quantities)
         assert detail['currentValue'] == 250000.0
-        assert detail['activityStream'] == 'qt'
-        assert detail['finalizedPositionsAvailable'] is True
-        assert [(p['strategyName'], p['quantity']) for p in detail['finalizedPositions']] == [('QT_OLD', 4.0)]
-        assert [e['symbol'] for e in detail['executions']] == ['ES']
+        assert detail['activityStream'] == 'system'
+        assert detail['finalizedPositionsAvailable'] is False
+        assert detail['finalizedPositions'] == []
+        assert [e['symbol'] for e in detail['executions']] == ['NQ']
         assert [p['percentOfTotal'] for p in detail['positions']] == (
             [None, None] if stream == 'system' else [34.0]
         )
@@ -304,7 +304,7 @@ def test_selected_stream_http_bytes_and_qt_activity_are_separate(
     assert current_detail['positionStream'] == 'qt'
     assert current_detail['positionDate'] == qt_current_day.isoformat()
     assert current_detail['positionsEditable'] is True
-    assert current_detail['activityStream'] == 'qt'
+    assert current_detail['activityStream'] == 'system'
     current_capture = tmp_path / 'issue83-backend-qt-current-http.json'
     current_capture.write_bytes(current_response.data)
     print(f'ISSUE83_HTTP_CAPTURE={current_capture}')

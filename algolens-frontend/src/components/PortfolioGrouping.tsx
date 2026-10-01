@@ -134,7 +134,7 @@ export function PortfolioGrouping({ onOpenStrategy, canOpen }: PortfolioGrouping
               </div>
               {awaitingQtResults(portfolio) > 0 && (
                 <div className={`text-xs ${isDark ? 'text-amber-400' : 'text-amber-600'}`}>
-                  partial; {awaitingQtResults(portfolio)} QT result unavailable
+                  partial; {awaitingQtResults(portfolio)} system result unavailable
                 </div>
               )}
               <div className={`text-xs tabular-nums ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>

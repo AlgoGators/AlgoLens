@@ -15,7 +15,7 @@ export function StrategySummary({ metrics, theme }: StrategySummaryProps) {
       </h3>
       {metrics.strategiesAwaitingData > 0 && (
         <p className={`text-sm mb-3 ${theme === 'dark' ? 'text-amber-400' : 'text-amber-600'}`}>
-          Partial: {metrics.strategiesAwaitingData} selected {metrics.strategiesAwaitingData === 1 ? 'strategy has' : 'strategies have'} QT performance unavailable; this summary covers only measured strategies.
+          Partial: {metrics.strategiesAwaitingData} selected {metrics.strategiesAwaitingData === 1 ? 'strategy has' : 'strategies have'} system-model performance unavailable; this summary covers only measured strategies.
         </p>
       )}
       <div className={`border rounded-lg overflow-hidden ${theme === 'dark' ? 'border-gray-800' : 'border-gray-200'

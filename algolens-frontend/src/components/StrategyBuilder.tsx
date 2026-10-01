@@ -83,9 +83,9 @@ export function StrategyBuilder({ strategies, onClose }: StrategyBuilderProps) {
               ? 'border-amber-700 bg-amber-950 text-amber-300'
               : 'border-amber-300 bg-amber-50 text-amber-800'}`}
           >
-            Partial QT coverage: {combinedMetrics.strategiesAwaitingData} selected {combinedMetrics.strategiesAwaitingData === 1 ? 'strategy has' : 'strategies have'} QT performance unavailable.
+            Partial system coverage: {combinedMetrics.strategiesAwaitingData} selected {combinedMetrics.strategiesAwaitingData === 1 ? 'strategy has' : 'strategies have'} system-model performance unavailable.
             {' '}{allSelectedAwaitingQt
-              ? 'No selected strategy has a measured QT result.'
+              ? 'No selected strategy has a measured system result.'
               : 'All derived panels below cover measured strategies only; excluded strategies have unknown value and weight.'}
           </div>
         )}
@@ -94,7 +94,7 @@ export function StrategyBuilder({ strategies, onClose }: StrategyBuilderProps) {
           <div className={`mb-4 p-4 border ${theme === 'dark'
             ? 'border-gray-800 bg-gray-950 text-gray-300'
             : 'border-gray-200 bg-gray-50 text-gray-600'}`}>
-            Portfolio value, performance, allocations, and holdings are unavailable until a selected QT result is published.
+            Portfolio value, performance, allocations, and holdings are unavailable until a selected system result is published.
           </div>
         ) : (
           <>

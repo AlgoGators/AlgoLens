@@ -15,20 +15,20 @@ describe('activity reporting semantics', () => {
     notional: null, commission: 2, date: '2026-09-21',
   };
 
-  it('keeps QT fills visible while an absent QT comparison is unavailable', () => {
+  it('keeps system fills visible while an absent system comparison is unavailable', () => {
     render(<TradingActivity executions={[execution]} finalizedPositions={[]}
-      executionsAvailable activityStream="qt" finalizedPositionsAvailable={false} />);
+      executionsAvailable activityStream="system" finalizedPositionsAvailable={false} />);
 
     expect(screen.getByText('ES')).toBeTruthy();
-    expect(screen.getByText(/QT closed-position comparison unavailable/i)).toBeTruthy();
+    expect(screen.getByText(/Model \/ System closed-position comparison unavailable/i)).toBeTruthy();
     expect(screen.queryByText('Total Positions: 0')).toBeNull();
   });
 
-  it('labels an identified known-empty closed-position comparison as QT', () => {
+  it('labels an identified known-empty closed-position comparison as Model / System', () => {
     render(<TradingActivity executions={[]} finalizedPositions={[]}
-      activityStream="qt" finalizedPositionsAvailable />);
+      activityStream="system" finalizedPositionsAvailable />);
 
-    expect(screen.getByText(/QT finalized position results/i)).toBeTruthy();
+    expect(screen.getByText(/Model \/ System finalized position results/i)).toBeTruthy();
     expect(screen.getByText('Total Positions: 0')).toBeTruthy();
   });
 
@@ -40,8 +40,8 @@ describe('activity reporting semantics', () => {
     expect(screen.getByText(/1 fill has unknown notional/i)).toBeTruthy();
     expect(screen.getAllByText('—').length).toBeGreaterThan(0);
     expect(screen.getByText('Sep 21')).toBeTruthy();
-    expect(screen.getByText('QT Finalized Position Results')).toBeTruthy();
-    expect(screen.getByText(/QT closed-position comparison unavailable/i)).toBeTruthy();
+    expect(screen.getByText('Position Finalized Position Results')).toBeTruthy();
+    expect(screen.getByText(/Position closed-position comparison unavailable/i)).toBeTruthy();
   });
 
   it('renders explicit execution unavailability instead of a zero count', () => {
@@ -69,6 +69,6 @@ describe('activity reporting semantics', () => {
     );
 
     expect(screen.getByText('Executions · Sep 21, 2026')).toBeTruthy();
-    expect(screen.getByText(/selected QT stream and execution date/i)).toBeTruthy();
+    expect(screen.getByText(/Position stream and execution date/i)).toBeTruthy();
   });
 });

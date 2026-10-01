@@ -18,10 +18,11 @@ const summary = {
 };
 const detail = {
   id: summary.id, name: summary.name, description: '', dataAvailable: false,
-  resultSource: 'qt', resultDate: null, invested: 100000, currentValue: null,
+  resultSource: 'system', resultDate: null, invested: 100000, currentValue: null,
   return: null, returnPercent: null, positions: [{ symbol: 'ES' }],
   positionStrategyNames: ['Engine A'], positionDate: '2026-09-23',
-  positionsEditable: true, positionEditUnavailableReason: null,
+  positionStream: 'system', positionsEditable: false,
+  positionEditUnavailableReason: 'Model/system positions are read-only.',
   historicalData: [], historyBreaks: [], bestDay: null, worstDay: null,
   metrics: { sharpeRatio: null, volatility: null }, executions: [],
   finalizedPositions: [], managers: [], lastUpdate: '',
@@ -30,15 +31,21 @@ const detail = {
 
 beforeEach(() => { vi.mocked(fetchWithAuth).mockReset(); });
 
-describe('portfolio read when QT results are unavailable', () => {
-  it('fetches and retains real QT positions while disclosing partial totals', async () => {
-    vi.mocked(fetchWithAuth).mockImplementation(async url =>
-      response(url.endsWith('/strategies') ? { strategies: [summary] } : detail));
+describe('system-model dashboard reads', () => {
+  it('fetches and retains real system positions while disclosing partial totals', async () => {
+    const urls: string[] = [];
+    vi.mocked(fetchWithAuth).mockImplementation(async url => {
+      urls.push(url);
+      return response(url.endsWith('/strategies') ? { strategies: [summary] } : detail);
+    });
 
     const portfolio = await PortfolioApiService.getPortfolioData();
 
     expect(portfolio.strategies[0].positions).toEqual([{ symbol: 'ES' }]);
-    expect(portfolio.strategies[0].positionsEditable).toBe(true);
+    expect(portfolio.strategies[0].positionsEditable).toBe(false);
+    expect(urls.filter(url => url.includes('/portfolio/strategy/'))).toHaveLength(1);
+    expect(urls.some(url => url.includes('position_stream=system'))).toBe(true);
+    expect(urls.some(url => url.includes('position_stream=qt'))).toBe(false);
     expect(portfolio.strategies[0].currentValue).toBeNull();
     expect(portfolio.strategiesAwaitingData).toBe(1);
     expect(portfolio.totalValue).toBe(0);
@@ -59,21 +66,22 @@ describe('portfolio read when QT results are unavailable', () => {
     expect(portfolio.strategiesAwaitingData).toBe(1);
   });
 
-  it('uses the system snapshot when the primary book has no QT publication', async () => {
+  it('does not fall back to QT when the system book has no publication', async () => {
+    const urls: string[] = [];
     vi.mocked(fetchWithAuth).mockImplementation(async url => {
+      urls.push(url);
       if (url.endsWith('/strategies')) return response({ strategies: [summary] });
-      if (url.includes('position_stream=qt')) {
-        throw new ApiError('not found', 404, 'no_data_for_book');
-      }
-      return response({ ...detail, positionStream: 'system' });
+      throw new ApiError('not found', 404, 'no_data_for_book');
     });
 
     const portfolio = await PortfolioApiService.getPortfolioData();
 
     expect(portfolio.strategies[0].portfolio_id).toBe('CONSERVATIVE_PORTFOLIO');
-    expect(portfolio.strategies[0].positionStream).toBe('system');
-    expect(portfolio.strategies[0].positions).toEqual([{ symbol: 'ES' }]);
+    expect(portfolio.strategies[0].positionStream).toBeNull();
+    expect(portfolio.strategies[0].positions).toEqual([]);
     expect(portfolio.strategies[0].dataAvailable).toBe(false);
+    expect(urls.filter(url => url.includes('/portfolio/strategy/'))).toHaveLength(1);
+    expect(urls.some(url => url.includes('position_stream=qt'))).toBe(false);
   });
 
   it('propagates an unrelated detail failure instead of calling it unavailable', async () => {

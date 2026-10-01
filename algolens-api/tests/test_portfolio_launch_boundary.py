@@ -116,7 +116,10 @@ def test_detail_snapshot_metadata_and_held_symbols_obey_the_same_boundary(monkey
         for call in cursor.calls
         if call[0].startswith("SELECT date, strategy_name FROM trading.positions")
     ]
-    assert len(snapshot_calls) == 2
+    # The selected position stream and the reporting stream are both system,
+    # so the repository performs one scoped metadata read rather than reading
+    # the same stream twice.
+    assert len(snapshot_calls) == 1
     for sql, params in snapshot_calls:
         assert sql.count("AND date >= %s") == 2
         assert params.count(LAUNCH_DATE) == 2

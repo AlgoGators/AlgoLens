@@ -16,7 +16,7 @@ export function PerformanceOverview({ metrics, theme }: PerformanceOverviewProps
       <div className={`mb-4 p-4 border ${theme === 'dark' ? 'bg-gray-950 border-gray-800' : 'bg-gray-50 border-gray-200'}`}>
         <div className="text-xs mb-1">PORTFOLIO VALUE UNAVAILABLE</div>
         <div className="text-2xl">—</div>
-        <div className="text-sm mt-1">QT performance unavailable for every selected strategy.</div>
+        <div className="text-sm mt-1">System-model performance unavailable for every selected strategy.</div>
       </div>
     );
   }
@@ -25,7 +25,7 @@ export function PerformanceOverview({ metrics, theme }: PerformanceOverviewProps
     <div className="mb-4">
       {measuredSubset && (
         <p className={`mb-2 text-xs ${theme === 'dark' ? 'text-amber-400' : 'text-amber-700'}`}>
-          Value, returns, and risk metrics cover measured strategies only; {metrics.strategiesAwaitingData} selected {metrics.strategiesAwaitingData === 1 ? 'strategy is' : 'strategies are'} awaiting QT results.
+          Value, returns, and risk metrics cover measured strategies only; {metrics.strategiesAwaitingData} selected {metrics.strategiesAwaitingData === 1 ? 'strategy is' : 'strategies are'} awaiting system results.
         </p>
       )}
       {/* Main Performance Bar */}
