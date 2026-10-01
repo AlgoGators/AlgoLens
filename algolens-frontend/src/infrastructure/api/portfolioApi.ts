@@ -48,10 +48,17 @@ export function aggregatePortfolioTotals(strategies: PortfolioTotalSource[]): Pi
  * zero that leaks past that check reads as a measurement ("0.00x leverage",
  * "$0 margin posted"). A null renders as an em dash wherever it lands.
  */
-function placeholderStrategy(summary: { id: string; name: string }): Strategy {
+function placeholderStrategy(summary: {
+  id: string;
+  name: string;
+  portfolio_id?: string;
+  books?: string[];
+}): Strategy {
   return {
     id: summary.id,
     name: summary.name,
+    portfolio_id: summary.portfolio_id,
+    books: summary.books ?? (summary.portfolio_id ? [summary.portfolio_id] : undefined),
     description: '',
     dataAvailable: false,
     invested: null,
@@ -247,12 +254,19 @@ export class PortfolioApiService {
       strategySummaries.map(async (summary: any, index: number) => {
         log('info', `Fetching strategy ${index + 1}/${strategySummaries.length}: ${summary.id}`);
         try {
-          const strategy = await this.getStrategy(summary.id, undefined, 'qt');
+          const strategy = await this.getStrategy(summary.id, summary.portfolio_id, 'qt');
           log('info', `Strategy ${summary.id} fetched successfully`);
           return strategy;
         } catch (error) {
           if (error instanceof ApiError && error.code === 'no_data_for_book') {
-            return placeholderStrategy(summary);
+            try {
+              return await this.getStrategy(summary.id, summary.portfolio_id, 'system');
+            } catch (systemError) {
+              if (systemError instanceof ApiError && systemError.code === 'no_data_for_book') {
+                return placeholderStrategy(summary);
+              }
+              throw systemError;
+            }
           }
           throw error;
         }

@@ -328,6 +328,7 @@ def build_strategy_summary(
         return {
             "id": cfg["id"],
             "name": cfg["name"],
+            "portfolio_id": cfg["portfolio_id"],
             "dataAvailable": False,
             "resultSource": PRIMARY_STREAM,
             "resultDate": None,
@@ -356,6 +357,7 @@ def build_strategy_summary(
     return {
         "id": cfg["id"],
         "name": cfg["name"],
+        "portfolio_id": cfg["portfolio_id"],
         "dataAvailable": True,
         "resultSource": PRIMARY_STREAM,
         "resultDate": str(latest["date"]) if latest.get("date") is not None else None,

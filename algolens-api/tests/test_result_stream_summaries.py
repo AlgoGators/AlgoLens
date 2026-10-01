@@ -23,6 +23,7 @@ def test_strategy_summary_names_qt_result_source_and_date_without_inventing_miss
     assert absent["resultSource"] == "qt"
     assert absent["resultDate"] is None
     assert absent["currentValue"] is None
+    assert absent["portfolio_id"] == "BOOK"
 
     present = build_strategy_summary(cfg, {
         "date": date(2026, 9, 18), "current_portfolio_value": 120,
@@ -32,6 +33,7 @@ def test_strategy_summary_names_qt_result_source_and_date_without_inventing_miss
     assert present["resultSource"] == "qt"
     assert present["resultDate"] == "2026-09-18"
     assert present["currentValue"] == 120
+    assert present["portfolio_id"] == "BOOK"
 
 
 def test_partial_qt_result_keeps_unknown_measurements_null():
