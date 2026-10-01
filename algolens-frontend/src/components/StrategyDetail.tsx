@@ -425,7 +425,7 @@ export function StrategyDetail({
         )}
       </div>
 
-      {canReadOverrideHistory && (shown || emptyBook) && bookOnScreen && (
+      {canReadOverrideHistory && shown && bookOnScreen && (
         <ConfigurationInspectionPanel
           registryId={strategy.id}
           portfolioId={bookOnScreen}

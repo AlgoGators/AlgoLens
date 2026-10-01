@@ -1035,11 +1035,10 @@ describe('published configuration follows the selected registry and book', () =>
     reason: 'not_published', publication: null,
   }), { headers: { 'Content-Type': 'application/json' } });
 
-  it('uses the explicit primary book and stays visible for an empty secondary book', async () => {
+  it('does not inspect configuration for a book with no portfolio publication', async () => {
     role = 'general_member';
     const fetchMock = vi.spyOn(globalThis, 'fetch')
-      .mockResolvedValueOnce(unavailable('CONSERVATIVE_PORTFOLIO'))
-      .mockResolvedValueOnce(unavailable('AGGRESSIVE_PORTFOLIO'));
+      .mockResolvedValueOnce(unavailable('CONSERVATIVE_PORTFOLIO'));
     getStrategyImpl = async (_id, book, stream) => {
       if (book === 'CONSERVATIVE_PORTFOLIO') return strategy({ tag: 'C', positionStream: stream });
       throw new ApiError('x', 404, 'no_data_for_book', 'none yet');
@@ -1048,9 +1047,8 @@ describe('published configuration follows the selected registry and book', () =>
     await screen.findByText(/Registry: trendfollowing; book: CONSERVATIVE_PORTFOLIO/);
     fireEvent.change(topBox(), { target: { value: 'AGGRESSIVE_PORTFOLIO' } });
     await screen.findByText(/Nothing published for Trend Following in/);
-    expect(screen.getByText(/Registry: trendfollowing; book: AGGRESSIVE_PORTFOLIO/)).toBeTruthy();
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
-    expect(fetchMock.mock.calls[1][0]).toMatch(/configuration\?portfolio_id=AGGRESSIVE_PORTFOLIO$/);
+    expect(screen.queryByRole('region', { name: 'Published configuration' })).toBeNull();
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
   });
 
   it('reverts failed selection and makes a fresh request for the on-screen book', async () => {
