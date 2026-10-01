@@ -67,6 +67,7 @@ _STRING_FIELDS = frozenset({
     "instrument_type", "config_source_id", "market_snapshot_id", "source_id", "code",
     "unit", "message", "action", "person_id", "display_label", "user_id",
     "approved_at", "created_at", "updated_at", "evaluator_build", "policy_version",
+    "rationale",
 })
 _ALLOWED_FIELDS = _EXACT_FIELDS | _DIAGNOSTIC_FIELDS | _DIGEST_FIELDS | _UUID_FIELDS | _INT_FIELDS | _BOOL_FIELDS | _ARRAY_FIELDS | _OBJECT_FIELDS | _STRING_FIELDS
 _SORTED_KEY_ARRAYS = frozenset({"selection_rows", "seed_rows", "saved_qt_rows", "component_keys", "by_component"})

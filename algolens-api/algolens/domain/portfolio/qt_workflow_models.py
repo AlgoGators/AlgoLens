@@ -173,6 +173,7 @@ class QtDraftSaveRequest:
     expected_provenance_digest: str
     expected_draft_revision: int
     idempotency_key: str
+    rationale: str
     selection_rows: tuple[Mapping[str, object], ...]
 
     @classmethod
@@ -180,13 +181,19 @@ class QtDraftSaveRequest:
         obj = _shape(value, frozenset(cls.__dataclass_fields__))
         if obj["expected_draft_revision"] < 0 or not isinstance(obj["selection_rows"], list):
             raise QtWorkflowError("invalid_qt_payload")
-        return cls(**{**obj, "selection_rows": _freeze(obj["selection_rows"])})
+        if type(obj["rationale"]) is not str:
+            raise QtWorkflowError("invalid_qt_payload", "QT draft rationale is required")
+        rationale = obj["rationale"].strip()
+        if not rationale or len(rationale.encode("utf-8")) > 1000:
+            raise QtWorkflowError("invalid_qt_payload", "QT draft rationale must be 1 to 1000 UTF-8 bytes")
+        return cls(**{**obj, "rationale": rationale, "selection_rows": _freeze(obj["selection_rows"])})
 
     def to_wire(self) -> dict[str, object]:
         return {"expected_source_digest": self.expected_source_digest,
                 "expected_provenance_digest": self.expected_provenance_digest,
                 "expected_draft_revision": self.expected_draft_revision,
                 "idempotency_key": self.idempotency_key,
+                "rationale": self.rationale,
                 "selection_rows": _thaw(self.selection_rows)}
 
 

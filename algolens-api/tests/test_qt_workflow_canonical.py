@@ -322,9 +322,42 @@ def test_draft_save_request_still_accepts_narrow_key_quantity_rows():
         "expected_provenance_digest": draft["provenance_digest"],
         "expected_draft_revision": 0,
         "idempotency_key": "60000000-0000-4000-8000-000000000001",
+        "rationale": "Reduce concentration before the event window.",
         "selection_rows": [{"key": row["key"], "quantity_exact": row["quantity_exact"]} for row in draft["selection_rows"]],
     }
-    assert len(QtDraftSaveRequest.from_wire(request).to_wire()["selection_rows"]) == 2
+    decoded = QtDraftSaveRequest.from_wire(request).to_wire()
+    assert decoded["rationale"] == "Reduce concentration before the event window."
+    assert len(decoded["selection_rows"]) == 2
+
+
+@pytest.mark.parametrize("rationale", [None, "", "   ", "x" * 1001, "é" * 501])
+def test_draft_save_request_requires_bounded_utf8_rationale(rationale):
+    fixture = json.loads((Path(__file__).parents[2] / "contracts" / "qt-workflow-v1.json").read_text(encoding="utf-8"))
+    draft = fixture["draft_saved"]
+    request = {
+        "expected_source_digest": draft["source_digest"],
+        "expected_provenance_digest": draft["provenance_digest"],
+        "expected_draft_revision": 0,
+        "idempotency_key": "60000000-0000-4000-8000-000000000001",
+        "rationale": rationale,
+        "selection_rows": [{"key": row["key"], "quantity_exact": row["quantity_exact"]} for row in draft["selection_rows"]],
+    }
+    with pytest.raises(QtWorkflowError):
+        QtDraftSaveRequest.from_wire(request)
+
+
+def test_draft_save_request_trims_rationale():
+    fixture = json.loads((Path(__file__).parents[2] / "contracts" / "qt-workflow-v1.json").read_text(encoding="utf-8"))
+    draft = fixture["draft_saved"]
+    request = {
+        "expected_source_digest": draft["source_digest"],
+        "expected_provenance_digest": draft["provenance_digest"],
+        "expected_draft_revision": 0,
+        "idempotency_key": "60000000-0000-4000-8000-000000000001",
+        "rationale": "  Reduce concentration.  ",
+        "selection_rows": [{"key": row["key"], "quantity_exact": row["quantity_exact"]} for row in draft["selection_rows"]],
+    }
+    assert QtDraftSaveRequest.from_wire(request).to_wire()["rationale"] == "Reduce concentration."
 
 
 def test_proposal_accepts_complete_saved_qt_display_row():

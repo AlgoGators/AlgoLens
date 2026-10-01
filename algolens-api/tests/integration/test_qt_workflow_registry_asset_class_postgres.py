@@ -64,6 +64,7 @@ def test_equity_book_never_409s_across_proposal_draft_and_preview(futures_only_c
         "expected_provenance_digest": initial["provenance_digest"],
         "expected_draft_revision": 0,
         "idempotency_key": "00000000-0000-4000-8000-000000000201",
+        "rationale": "Test the registry asset-class quantity path.",
         "selection_rows": [{"key": editable["key"], "quantity_exact": "4"}],
     }).to_wire()
     assert saved["selection_rows"][0]["asset_type"] == "EQUITY"

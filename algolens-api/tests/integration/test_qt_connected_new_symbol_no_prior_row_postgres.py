@@ -191,6 +191,7 @@ def prepare_with_a_genuinely_new_symbol(dsn, monkeypatch):
     draft_response = browser.put('/portfolio/qt-books/BOOK/draft', headers=headers, json={
         "expected_source_digest": initial["source_digest"], "expected_provenance_digest": initial["provenance_digest"],
         "expected_draft_revision": 0, "idempotency_key": "00000000-0000-4000-8000-000000000061",
+        "rationale": "Exercise a new symbol with immutable holdings.",
         "selection_rows": [{"key": row["key"], "quantity_exact": "7"},
                             {"key": new_key, "quantity_exact": "3"}]})
     assert draft_response.status_code == 200, draft_response.json
@@ -281,6 +282,7 @@ def prepare_with_a_new_strategy_name(dsn, monkeypatch):
     draft_response = browser.put('/portfolio/qt-books/BOOK/draft', headers=headers, json={
         "expected_source_digest": initial["source_digest"], "expected_provenance_digest": initial["provenance_digest"],
         "expected_draft_revision": 0, "idempotency_key": "00000000-0000-4000-8000-000000000071",
+        "rationale": "Exercise independent multi-owner symbols.",
         "selection_rows": [{"key": row["key"], "quantity_exact": row["quantity_exact"]}
                             for row in initial["selection_rows"] if row["editable"]]})
     assert draft_response.status_code == 200, draft_response.json
@@ -340,6 +342,7 @@ def prepare_into_an_empty_before_book(dsn, monkeypatch):
     draft_response = browser.put('/portfolio/qt-books/BOOK/draft', headers=headers, json={
         "expected_source_digest": initial["source_digest"], "expected_provenance_digest": initial["provenance_digest"],
         "expected_draft_revision": 0, "idempotency_key": "00000000-0000-4000-8000-000000000081",
+        "rationale": "Exercise a selected symbol without prior QT rows.",
         "selection_rows": [{"key": row["key"], "quantity_exact": "6"}]})
     assert draft_response.status_code == 200, draft_response.json
     draft = draft_response.json

@@ -110,7 +110,7 @@ def test_explicit_save_uses_verified_processed_receipt_and_preserves_consumed_hi
     workflow, _, tx = services(head, provenance)
     request = dict(expected_source_digest=provenance.observed_source_digest,
         expected_provenance_digest=provenance.legacy_audit_chain_digest,
-        expected_draft_revision=1, selection_rows=[],
+        expected_draft_revision=1, rationale="Confirm the verified empty book choice.", selection_rows=[],
         idempotency_key="00000000-0000-4000-8000-000000000006")
     wire = workflow.save_draft(BOOK, 101, request).to_wire()
     assert wire["state"] == "saved" and wire["draft_revision"] == 2
@@ -146,7 +146,7 @@ def test_unproved_or_changed_receipt_never_grants_consumed_successor(damage):
         assert "successor" not in wire and "empty_owner" not in wire
     request = dict(expected_source_digest=provenance.observed_source_digest,
         expected_provenance_digest=provenance.legacy_audit_chain_digest,
-        expected_draft_revision=head["revision"], selection_rows=[],
+        expected_draft_revision=head["revision"], rationale="Confirm the verified empty book choice.", selection_rows=[],
         idempotency_key="00000000-0000-4000-8000-000000000006")
     with pytest.raises(QtWorkflowError): workflow.save_draft(BOOK, 101, request)
     assert tx.head == old and tx.pending is None and tx.idempotency == {} and tx.position_mutations == 0

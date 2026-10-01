@@ -71,6 +71,7 @@ def test_actual_stale_or_unavailable_confirmation_has_zero_decision_writes(previ
         service.save_draft("BOOK", 101, {"expected_source_digest": current["source_digest"],
             "expected_provenance_digest": current["provenance_digest"], "expected_draft_revision": current["draft_revision"],
             "idempotency_key": "00000000-0000-4000-8000-000000000073",
+            "rationale": "Create a newer draft for stale confirmation coverage.",
             "selection_rows": [{"key": row["key"], "quantity_exact": row["quantity_exact"]}
                                for row in current["selection_rows"] if row["editable"]]})
     elif mutation == "grant": query(preview_db, "UPDATE trading.qt_action_grants SET active=false,version=2 WHERE user_id=101")

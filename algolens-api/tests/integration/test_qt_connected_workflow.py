@@ -59,6 +59,7 @@ def prepare(dsn, quantity, monkeypatch, *, override=False):
     draft_response = browser.put('/portfolio/qt-books/BOOK/draft', headers=headers, json={
         "expected_source_digest":initial["source_digest"],"expected_provenance_digest":initial["provenance_digest"],
         "expected_draft_revision":0,"idempotency_key":"00000000-0000-4000-8000-000000000051",
+        "rationale":"Exercise the connected QT decision flow.",
         "selection_rows":[{"key":row["key"],"quantity_exact":quantity}]})
     assert draft_response.status_code == 200, draft_response.json
     draft = draft_response.json

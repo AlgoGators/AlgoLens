@@ -44,6 +44,7 @@ def test_draft_save_cas_replay_and_physical_position_invariance(draft_db):
         "expected_provenance_digest": initial["provenance_digest"],
         "expected_draft_revision": 0,
         "idempotency_key": "00000000-0000-4000-8000-000000000044",
+        "rationale": "Exercise exact draft persistence.",
         "selection_rows": [_choice(proposal, "2"), _choice(new, "0.125")],
     }
     saved = service.save_draft("BOOK", 101, request).to_wire()
@@ -74,6 +75,7 @@ def test_unresolved_instrument_rejects_before_draft_write(draft_db):
         "expected_provenance_digest": initial["provenance_digest"],
         "expected_draft_revision": 0,
         "idempotency_key": "00000000-0000-4000-8000-000000000066",
+        "rationale": "Exercise unresolved instrument refusal.",
         "selection_rows": [_choice(proposal, "2"), _choice({**proposal, "symbol": "UNKNOWN"}, "1")],
     }
     with pytest.raises(QtWorkflowError) as unavailable:
@@ -96,6 +98,7 @@ def test_independent_saved_qt_change_stales_draft_get_and_update(draft_db, mutat
         "expected_provenance_digest": initial["provenance_digest"],
         "expected_draft_revision": 0,
         "idempotency_key": "00000000-0000-4000-8000-000000000077",
+        "rationale": "Exercise draft staleness handling.",
         "selection_rows": [_choice(proposal, "2")],
     }
     saved = service.save_draft("BOOK", 101, request).to_wire()
@@ -128,6 +131,7 @@ def test_revision_two_can_remove_new_symbol_but_not_model_source(draft_db):
         "expected_provenance_digest": initial["provenance_digest"],
         "expected_draft_revision": 0,
         "idempotency_key": "00000000-0000-4000-8000-000000000077",
+        "rationale": "Exercise removal of a draft-only component.",
         "selection_rows": [_choice(proposal, "2"), _choice({**proposal, "symbol": "NEW"}, "0.125")],
     }
     service.save_draft("BOOK", 101, request)
@@ -155,6 +159,7 @@ def test_retry_replays_after_provenance_break_but_revoked_grant_denies(draft_db)
         "expected_provenance_digest": initial["provenance_digest"],
         "expected_draft_revision": 0,
         "idempotency_key": "00000000-0000-4000-8000-000000000077",
+        "rationale": "Exercise exact draft storage.",
         "selection_rows": [_choice(proposal, "2")],
     }
     first = service.save_draft("BOOK", 101, request).to_wire()

@@ -220,7 +220,8 @@ def prepare_multiowner(dsn, monkeypatch, quantities):
                 'HELD': ('8', False, 'immutable')}
     response = browser.put('/portfolio/qt-books/BOOK/draft', headers=headers, json={
         'expected_source_digest': initial['source_digest'], 'expected_provenance_digest': initial['provenance_digest'],
-        'expected_draft_revision': 0, 'idempotency_key': str(uuid4()), 'selection_rows': [
+        'expected_draft_revision': 0, 'idempotency_key': str(uuid4()),
+        'rationale': 'Exercise the connected multi-owner choice.', 'selection_rows': [
             {'key': row['key'], 'quantity_exact': quantities[row['key']['strategy_name']]}
             for row in initial['selection_rows'] if row['editable']]})
     assert response.status_code == 200, response.json
@@ -438,6 +439,7 @@ def test_actual_future_fraction_refuses_without_writes_then_whole_seven_publishe
     assert row['quantity_exact'] == '4' and row['origin'] == 'verified_model_seed'
     request = {'expected_source_digest': initial['source_digest'], 'expected_provenance_digest': initial['provenance_digest'],
         'expected_draft_revision': 0, 'idempotency_key': str(uuid4()),
+        'rationale': 'Exercise fractional-future refusal.',
         'selection_rows': [{'key': row['key'], 'quantity_exact': '2.5'}]}
     before_refusal = full_future_refusal_state(dsn)
     refused = browser.put('/portfolio/qt-books/BOOK/draft', headers=headers, json=request)

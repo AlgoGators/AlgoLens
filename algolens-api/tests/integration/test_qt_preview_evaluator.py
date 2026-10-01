@@ -148,7 +148,8 @@ def saved_draft(dsn):
     selected = {"key": next(row for row in initial["selection_rows"] if row["editable"])["key"], "quantity_exact": "5"}
     draft = service.save_draft("BOOK", 101, {"expected_source_digest": initial["source_digest"],
         "expected_provenance_digest": initial["provenance_digest"], "expected_draft_revision": 0,
-        "idempotency_key": "00000000-0000-4000-8000-000000000041", "selection_rows": [selected]}).to_wire()
+        "idempotency_key": "00000000-0000-4000-8000-000000000041", "rationale": "Evaluate the reviewed target.",
+        "selection_rows": [selected]}).to_wire()
     request = {"book_id": "BOOK", "draft_id": draft["draft_id"], "draft_revision": draft["draft_revision"],
         "draft_digest": draft["draft_digest"], "expected_source_digest": draft["source_digest"],
         "expected_provenance_digest": draft["provenance_digest"],
@@ -213,6 +214,7 @@ def test_actual_preview_preserves_immutable_and_new_unfilled_component(preview_d
     draft = service.save_draft("BOOK", 101, {"expected_source_digest": first["source_digest"],
         "expected_provenance_digest": first["provenance_digest"], "expected_draft_revision": first["draft_revision"],
         "idempotency_key": "00000000-0000-4000-8000-000000000051",
+        "rationale": "Evaluate the reviewed target with a new component.",
         "selection_rows": [{"key": syn["key"], "quantity_exact": "5"},
                            {"key": new_key, "quantity_exact": "2"}]}).to_wire()
     authority(preview_db, case=case, selection=draft["selection_rows"])

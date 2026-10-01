@@ -172,7 +172,11 @@ class QtWorkflowService:
     @staticmethod
     def _stored_rows(head):
         payload = head["selection_payload"]
-        if (not isinstance(payload, Mapping) or set(payload) != {"selection_rows"}
+        fields = set(payload) if isinstance(payload, Mapping) else set()
+        rationale = payload.get("rationale") if isinstance(payload, Mapping) else None
+        if (fields not in ({"selection_rows"}, {"rationale", "selection_rows"})
+                or (rationale is not None and (type(rationale) is not str or not rationale.strip()
+                    or len(rationale.encode("utf-8")) > 1000))
                 or qt_digest_v1(payload) != head["draft_digest"]):
             raise QtWorkflowError("draft_identity_unresolved", "Stored QT draft digest is invalid")
         rows = tuple(QtSelectionRow.from_wire(item) for item in payload["selection_rows"])
@@ -283,7 +287,10 @@ class QtWorkflowService:
                                       source_rows=editable, immutable_rows=immutable)
             draft_id = str(uuid4())
             revision = current_revision + 1
-            payload = {"selection_rows": [row.to_wire() for row in rows]}
+            # The rationale is immutable decision evidence: keeping it in the
+            # draft payload binds it to both the stored audit row and digest.
+            payload = {"rationale": request.rationale,
+                       "selection_rows": [row.to_wire() for row in rows]}
             digest = qt_digest_v1(payload)
             tx.insert_draft_revision({
                 "draft_id": draft_id, "book_id": book_id, "source_day": day,

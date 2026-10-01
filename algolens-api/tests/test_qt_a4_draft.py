@@ -137,12 +137,14 @@ def _ready_provenance():
     )
 
 
-def _save_request(rows, *, revision=0, idempotency="00000000-0000-4000-8000-000000000044"):
+def _save_request(rows, *, revision=0, idempotency="00000000-0000-4000-8000-000000000044",
+                  rationale="Rebalance the selected book to the reviewed target."):
     return {
         "expected_source_digest": "a" * 64,
         "expected_provenance_digest": "b" * 64,
         "expected_draft_revision": revision,
         "idempotency_key": idempotency,
+        "rationale": rationale,
         "selection_rows": rows,
     }
 
@@ -161,12 +163,18 @@ def test_draft_save_complete_selection_cas_and_idempotent_replay(monkeypatch):
     assert saved["draft_revision"] == 1
     assert saved["selection_rows"][0]["basis_status"] == "unfilled"
     assert next(row for row in saved["selection_rows"] if row["key"]["symbol"] == "ES")["average_price_exact"] == "100"
+    assert repository.tx.head["selection_payload"]["rationale"] == request["rationale"]
+    first_digest = repository.tx.head["draft_digest"]
     assert service.save_draft(BOOK, 101, request).to_wire() == saved
     assert repository.tx.position_mutations == 0
     assert repository.tx.lock_order[:4] == ["auth", "registry", "book", "mutable"]
     with pytest.raises(QtWorkflowError) as conflict:
         service.save_draft(BOOK, 101, {**request, "selection_rows": [choice(key(), "4"), choice(new, "0.125")]})
     assert conflict.value.code == "idempotency_conflict"
+    with pytest.raises(QtWorkflowError) as changed_reason:
+        service.save_draft(BOOK, 101, {**request, "rationale": "A different decision rationale."})
+    assert changed_reason.value.code == "idempotency_conflict"
+    assert repository.tx.head["draft_digest"] == first_digest
     with pytest.raises(QtWorkflowError) as stale:
         service.save_draft(BOOK, 101, _save_request([choice(key(), "2"), choice(new, "0.125")],
                                                   idempotency="00000000-0000-4000-8000-000000000055"))

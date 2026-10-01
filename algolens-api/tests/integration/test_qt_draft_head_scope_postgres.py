@@ -15,7 +15,8 @@ def test_saved_draft_repository_retains_actual_book_and_foreign_book_cannot_read
     key=next(row['key'] for row in absent['selection_rows'] if row['editable'])
     saved=service.save_draft('BOOK',101,dict(expected_source_digest=absent['source_digest'],
         expected_provenance_digest=absent['provenance_digest'],expected_draft_revision=0,
-        idempotency_key=str(uuid4()),selection_rows=[dict(key=key,quantity_exact='2')])).to_wire()
+        idempotency_key=str(uuid4()),rationale='Exercise draft-head scope.',
+        selection_rows=[dict(key=key,quantity_exact='2')])).to_wire()
     before=_query(draft_db,'SELECT to_jsonb(d)::text FROM trading.qt_drafts d ORDER BY draft_id')
     day=date.fromisoformat(saved['source_day'])
     for book in ('BOOK','FOREIGN_BOOK'):

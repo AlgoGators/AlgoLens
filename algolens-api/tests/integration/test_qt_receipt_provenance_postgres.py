@@ -30,6 +30,7 @@ def save_request(view, quantities):
     return {"expected_source_digest": view["source_digest"],
         "expected_provenance_digest": view["provenance_digest"],
         "expected_draft_revision": view["draft_revision"], "idempotency_key": str(uuid4()),
+        "rationale": "Exercise receipt provenance for reviewed quantities.",
         "selection_rows": [{"key": row["key"], "quantity_exact": quantities[row["key"]["symbol"]]}
             for row in view["selection_rows"] if row["editable"]]}
 
