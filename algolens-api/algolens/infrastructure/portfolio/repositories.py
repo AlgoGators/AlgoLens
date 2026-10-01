@@ -66,8 +66,22 @@ def _plain_position(row):
     return out
 
 class PostgresPortfolioRepository:
-    def __init__(self, connection_factory=None):
+    def __init__(self, connection_factory=None, launch_date=None):
         self.connection_factory = connection_factory or get_db_connection
+        self.launch_date = launch_date
+
+    def _date_launch_scope(self):
+        if self.launch_date is None:
+            return "", ()
+        return "AND date >= %s", (self.launch_date,)
+
+    def _timestamp_launch_scope(self):
+        if self.launch_date is None:
+            return "", ()
+        launch_instant = datetime.combine(
+            self.launch_date, day_time.min, tzinfo=timezone.utc
+        )
+        return "AND timestamp >= %s", (launch_instant,)
 
     def _fetch_latest_live_results(self, cursor, strategy_type, portfolio_id):
         if not self._has_portfolio_type(cursor, "live_results"):
@@ -75,16 +89,18 @@ class PostgresPortfolioRepository:
             # failure and must still reach the caller as such.
             cursor.execute("SELECT 1 FROM trading.live_results LIMIT 0")
             return None
+        launch_predicate, launch_params = self._date_launch_scope()
         cursor.execute(
-            """
+            f"""
             SELECT * FROM trading.live_results
             WHERE config::jsonb->>'strategy_type' = %s
             AND portfolio_id = %s
             AND portfolio_type = %s
+            {launch_predicate}
             ORDER BY date DESC
             LIMIT 1
             """,
-            (strategy_type, portfolio_id, PRIMARY_STREAM),
+            (strategy_type, portfolio_id, PRIMARY_STREAM) + launch_params,
         )
         return cursor.fetchone()
 
@@ -92,18 +108,20 @@ class PostgresPortfolioRepository:
         if not self._has_portfolio_type(cursor, "live_results"):
             cursor.execute("SELECT 1 FROM trading.live_results LIMIT 0")
             return None
+        launch_predicate, launch_params = self._date_launch_scope()
         cursor.execute(
-            """
+            f"""
             SELECT date, current_portfolio_value, total_annualized_return,
                    volatility, total_cumulative_return
             FROM trading.live_results
             WHERE config::jsonb->>'strategy_type' = %s
             AND portfolio_id = %s
             AND portfolio_type = %s
+            {launch_predicate}
             ORDER BY date DESC
             LIMIT 1
             """,
-            (strategy_type, portfolio_id, PRIMARY_STREAM),
+            (strategy_type, portfolio_id, PRIMARY_STREAM) + launch_params,
         )
         return cursor.fetchone()
 
@@ -150,28 +168,31 @@ class PostgresPortfolioRepository:
         if portfolio_type is not None and has_portfolio_type is None:
             has_portfolio_type = self._has_portfolio_type(cursor)
 
+        launch_predicate, launch_params = self._timestamp_launch_scope()
         if portfolio_type is not None and has_portfolio_type:
             cursor.execute(
-                """
+                f"""
                 SELECT timestamp, equity
                 FROM trading.equity_curve
                 WHERE strategy_id = %s
                 AND portfolio_id = %s
                 AND portfolio_type = %s
+                {launch_predicate}
                 ORDER BY timestamp ASC
                 """,
-                (strategy_type, portfolio_id, portfolio_type),
+                (strategy_type, portfolio_id, portfolio_type) + launch_params,
             )
         else:
             cursor.execute(
-                """
+                f"""
                 SELECT timestamp, equity
                 FROM trading.equity_curve
                 WHERE strategy_id = %s
                 AND portfolio_id = %s
+                {launch_predicate}
                 ORDER BY timestamp ASC
                 """,
-                (strategy_type, portfolio_id),
+                (strategy_type, portfolio_id) + launch_params,
             )
         return cursor.fetchall()
 
@@ -253,12 +274,13 @@ class PostgresPortfolioRepository:
         # max over every stream would ask for the qt stream's rows on a date
         # only the system stream reached, and return nothing at all.
         stream_predicate = "AND portfolio_type = %s" if scoped else ""
-        params = (
-            (strategy_type, portfolio_id, portfolio_type,
-             strategy_type, portfolio_id, portfolio_type)
+        launch_predicate, launch_params = self._date_launch_scope()
+        scope = (
+            (strategy_type, portfolio_id, portfolio_type)
             if scoped
-            else (strategy_type, portfolio_id, strategy_type, portfolio_id)
-        )
+            else (strategy_type, portfolio_id)
+        ) + launch_params
+        params = scope + scope
         cursor.execute(
             f"""
             SELECT * FROM (
@@ -269,11 +291,13 @@ class PostgresPortfolioRepository:
                 WHERE strategy_id = %s
                 AND portfolio_id = %s
                 {stream_predicate}
+                {launch_predicate}
                 AND quantity != 0
                 AND date = (
                     SELECT max(date) FROM trading.positions
                     WHERE strategy_id = %s AND portfolio_id = %s
                     {stream_predicate}
+                    {launch_predicate}
                 )
                 ORDER BY strategy_name, symbol, updated_at DESC
             ) AS latest_positions
@@ -310,11 +334,14 @@ class PostgresPortfolioRepository:
                     and self._has_portfolio_type(cursor, "positions")
                 )
                 stream_predicate = "AND portfolio_type = %s" if scoped else ""
-                params = (
-                    (books, portfolio_type, portfolio_type)
-                    if scoped
-                    else (books,)
-                )
+                launch_predicate, launch_params = self._date_launch_scope()
+                params = (books,)
+                if scoped:
+                    params += (portfolio_type,)
+                params += launch_params
+                if scoped:
+                    params += (portfolio_type,)
+                params += launch_params
                 cursor.execute(
                     f"""
                     SELECT DISTINCT symbol
@@ -322,10 +349,12 @@ class PostgresPortfolioRepository:
                     WHERE portfolio_id = ANY(%s)
                       AND quantity != 0
                       {stream_predicate}
+                      {launch_predicate}
                       AND date = (
                           SELECT max(date) FROM trading.positions
                           WHERE portfolio_id = held_positions.portfolio_id
                           {stream_predicate}
+                          {launch_predicate}
                       )
                     ORDER BY symbol
                     """,
@@ -384,14 +413,13 @@ class PostgresPortfolioRepository:
         # Same stream as the current snapshot, or the two columns of the
         # comparison are two different books.
         stream_predicate = "AND portfolio_type = %s" if scoped else ""
-        params = (
-            (strategy_type, portfolio_id, portfolio_type,
-             strategy_type, portfolio_id, portfolio_type,
-             strategy_type, portfolio_id, portfolio_type)
+        launch_predicate, launch_params = self._date_launch_scope()
+        scope = (
+            (strategy_type, portfolio_id, portfolio_type)
             if scoped
-            else (strategy_type, portfolio_id, strategy_type, portfolio_id,
-                  strategy_type, portfolio_id)
-        )
+            else (strategy_type, portfolio_id)
+        ) + launch_params
+        params = scope + scope + scope
         cursor.execute(
             f"""
             SELECT DISTINCT ON (strategy_name, symbol)
@@ -401,14 +429,17 @@ class PostgresPortfolioRepository:
             WHERE strategy_id = %s
             AND portfolio_id = %s
             {stream_predicate}
+            {launch_predicate}
             AND date = (
                 SELECT max(date) FROM trading.positions
                 WHERE strategy_id = %s AND portfolio_id = %s
                 {stream_predicate}
+                {launch_predicate}
                 AND date < (
                     SELECT max(date) FROM trading.positions
                     WHERE strategy_id = %s AND portfolio_id = %s
                     {stream_predicate}
+                    {launch_predicate}
                 )
             )
             ORDER BY strategy_name, symbol, updated_at DESC
@@ -452,17 +483,24 @@ class PostgresPortfolioRepository:
                     has_portfolio_type=positions_scoped,
                 )
                 stream_predicate = "AND portfolio_type = %s" if positions_scoped else ""
+                launch_predicate, launch_params = self._date_launch_scope()
                 snapshots = {}
                 streams = (position_stream, PRIMARY_STREAM) if positions_scoped and position_stream != PRIMARY_STREAM else (position_stream,)
                 for stream in streams:
-                    scope = (strategy_type, portfolio_id, stream) if positions_scoped else (strategy_type, portfolio_id)
+                    scope = (
+                        (strategy_type, portfolio_id, stream)
+                        if positions_scoped
+                        else (strategy_type, portfolio_id)
+                    ) + launch_params
                     # Includes zero rows: a flat book still has a dated
                     # snapshot and its own engine component identities.
                     cursor.execute(
                         f"""SELECT date, strategy_name FROM trading.positions
                             WHERE strategy_id = %s AND portfolio_id = %s {stream_predicate}
+                              {launch_predicate}
                               AND date = (SELECT max(date) FROM trading.positions
-                                          WHERE strategy_id = %s AND portfolio_id = %s {stream_predicate})""",
+                                          WHERE strategy_id = %s AND portfolio_id = %s {stream_predicate}
+                                          {launch_predicate})""",
                         scope + scope,
                     )
                     snapshots[stream] = cursor.fetchall()

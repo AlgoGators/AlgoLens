@@ -1,6 +1,6 @@
 """Portfolio stream names produced by the trading engine."""
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 PORTFOLIO_STREAMS = ("qt", "system", "benchmark")
 
@@ -10,6 +10,11 @@ PRIMARY_STREAM = "qt"
 # The detail page selects positions independently of QT financial reporting.
 DEFAULT_POSITION_STREAM = "system"
 POSITION_READ_STREAMS = ("system", "qt")
+
+# Public portfolio history begins with the feature launch. Earlier engine
+# records remain stored for audit and operational continuity, but they are not
+# part of the investor-facing product history.
+PORTFOLIO_LAUNCH_DATE = date(2026, 10, 1)
 
 
 class InvalidPositionStream(ValueError):

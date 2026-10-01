@@ -17,6 +17,7 @@ from algolens.infrastructure.identity.sessions import FlaskJwtSessionIssuer
 from algolens.infrastructure.portfolio.market_data import PostgresMarketData
 from algolens.infrastructure.portfolio.instrument_catalog import PostgresInstrumentCatalog
 from algolens.infrastructure.portfolio.repositories import PostgresPortfolioRepository
+from algolens.domain.portfolio.streams import PORTFOLIO_LAUNCH_DATE
 from algolens.infrastructure.portfolio.runtime_control import PostgresRuntimeControlRepository
 from algolens.infrastructure.portfolio.configuration_inspection import PostgresConfigurationInspectionReader
 from algolens.infrastructure.portfolio.strategy_registry import PostgresStrategyRegistry
@@ -48,7 +49,10 @@ def create_identity_dependencies(
 
 def create_portfolio_dependencies(connection_factory=None):
     registry = PostgresStrategyRegistry(connection_factory=connection_factory)
-    reader = PostgresPortfolioRepository(connection_factory=connection_factory)
+    reader = PostgresPortfolioRepository(
+        connection_factory=connection_factory,
+        launch_date=PORTFOLIO_LAUNCH_DATE,
+    )
     return registry, reader
 
 
