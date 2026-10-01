@@ -155,7 +155,7 @@ def _validate(value: object, field: str | None = None, *, depth: int = 0) -> obj
             result = [item for _, item in sorted(zip(pairs, result), key=lambda pair: pair[0])]
         return result
     if value is None:
-        if field in (_EXACT_FIELDS - {"quantity_exact", "previous_net_quantity_exact", "proposed_net_quantity_exact", "prior_quantity_exact", "selected_quantity_exact", "cash_cost_exact"}) | _DIAGNOSTIC_FIELDS | _DIGEST_FIELDS | _UUID_FIELDS | _OBJECT_FIELDS | {"read_only_reason", "config_source_id", "market_snapshot_id", "source_id", "passed", "version", "user_id"}:
+        if field in (_EXACT_FIELDS - {"quantity_exact", "previous_net_quantity_exact", "proposed_net_quantity_exact", "prior_quantity_exact", "selected_quantity_exact", "cash_cost_exact"}) | _DIAGNOSTIC_FIELDS | _DIGEST_FIELDS | _UUID_FIELDS | _OBJECT_FIELDS | {"read_only_reason", "rationale", "config_source_id", "market_snapshot_id", "source_id", "passed", "version", "user_id"}:
             return None
         _reject()
     if field in _TEXT_ARRAYS:
@@ -229,7 +229,7 @@ def canonical_qt_bytes(payload: Mapping[str, object]) -> bytes:
         _reject()
     if payload.get("schema_version") == "qt-workflow/v2":
         proposal = frozenset("schema_version book_id source_day capability workflow_state read_only_reason action_grants source_digest provenance_digest seed_publication_id seed_rows saved_qt_rows empty_owner".split())
-        draft = frozenset("schema_version book_id source_day state draft_id draft_revision draft_digest source_digest provenance_digest selection_rows empty_owner".split())
+        draft = frozenset("schema_version book_id source_day state draft_id draft_revision draft_digest source_digest provenance_digest rationale selection_rows empty_owner".split())
         consumed = draft | {"successor"}
         if frozenset(payload) not in {proposal, draft, consumed}: _reject()
         marker = payload["empty_owner"]

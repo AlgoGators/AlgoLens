@@ -56,6 +56,9 @@ export function StrategyDetail({
   // strategy's positions were simply unreachable from the app.
   const { theme } = useTheme();
   const { user } = useAuth();
+  const actorName = [user?.first_name, user?.last_name].filter(Boolean).join(' ').trim();
+  const actorLabel = user ? actorName && user.email ? `${actorName} (${user.email})` :
+    actorName || user.email || `Account ${user.id}` : '';
   useEffect(() => {
     if (!user?.id) return;
     try { QtRecovery.activateActor(sessionStorage, user.id); }
@@ -665,7 +668,7 @@ export function StrategyDetail({
             <QtEditDialog open={editorOpen} keepMounted={editorEverOpened}
               title={`Edit QT positions - ${workflowBook}`} onClose={closeEditor}
               returnFocusTo={() => document.querySelector<HTMLElement>('[data-qt-edit-entry]')}>
-              <QtProposalWorkspace embedded key={workflowScope} actorId={user.id} bookId={workflowBook}
+              <QtProposalWorkspace embedded key={workflowScope} actorId={user.id} actorLabel={actorLabel} bookId={workflowBook}
                 sourceDay={sourceDay} focusStrategyName={strategy.name} onPublished={handlePositionsChanged} />
             </QtEditDialog>
           )}

@@ -6,6 +6,7 @@ import { API_BASE_URL, getWithAuth, postWithAuth, putWithAuth, SessionExpiredErr
 
 export type QtSaveDraftRequest = { expected_source_digest: string; expected_provenance_digest: string;
   expected_draft_revision: number; idempotency_key: string;
+  rationale: string;
   selection_rows: Array<{ key: QtComponentKey; quantity_exact: string }> };
 export type QtCreatePreviewRequest = { book_id: string; draft_id: string; draft_revision: number;
   draft_digest: string; expected_source_digest: string; expected_provenance_digest: string; idempotency_key: string };
@@ -120,6 +121,7 @@ export class QtPreviewApi {
     const body: QtSaveDraftRequest = { expected_source_digest: request.expected_source_digest,
       expected_provenance_digest: request.expected_provenance_digest,
       expected_draft_revision: request.expected_draft_revision, idempotency_key: request.idempotency_key,
+      rationale: request.rationale,
       selection_rows: request.selection_rows.map(row => ({ key: {
         portfolio_id: row.key.portfolio_id, strategy_id: row.key.strategy_id,
         strategy_name: row.key.strategy_name, date: row.key.date,

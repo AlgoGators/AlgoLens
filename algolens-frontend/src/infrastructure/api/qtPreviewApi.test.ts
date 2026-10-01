@@ -56,7 +56,8 @@ describe('QT authenticated protocol', () => {
     const row = fixtures.draft_saved.selection_rows[0];
     const save = { expected_source_digest: fixtures.draft_saved.source_digest,
       expected_provenance_digest: fixtures.draft_saved.provenance_digest, expected_draft_revision: 0,
-      idempotency_key: key, selection_rows: [{ key: { ...row.key, browser_only: 'discard' }, quantity_exact: '5' }] };
+      idempotency_key: key, rationale: 'Reduce concentration.',
+      selection_rows: [{ key: { ...row.key, browser_only: 'discard' }, quantity_exact: '5' }] };
     await QtPreviewApi.saveDraft('synthetic-book-A', save);
     const create = { book_id: 'synthetic-book-A', draft_id: fixtures.draft_saved.draft_id!, draft_revision: 1,
       draft_digest: fixtures.draft_saved.draft_digest!, expected_source_digest: fixtures.draft_saved.source_digest!,
@@ -79,7 +80,8 @@ describe('QT authenticated protocol', () => {
     vi.stubGlobal('fetch', fetch);
     const request = { expected_source_digest: fixtures.draft_saved.source_digest!,
       expected_provenance_digest: fixtures.draft_saved.provenance_digest!, expected_draft_revision: 0,
-      idempotency_key: key, selection_rows: [{ key: fixtures.draft_saved.selection_rows[0].key, quantity_exact: '5' }] };
+      idempotency_key: key, rationale: 'Reduce concentration.',
+      selection_rows: [{ key: fixtures.draft_saved.selection_rows[0].key, quantity_exact: '5' }] };
     await expect(QtPreviewApi.saveDraft('synthetic-book-A', request)).rejects.toBeInstanceOf(QtMutationUncertainError);
     expect(fetch).toHaveBeenCalledTimes(1);
   });
@@ -89,7 +91,8 @@ describe('QT authenticated protocol', () => {
     vi.stubGlobal('fetch', fetch);
     await expect(QtPreviewApi.saveDraft('synthetic-book-A', { expected_source_digest: fixtures.draft_saved.source_digest!,
       expected_provenance_digest: fixtures.draft_saved.provenance_digest!, expected_draft_revision: 1,
-      idempotency_key: key, selection_rows: [{ key: fixtures.draft_saved.selection_rows[0].key, quantity_exact: '5' }] }))
+      idempotency_key: key, rationale: 'Reduce concentration.',
+      selection_rows: [{ key: fixtures.draft_saved.selection_rows[0].key, quantity_exact: '5' }] }))
       .rejects.toBeInstanceOf(QtMutationUncertainError);
     expect(fetch).toHaveBeenCalledTimes(1);
   });

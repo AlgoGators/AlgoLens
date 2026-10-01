@@ -31,10 +31,11 @@ vi.mock('../infrastructure/api/qtPreviewApi', async importOriginal => ({
   ...await importOriginal<typeof import('../infrastructure/api/qtPreviewApi')>(), QtPreviewApi: qtApi,
 }));
 vi.mock('./QtProposalWorkspace', () => ({
-  QtProposalWorkspace: (p: { actorId: string; bookId: string; sourceDay: string; embedded?: boolean }) => (
+  QtProposalWorkspace: (p: { actorId: string; actorLabel?: string; bookId: string; sourceDay: string; embedded?: boolean }) => (
     <section aria-label="QT proposal workspace">
       <div data-testid="qt-workspace-context">{p.actorId}:{p.bookId}:{p.sourceDay}</div>
       <div data-testid="embedded">{String(!!p.embedded)}</div>
+      <div data-testid="actor-label">{p.actorLabel}</div>
       <input aria-label="Chosen quantity ES.v.0" defaultValue="5" />
     </section>
   ),
@@ -43,7 +44,7 @@ vi.mock('../adapters/react/ThemeContext', () => ({ useTheme: () => ({ theme: 'li
 let role = 'admin';
 let userId = '101';
 vi.mock('../adapters/react/useAuth', () => ({
-  useAuth: () => ({ user: { id: userId, role } }),
+  useAuth: () => ({ user: { id: userId, role, first_name: 'John', last_name: 'Riley', email: 'john@example.com' } }),
 }));
 vi.mock('./FinancialAnalysis', () => ({ FinancialAnalysis: () => null }));
 vi.mock('./TradingActivity', () => ({ TradingActivity: () => null }));
@@ -162,6 +163,7 @@ describe('on the Model / System stream (the default view)', () => {
     expect(getStrategyCalls.at(-1)).toEqual(['trendfollowing', 'CONSERVATIVE_PORTFOLIO', 'qt']);
     expect(within(win).getByTestId('qt-workspace-context').textContent).toBe('101:CONSERVATIVE_PORTFOLIO:2026-09-23');
     expect(within(win).getByTestId('embedded').textContent).toBe('true');
+    expect(within(win).getByTestId('actor-label').textContent).toBe('John Riley (john@example.com)');
     expect(screen.getByText(/QT positions snapshot/i)).toBeTruthy();
   });
 

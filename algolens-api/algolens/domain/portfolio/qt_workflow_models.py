@@ -328,12 +328,16 @@ class QtProposalResponse(_WireResponse):
 class QtDraftResponse(_WireResponse):
     _NAMES: ClassVar[frozenset[str]] = frozenset({
         "schema_version", "book_id", "source_day", "state", "draft_id", "draft_revision",
-        "draft_digest", "source_digest", "provenance_digest", "selection_rows",
+        "draft_digest", "source_digest", "provenance_digest", "rationale", "selection_rows",
     })
 
     @classmethod
     def from_wire(cls, value: object):
         result = _empty_owner_response(cls, value)
+        rationale = result.payload["rationale"]
+        if rationale is not None and (type(rationale) is not str or not rationale.strip()
+                or rationale != rationale.strip() or len(rationale.encode("utf-8")) > 1000):
+            raise QtWorkflowError("invalid_qt_payload", "Saved QT rationale is invalid")
         _display_rows(result.payload["selection_rows"], result.payload["book_id"], result.payload["source_day"], frozenset({"qt_proposal", "qt"}))
         states = {"absent", "saved", "stale", "provenance_unresolved"}
         if result.payload["schema_version"] == "qt-workflow/v2": states.add("consumed")

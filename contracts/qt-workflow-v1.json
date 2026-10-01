@@ -27,6 +27,7 @@
     "draft_digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
     "source_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     "provenance_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "rationale": "Reduce concentration before the event window.",
     "selection_rows": [
       {"key": {"portfolio_id": "synthetic-book-A", "strategy_id": "component-1", "strategy_name": "synthetic-alpha", "date": "2026-09-25", "symbol": "SYN", "portfolio_type": "qt_proposal"}, "quantity_exact": "5", "basis_status": "preserved_source", "average_price_exact": "100", "asset_type": "EQUITY", "editable": true, "origin": "qt_draft"},
       {"key": {"portfolio_id": "synthetic-book-A", "strategy_id": "component-2", "strategy_name": "synthetic-beta", "date": "2026-09-25", "symbol": "SYN", "portfolio_type": "qt_proposal"}, "quantity_exact": "1", "basis_status": "preserved_source", "average_price_exact": "100", "asset_type": "EQUITY", "editable": true, "origin": "qt_draft"}

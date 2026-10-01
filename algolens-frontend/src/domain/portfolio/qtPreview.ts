@@ -33,7 +33,7 @@ export type QtDraft = {
   successor?: { decision_id: string; attempt_id: string; preview_id: string; publication_digest: string };
   state: 'absent' | 'saved' | 'consumed' | 'stale' | 'provenance_unresolved';
   draft_id: string | null; draft_revision: number; draft_digest: string | null;
-  source_digest: string | null; provenance_digest: string | null; selection_rows: QtSelectionRow[];
+  source_digest: string | null; provenance_digest: string | null; rationale: string | null; selection_rows: QtSelectionRow[];
 };
 export type QtEvaluation = {
   optimizer: {
@@ -216,12 +216,14 @@ export function decodeQtProposal(value: unknown): QtProposal {
 }
 
 export function decodeQtDraft(value: unknown): QtDraft {
-  const item = choiceObject(value, ['schema_version', 'book_id', 'source_day', 'state', 'draft_id', 'draft_revision', 'draft_digest', 'source_digest', 'provenance_digest', 'selection_rows'], true);
+  const item = choiceObject(value, ['schema_version', 'book_id', 'source_day', 'state', 'draft_id', 'draft_revision', 'draft_digest', 'source_digest', 'provenance_digest', 'rationale', 'selection_rows'], true);
   const book = string(item.book_id); const day = date(item.source_day);
   const state = literal(item.state, item.schema_version === 'qt-workflow/v2' ?
     ['absent', 'saved', 'consumed'] : ['absent', 'saved', 'stale', 'provenance_unresolved']);
   optionalId(item.draft_id); const revision = integer(item.draft_revision);
   optionalDigest(item.draft_digest); optionalDigest(item.source_digest); optionalDigest(item.provenance_digest);
+  const rationale = optionalString(item.rationale);
+  if (rationale !== null && (!rationale.trim() || rationale !== rationale.trim() || new TextEncoder().encode(rationale).length > 1000)) fail();
   const selection = rows(item.selection_rows, book, day, ['qt_proposal', 'qt']);
   if (state === 'absent' && (revision !== 0 || item.draft_id !== null || item.draft_digest !== null)) fail();
   if ((state === 'saved' || state === 'consumed') && (revision < 1 || !item.draft_id || !item.draft_digest || !item.source_digest || !item.provenance_digest)) fail();

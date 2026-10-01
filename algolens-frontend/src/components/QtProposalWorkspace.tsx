@@ -14,7 +14,7 @@ import { QtSelectionTable } from './qt-proposal/QtSelectionTable';
 import { qtStyles, useQtDark, type QtTone } from './qt-proposal/qtStyles';
 
 type Props = {
-  actorId: string; bookId: string; sourceDay: string; onPublished: () => void;
+  actorId: string; actorLabel?: string; bookId: string; sourceDay: string; onPublished: () => void;
   /**
    * True when the workspace sits inside the QT edit dialog: the dialog draws the
    * border, rounding, padding and background, so the workspace keeps only its
@@ -71,7 +71,7 @@ function problem(error: unknown): { message: string; revoke: boolean } {
   return { message: 'QT data is unavailable. Refresh and try again.', revoke: false };
 }
 
-export function QtProposalWorkspace({ actorId, bookId, sourceDay, onPublished, embedded = false, focusStrategyName }: Props) {
+export function QtProposalWorkspace({ actorId, actorLabel, bookId, sourceDay, onPublished, embedded = false, focusStrategyName }: Props) {
   const context = qtContextKey(actorId, bookId, sourceDay);
   const ui = qtStyles(useQtDark());
   const [state, setState] = useState<QtState>(() => makeQtState(context));
@@ -85,6 +85,8 @@ export function QtProposalWorkspace({ actorId, bookId, sourceDay, onPublished, e
   const [hasConfirmationRecovery, setHasConfirmationRecovery] = useState(false);
   const [hasApprovalRecovery, setHasApprovalRecovery] = useState(false);
   const [decisionRefresh, setDecisionRefresh] = useState(0);
+  const [rationale, setRationale] = useState('');
+  const [savedRationale, setSavedRationale] = useState<string | null>(null);
   const renderEpoch = useRef({ context, epoch: 0 });
   if (renderEpoch.current.context !== context) renderEpoch.current = { context, epoch: renderEpoch.current.epoch + 1 };
   const reviewScope = JSON.stringify([context, renderEpoch.current.epoch, refreshIndex, decisionRefresh]);
@@ -108,6 +110,7 @@ export function QtProposalWorkspace({ actorId, bookId, sourceDay, onPublished, e
     const controller = new AbortController();
     send({ type: 'context_changed', context });
     setMessage(''); setRevoked(false); setRecoveredDecision(null);
+    setRationale(''); setSavedRationale(null);
     busyRef.current = false; setBusy(false);
     try {
       QtRecovery.activateActor(sessionStorage, actorId);
@@ -126,6 +129,8 @@ export function QtProposalWorkspace({ actorId, bookId, sourceDay, onPublished, e
         if (!live || lifecycle.current !== token) return;
         if (draft.source_day !== sourceDay) throw new Error('wrong_source_day');
         send({ type: 'draft_loaded', context, generation: draftGeneration, draft });
+        setRationale(draft.rationale ?? '');
+        setSavedRationale(draft.rationale);
       } catch (error) {
         if (!live || lifecycle.current !== token || (error instanceof DOMException && error.name === 'AbortError')) return;
         const failure = problem(error); setMessage(failure.message); setRevoked(failure.revoke);
@@ -232,12 +237,17 @@ export function QtProposalWorkspace({ actorId, bookId, sourceDay, onPublished, e
   }
   catch { validSelection = false; }
   const savedSelection = !!draft && draft.state === 'saved' && matchesSaved(draft.selection_rows, visible.selection);
+  const rationaleTrimmed = rationale.trim();
+  const rationaleBytes = new TextEncoder().encode(rationaleTrimmed).length;
+  const validRationale = rationaleBytes > 0 && rationaleBytes <= 1000;
+  const rationaleMatchesSaved = savedRationale !== null && rationaleTrimmed === savedRationale;
   const sourceReady = proposal?.workflow_state === 'ready' && proposal.capability.available && !revoked;
   const editorAllowsEdit = reduceQtState(visible,
     { type: 'edited', context, selection: visible.selection }) !== visible;
-  const canSave = !!sourceReady && !!draft && !!proposal.action_grants.can_save_draft && validSelection &&
+  const canSave = !!sourceReady && !!draft && !!proposal.action_grants.can_save_draft && validSelection && validRationale &&
     visible.phase === 'editing' && !busy && !decisionExists;
-  const canEvaluate = !!sourceReady && !!proposal?.action_grants.can_save_draft && validSelection && savedSelection && visible.phase === 'editing' && !busy && !decisionExists;
+  const canEvaluate = !!sourceReady && !!proposal?.action_grants.can_save_draft && validSelection && savedSelection &&
+    rationaleMatchesSaved && visible.phase === 'editing' && !busy && !decisionExists;
   const canConfirm = !hasConfirmationRecovery && !busy && !revoked && canConfirmQt(visible);
 
   function edit(identity: string, value: string) {
@@ -246,20 +256,34 @@ export function QtProposalWorkspace({ actorId, bookId, sourceDay, onPublished, e
     const after = send({ type: 'edited', context, selection: { ...before.selection, [identity]: value } });
     if (after !== before) setMessage('');
   }
+  function editRationale(value: string) {
+    if (!current() || revoked || decisionExists) return;
+    setRationale(value);
+    const trimmed = value.trim();
+    if (visible.preview || (savedRationale !== null && trimmed !== savedRationale)) {
+      send({ type: 'edited', context, selection: stateRef.current.selection });
+    }
+    setMessage('');
+  }
   function save() {
     if (!canSave || !proposal) return;
     let rows: ReturnType<typeof selectionRows>;
     try { rows = selectionRows(chosenRows, stateRef.current.selection); }
     catch { setMessage('Enter a valid exact quantity for every editable component. Futures require whole contracts.'); return; }
     void runOneWrite(async stillCurrent => {
+      const submittedRationale = rationaleTrimmed;
       const started = send({ type: 'save_started', context, generation: stateRef.current.generation });
       const generation = started.generation;
       try {
         const saved = await QtPreviewApi.saveDraft(bookId, {
           expected_source_digest: proposal.source_digest!, expected_provenance_digest: proposal.provenance_digest!,
           expected_draft_revision: draft?.draft_revision ?? 0, idempotency_key: crypto.randomUUID(), selection_rows: rows,
+          rationale: submittedRationale,
         });
-        if (stillCurrent()) send({ type: 'draft_saved', context, generation, draft: saved });
+        if (stillCurrent()) {
+          const accepted = send({ type: 'draft_saved', context, generation, draft: saved });
+          if (accepted.draft === saved) setSavedRationale(submittedRationale);
+        }
       } catch (error) { showFailure(error, stillCurrent, generation); }
     });
   }
@@ -461,6 +485,29 @@ export function QtProposalWorkspace({ actorId, bookId, sourceDay, onPublished, e
     </section>}
     {proposal && <QtEditGuide step={guideStep} changed={changedFromModel} editable={editableRows.length} lockedReason={guideLocked} note={guideNote}
       focusNote={focusLockedNote(chosenRows, focusStrategyName)} />}
+    {proposal && <section aria-label="Position change request" className={ui.card}>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div><p className={ui.subTitle}>Authenticated actor</p>
+          <p className={ui.body}>{actorLabel || `Account ${actorId}`}</p></div>
+        <div><p className={ui.subTitle}>Numerical change</p>
+          <p className={ui.body}>{changedFromModel} of {editableRows.length} editable positions differ from MODEL.</p>
+          <p className={ui.note}>Exact current, proposed, and signed quantity differences are shown below.</p></div>
+      </div>
+      <label className="block space-y-1">
+        <span className={ui.subTitle}>Why should this position change be made?</span>
+        <textarea aria-label="Why should this position change be made?" value={rationale}
+          disabled={tableLocked} rows={3} onChange={event => editRationale(event.target.value)}
+          className={ui.textarea(tableLocked)} />
+      </label>
+      <div className="flex flex-wrap justify-between gap-2">
+        <p className={validRationale ? ui.note : ui.callout('warning')}>
+          {rationaleBytes === 0 ? 'A rationale is required before this draft can be saved.' :
+            rationaleBytes > 1000 ? 'Rationale must be 1000 UTF-8 bytes or fewer.' :
+              'This rationale is stored with the draft as audit evidence.'}
+        </p>
+        <p className={ui.note}>{rationaleBytes}/1000 bytes</p>
+      </div>
+    </section>}
     {proposal && <div className={ui.card}>
       <QtSelectionTable sourceRows={sourceRows} chosenRows={chosenRows} previousQtRows={proposal.saved_qt_rows} selection={visible.selection}
         onEdit={edit} locked={tableLocked} />
@@ -471,7 +518,9 @@ export function QtProposalWorkspace({ actorId, bookId, sourceDay, onPublished, e
         </div>
         {!sourceReady && <p className={ui.callout('warning')}>QT actions are unavailable until current source and grants are ready.</p>}
         {!validSelection && <p className={ui.callout('warning')}>Enter valid exact quantities before saving.</p>}
+        {!validRationale && <p className={ui.note}>Add a valid rationale before saving.</p>}
         {!savedSelection && <p className={ui.note}>Save the current selection before evaluation.</p>}
+        {savedSelection && !rationaleMatchesSaved && <p className={ui.note}>Save this rationale before evaluation.</p>}
       </div>
     </div>}
     {visible.preview && <QtPreviewEvidence preview={visible.preview} />}

@@ -93,5 +93,10 @@ export function qtStyles(dark: boolean) {
       (locked
         ? (dark ? 'cursor-not-allowed border-gray-800 bg-gray-900/60 text-gray-300' : 'cursor-not-allowed border-gray-200 bg-gray-100 text-gray-600')
         : (dark ? 'border-gray-500 bg-gray-900 text-white hover:border-gray-400' : 'border-gray-500 bg-white text-black hover:border-gray-600')),
+    textarea: (locked: boolean) => `w-full resize-y rounded-lg border px-3 py-2 text-sm ` +
+      `focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 ` +
+      (locked
+        ? (dark ? 'cursor-not-allowed border-gray-800 bg-gray-900/60 text-gray-300' : 'cursor-not-allowed border-gray-200 bg-gray-100 text-gray-600')
+        : (dark ? 'border-gray-500 bg-gray-900 text-white hover:border-gray-400' : 'border-gray-500 bg-white text-black hover:border-gray-600')),
   };
 }

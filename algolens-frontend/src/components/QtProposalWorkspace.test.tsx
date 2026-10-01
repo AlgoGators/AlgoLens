@@ -20,7 +20,7 @@ const clean = () => decodeQtPreview(structuredClone(fixtures.preview_clean));
 const breach = () => decodeQtPreview(structuredClone(fixtures.preview_breach));
 const pending = () => decodeQtDecision(structuredClone(fixtures.decision_pending));
 const processed = () => decodeQtDecision(structuredClone(fixtures.decision_processed));
-const props = { actorId: '101', bookId: 'synthetic-book-A', sourceDay: '2026-09-25' };
+const props = { actorId: '101', actorLabel: 'John Riley (john@example.com)', bookId: 'synthetic-book-A', sourceDay: '2026-09-25' };
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(yes => { resolve = yes; }); return { promise, resolve }; }
 function storedIntents(): Array<Record<string, unknown>> {
   return Object.keys(sessionStorage).map(key => JSON.parse(sessionStorage.getItem(key)!));
@@ -330,6 +330,30 @@ describe('QT proposal workspace', () => {
     expect((within(second).getByRole('textbox') as HTMLInputElement).value).toBe('1');
   });
 
+  it('attributes the request, requires a rationale, and sends its trimmed value without a claimed actor', async () => {
+    const legacy: any = structuredClone(fixtures.draft_saved);
+    legacy.rationale = null;
+    api.getDraft.mockResolvedValue(decodeQtDraft(legacy));
+    const updated = structuredClone(fixtures.draft_saved);
+    updated.draft_revision = 2; updated.draft_digest = 'd'.repeat(64);
+    api.saveDraft.mockResolvedValue(decodeQtDraft(updated));
+    render(<QtProposalWorkspace {...props} onPublished={vi.fn()} />);
+    const card = await screen.findByRole('region', { name: 'Position change request' });
+    expect(within(card).getByText('John Riley (john@example.com)')).toBeTruthy();
+    expect(within(card).getByText(/2 of 2 editable positions differ from MODEL/)).toBeTruthy();
+    const rationale = within(card).getByRole('textbox', { name: 'Why should this position change be made?' });
+    const save = screen.getByRole('button', { name: 'Save draft' });
+    expect(save).toHaveProperty('disabled', true);
+    await userEvent.setup().type(rationale, '  Reduce concentration before the event window.  ');
+    expect(save).toHaveProperty('disabled', false);
+    await userEvent.setup().click(save);
+    expect(api.saveDraft).toHaveBeenCalledWith(props.bookId, expect.objectContaining({
+      rationale: 'Reduce concentration before the event window.',
+    }));
+    expect(api.saveDraft.mock.calls[0][1]).not.toHaveProperty('actorId');
+    expect(api.saveDraft.mock.calls[0][1]).not.toHaveProperty('actorLabel');
+  });
+
   it('saves exact edited quantities before evaluation and rejects fractional futures', async () => {
     const updated = structuredClone(fixtures.draft_saved);
     updated.draft_revision = 2; updated.draft_digest = 'd'.repeat(64);
@@ -340,8 +364,12 @@ describe('QT proposal workspace', () => {
     const second = screen.getByRole('textbox', { name: /Chosen quantity for synthetic-beta/ });
     fireEvent.change(first, { target: { value: '2.5' } });
     fireEvent.change(second, { target: { value: '0' } });
+    const rationale = screen.getByRole('textbox', { name: 'Why should this position change be made?' });
+    await userEvent.setup().clear(rationale);
+    await userEvent.setup().type(rationale, 'Reduce gross exposure.');
     await userEvent.setup().click(screen.getByRole('button', { name: 'Save draft' }));
     expect(api.saveDraft).toHaveBeenCalledWith(props.bookId, expect.objectContaining({
+      rationale: 'Reduce gross exposure.',
       selection_rows: expect.arrayContaining([
         { key: fixtures.draft_saved.selection_rows[0].key, quantity_exact: '2.5' },
         { key: fixtures.draft_saved.selection_rows[1].key, quantity_exact: '0' },

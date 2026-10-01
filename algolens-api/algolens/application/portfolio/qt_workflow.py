@@ -158,6 +158,7 @@ class QtWorkflowService:
             "draft_digest": head["draft_digest"] if head else None,
             "source_digest": provenance.observed_source_digest,
             "provenance_digest": provenance.legacy_audit_chain_digest,
+            "rationale": ((head.get("selection_payload") or {}).get("rationale") if head else None),
             "selection_rows": [row.to_wire() for row in rows],
         }
         choice = getattr(provenance, "empty_owner_choice", None)
@@ -304,7 +305,8 @@ class QtWorkflowService:
             })
             tx.advance_draft_head(day, current_revision, draft_id, revision)
             response = self._response(book_id, day, provenance, rows,
-                                      head={"draft_id": draft_id, "revision": revision, "draft_digest": digest})
+                                      head={"draft_id": draft_id, "revision": revision, "draft_digest": digest,
+                                            "selection_payload": payload})
             tx.insert_idempotent("save_draft", day.isoformat(), request.idempotency_key,
                                  request_digest, response.to_wire())
             return response
