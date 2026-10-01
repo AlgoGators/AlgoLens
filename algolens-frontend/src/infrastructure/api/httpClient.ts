@@ -1,3 +1,5 @@
+import { positionEditDemoEnabled, positionEditDemoResponse } from '../demo/positionEditDemo';
+
 export const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
 
 // Environment detection
@@ -83,7 +85,7 @@ function throwIfSessionExpired(response: Response): void {
 
 async function requestOnce(url: string, init: RequestInit): Promise<Response> {
   try {
-    const response = await fetch(url, init);
+    const response = positionEditDemoResponse(url, init) ?? await fetch(url, init);
     throwIfSessionExpired(response);
     return response;
   } catch (error) {
@@ -129,12 +131,13 @@ export async function fetchWithAuth(url: string): Promise<Response> {
 
   try {
     const startTime = performance.now();
-    const response = await fetch(url, {
+    const init: RequestInit = {
       credentials: 'include',
       headers: {
         'Content-Type': 'application/json',
       },
-    });
+    };
+    const response = positionEditDemoResponse(url, init) ?? await fetch(url, init);
     const elapsed = (performance.now() - startTime).toFixed(2);
 
     log('info', `Response received in ${elapsed}ms`);
@@ -257,7 +260,7 @@ async function writeWithAuth(
   body: unknown,
 ): Promise<Response> {
   const csrf = readCookie('csrf_access_token');
-  if (!csrf) {
+  if (!csrf && !positionEditDemoEnabled()) {
     log('warn', 'No csrf_access_token cookie found; the request will likely 401');
   }
 
@@ -283,7 +286,7 @@ export async function putWithAuth(url: string, body: unknown): Promise<Response>
 
 export async function deleteWithAuth(url: string, body?: unknown): Promise<Response> {
   const csrf = readCookie('csrf_access_token');
-  if (!csrf) {
+  if (!csrf && !positionEditDemoEnabled()) {
     log('warn', 'No csrf_access_token cookie found; the request will likely 401');
   }
 

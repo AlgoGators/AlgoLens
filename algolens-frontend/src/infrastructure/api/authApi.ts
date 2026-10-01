@@ -1,4 +1,5 @@
 import type { AuthResponse, User } from '../../domain/identity/user';
+import { positionEditDemoResponse } from '../demo/positionEditDemo';
 import { API_BASE_URL } from './httpClient';
 
 export const DEV_MODE = import.meta.env.VITE_DEV_MODE === '1';
@@ -9,10 +10,12 @@ export interface SessionResult {
 }
 
 export async function verifySessionRequest(): Promise<SessionResult> {
-  const response = await fetch(`${API_BASE_URL}/auth/verify`, {
+  const url = `${API_BASE_URL}/auth/verify`;
+  const init: RequestInit = {
     method: 'GET',
     credentials: 'include',
-  });
+  };
+  const response = positionEditDemoResponse(url, init) ?? await fetch(url, init);
 
   if (!response.ok) {
     return { user: null, status: response.status };
@@ -88,8 +91,10 @@ export async function registerRequest(
 }
 
 export async function logoutRequest(): Promise<void> {
-  await fetch(`${API_BASE_URL}/auth/logout`, {
+  const url = `${API_BASE_URL}/auth/logout`;
+  const init: RequestInit = {
     method: 'POST',
     credentials: 'include',
-  });
+  };
+  positionEditDemoResponse(url, init) ?? await fetch(url, init);
 }
