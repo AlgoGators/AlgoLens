@@ -16,6 +16,20 @@ logger = logging.getLogger(__name__)
 
 logger.info("=== Database module loaded ===")
 
+REQUIRED_DATABASE_ENVIRONMENT_VARIABLES = (
+    "DB_HOST",
+    "DB_USER",
+    "DB_PASSWORD",
+    "DB_NAME",
+)
+
+
+def missing_database_environment_variables():
+    """Return required database settings that are absent from the environment."""
+    return tuple(
+        name for name in REQUIRED_DATABASE_ENVIRONMENT_VARIABLES if not os.getenv(name)
+    )
+
 
 def get_db_connection():
     host = os.getenv("DB_HOST")
@@ -26,15 +40,7 @@ def get_db_connection():
 
     logger.info("=== Attempting DB connection ===")
 
-    missing = []
-    if not host:
-        missing.append("DB_HOST")
-    if not user:
-        missing.append("DB_USER")
-    if not password:
-        missing.append("DB_PASSWORD")
-    if not dbname:
-        missing.append("DB_NAME")
+    missing = missing_database_environment_variables()
 
     if missing:
         error_msg = (

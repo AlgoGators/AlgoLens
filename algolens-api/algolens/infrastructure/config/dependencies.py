@@ -5,7 +5,11 @@ from werkzeug.security import check_password_hash, generate_password_hash
 from algolens.application.runtime_control import RuntimeControlService
 from algolens.application.configuration_inspection import ConfigurationInspectionService
 from algolens.infrastructure.config.runtime_control import RuntimeControlConfig
-from algolens.infrastructure.db.postgres import execute_query, get_db_connection
+from algolens.infrastructure.db.postgres import (
+    execute_query,
+    get_db_connection,
+    missing_database_environment_variables,
+)
 from algolens.infrastructure.identity.dev_config import EnvironmentDevAuthConfig
 from algolens.infrastructure.identity.repositories import PostgresUserRepository
 from algolens.infrastructure.identity.security import WerkzeugPasswordHasher

@@ -64,6 +64,7 @@ from algolens.infrastructure.config.dependencies import (
     create_instrument_catalog,
     create_market_data,
     create_portfolio_dependencies,
+    missing_database_environment_variables,
 )
 
 portfolio_bp = Blueprint("portfolio", __name__)
@@ -322,6 +323,16 @@ def get_all_strategies():
     current_app.logger.info("[STRATEGIES] === /strategies endpoint called ===")
 
     try:
+        if (
+            create_dev_auth_config().is_enabled()
+            and missing_database_environment_variables()
+        ):
+            current_app.logger.info(
+                "[DEV_MODE] Database configuration is absent; returning an empty "
+                "strategy list for the local dashboard"
+            )
+            return jsonify(serialize_strategy_list([])), 200
+
         registry, reader = _portfolio_dependencies()
         strategies = ListStrategies(registry, reader).execute()
         elapsed_ms = (time.perf_counter() - start) * 1000
