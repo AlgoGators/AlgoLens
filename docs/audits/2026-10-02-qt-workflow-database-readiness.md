@@ -28,9 +28,40 @@ rollout must not be presented as a working launch.
   `position_overrides.portfolio_id` plus
   `position_override_legacy_scopes`.
 - The engine foundation is older than the QT workflow line: `run_inputs`,
-  runtime intent/attempt tables, result-stream columns, proposal/seed storage,
-  accounting inputs, market/finalization sources, and desk results are absent.
-  The positions stream constraint admits only `system` and `qt`.
+  runtime intent/attempt tables, execution/result `portfolio_type` columns,
+  proposal/seed storage, accounting inputs, market/finalization sources, and
+  desk results are absent. The positions stream constraint admits only
+  `system` and `qt`.
+
+## Restore and no-backfill rehearsal
+
+On 2026-10-02, the complete affected `trading` and `auth` schemas were exported
+with PostgreSQL 16 `pg_dump` in custom format and restored successfully into a
+disposable database on the same PostgreSQL server. The restored copy then
+accepted this exact, no-history-backfill sequence:
+
+1. trade-ngin 003, 006, 007, 011, 010, 012;
+2. AlgoLens 007;
+3. trade-ngin 013, 014, 015, 016;
+4. AlgoLens 003, 004, 005;
+5. trade-ngin 020, 017, 018.
+
+Migration 002 was deliberately excluded. Migration 010 was exercised only on
+the disposable copy; it is unrelated to QT activation and should be omitted
+from the configured-database rollout to avoid rewriting historical metric
+sentinels. Post-migration verification found all
+core workflow, governed-source, model-publication, exact-position, accounting,
+receipt, and finalization relations present; `positions` retained exactly 3,878
+`system` rows and contained zero `qt` or `qt_proposal` rows. The disposable
+database was dropped after verification. The affected-schema backup is retained
+outside the repositories at
+`/home/john-riley/projects/Algo/.database-backups/new_algo_data-trading-auth-pre-qt-20261002.dump`
+with SHA-256
+`a8dc0ab4ac8cc322cd6ffb9495a000af2270d20b93176d49b9ff0124ffbca532`.
+
+The configured database was not migrated. Activation still requires explicit
+submitter and two-person approver assignments, a production evaluator bundle
+and desk-processor host/schedule, and a fresh launch-day model publication.
 
 ## Required rollout sequence
 
