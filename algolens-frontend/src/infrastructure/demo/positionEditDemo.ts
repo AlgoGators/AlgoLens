@@ -1,12 +1,16 @@
 import fixtures from '../../../../contracts/qt-workflow-v1.json';
+import configurationFixture from '../api/__fixtures__/configurationInspectionHttp.json';
 
 import type { PositionStream, Strategy } from '../../domain/portfolio/portfolioData';
 
 const BOOK = 'synthetic-book-A';
 const STRATEGY_ID = 'component-1';
+const DEMO_DECISION_KEY = 'algolens.demo.position-edit.decision.v1';
 
 const demoUser = {
-  id: 'demo-qt-reviewer',
+  // Production account IDs are decimal strings. Keeping the demo actor in
+  // that shape exercises the same recovery and idempotency guards as real UI.
+  id: '9000001',
   email: 'demo.reviewer@localhost',
   first_name: 'Demo',
   last_name: 'Reviewer',
@@ -118,6 +122,36 @@ function response(body: unknown, status = 200): Response {
   });
 }
 
+function demoConfigurationInspection() {
+  const inspection = structuredClone(configurationFixture);
+  inspection.scope.registry_id = STRATEGY_ID;
+  inspection.scope.portfolio_id = BOOK;
+  inspection.read_at = new Date().toISOString();
+  inspection.publication.identity.registry_id = STRATEGY_ID;
+  inspection.publication.identity.portfolio_id = BOOK;
+  inspection.publication.identity.engine_strategy_id = 'LIVE_SYNTHETIC_TREND';
+  inspection.publication.identity.run_date = '2026-09-25';
+  inspection.publication.identity.producer_version = 'local-position-edit-demo';
+  inspection.publication.captured_at = '2026-09-25T20:01:12.120000Z';
+  inspection.publication.publication_recorded_at = '2026-09-25T20:01:15.440000Z';
+  return inspection;
+}
+
+function rememberDemoDecision(): void {
+  window.sessionStorage.setItem(DEMO_DECISION_KEY, fixtures.decision_processed.decision_id);
+}
+
+function demoBookDecision() {
+  const confirmed = window.sessionStorage.getItem(DEMO_DECISION_KEY) === fixtures.decision_processed.decision_id;
+  return {
+    schema_version: 'qt-workflow/v1',
+    book_id: BOOK,
+    source_day: '2026-09-25',
+    decision: confirmed ? fixtures.decision_processed : null,
+    preview: confirmed ? fixtures.preview_clean : null,
+  };
+}
+
 function requestUrl(input: RequestInfo | URL): URL {
   const raw = input instanceof Request ? input.url : String(input);
   return new URL(raw, window.location.origin);
@@ -194,14 +228,7 @@ export function positionEditDemoResponse(
   }
 
   if (method === 'GET' && path === `/portfolio/strategies/${STRATEGY_ID}/configuration`) {
-    return response({
-      api_version: 1,
-      scope: { registry_id: STRATEGY_ID, portfolio_id: BOOK },
-      read_at: new Date().toISOString(),
-      status: 'unavailable',
-      reason: 'not_published',
-      publication: null,
-    });
+    return response(demoConfigurationInspection());
   }
 
   if (method === 'GET' && path === `/portfolio/qt-books/${BOOK}/proposal`) {
@@ -211,13 +238,7 @@ export function positionEditDemoResponse(
     return response(fixtures.draft_saved);
   }
   if (method === 'GET' && path === `/portfolio/qt-books/${BOOK}/decision`) {
-    return response({
-      schema_version: 'qt-workflow/v1',
-      book_id: BOOK,
-      source_day: '2026-09-25',
-      decision: null,
-      preview: null,
-    });
+    return response(demoBookDecision());
   }
   if (method === 'PUT' && path === `/portfolio/qt-books/${BOOK}/draft`) {
     return response(fixtures.draft_saved);
@@ -226,6 +247,7 @@ export function positionEditDemoResponse(
     return response(fixtures.preview_clean);
   }
   if (method === 'POST' && path === `/portfolio/qt-previews/${fixtures.preview_clean.preview_id}/confirm`) {
+    rememberDemoDecision();
     return response(fixtures.decision_processed);
   }
   if (method === 'GET' && path === `/portfolio/qt-decisions/${fixtures.decision_processed.decision_id}`) {
