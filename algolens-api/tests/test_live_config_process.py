@@ -31,7 +31,10 @@ def test_validator_profile_and_closure_substitution_refused(tmp_path,change):
     path=directory/'live_config_validator_manifest.json'; manifest=json.loads(path.read_text())
     if change=='engine':
         target=directory/'lib/libtrade_ngin.so'; target.write_bytes(target.read_bytes()+b'changed')
-    elif change=='executable': manifest['artifacts'][0]['name']='qt_evaluator'
+    elif change=='executable':
+        row=next(row for row in manifest['artifacts'] if row['role']=='executable')
+        (directory/row['path']).rename(directory/'bin/qt_evaluator')
+        row.update(name='qt_evaluator',path='bin/qt_evaluator')
     elif change=='schema': manifest['schema']='qt-evaluator-bundle/v1'
     elif change=='build_key': manifest['evaluator_build']=manifest.pop('validator_build')
     elif change=='wire': manifest['wire_schema']='qt-eval/v1'
@@ -89,3 +92,42 @@ def test_real_native_refusal_envelopes_are_not_success(operation,changes):
     if operation=='reset_to_baseline': current['config_snapshot']['risk']['schema']=1
     with pytest.raises(LiveConfigError,match='validator_unavailable'):
         NativeValidator(native_pin()).validate(current,changes,operation)
+
+@pytest.mark.parametrize('profile_name',['qt','config'])
+@pytest.mark.parametrize('mutation',['executable','schema','build_key'])
+def test_both_fixed_profiles_reject_metadata_substitution(tmp_path,profile_name,mutation):
+    # Metadata-only synthetic ELF has no machine code and is NEVER launched.
+    import importlib.util
+    from tests.qt_native_artifacts import require_native_artifact_paths
+    from algolens.infrastructure.portfolio.qt_evaluator_bundle import _QT_PROFILE,read_elf,_ABI
+    path=require_native_artifact_paths().source_dir/'tests/contracts/test_qt_evaluator_bundle.py'
+    spec=importlib.util.spec_from_file_location('metadata_only_elf_fixture',path)
+    fixture=importlib.util.module_from_spec(spec); spec.loader.exec_module(fixture)
+    profile=_QT_PROFILE if profile_name=='qt' else _LIVE_CONFIG_PROFILE
+    names={profile.executable:('executable',['libtrade_ngin.so']),
+        'libtrade_ngin.so':('engine',['libcrypto.so.3']),
+        'libcrypto.so.3':('dependency',['ld-linux-x86-64.so.2']),
+        'ld-linux-x86-64.so.2':('loader',[])}
+    rows=[]
+    for name,(role,needed) in names.items():
+        raw=fixture.synthetic_elf('qt_evaluator' if role=='executable' else name,needed)
+        relative=('bin/' if role=='executable' else 'lib/')+name
+        target=tmp_path/relative; target.parent.mkdir(exist_ok=True); target.write_bytes(raw)
+        rows.append({'name':name,'role':role,'path':relative,'size':len(raw),
+                     'sha256':sha256(raw).hexdigest(),'elf':read_elf(raw)})
+    manifest={'schema':profile.schema,'wire_schema':profile.wire_schema,profile.build_key:'metadata-only-not-a-native-build',
+              'compiler':{'id':'metadata-only','version':'test'},'abi':_ABI,'artifacts':rows}
+    def save():
+        manifest.pop('bundle_sha256',None)
+        manifest['bundle_sha256']=sha256(_canonical(manifest)).hexdigest()
+        (tmp_path/profile.manifest).write_bytes(_canonical(manifest))
+    save(); verify_bundle(tmp_path,manifest['bundle_sha256'],_profile=profile)
+    other=_LIVE_CONFIG_PROFILE if profile_name=='qt' else _QT_PROFILE
+    if mutation=='executable':
+        row=next(row for row in rows if row['role']=='executable')
+        (tmp_path/row['path']).rename(tmp_path/'bin'/other.executable)
+        row.update(name=other.executable,path='bin/'+other.executable)
+    elif mutation=='schema': manifest['schema']=other.schema
+    else: manifest[other.build_key]=manifest.pop(profile.build_key)
+    save()
+    with pytest.raises(ValueError): verify_bundle(tmp_path,manifest['bundle_sha256'],_profile=profile)
