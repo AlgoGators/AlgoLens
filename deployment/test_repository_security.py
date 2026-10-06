@@ -33,11 +33,18 @@ def test_deployment_guidance_contains_no_literal_credentials_or_public_database_
     assignment = re.compile(r"^(DB_PASSWORD|JWT_SECRET_KEY)=([^\s#]+)$", re.MULTILINE)
     bad_assignments = [name for name, value in assignment.findall(text)
                        if not re.fullmatch(r"\$\{[A-Z][A-Z0-9_]+\}", value)]
-    public_ipv4 = [value for value in re.findall(r"\b(?:\d{1,3}\.){3}\d{1,3}\b", text)
-                   if not value.startswith(("10.", "127.", "192.168."))]
     assert bad_assignments == []
-    assert public_ipv4 == []
     assert re.search(r"secret[\s-]+manager", text, re.IGNORECASE)
+
+    active_guidance = [ROOT / "deployment/DEPLOYMENT.md",
+                       ROOT / "algolens-api/scripts/production_readiness.sh"]
+    public_ipv4 = []
+    for path in active_guidance:
+        for value in re.findall(r"\b(?:\d{1,3}\.){3}\d{1,3}\b",
+                                path.read_text(encoding="utf-8")):
+            if not value.startswith(("10.", "127.", "192.168.")):
+                public_ipv4.append(f"{path.relative_to(ROOT)}: {value}")
+    assert public_ipv4 == []
 
 
 def test_active_code_and_configuration_contain_no_developer_home_paths():

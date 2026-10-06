@@ -41,7 +41,7 @@ set -uo pipefail
 DSN="${1:-}"
 if [ -z "$DSN" ]; then
     echo "usage: $0 <postgres-dsn>" >&2
-    echo "  e.g. $0 \"postgresql://user@13.58.153.216:5432/new_algo_data\"" >&2
+    echo "  e.g. $0 \"postgresql://USER@HOST:5432/new_algo_data\"" >&2
     exit 2
 fi
 
