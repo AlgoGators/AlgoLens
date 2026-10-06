@@ -12,10 +12,11 @@ import subprocess
 import psycopg2
 import pytest
 from tests.integration.test_qt_a3_read_set_postgres import a3_db, PUBLICATION
+from tests.qt_native_artifacts import require_native_artifact_paths
 
-BIN = Path('/home/devcontainers/qt-validation-20260921/bin/Debug')
-PROBE = Path(os.environ.get('QT_LEGACY_CAPABILITY_PROBE', str(BIN/'qt_empty_owner_loader_probe')))
-GUARD = BIN/'libqt_no_delivery_guard.so'
+NATIVE_PATHS = require_native_artifact_paths(allow_module_level=True)
+PROBE = NATIVE_PATHS.artifact('qt_empty_owner_loader_probe')
+GUARD = NATIVE_PATHS.artifact('libqt_no_delivery_guard.so')
 
 
 def state(conn):
@@ -41,9 +42,6 @@ def state(conn):
     ('archive_without_capability', False), ('claimed_marker_without_archive', False),
 ])
 def test_legacy_reference_capability_boundary(a3_db, mode, accepted):
-    root = next(p for p in Path(__file__).resolve().parents if (p/'.review/trade-ngin-qt').is_dir())
-    isolated = root/'docs/repairs/2026-09-26-hemdutt-issue-completion/empty-owner-protocol-staging/legacy-capability-1/isolated-1/qt_empty_owner_loader_probe'
-    assert PROBE in (BIN/'qt_empty_owner_loader_probe', isolated)
     assert PROBE.is_file() and not PROBE.is_symlink()
     assert GUARD.is_file() and not GUARD.is_symlink()
     assert os.environ['LD_PRELOAD'] == str(GUARD)

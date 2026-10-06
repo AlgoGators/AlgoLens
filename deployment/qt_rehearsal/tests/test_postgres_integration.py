@@ -12,18 +12,19 @@ import warnings
 
 from deployment.qt_rehearsal.cluster import RehearsalCluster
 from deployment.qt_rehearsal.harness import SafetyError, load_manifest, load_role_contract
+from deployment.qt_rehearsal.postgres_toolchain import PostgresToolchainError, resolve_postgres_bin
 
 
-PG_BIN = Path(
-    "/home/john-riley/projects/Algo/.worktrees/trade-ngin/"
-    "codex-qt-exact-choice-continuation/.superpowers/sdd/"
-    "2026-09-30-issues-121-124-completion/env/bin"
-)
+try:
+    PG_BIN = resolve_postgres_bin()
+except PostgresToolchainError:
+    PG_BIN = None
 
 
-@unittest.skipUnless((PG_BIN / "postgres").is_file(), "bundled PostgreSQL 16 toolchain unavailable")
+@unittest.skipUnless(PG_BIN is not None, "PostgreSQL 16 toolchain unavailable via QT_REHEARSAL_PG_BIN or PATH")
 class PostgresIntegrationTests(unittest.TestCase):
     def setUp(self):
+        assert PG_BIN is not None
         self.root = Path(tempfile.mkdtemp(prefix="algolens-qt-rehearsal.", dir="/dev/shm"))
         self.root.chmod(0o700)
         self.cluster = RehearsalCluster(self.root, PG_BIN)

@@ -3,16 +3,31 @@ import atexit
 from functools import lru_cache
 import importlib.util
 from pathlib import Path
+import sys
 import tempfile
+
+from tests.qt_native_artifacts import require_native_artifact_paths
 
 
 @lru_cache(maxsize=1)
 def native_evaluator_configuration():
-    engine = Path(__file__).resolve().parents[3] / "trade-ngin-qt"
-    helper = engine / "tests/contracts/qt_native_bundle_fixture.py"
+    paths = require_native_artifact_paths()
+    helper = paths.source_dir / "tests/contracts/qt_native_bundle_fixture.py"
+    artifact_helper = paths.source_dir / "tests/qt_test_artifacts.py"
+    artifact_spec = importlib.util.spec_from_file_location("algolens_trade_ngin_test_artifacts", artifact_helper)
+    artifact_module = importlib.util.module_from_spec(artifact_spec)
+    artifact_spec.loader.exec_module(artifact_module)
+    previous = sys.modules.get("tests.qt_test_artifacts")
+    sys.modules["tests.qt_test_artifacts"] = artifact_module
     spec = importlib.util.spec_from_file_location("qt_native_fixture_stage", helper)
     module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        if previous is None:
+            sys.modules.pop("tests.qt_test_artifacts", None)
+        else:
+            sys.modules["tests.qt_test_artifacts"] = previous
     owned = tempfile.TemporaryDirectory(prefix="qt-owned-native-fixture-")
     atexit.register(owned.cleanup)
     directory = Path(owned.name) / "bundle"

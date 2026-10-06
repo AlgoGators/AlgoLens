@@ -20,13 +20,14 @@ from tests.integration.test_qt_preview_evaluator import preview_db, authority, q
 from tests.integration.test_qt_a3_read_set_postgres import a3_db
 from tests.qt_native_evaluator import native_evaluator_configuration
 from tests.integration.test_qt_a8_http_postgres import http_harness, seed_http_approvers
+from tests.qt_native_artifacts import require_native_artifact_paths
 from uuid import uuid4
 import psycopg2
 
-NATIVE_BUILD = Path('/home/devcontainers/qt-validation-20260921/bin/Debug')
-DESK = NATIVE_BUILD / 'qt_desk_storage_probe'
-REPORT = NATIVE_BUILD / 'qt_processed_report_probe'
-DELIVERY_GUARD = NATIVE_BUILD / 'libqt_no_delivery_guard.so'
+NATIVE_PATHS = require_native_artifact_paths(allow_module_level=True)
+DESK = NATIVE_PATHS.artifact('qt_desk_storage_probe')
+REPORT = NATIVE_PATHS.artifact('qt_processed_report_probe')
+DELIVERY_GUARD = NATIVE_PATHS.artifact('libqt_no_delivery_guard.so')
 OBSERVATION = "60000000-0000-4000-8000-000000000051"
 ATTEMPT = "50000000-0000-4000-8000-000000000051"
 

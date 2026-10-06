@@ -4,16 +4,17 @@ import json
 from pathlib import Path
 
 from algolens.infrastructure.portfolio.qt_evaluator_process import QtEvaluatorProcess
+from tests.qt_native_artifacts import require_native_artifact_paths
 
 
 def test_real_compiled_evaluator_through_isolated_bounded_process():
-    binary = Path("/home/devcontainers/qt-validation-20260921/bin/Debug/qt_evaluator")
+    paths = require_native_artifact_paths()
+    binary = paths.artifact("qt_evaluator")
     assert binary.is_file(), "Build the actual reviewed evaluator before this gate"
-    fixture = (Path(__file__).resolve().parents[4] / "trade-ngin-qt" /
-               "tests/contracts/qt-eval-v1.json")
+    fixture = paths.source_dir / "tests/contracts/qt-eval-v1.json"
     request = json.loads(fixture.read_text())["selected_book"]
     process = QtEvaluatorProcess(binary, sha256(binary.read_bytes()).hexdigest(),
-                                 "local-qt-controlled")
+                                 request["evaluator_build"])
     response = process.run(request)
     assert response["completeness"] == "complete"
     assert [row["quantity_exact"] for row in response["evaluated_book"]] == ["5", "1"]
