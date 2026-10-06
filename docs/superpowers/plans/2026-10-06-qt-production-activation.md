@@ -93,26 +93,26 @@ T1–T4 use isolated Git worktrees and disjoint ownership. T5 may start its non-
 - verification: `git status --short`, `git diff --check`, recorded test outputs, and `git worktree list --porcelain`
 - estimate: M
 - coordination_risk: moderate
-- status: pending
+- status: complete
 
 **Files:**
 
 - Include: existing modified AlgoLens source, tests, migrations 003/009, this specification, this plan, and the reviewed handoff.
 - Exclude: `graphify-out/`, `logs/`, `__pycache__/`, build trees, database dumps/extracts, `.env*`, and credentials.
 
-- [ ] Inventory every modified/untracked path and classify it as source evidence, generated output, secret, or unrelated user work.
-- [ ] Run `git diff --check` and the focused QT/auth tests before snapshotting.
-- [ ] Run AlgoLens baseline verification:
+- [x] Inventory every modified/untracked path and classify it as source evidence, generated output, secret, or unrelated user work.
+- [x] Run `git diff --check` and the focused QT/auth tests before snapshotting.
+- [x] Run AlgoLens baseline verification:
 
 ```bash
 cd algolens-api && python -m pytest tests -q
 cd ../algolens-frontend && npm test && npm run typecheck && npm run build
 ```
 
-- [ ] Create one local-only baseline commit containing only the reviewed relevant paths. Record its full SHA. Do not push.
-- [ ] Record trade-ngin candidate full SHA and confirm its worktree is clean except known generated caches.
-- [ ] Create isolated branches/worktrees for `qt-prod-auth`, `qt-prod-runtime`, `qt-prod-rehearsal`, `qt-prod-worker`, and `qt-prod-release` from the recorded baselines.
-- [ ] Give each task its absolute worktree path, branch, owned paths, acceptance checks, prohibited side effects, and structured return format.
+- [x] Create one local-only baseline commit containing only the reviewed relevant paths. Recorded SHA: `98a16eb72a79f3fcafa2ba223e6ba2b6bfe52157`. Nothing was pushed.
+- [x] Record trade-ngin candidate full SHA (`a982e429aa33ba97f8c7ec9c462ed962f1233729`) and confirm its worktree is clean except known generated caches.
+- [x] Create isolated branches/worktrees for `qt-prod-auth`, `qt-prod-runtime`, `qt-prod-rehearsal`, `qt-prod-worker`, and `qt-prod-release` from the recorded baselines.
+- [x] Give each task its absolute worktree path, branch, owned paths, acceptance checks, prohibited side effects, and structured return format.
 
 ### T1: Implement internal capability authorization and self-approval prevention
 
@@ -125,7 +125,7 @@ cd ../algolens-frontend && npm test && npm run typecheck && npm run build
 - verification: focused backend/frontend tests plus scratch-PostgreSQL migration tests and route-walk matrix
 - estimate: L
 - coordination_risk: moderate
-- status: pending
+- status: running
 
 **Owned files:**
 
@@ -173,7 +173,7 @@ npm run typecheck
 - verification: bundle admission tests, clean Release build, CTest, manifest schema/hash validation, image smoke and digest assertions
 - estimate: L
 - coordination_risk: moderate
-- status: pending
+- status: running
 
 **Owned files:**
 
@@ -211,7 +211,7 @@ PYTHONDONTWRITEBYTECODE=1 python3 -B -m unittest -v test_qt_evaluator_bundle.py 
 - verification: unit tests for refusal/cleanup plus a full scratch run using the bundled PostgreSQL 16 toolchain
 - estimate: L
 - coordination_risk: high
-- status: pending
+- status: running
 
 **Owned files:**
 
@@ -241,7 +241,7 @@ PYTHONDONTWRITEBYTECODE=1 python3 -B -m unittest -v test_qt_evaluator_bundle.py 
 - verification: native/unit child-process tests, two-connection PostgreSQL races, first-day/continuation/restart matrix, image health smoke
 - estimate: L
 - coordination_risk: high
-- status: pending
+- status: running
 
 **Owned files:**
 
@@ -275,7 +275,7 @@ PYTHONDONTWRITEBYTECODE=1 python3 -B -m unittest -v test_qt_evaluator_bundle.py 
 - verification: container/config unit tests, candidate-container preflight, post-start endpoint/identity tests
 - estimate: L
 - coordination_risk: moderate
-- status: pending
+- status: running
 
 **Owned files:**
 
