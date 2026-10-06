@@ -23,23 +23,29 @@ from algolens.infrastructure.db.postgres import get_db_connection
 from algolens.infrastructure.config.production_readiness import (
     ReadinessResult,
     ReadinessSnapshotCache,
-    evaluator_isolation_probe,
-    evaluate_readiness,
+    evaluate_runtime_readiness,
     load_runtime_contract,
-    runtime_configuration_file_probe,
 )
 from extensions import limiter
 
 ENV_PATH = Path(__file__).resolve().parents[3] / ".env"
 
 
-def create_app():
+def create_app(*, rehearsal_root=None):
     load_dotenv(dotenv_path=ENV_PATH)
 
     env = os.getenv("FLASK_ENV", "production")
     debug = os.getenv("FLASK_DEBUG", "False").lower() == "true"
-    is_production = env == "production"
-    production_contract = load_runtime_contract() if is_production else None
+    # Rehearsal is an explicit caller-selected context, with production security
+    # controls. Setting FLASK_ENV alone never enables the alternate database.
+    if env == "rehearsal" and rehearsal_root is None:
+        raise RuntimeError("Explicit rehearsal root required")
+    is_production = env == "production" or rehearsal_root is not None
+    production_contract = (
+        load_runtime_contract(context="rehearsal", rehearsal_root=rehearsal_root)
+        if rehearsal_root is not None else
+        load_runtime_contract() if is_production else None
+    )
     readiness_cache = ReadinessSnapshotCache(5.0)
 
     app = Flask(__name__)
@@ -250,17 +256,10 @@ def create_app():
                 )
             else:
                 result = readiness_cache.get(
-                    lambda: evaluate_readiness(
+                    lambda: evaluate_runtime_readiness(
                         production_contract,
+                        application=app,
                         connection_factory=get_db_connection,
-                        schema_probe=app.config.get("QT_SCHEMA_READINESS_PROBE"),
-                        role_probe=app.config.get("QT_ROLE_READINESS_PROBE"),
-                        runtime_configuration_probe=runtime_configuration_file_probe,
-                        evaluator_probe=app.config.get(
-                            "QT_EVALUATOR_READINESS_PROBE", evaluator_isolation_probe
-                        ),
-                        capability_probe=app.config.get("QT_CAPABILITY_READINESS_PROBE"),
-                        worker_probe=app.config.get("QT_WORKER_READINESS_PROBE"),
                     )
                 )
         except Exception:

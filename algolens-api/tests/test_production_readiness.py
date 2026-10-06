@@ -10,10 +10,15 @@ import pytest
 from algolens.infrastructure.config.production_readiness import (
     ProductionConfigurationError,
     ReadinessSnapshotCache,
+    capability_contract_digest,
     canonical_json,
     evaluator_isolation_probe,
     evaluate_readiness,
+    evaluate_runtime_readiness,
     load_runtime_contract,
+    role_contract_probe,
+    schema_contract_probe,
+    worker_contract_digest,
 )
 
 
@@ -255,6 +260,8 @@ def test_readiness_proves_exact_read_only_identity_and_dependency_pins(tmp_path)
             self.query = " ".join(query.split())
 
         def fetchone(self):
+            if "worker_schema_ready" in self.query:
+                return {"worker_schema_ready": True, "active_workers": 1, "queue_healthy": True}
             if "current_database()" in self.query:
                 return {
                     "database_name": "new_algo_data",
@@ -320,11 +327,11 @@ def test_readiness_proves_exact_read_only_identity_and_dependency_pins(tmp_path)
         role_probe=lambda _cursor: "9" * 64,
         runtime_configuration_probe=lambda _contract: "0" * 64,
         evaluator_probe=lambda _contract: response,
-        capability_probe=lambda expected: expected["state"] == "resolved",
-        worker_probe=lambda expected: expected["state"] == "resolved",
+        capability_probe=lambda _cursor, expected: expected["state"] == "resolved",
+        worker_probe=lambda _cursor, expected: expected["state"] == "resolved",
     )
 
-    assert result.ready is True
+    assert result.ready is True, result.failure_codes
     assert connection.readonly == (True, False)
     assert connection.closed is True
     assert result.public_payload()["status"] == "ready"
@@ -441,8 +448,8 @@ def test_readiness_refuses_each_identity_boundary(tmp_path, damage, expected_cod
             "f" * 64 if damage == "runtime_config" else "0" * 64
         ),
         evaluator_probe=lambda _contract: {"wrong": True} if damage == "evaluator" else response,
-        capability_probe=lambda _expected: damage != "capability",
-        worker_probe=lambda _expected: damage != "worker",
+        capability_probe=lambda _cursor, _expected: damage != "capability",
+        worker_probe=lambda _cursor, _expected: damage != "worker",
     )
     assert result.ready is False
     assert expected_code in result.failure_codes
@@ -515,3 +522,323 @@ def test_cli_refuses_placeholder_dependencies_without_connecting_or_leaking_deta
         "status": "not_ready",
     }
     assert result.stderr == ""
+
+
+def test_catalog_probes_hash_bounded_read_only_schema_and_role_acl_rls_rows():
+    class Cursor:
+        query = ""
+
+        def __init__(self):
+            self.executed = []
+
+        def execute(self, query, params=None):
+            self.query = " ".join(query.split())
+            self.executed.append((self.query, params))
+
+        def fetchall(self):
+            if "pg_get_policy" in self.query or "pg_policy" in self.query:
+                return [
+                    {"canonical_line": "policy|trading.qt_rows.qt_owner|roles=api|cmd=r"},
+                    {"canonical_line": "relation|trading.qt_rows|acl=api=r|rls=true|force=true"},
+                ]
+            return [
+                {"canonical_line": "column|trading.qt_rows.id|uuid|NO|"},
+                {"canonical_line": "constraint|trading.qt_rows.qt_rows_pkey|PRIMARY KEY (id)"},
+            ]
+
+    cursor = Cursor()
+    role_digest = sha256(
+        b"policy|trading.qt_rows.qt_owner|roles=api|cmd=r\n"
+        b"relation|trading.qt_rows|acl=api=r|rls=true|force=true\n"
+    ).hexdigest()
+    assert schema_contract_probe(cursor) == sha256(
+        b"column|trading.qt_rows.id|uuid|NO|\n"
+        b"constraint|trading.qt_rows.qt_rows_pkey|PRIMARY KEY (id)\n"
+        + ("role-policy-digest|" + role_digest + "\n").encode()
+    ).hexdigest()
+    assert role_contract_probe(cursor) == sha256(
+        b"policy|trading.qt_rows.qt_owner|roles=api|cmd=r\n"
+        b"relation|trading.qt_rows|acl=api=r|rls=true|force=true\n"
+    ).hexdigest()
+    timeout_calls = [(query, params) for query, params in cursor.executed
+                     if "_timeout" in query]
+    assert timeout_calls == [
+        ("SET LOCAL statement_timeout = %s", (5000,)),
+        ("SET LOCAL lock_timeout = %s", (5000,)),
+        ("SET LOCAL statement_timeout = %s", (5000,)),
+        ("SET LOCAL lock_timeout = %s", (5000,)),
+        ("SET LOCAL statement_timeout = %s", (5000,)),
+        ("SET LOCAL lock_timeout = %s", (5000,)),
+    ]
+
+
+def test_rehearsal_contract_is_explicit_socket_only_and_fixed_name(tmp_path):
+    artifact_path, database_path, _artifact, database = resolved_manifests(tmp_path)
+    root = Path("/dev/shm/algolens-qt-rehearsal.synthetic")
+    database["database"].update({
+        "name": "qt_rehearsal_migrated",
+        "server_addr": "socket",
+        "data_directory": str(root / "data"),
+        "role": "qt_algolens_api",
+    })
+    database_path.write_text(json.dumps(database))
+    environment = production_environment(
+        FLASK_ENV="rehearsal",
+        DB_NAME="qt_rehearsal_migrated",
+        DB_HOST=str(root / "socket"),
+        DB_USER="qt_algolens_api",
+        QT_RELEASE_ARTIFACT_MANIFEST=str(artifact_path),
+        QT_DATABASE_IDENTITY_MANIFEST=str(database_path),
+    )
+
+    contract = load_runtime_contract(
+        environment, context="rehearsal", rehearsal_root=root
+    )
+    assert contract.context == "rehearsal"
+    assert contract.database_manifest["database"]["name"] == "qt_rehearsal_migrated"
+
+    for changes in (
+        {"FLASK_ENV": "production"},
+        {"DB_NAME": "new_algo_data"},
+        {"DB_NAME": "arbitrary_rehearsal"},
+        {"DB_HOST": "127.0.0.1"},
+        {"DB_HOST": "/tmp/postgresql"},
+    ):
+        with pytest.raises(ProductionConfigurationError, match="production_configuration_invalid"):
+            load_runtime_contract(
+                {**environment, **changes}, context="rehearsal", rehearsal_root=root
+            )
+
+
+def test_runtime_composition_wires_all_real_probes_in_one_read_only_transaction(tmp_path):
+    from flask import Flask
+    from algolens.adapters.http.capability_guard import install_capability_guard, open_route
+
+    artifact_path, database_path, artifact, database = resolved_manifests(tmp_path)
+    app = Flask(__name__)
+
+    @app.get("/health")
+    @open_route
+    def health():
+        return {"status": "ok"}
+
+    install_capability_guard(app)
+    app.config["CAPABILITY_GUARD_INSTALLED"] = True
+    database["dependencies"]["capability"]["sha256"] = capability_contract_digest(app)
+    database["dependencies"]["worker"]["sha256"] = worker_contract_digest(artifact)
+    database_path.write_text(json.dumps(database))
+    artifact_path.write_text(json.dumps(artifact))
+    contract = load_runtime_contract(production_environment(
+        QT_RELEASE_ARTIFACT_MANIFEST=str(artifact_path),
+        QT_DATABASE_IDENTITY_MANIFEST=str(database_path),
+    ))
+
+    class Cursor:
+        query = ""
+
+        def execute(self, query, params=None):
+            self.query = " ".join(query.split())
+
+        def fetchone(self):
+            if "worker_schema_ready" in self.query:
+                return {"worker_schema_ready": True, "active_workers": 1, "queue_healthy": True}
+            if "current_database()" in self.query:
+                return {
+                    "database_name": "new_algo_data",
+                    "server_addr": "192.0.2.10",
+                    "data_directory": "/approved/postgres/data",
+                    "database_role": "algolens_api_runtime",
+                }
+            if "FROM pg_roles" in self.query:
+                return {name: False for name in (
+                    "rolsuper", "rolcreaterole", "rolcreatedb", "rolreplication", "rolbypassrls"
+                )}
+            if "capability_tables_ready" in self.query:
+                return {"capability_tables_ready": True, "launch_authority_ready": True}
+            raise AssertionError(self.query)
+
+        def fetchall(self):
+            if "strategy_registry" in self.query:
+                return [{key: database["live_books"][0][key] for key in
+                         ("registry_id", "strategy_id", "book_id", "lifecycle")}]
+            if "qt_source_policies" in self.query:
+                return [{key: database["live_books"][0][key] for key in
+                         ("book_id", "evaluator_build", "evaluator_sha256", "evaluator_bundle_sha256")}]
+            if "pg_policy" in self.query:
+                return [{"canonical_line": "role-contract"}]
+            if "WITH catalog" in self.query:
+                return [{"canonical_line": "schema-contract"}]
+            raise AssertionError(self.query)
+
+        def __enter__(self): return self
+        def __exit__(self, *args): return False
+
+    database["database"]["role_contract_sha256"] = sha256(b"role-contract\n").hexdigest()
+    database["database"]["schema_sha256"] = sha256((
+        "schema-contract\nrole-policy-digest|" + database["database"]["role_contract_sha256"] + "\n"
+    ).encode()).hexdigest()
+    database_path.write_text(json.dumps(database))
+    contract = load_runtime_contract(production_environment(
+        QT_RELEASE_ARTIFACT_MANIFEST=str(artifact_path),
+        QT_DATABASE_IDENTITY_MANIFEST=str(database_path),
+    ))
+
+    class Connection:
+        def __init__(self):
+            self.session = None
+            self.rolled_back = False
+            self.closed = False
+        def set_session(self, **kwargs): self.session = kwargs
+        def cursor(self): return Cursor()
+        def rollback(self): self.rolled_back = True
+        def close(self): self.closed = True
+
+    connection = Connection()
+    result = evaluate_runtime_readiness(
+        contract,
+        application=app,
+        connection_factory=lambda: connection,
+        runtime_configuration_probe=lambda _contract: "0" * 64,
+        evaluator_probe=lambda _contract: handshake_response(
+            artifact["evaluator"]["evaluator_build"]
+        ),
+    )
+    assert result.ready is True, result.failure_codes
+    assert connection.session == {"readonly": True, "autocommit": False}
+    assert connection.rolled_back is True
+    assert connection.closed is True
+
+
+def test_cli_uses_application_route_inventory_and_runtime_probe_composition(monkeypatch, capsys):
+    import scripts.production_readiness as command
+
+    application = object()
+    contract = object()
+    observed = {}
+
+    class Result:
+        ready = True
+        failure_codes = ()
+        def public_payload(self): return {"status": "ready"}
+        def evidence_payload(self): return {"schema": "algolens-readiness-evidence/v1"}
+
+    monkeypatch.setattr(command, "create_app", lambda: application)
+    monkeypatch.setattr(command, "load_runtime_contract", lambda *args, **kwargs: contract)
+    monkeypatch.setattr(command, "evaluate_readiness", lambda _contract: Result())
+
+    def composed(received, **kwargs):
+        observed.update(contract=received, **kwargs)
+        return Result()
+
+    monkeypatch.setattr(command, "evaluate_runtime_readiness", composed)
+    assert command.main([]) == 0
+    assert observed["contract"] is contract
+    assert observed["application"] is application
+    assert observed["connection_factory"] is command.get_db_connection
+    assert json.loads(capsys.readouterr().out) == {"status": "ready"}
+
+
+def test_ready_endpoint_uses_the_same_concrete_runtime_composition(monkeypatch, tmp_path):
+    import algolens.infrastructure.config.app_factory as factory
+
+    contract = object()
+    observed = {}
+
+    class Result:
+        ready = True
+        def public_payload(self): return {"status": "ready", "checks": {}}
+
+    monkeypatch.chdir(tmp_path)
+    for name, value in {
+        "FLASK_ENV": "production",
+        "FLASK_DEBUG": "false",
+        "DEV_MODE": "0",
+        "CORS_ORIGINS": "https://example.invalid",
+        "JWT_SECRET_KEY": "synthetic-test-key-with-more-than-32-bytes",
+        "APP_RELEASE_SHA": "a" * 40,
+    }.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.setattr(factory, "load_runtime_contract", lambda: contract)
+
+    def composed(received, **kwargs):
+        observed.update(contract=received, **kwargs)
+        return Result()
+
+    monkeypatch.setattr(factory, "evaluate_runtime_readiness", composed)
+    app = factory.create_app()
+    response = app.test_client().get("/ready")
+    assert response.status_code == 200
+    assert response.get_json() == {"status": "ready", "checks": {}}
+    assert observed["contract"] is contract
+    assert observed["application"] is app
+    assert observed["connection_factory"] is factory.get_db_connection
+
+
+def test_rehearsal_factory_requires_explicit_root_and_retains_production_guards(monkeypatch, tmp_path):
+    import algolens.infrastructure.config.app_factory as factory
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("FLASK_ENV", "rehearsal")
+    monkeypatch.setenv("DEV_MODE", "0")
+    monkeypatch.setenv("FLASK_DEBUG", "false")
+    monkeypatch.setenv("PYTHON_DOTENV_DISABLED", "1")
+    with pytest.raises(RuntimeError, match="Explicit rehearsal root required"):
+        factory.create_app()
+    observed = {}
+    def load(**kwargs):
+        observed.update(kwargs)
+        return object()
+    monkeypatch.setattr(factory, "load_runtime_contract", load)
+    monkeypatch.setenv("CORS_ORIGINS", "https://example.invalid")
+    monkeypatch.delenv("JWT_SECRET_KEY", raising=False)
+    root = Path("/dev/shm/algolens-qt-rehearsal.synthetic")
+    with pytest.raises(RuntimeError, match="JWT_SECRET_KEY must be set"):
+        factory.create_app(rehearsal_root=root)
+    monkeypatch.setenv("JWT_SECRET_KEY", "synthetic-test-key-with-more-than-32-bytes")
+    app = factory.create_app(rehearsal_root=root)
+    assert app.config["ALGOLENS_IS_PRODUCTION"] is True
+    assert app.config["JWT_COOKIE_SECURE"] is True
+    assert app.config["CAPABILITY_GUARD_INSTALLED"] is True
+    assert observed == {"context": "rehearsal", "rehearsal_root": root}
+
+
+@pytest.mark.parametrize("changes", [
+    {"active_workers": 0}, {"active_workers": True}, {"queue_healthy": False},
+    {"worker_schema_ready": False},
+])
+def test_worker_probe_refuses_absence_stale_queue_and_unresolved_schema(tmp_path, changes):
+    from algolens.infrastructure.config.production_readiness import worker_readiness_probe
+    artifact_path, database_path, artifact, database = resolved_manifests(tmp_path)
+    contract = load_runtime_contract(production_environment(
+        QT_RELEASE_ARTIFACT_MANIFEST=str(artifact_path),
+        QT_DATABASE_IDENTITY_MANIFEST=str(database_path),
+    ))
+    expected = {"schema": "qt-worker-service/v1", "sha256": worker_contract_digest(artifact)}
+    class Cursor:
+        def execute(self, query, params=None): pass
+        def fetchone(self):
+            return {"worker_schema_ready": True, "active_workers": 1,
+                    "queue_healthy": True, **changes}
+    assert worker_readiness_probe(Cursor(), expected, contract) is False
+
+
+def test_schema_catalog_is_role_independent_and_role_digest_covers_security_settings():
+    from algolens.infrastructure.config.production_readiness import (
+        _IDENTITY_SQL, _SCHEMA_CONTRACT_SQL, _ROLE_CONTRACT_SQL, _WORKER_READINESS_SQL,
+    )
+    assert "information_schema.columns" not in _SCHEMA_CONTRACT_SQL
+    assert "pg_attribute" in _SCHEMA_CONTRACT_SQL
+    assert "data_directory" not in _IDENTITY_SQL
+    for catalog in ("pg_auth_members", "pg_default_acl", "pg_policy", "pg_db_role_setting"):
+        assert catalog in _ROLE_CONTRACT_SQL
+    assert "proconfig" in _ROLE_CONTRACT_SQL
+    assert "usename='qt_worker'" in _WORKER_READINESS_SQL
+    assert "backend_type" not in _WORKER_READINESS_SQL
+
+
+def test_capability_probe_refuses_changed_launch_authority():
+    from algolens.infrastructure.config.production_readiness import capability_readiness_probe
+    class Cursor:
+        def execute(self, query, params=None): pass
+        def fetchone(self):
+            return {"capability_tables_ready": True, "launch_authority_ready": False}
+    assert capability_readiness_probe(Cursor(), {}, None) is False

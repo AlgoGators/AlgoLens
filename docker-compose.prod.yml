@@ -18,6 +18,8 @@ services:
     build:
       context: ./algolens-api
       dockerfile: Dockerfile
+      args:
+        APP_RELEASE_SHA: ${ALGOLENS_RELEASE_SHA:?Exact tested release SHA required}
     ports:
       - "127.0.0.1:5000:5000"
     env_file:

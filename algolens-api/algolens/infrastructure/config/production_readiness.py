@@ -166,21 +166,61 @@ class RuntimeContract:
     artifact_manifest_sha256: str
     database_manifest: dict
     database_manifest_sha256: str
+    context: str = "production"
+    rehearsal_root: Path | None = None
 
 
-def load_runtime_contract(environment: Mapping[str, str] | None = None) -> RuntimeContract:
+def _rehearsal_root(value) -> Path:
+    try:
+        root = Path(value)
+    except TypeError:
+        _configuration_error()
+    if (
+        not root.is_absolute()
+        or root.parent != Path("/dev/shm")
+        or re.fullmatch(r"algolens-qt-rehearsal\.[A-Za-z0-9_-]{6,64}", root.name) is None
+        or (root.exists() and (root.is_symlink() or root.resolve() != root.absolute()))
+        or (root.exists() and (root.stat().st_uid != os.getuid()
+                              or root.stat().st_mode & 0o777 != 0o700))
+    ):
+        _configuration_error()
+    return root
+
+
+def load_runtime_contract(
+    environment: Mapping[str, str] | None = None,
+    *,
+    context: str = "production",
+    rehearsal_root: Path | str | None = None,
+) -> RuntimeContract:
     environment = os.environ if environment is None else environment
     release_sha = environment.get("APP_RELEASE_SHA", "")
     bundle_directory = Path(environment.get("QT_EVALUATOR_BUNDLE_DIR", ""))
     runtime_config = Path(environment.get("QT_RUNTIME_CONFIG_MANIFEST", ""))
     runtime_config_sha256 = environment.get("QT_RUNTIME_CONFIG_SHA256", "")
+    if context not in {"production", "rehearsal"}:
+        _configuration_error()
+    root = None
+    if context == "production":
+        authority_valid = (
+            rehearsal_root is None
+            and environment.get("FLASK_ENV") == "production"
+            and environment.get("DB_NAME") == "new_algo_data"
+        )
+    else:
+        root = _rehearsal_root(rehearsal_root)
+        authority_valid = (
+            environment.get("FLASK_ENV") == "rehearsal"
+            and environment.get("DB_NAME") == "qt_rehearsal_migrated"
+            and environment.get("DB_HOST") == str(root / "socket")
+            and environment.get("DB_USER") == "qt_algolens_api"
+        )
     if (
-        environment.get("FLASK_ENV") != "production"
+        not authority_valid
         or environment.get("FLASK_DEBUG", "").lower() != "false"
         or environment.get("DEV_MODE") != "0"
         or _GIT_SHA.fullmatch(release_sha) is None
         or environment.get("QT_EMAIL_DELIVERY_ENABLED", "").lower() not in {"false", "0"}
-        or environment.get("DB_NAME") != "new_algo_data"
         or bundle_directory != _FIXED_BUNDLE_DIRECTORY
         or runtime_config != _FIXED_RUNTIME_CONFIG
         or not _valid_digest(runtime_config_sha256)
@@ -194,7 +234,7 @@ def load_runtime_contract(environment: Mapping[str, str] | None = None) -> Runti
     )
     return RuntimeContract(
         release_sha.lower(), bundle_directory, runtime_config_sha256,
-        artifact, artifact_sha256, database, database_sha256,
+        artifact, artifact_sha256, database, database_sha256, context, root,
     )
 
 
@@ -249,11 +289,28 @@ def _contract_shape(contract: RuntimeContract) -> list[str]:
         failures.append("artifact_contract_unresolved")
     elif not _valid_release_artifact(artifact):
         failures.append("artifact_contract_invalid")
+    expected_database = (
+        {
+            "name": "new_algo_data",
+            "server_addr": None,
+            "data_directory": None,
+        }
+        if contract.context == "production"
+        else {
+            "name": "qt_rehearsal_migrated",
+            "server_addr": "socket",
+            "data_directory": str(contract.rehearsal_root / "data") if contract.rehearsal_root else "",
+        }
+    )
     if database.get("state") != "resolved":
         failures.append("database_contract_unresolved")
     elif not (
         isinstance(db, dict)
-        and db.get("name") == "new_algo_data"
+        and db.get("name") == expected_database["name"]
+        and (expected_database["server_addr"] is None
+             or db.get("server_addr") == expected_database["server_addr"])
+        and (expected_database["data_directory"] is None
+             or db.get("data_directory") == expected_database["data_directory"])
         and all(isinstance(db.get(key), str) and db[key].strip()
                 for key in ("server_addr", "data_directory", "role"))
         and _valid_digest(db.get("role_contract_sha256"))
@@ -288,7 +345,6 @@ def _contract_shape(contract: RuntimeContract) -> list[str]:
 _IDENTITY_SQL = """
 SELECT current_database() AS database_name,
        COALESCE(inet_server_addr()::text, 'socket') AS server_addr,
-       current_setting('data_directory') AS data_directory,
        current_user AS database_role
 """
 _ROLE_SQL = """
@@ -308,6 +364,313 @@ FROM trading.qt_source_policies p
 WHERE p.purpose = 'evaluation' AND p.enabled IS TRUE
 ORDER BY p.book_id
 """
+
+_SCHEMA_CONTRACT_SQL = """
+WITH catalog(kind, identity, definition) AS (
+  SELECT 'column', n.nspname||'.'||c.relname||'.'||a.attname,
+         format_type(a.atttypid,a.atttypmod)||'|'||
+         CASE WHEN a.attnotnull THEN 'NO' ELSE 'YES' END||'|'||
+         coalesce(pg_get_expr(d.adbin,d.adrelid),'')
+    FROM pg_attribute a JOIN pg_class c ON c.oid=a.attrelid
+    JOIN pg_namespace n ON n.oid=c.relnamespace
+    LEFT JOIN pg_attrdef d ON d.adrelid=a.attrelid AND d.adnum=a.attnum
+   WHERE a.attnum>0 AND NOT a.attisdropped AND c.relkind IN ('r','p','v','f')
+     AND n.nspname NOT IN ('pg_catalog','information_schema')
+     AND n.nspname !~ '^pg_toast'
+  UNION ALL
+  SELECT 'constraint', n.nspname||'.'||c.relname||'.'||x.conname,
+         pg_get_constraintdef(x.oid, true)
+    FROM pg_constraint x JOIN pg_class c ON c.oid=x.conrelid
+    JOIN pg_namespace n ON n.oid=c.relnamespace
+   WHERE n.nspname NOT IN ('pg_catalog','information_schema')
+  UNION ALL
+  SELECT 'function', n.nspname||'.'||p.proname||'('||pg_get_function_identity_arguments(p.oid)||')',
+         pg_get_functiondef(p.oid)
+    FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+   WHERE n.nspname NOT IN ('pg_catalog','information_schema')
+  UNION ALL
+  SELECT 'trigger', n.nspname||'.'||c.relname||'.'||t.tgname, pg_get_triggerdef(t.oid, true)
+    FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid
+    JOIN pg_namespace n ON n.oid=c.relnamespace
+   WHERE NOT t.tgisinternal AND n.nspname NOT IN ('pg_catalog','information_schema')
+)
+SELECT kind||'|'||identity||'|'||definition AS canonical_line
+  FROM catalog ORDER BY kind,identity,definition
+"""
+
+_ROLE_CONTRACT_SQL = r"""
+WITH catalog(kind, identity, definition) AS (
+  SELECT 'role', r.rolname,
+         concat_ws('|',r.rolsuper,r.rolinherit,r.rolcreaterole,r.rolcreatedb,
+                   r.rolcanlogin,r.rolreplication,r.rolbypassrls,
+                   coalesce(array_to_string(s.setconfig,','),''))
+    FROM pg_roles r
+    LEFT JOIN pg_db_role_setting s
+      ON s.setrole=r.oid AND s.setdatabase=0
+   WHERE r.rolname LIKE 'qt\_%' ESCAPE '\'
+  UNION ALL
+  SELECT 'membership', member.rolname||'->'||parent.rolname,
+         concat_ws('|',m.admin_option,m.inherit_option,m.set_option)
+    FROM pg_auth_members m
+    JOIN pg_roles parent ON parent.oid=m.roleid
+    JOIN pg_roles member ON member.oid=m.member
+   WHERE parent.rolname LIKE 'qt\_%' ESCAPE '\'
+      OR member.rolname LIKE 'qt\_%' ESCAPE '\'
+  UNION ALL
+  SELECT 'database', 'current', owner.rolname||'|'||coalesce(d.datacl::text,'')
+    FROM pg_database d JOIN pg_roles owner ON owner.oid=d.datdba
+   WHERE d.datname=current_database()
+  UNION ALL
+  SELECT 'schema', n.nspname, owner.rolname||'|'||coalesce(n.nspacl::text,'')
+    FROM pg_namespace n JOIN pg_roles owner ON owner.oid=n.nspowner
+   WHERE n.nspname NOT IN ('pg_catalog','information_schema')
+     AND n.nspname !~ '^pg_toast'
+  UNION ALL
+  SELECT 'relation', n.nspname||'.'||c.relname,
+         concat_ws('|',c.relkind,owner.rolname,coalesce(c.relacl::text,''),
+                   c.relrowsecurity,c.relforcerowsecurity)
+    FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+    JOIN pg_roles owner ON owner.oid=c.relowner
+   WHERE n.nspname NOT IN ('pg_catalog','information_schema')
+     AND n.nspname !~ '^pg_toast'
+     AND c.relkind IN ('r','p','v','m','S','f')
+  UNION ALL
+  SELECT 'column-acl', n.nspname||'.'||c.relname||'.'||a.attname,
+         coalesce(a.attacl::text,'')
+    FROM pg_attribute a JOIN pg_class c ON c.oid=a.attrelid
+    JOIN pg_namespace n ON n.oid=c.relnamespace
+   WHERE a.attnum>0 AND NOT a.attisdropped AND a.attacl IS NOT NULL
+     AND n.nspname NOT IN ('pg_catalog','information_schema')
+     AND n.nspname !~ '^pg_toast'
+  UNION ALL
+  SELECT 'policy', n.nspname||'.'||c.relname||'.'||p.polname,
+         concat_ws('|',p.polcmd,p.polpermissive,
+                   coalesce((SELECT string_agg(coalesce(r.rolname,'PUBLIC'),',' ORDER BY coalesce(r.rolname,'PUBLIC'))
+                               FROM unnest(p.polroles) AS role_oid(oid)
+                               LEFT JOIN pg_roles r ON r.oid=role_oid.oid),''),
+                   coalesce(pg_get_expr(p.polqual,p.polrelid),''),
+                   coalesce(pg_get_expr(p.polwithcheck,p.polrelid),''))
+    FROM pg_policy p JOIN pg_class c ON c.oid=p.polrelid
+    JOIN pg_namespace n ON n.oid=c.relnamespace
+   WHERE n.nspname NOT IN ('pg_catalog','information_schema')
+  UNION ALL
+  SELECT 'function-security', n.nspname||'.'||p.proname||'('||pg_get_function_identity_arguments(p.oid)||')',
+         concat_ws('|',owner.rolname,p.prosecdef,coalesce(p.proacl::text,''),
+                   coalesce(array_to_string(p.proconfig,','),''))
+    FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+    JOIN pg_roles owner ON owner.oid=p.proowner
+   WHERE n.nspname NOT IN ('pg_catalog','information_schema')
+     AND n.nspname !~ '^pg_toast'
+  UNION ALL
+  SELECT 'type-security', n.nspname||'.'||t.typname,
+         concat_ws('|',owner.rolname,t.typtype,coalesce(t.typacl::text,''))
+    FROM pg_type t JOIN pg_namespace n ON n.oid=t.typnamespace
+    JOIN pg_roles owner ON owner.oid=t.typowner
+   WHERE n.nspname NOT IN ('pg_catalog','information_schema')
+     AND n.nspname !~ '^pg_toast' AND t.typtype IN ('d','e','r')
+  UNION ALL
+  SELECT 'default-acl', owner.rolname||'|'||coalesce(n.nspname,'')||'|'||d.defaclobjtype::text,
+         d.defaclacl::text
+    FROM pg_default_acl d JOIN pg_roles owner ON owner.oid=d.defaclrole
+    LEFT JOIN pg_namespace n ON n.oid=d.defaclnamespace
+  UNION ALL
+  SELECT 'trigger-guard', n.nspname||'.'||c.relname||'.'||t.tgname,
+         pg_get_triggerdef(t.oid,true)
+    FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid
+    JOIN pg_namespace n ON n.oid=c.relnamespace
+   WHERE NOT t.tgisinternal AND n.nspname NOT IN ('pg_catalog','information_schema')
+)
+SELECT kind||'|'||identity||'|'||definition AS canonical_line
+  FROM catalog ORDER BY kind,identity,definition;
+"""
+
+_CAPABILITY_READINESS_SQL = """
+WITH expected(email, role, capability, person_id) AS (VALUES
+  ('john.riley@ufl.edu','general_member','qt_submit',NULL),
+  ('raohemdutt@ufl.edu','exec_board','qt_approve','hemdutt_rao'),
+  ('robbins.a@ufl.edu','general_member','qt_approve','xander_robbins'),
+  ('dominickdupuy@ufl.edu','exec_board','qt_approve','dominick_dupuy')
+)
+SELECT to_regclass('trading.qt_action_grants') IS NOT NULL
+   AND to_regclass('trading.qt_approver_allowlist') IS NOT NULL
+   AND to_regclass('auth.account_retirements') IS NOT NULL
+   AND to_regprocedure('trading.qt_reject_submitter_approval()') IS NOT NULL
+   AND EXISTS (
+       SELECT 1 FROM pg_trigger
+        WHERE tgrelid='trading.qt_override_approvals'::regclass
+          AND tgname='qt_approvals_no_submitter' AND tgenabled <> 'D'
+   ) AS capability_tables_ready,
+   NOT EXISTS (
+     SELECT 1 FROM expected e WHERE (
+       SELECT count(*) FROM auth.users u WHERE lower(btrim(u.email))=e.email
+         AND u.role::text=e.role
+         AND NOT EXISTS (SELECT 1 FROM auth.account_retirements r WHERE r.user_id=u.id)
+     ) <> 1
+   )
+   AND (SELECT count(*) FROM trading.qt_action_grants WHERE active) = 4
+   AND NOT EXISTS (
+     SELECT 1 FROM trading.qt_action_grants g JOIN auth.users u ON u.id=g.user_id
+      WHERE g.active AND NOT EXISTS (
+        SELECT 1 FROM expected e WHERE e.email=lower(btrim(u.email)) AND e.capability=g.capability
+      )
+   )
+   AND (SELECT count(*) FROM trading.qt_approver_allowlist WHERE active) = 3
+   AND NOT EXISTS (
+     SELECT 1 FROM trading.qt_approver_allowlist a JOIN auth.users u ON u.id=a.user_id
+      WHERE a.active AND NOT EXISTS (
+        SELECT 1 FROM expected e WHERE e.email=lower(btrim(u.email)) AND e.person_id=a.person_id
+      )
+   )
+   AND (SELECT count(*) FROM auth.account_retirements r
+        JOIN auth.users retired ON retired.id=r.user_id
+        JOIN auth.users replacement ON replacement.id=r.replacement_user_id
+       WHERE lower(btrim(retired.email))='domdd305@gmail.com'
+         AND lower(btrim(replacement.email))='dominickdupuy@ufl.edu') = 1
+       AS launch_authority_ready
+"""
+
+_WORKER_READINESS_SQL = """
+SELECT to_regclass('trading.qt_desk_dispatch_jobs') IS NOT NULL
+   AND to_regclass('trading.qt_desk_dispatch_attempts') IS NOT NULL
+   AND to_regprocedure('trading.claim_qt_desk_dispatch(uuid,interval)') IS NOT NULL
+   AND to_regprocedure('trading.enqueue_qt_desk_dispatch(uuid,uuid,uuid,uuid,uuid)') IS NOT NULL
+       AS worker_schema_ready,
+   (SELECT count(*) FROM pg_stat_activity
+     WHERE datname=current_database()
+       AND usename='qt_worker'
+       AND application_name='qt_desk_worker'
+   ) AS active_workers,
+   NOT EXISTS (
+       SELECT 1 FROM trading.qt_desk_dispatch_jobs
+        WHERE (state NOT IN ('succeeded','dead_letter')
+               AND first_seen_at < clock_timestamp() - interval '5 minutes')
+           OR (state='running' AND lease_expires_at < clock_timestamp())
+   ) AS queue_healthy
+"""
+
+_READINESS_OPEN_ENDPOINTS = frozenset({"version", "health_check", "readiness_check"})
+
+
+def _catalog_lines(cursor, query: str) -> str:
+    """Hash a bounded catalog snapshot using the rehearsal harness wire format."""
+    cursor.execute("SET LOCAL statement_timeout = %s", (5000,))
+    cursor.execute("SET LOCAL lock_timeout = %s", (5000,))
+    cursor.execute(query)
+    rows = cursor.fetchall()
+    if not isinstance(rows, (list, tuple)) or len(rows) > 50000:
+        raise ValueError("catalog_probe_invalid")
+    lines = []
+    for row in rows:
+        value = row.get("canonical_line") if isinstance(row, dict) else row[0]
+        if not isinstance(value, str) or not value or len(value) > 1024 * 1024 or "\x00" in value:
+            raise ValueError("catalog_probe_invalid")
+        lines.extend(line.rstrip() for line in value.splitlines() if line.strip())
+    return "\n".join(lines) + "\n"
+
+
+def schema_contract_probe(cursor) -> str:
+    """Return the exact read-only database schema fingerprint used by rehearsal."""
+    canonical = _catalog_lines(cursor, _SCHEMA_CONTRACT_SQL)
+    canonical += "role-policy-digest|" + role_contract_probe(cursor) + "\n"
+    return sha256(canonical.encode("utf-8", "strict")).hexdigest()
+
+
+def role_contract_probe(cursor) -> str:
+    """Fingerprint owners, ACLs, SECURITY DEFINER flags, RLS flags, and policies."""
+    return sha256(_catalog_lines(cursor, _ROLE_CONTRACT_SQL).encode("utf-8", "strict")).hexdigest()
+
+
+def _route_contract(application) -> list[dict]:
+    from algolens.adapters.http.capability_guard import _rule_rows, unclassified_routes
+    from algolens.domain.identity.capabilities import CAPABILITIES
+
+    if not application.config.get("CAPABILITY_GUARD_INSTALLED"):
+        raise ValueError("capability_guard_unavailable")
+    if unclassified_routes(application, explicitly_open_endpoints=_READINESS_OPEN_ENDPOINTS):
+        raise ValueError("unclassified_routes")
+    rows = []
+    for method, path, endpoint in _rule_rows(application):
+        if endpoint in _READINESS_OPEN_ENDPOINTS:
+            kind, capability = "open", None
+        else:
+            policy = getattr(application.view_functions[endpoint], "__algolens_route_policy__", None)
+            if policy is None or policy.kind not in {
+                "open", "dev_only", "session", "disabled", "capability"
+            } or (policy.kind == "capability") != (policy.capability in CAPABILITIES):
+                raise ValueError("route_policy_invalid")
+            kind, capability = policy.kind, policy.capability
+        rows.append({
+            "method": method,
+            "path": path,
+            "endpoint": endpoint,
+            "kind": kind,
+            "capability": capability,
+        })
+    return sorted(rows, key=lambda row: (row["path"], row["method"], row["endpoint"]))
+
+
+def capability_contract_digest(application) -> str:
+    from algolens.domain.identity.capabilities import CAPABILITIES, CANONICAL_APPROVERS
+
+    document = {
+        "schema": "qt-capabilities/v1",
+        "capabilities": sorted(CAPABILITIES),
+        "canonical_approvers": sorted(CANONICAL_APPROVERS),
+        "routes": _route_contract(application),
+    }
+    return sha256(canonical_json(document)).hexdigest()
+
+
+def capability_readiness_probe(cursor, expected: dict, application) -> bool:
+    cursor.execute("SET LOCAL statement_timeout = %s", (5000,))
+    cursor.execute("SET LOCAL lock_timeout = %s", (5000,))
+    cursor.execute(_CAPABILITY_READINESS_SQL)
+    row = cursor.fetchone()
+    return bool(
+        isinstance(row, dict)
+        and row.get("capability_tables_ready") is True
+        and row.get("launch_authority_ready") is True
+        and expected.get("schema") == "qt-capabilities/v1"
+        and capability_contract_digest(application) == expected.get("sha256")
+    )
+
+
+def worker_contract_digest(artifact_manifest: dict) -> str:
+    worker = next(
+        row for row in artifact_manifest.get("artifacts", [])
+        if isinstance(row, dict) and row.get("name") == "qt_desk_worker"
+    )
+    document = {
+        "schema": "qt-worker-service/v1",
+        "source_git_sha_full": artifact_manifest["source"]["git_sha_full"],
+        "worker": {
+            key: worker[key] for key in ("install_path", "sha256", "size")
+        },
+        "database_interface": {
+            "jobs": "trading.qt_desk_dispatch_jobs",
+            "attempts": "trading.qt_desk_dispatch_attempts",
+            "claim": "trading.claim_qt_desk_dispatch(uuid,interval)",
+            "enqueue": "trading.enqueue_qt_desk_dispatch(uuid,uuid,uuid,uuid,uuid)",
+            "application_name": "qt_desk_worker",
+        },
+    }
+    return sha256(canonical_json(document)).hexdigest()
+
+
+def worker_readiness_probe(cursor, expected: dict, contract: RuntimeContract) -> bool:
+    cursor.execute("SET LOCAL statement_timeout = %s", (5000,))
+    cursor.execute("SET LOCAL lock_timeout = %s", (5000,))
+    cursor.execute(_WORKER_READINESS_SQL)
+    row = cursor.fetchone()
+    return bool(
+        isinstance(row, dict)
+        and row.get("worker_schema_ready") is True
+        and type(row.get("active_workers")) is int
+        and row["active_workers"] >= 1
+        and row.get("queue_healthy") is True
+        and expected.get("schema") == "qt-worker-service/v1"
+        and worker_contract_digest(contract.artifact_manifest) == expected.get("sha256")
+    )
 
 
 def _selected_rows(rows, keys) -> list[dict]:
@@ -520,10 +883,12 @@ def evaluate_readiness(
                 expected_identity = {
                     "database_name": expected_db["name"],
                     "server_addr": expected_db["server_addr"],
-                    "data_directory": expected_db["data_directory"],
                     "database_role": expected_db["role"],
                 }
-                identity_verified = identity == expected_identity
+                identity_verified = (
+                    isinstance(identity, dict)
+                    and {key: identity.get(key) for key in expected_identity} == expected_identity
+                )
                 if not identity_verified:
                     failures.append("database_identity_mismatch")
                 cursor.execute(_ROLE_SQL)
@@ -551,6 +916,15 @@ def evaluate_readiness(
                     schema_verified = schema_probe(cursor) == expected_db["schema_sha256"]
                     if not schema_verified:
                         failures.append("schema_digest_mismatch")
+                for name, probe in (("capability", capability_probe), ("worker", worker_probe)):
+                    expected = expected_dependencies[name]
+                    try:
+                        if probe is None or probe(cursor, expected) is not True:
+                            failures.append(f"{name}_dependency_unready")
+                        else:
+                            checks[name] = "ok"
+                    except Exception:
+                        failures.append(f"{name}_dependency_unready")
                 expected_registry = _selected_rows(
                     expected_books, ("registry_id", "strategy_id", "book_id", "lifecycle")
                 )
@@ -608,16 +982,6 @@ def evaluate_readiness(
     if not any(code.startswith("evaluator_") or code == "artifact_policy_pin_mismatch" for code in failures):
         checks["evaluator"] = "ok"
 
-    for name, probe in (("capability", capability_probe), ("worker", worker_probe)):
-        expected = expected_dependencies[name]
-        try:
-            if probe is None or probe(expected) is not True:
-                failures.append(f"{name}_dependency_unready")
-            else:
-                checks[name] = "ok"
-        except Exception:
-            failures.append(f"{name}_dependency_unready")
-
     evidence = {
         "schema": "algolens-readiness-evidence/v1",
         "status": "ready" if not failures else "not_ready",
@@ -651,3 +1015,51 @@ def evaluate_readiness(
         },
     }
     return ReadinessResult(dict(checks), tuple(dict.fromkeys(failures)), evidence)
+
+
+def evaluate_runtime_readiness(
+    contract: RuntimeContract,
+    *,
+    application,
+    connection_factory: Callable,
+    runtime_configuration_probe: Callable = runtime_configuration_file_probe,
+    evaluator_probe: Callable = evaluator_isolation_probe,
+) -> ReadinessResult:
+    """Compose every production/rehearsal dependency with no permissive fallback."""
+    if application is None or connection_factory is None:
+        raise ProductionConfigurationError("production_configuration_invalid")
+    if contract.context == "rehearsal":
+        connection_factory = lambda: _rehearsal_connection(contract)
+    return evaluate_readiness(
+        contract,
+        connection_factory=connection_factory,
+        schema_probe=schema_contract_probe,
+        role_probe=role_contract_probe,
+        runtime_configuration_probe=runtime_configuration_probe,
+        evaluator_probe=evaluator_probe,
+        capability_probe=lambda cursor, expected: capability_readiness_probe(
+            cursor, expected, application
+        ),
+        worker_probe=lambda cursor, expected: worker_readiness_probe(
+            cursor, expected, contract
+        ),
+    )
+
+
+def _rehearsal_connection(contract):
+    """Never inherit a service, password file, or network address for rehearsal."""
+    import psycopg2
+    from psycopg2.extras import RealDictCursor
+
+    root = _rehearsal_root(contract.rehearsal_root)
+    socket = root / "socket"
+    if (not root.is_dir() or not socket.is_dir() or socket.is_symlink()
+            or socket.stat().st_uid != os.getuid()
+            or socket.stat().st_mode & 0o777 != 0o700):
+        raise ProductionConfigurationError("production_configuration_invalid")
+    return psycopg2.connect(
+        host=str(socket), hostaddr="", port=5432, dbname="qt_rehearsal_migrated",
+        user="qt_algolens_api", password="", passfile="/dev/null", service="",
+        sslmode="disable", options="", connect_timeout=5,
+        cursor_factory=RealDictCursor,
+    )

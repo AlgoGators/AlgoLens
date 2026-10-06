@@ -15,6 +15,21 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  qt-container-smoke:
+    name: QT synthetic container isolation (exact SHA, no deploy)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Build exact commit and prove sealed evaluator container isolation
+        env:
+          QT_SMOKE_SOURCE_SHA: ${{ github.sha }}
+        run: python3 deployment/qt_container_smoke/run.py --sha "$QT_SMOKE_SOURCE_SHA"
+
   backend:
     name: Backend (pytest)
     runs-on: ubuntu-latest

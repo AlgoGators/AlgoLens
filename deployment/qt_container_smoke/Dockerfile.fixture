@@ -1,0 +1,9 @@
+FROM python:3.14-slim@sha256:f85c5697265c178cc6887276c55fe16cf3d14ca35c3df6a5eab3b360534a55d2
+RUN apt-get update && apt-get install -y --no-install-recommends gcc libc6-dev libssl-dev && rm -rf /var/lib/apt/lists/*
+WORKDIR /fixture
+COPY deployment/qt_container_smoke/engine.c deployment/qt_container_smoke/evaluator.c ./
+RUN gcc -shared -fPIC engine.c -Wl,-soname,libtrade_ngin.so -lcrypto -o libtrade_ngin.so && gcc evaluator.c -L. -ltrade_ngin -Wl,-rpath,/fixture -o qt_evaluator
+COPY algolens-api/algolens/infrastructure/portfolio/qt_evaluator_bundle.py ./qt_evaluator_bundle.py
+COPY deployment/qt_container_smoke/stage.py ./
+RUN python stage.py
+CMD ["true"]

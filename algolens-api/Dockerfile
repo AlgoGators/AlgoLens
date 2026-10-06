@@ -2,6 +2,9 @@ FROM python:3.14-slim@sha256:f85c5697265c178cc6887276c55fe16cf3d14ca35c3df6a5eab
 
 WORKDIR /app
 
+ARG APP_RELEASE_SHA
+LABEL org.opencontainers.image.revision=$APP_RELEASE_SHA
+
 # curl serves the readiness healthcheck. util-linux provides the exact
 # /usr/bin/unshare isolation primitive required by the sealed evaluator path.
 RUN apt-get update \
