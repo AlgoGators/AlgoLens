@@ -45,7 +45,10 @@ cd ..
 
 ### 4. Configure Environment Variables
 
-Create a `.env` file in the `algolens-api` directory:
+Provide deployment secrets through the environment or the platform secret
+manager. If the service manager materializes an `algolens-api/.env` file, keep
+it outside version control, restrict it to the service account, and populate it
+from secret references rather than copying credentials into this guide:
 
 ```bash
 cd /home/ec2-user/AlgoLens/algolens-api
@@ -55,12 +58,12 @@ nano .env
 Add your configuration:
 
 ```env
-DB_HOST=13.58.153.216
-DB_PORT=5432
-DB_USER=postgres
-DB_PASSWORD=algogators
-DB_NAME=algo_data
-JWT_SECRET_KEY=your-super-secret-jwt-key-change-this
+DB_HOST=${ALGOLENS_DB_HOST}
+DB_PORT=${ALGOLENS_DB_PORT}
+DB_USER=${ALGOLENS_DB_USER}
+DB_PASSWORD=${ALGOLENS_DB_PASSWORD}
+DB_NAME=${ALGOLENS_DB_NAME}
+JWT_SECRET_KEY=${ALGOLENS_JWT_SECRET_KEY}
 ```
 
 For the frontend, create `/home/ec2-user/AlgoLens/algolens-frontend/.env` if you need to override `VITE_API_URL` or enable `VITE_DEV_MODE`.
@@ -77,10 +80,9 @@ python3 -c "import secrets; print(secrets.token_hex(32))"
 sudo cp deployment/algolens-backend.service /etc/systemd/system/
 sudo cp deployment/algolens.service /etc/systemd/system/
 
-# Edit the backend service to set a secure JWT secret
+# Edit the backend service to load its environment from the platform secret manager
 sudo nano /etc/systemd/system/algolens-backend.service
-# Change: Environment="JWT_SECRET_KEY=your-secure-secret-key-change-this"
-# To: Environment="JWT_SECRET_KEY=<generate-a-random-secure-key>"
+# Configure an EnvironmentFile or credential provider owned by the service account.
 
 # Reload systemd to recognize new services
 sudo systemctl daemon-reload

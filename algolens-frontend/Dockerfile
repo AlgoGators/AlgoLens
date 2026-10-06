@@ -1,5 +1,5 @@
 # Build stage
-FROM node:26-alpine AS build
+FROM node:26-alpine@sha256:0b36e8c136b94cd4fcf02188228e76c31ad5872eef3fec8cbd2eee500cfd9e80 AS build
 
 WORKDIR /app
 
@@ -23,7 +23,7 @@ RUN npm run build
 RUN node -e "const fs=require('fs');const sha=process.env.APP_RELEASE_SHA;if(sha!=='development'&&!/^[0-9a-f]{40}$/.test(sha||''))throw Error('Invalid release SHA');fs.writeFileSync('build/release.json',JSON.stringify({release:sha==='development'?null:sha}));"
 
 # Production stage
-FROM nginx:alpine
+FROM nginx:alpine@sha256:df221db836e1754089190208cee7eeda94f233197056426eda74a43ab1abeac2
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 
 # Copy built assets from build stage
