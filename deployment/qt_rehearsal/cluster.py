@@ -306,6 +306,110 @@ SELECT kind||'|'||identity||'|'||definition FROM catalog ORDER BY kind,identity,
         self.identity(database)
         result = self._run([*self._psql_args(database), "--command", query])
         canonical = "\n".join(line.rstrip() for line in result.stdout.splitlines() if line.strip()) + "\n"
+        role_policy_digest = self.role_policy_digest(database)
+        attested = canonical + "role-policy-digest|" + role_policy_digest + "\n"
+        return hashlib.sha256(attested.encode("utf-8")).hexdigest()
+
+    def role_policy_digest(self, database):
+        """Digest the authorization catalog omitted by information_schema DDL.
+
+        The canonical rows deliberately include cluster roles and memberships:
+        database/schema/table/column/function/default ACLs; object ownership;
+        RLS flags and policies; function definer/search-path settings; and
+        non-internal trigger definitions.  This makes the migration digest
+        sensitive to the controls that enforce the runtime role contract.
+        """
+        query = r"""
+WITH catalog(kind, identity, definition) AS (
+  SELECT 'role', r.rolname,
+         concat_ws('|',r.rolsuper,r.rolinherit,r.rolcreaterole,r.rolcreatedb,
+                   r.rolcanlogin,r.rolreplication,r.rolbypassrls,
+                   coalesce(array_to_string(s.setconfig,','),''))
+    FROM pg_roles r
+    LEFT JOIN pg_db_role_setting s
+      ON s.setrole=r.oid AND s.setdatabase=0
+   WHERE r.rolname LIKE 'qt\_%' ESCAPE '\'
+  UNION ALL
+  SELECT 'membership', member.rolname||'->'||parent.rolname,
+         concat_ws('|',m.admin_option,m.inherit_option,m.set_option)
+    FROM pg_auth_members m
+    JOIN pg_roles parent ON parent.oid=m.roleid
+    JOIN pg_roles member ON member.oid=m.member
+   WHERE parent.rolname LIKE 'qt\_%' ESCAPE '\'
+      OR member.rolname LIKE 'qt\_%' ESCAPE '\'
+  UNION ALL
+  SELECT 'database', 'current', owner.rolname||'|'||coalesce(d.datacl::text,'')
+    FROM pg_database d JOIN pg_roles owner ON owner.oid=d.datdba
+   WHERE d.datname=current_database()
+  UNION ALL
+  SELECT 'schema', n.nspname, owner.rolname||'|'||coalesce(n.nspacl::text,'')
+    FROM pg_namespace n JOIN pg_roles owner ON owner.oid=n.nspowner
+   WHERE n.nspname NOT IN ('pg_catalog','information_schema')
+     AND n.nspname !~ '^pg_toast'
+  UNION ALL
+  SELECT 'relation', n.nspname||'.'||c.relname,
+         concat_ws('|',c.relkind,owner.rolname,coalesce(c.relacl::text,''),
+                   c.relrowsecurity,c.relforcerowsecurity)
+    FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+    JOIN pg_roles owner ON owner.oid=c.relowner
+   WHERE n.nspname NOT IN ('pg_catalog','information_schema')
+     AND n.nspname !~ '^pg_toast'
+     AND c.relkind IN ('r','p','v','m','S','f')
+  UNION ALL
+  SELECT 'column-acl', n.nspname||'.'||c.relname||'.'||a.attname,
+         coalesce(a.attacl::text,'')
+    FROM pg_attribute a JOIN pg_class c ON c.oid=a.attrelid
+    JOIN pg_namespace n ON n.oid=c.relnamespace
+   WHERE a.attnum>0 AND NOT a.attisdropped AND a.attacl IS NOT NULL
+     AND n.nspname NOT IN ('pg_catalog','information_schema')
+     AND n.nspname !~ '^pg_toast'
+  UNION ALL
+  SELECT 'policy', n.nspname||'.'||c.relname||'.'||p.polname,
+         concat_ws('|',p.polcmd,p.polpermissive,
+                   coalesce((SELECT string_agg(coalesce(r.rolname,'PUBLIC'),',' ORDER BY coalesce(r.rolname,'PUBLIC'))
+                               FROM unnest(p.polroles) AS role_oid(oid)
+                               LEFT JOIN pg_roles r ON r.oid=role_oid.oid),''),
+                   coalesce(pg_get_expr(p.polqual,p.polrelid),''),
+                   coalesce(pg_get_expr(p.polwithcheck,p.polrelid),''))
+    FROM pg_policy p JOIN pg_class c ON c.oid=p.polrelid
+    JOIN pg_namespace n ON n.oid=c.relnamespace
+   WHERE n.nspname NOT IN ('pg_catalog','information_schema')
+  UNION ALL
+  SELECT 'function-security', n.nspname||'.'||p.proname||'('||pg_get_function_identity_arguments(p.oid)||')',
+         concat_ws('|',owner.rolname,p.prosecdef,coalesce(p.proacl::text,''),
+                   coalesce(array_to_string(p.proconfig,','),''))
+    FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+    JOIN pg_roles owner ON owner.oid=p.proowner
+   WHERE n.nspname NOT IN ('pg_catalog','information_schema')
+     AND n.nspname !~ '^pg_toast'
+  UNION ALL
+  SELECT 'type-security', n.nspname||'.'||t.typname,
+         concat_ws('|',owner.rolname,t.typtype,coalesce(t.typacl::text,''))
+    FROM pg_type t JOIN pg_namespace n ON n.oid=t.typnamespace
+    JOIN pg_roles owner ON owner.oid=t.typowner
+   WHERE n.nspname NOT IN ('pg_catalog','information_schema')
+     AND n.nspname !~ '^pg_toast' AND t.typtype IN ('d','e','r')
+  UNION ALL
+  SELECT 'default-acl', owner.rolname||'|'||coalesce(n.nspname,'')||'|'||d.defaclobjtype::text,
+         d.defaclacl::text
+    FROM pg_default_acl d JOIN pg_roles owner ON owner.oid=d.defaclrole
+    LEFT JOIN pg_namespace n ON n.oid=d.defaclnamespace
+  UNION ALL
+  SELECT 'trigger-guard', n.nspname||'.'||c.relname||'.'||t.tgname,
+         pg_get_triggerdef(t.oid,true)
+    FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid
+    JOIN pg_namespace n ON n.oid=c.relnamespace
+   WHERE NOT t.tgisinternal AND n.nspname NOT IN ('pg_catalog','information_schema')
+)
+SELECT kind||'|'||identity||'|'||definition
+  FROM catalog ORDER BY kind,identity,definition;
+"""
+        validate_database_name(database)
+        self.identity(database)
+        result = self._run([*self._psql_args(database), "--command", query], check=False)
+        if result.returncode:
+            raise SafetyError("role/policy attestation query failed: " + result.stderr[-1000:])
+        canonical = "\n".join(line.rstrip() for line in result.stdout.splitlines() if line.strip()) + "\n"
         return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
     def _predicate_applies(self, database, predicate):
@@ -347,6 +451,7 @@ SELECT kind||'|'||identity||'|'||definition FROM catalog ORDER BY kind,identity,
         if contract.database != "qt_rehearsal_migrated":
             raise SafetyError("role probes require the migrated rehearsal database")
         names = {role.domain: role.name for role in contract.roles}
+        role_policy_digest = self.role_policy_digest(contract.database)
         results = []
         for probe in contract.probes:
             role = names[probe.role_domain]
@@ -368,6 +473,7 @@ SELECT kind||'|'||identity||'|'||definition FROM catalog ORDER BY kind,identity,
                     "expect": probe.expect,
                     "outcome": "allowed" if completed.returncode == 0 else "denied" if permission_denied else "error",
                     "passed": passed,
+                    "role_policy_digest": role_policy_digest,
                 }
             )
         if not all(result["passed"] for result in results):
