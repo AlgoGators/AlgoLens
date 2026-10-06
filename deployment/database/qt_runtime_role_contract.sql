@@ -477,6 +477,38 @@ GRANT EXECUTE ON FUNCTION trading.finish_qt_desk_dispatch(uuid,uuid,text,text,te
 GRANT EXECUTE ON FUNCTION trading.renew_qt_desk_dispatch(uuid,uuid,interval) TO qt_worker;
 
 -- Final role-shape assertions turn accidental normalization into a failure.
+-- Governed configuration extension is optional for historical installations.
+-- When present it must be complete (Trade031 then AlgoLens011); partial enablement refuses.
+DO $live_config_roles$
+DECLARE relation_name text; col record;
+BEGIN
+ IF to_regclass('trading.live_config_versions') IS NOT NULL THEN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='trading'
+                 AND table_name='live_config_versions' AND column_name='submission_authority') THEN
+   RAISE EXCEPTION 'live config authority migration required';
+  END IF;
+  FOREACH relation_name IN ARRAY ARRAY['live_config_versions','live_config_activations',
+      'live_config_active','live_config_attempt_selections','live_config_attempt_safety'] LOOP
+   IF to_regclass('trading.'||relation_name) IS NULL THEN
+    RAISE EXCEPTION 'incomplete live config schema';
+   END IF;
+   EXECUTE format('REVOKE ALL ON trading.%I FROM PUBLIC,qt_algolens_api,qt_system_publisher,qt_worker',relation_name);
+   FOR col IN SELECT column_name FROM information_schema.columns
+              WHERE table_schema='trading' AND table_name=relation_name LOOP
+    EXECUTE format('REVOKE ALL (%I) ON trading.%I FROM PUBLIC,qt_algolens_api,qt_system_publisher,qt_worker',col.column_name,relation_name);
+   END LOOP;
+  END LOOP;
+  GRANT SELECT,INSERT ON trading.live_config_versions,trading.live_config_activations TO qt_algolens_api;
+  GRANT SELECT ON trading.live_config_active,trading.live_config_attempt_selections TO qt_algolens_api;
+  GRANT SELECT ON trading.live_config_versions,trading.live_config_activations,trading.live_config_active,
+    trading.live_config_attempt_selections,trading.live_config_attempt_safety TO qt_system_publisher;
+  GRANT INSERT ON trading.live_config_attempt_selections TO qt_system_publisher;
+  GRANT INSERT(attempt_id) ON trading.live_config_attempt_safety TO qt_system_publisher;
+  GRANT EXECUTE ON FUNCTION trading.lock_live_config_scope(text,text) TO qt_algolens_api,qt_system_publisher;
+ END IF;
+END
+$live_config_roles$;
+
 DO $qt_assert$
 BEGIN
   IF (SELECT count(*) FROM pg_roles WHERE rolname IN

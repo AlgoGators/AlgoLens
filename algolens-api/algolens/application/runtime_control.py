@@ -44,11 +44,13 @@ def _safe_tree(value):
     return True
 
 
-def validate_snapshot(snapshot, portfolio_id, engine_strategy_id):
+def validate_snapshot(snapshot, portfolio_id, engine_strategy_id, *, governed=False):
     """Validate the shared versioned, credential-free trading snapshot."""
     invalid = RuntimeControlError('runtime_configuration_unavailable', 503)
-    if (not isinstance(snapshot, dict) or set(snapshot) != SNAPSHOT_KEYS
-            or type(snapshot['snapshot_version']) is not int or snapshot['snapshot_version'] != 1
+    version = snapshot.get('snapshot_version') if isinstance(snapshot, dict) else None
+    keys = SNAPSHOT_KEYS | {'use_optimization', 'covariance_history_prices', 'sleeve_risk_modules'} if version == 2 else SNAPSHOT_KEYS
+    if (not isinstance(snapshot, dict) or set(snapshot) != keys
+            or type(version) is not int or version not in (1, 2) or (governed and version != 2)
             or snapshot['portfolio_id'] != portfolio_id or not _safe_tree(snapshot)):
         raise invalid
     for key in ('initial_capital', 'reserve_capital_pct', 'max_drawdown', 'max_leverage'):
@@ -62,7 +64,14 @@ def validate_snapshot(snapshot, portfolio_id, engine_strategy_id):
     for key in ('execution', 'optimization', 'risk', 'backtest', 'live', 'strategy_defaults', 'strategies'):
         if not isinstance(snapshot[key], dict):
             raise invalid
+    if version == 2 and (type(snapshot['use_optimization']) is not bool
+            or type(snapshot['covariance_history_prices']) is not int
+            or snapshot['covariance_history_prices'] < 2
+            or not isinstance(snapshot['sleeve_risk_modules'], dict)
+            or snapshot['risk'].get('schema') != 2):
+        raise invalid
     selected = []
+    profiles = set()
     for name, strategy in snapshot['strategies'].items():
         if not isinstance(strategy, dict) or type(strategy.get('enabled_live', False)) is not bool:
             raise invalid
@@ -72,8 +81,19 @@ def validate_snapshot(snapshot, portfolio_id, engine_strategy_id):
                     or not _finite_number(weight) or not 0 < weight <= 1):
                 raise invalid
             selected.append((name, weight))
+            if version == 2:
+                profile = strategy.get('type', 'TrendFollowingStrategy')
+                if not isinstance(profile, str):
+                    raise invalid
+                profiles.add(profile)
+    prefix = 'LIVE_'
+    if version == 2:
+        if profiles == {'MeanReversionStrategy'}:
+            prefix = 'LIVE_EQUITY_'
+        elif not profiles or not profiles <= {'TrendFollowingStrategy', 'TrendFollowingFastStrategy', 'TrendFollowingSlowStrategy'}:
+            raise invalid
     if (not selected or abs(sum(weight for _, weight in selected) - 1) > 1e-9
-            or 'LIVE_' + '_'.join(sorted(name for name, _ in selected)) != engine_strategy_id):
+            or prefix + '_'.join(sorted(name for name, _ in selected)) != engine_strategy_id):
         raise invalid
 
 
@@ -106,6 +126,7 @@ class RuntimeControlService:
         if body['action'] not in ('run', 'stop'):
             raise RuntimeControlError('invalid_request', 400)
         scope = self.config.scope(strategy_id, canonical_book(body['portfolio_id']))
+        validate_snapshot(scope['config_snapshot'],scope['portfolio_id'],scope['engine_strategy_id'],governed=True)
         return self.repository.request(strategy_id=strategy_id, action=body['action'],
                                        reason=reason, user_id=str(user_id), scope=scope)
 

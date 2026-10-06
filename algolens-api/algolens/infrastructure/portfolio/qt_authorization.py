@@ -45,3 +45,27 @@ def two_person_quorum(approvals: Sequence[QtApprovedPerson | Mapping]) -> bool:
     return (all(row.get("person_id") in CANONICAL_APPROVERS and type(row.get("user_id")) is int and row["user_id"] > 0
                 and all(type(row.get(name)) is int and row[name] > 0 for name in ("mapping_version", "grant_version")) for row in rows)
             and len({row["person_id"] for row in rows}) == 2 and len({row["user_id"] for row in rows}) == 2)
+
+
+def lock_current_authorities(cursor, user_ids):
+    """Match QtTransaction's user/grant/mapping order, including retirement checks.
+
+    Account FOR UPDATE also fences retirement's referencing FK insert. Active
+    authority cannot retire without revoking the rows held here first.
+    """
+    result = {}
+    for user_id in sorted(set(user_ids)):
+        if type(user_id) is not int or user_id <= 0:
+            raise ValueError('invalid_authority_id')
+        cursor.execute('SELECT id, role FROM auth.users WHERE id=%s FOR UPDATE', (user_id,))
+        account = cursor.fetchone()
+        cursor.execute('SELECT user_id FROM auth.account_retirements WHERE user_id=%s', (user_id,))
+        retired = cursor.fetchone() is not None
+        cursor.execute('SELECT user_id, capability, active, version FROM trading.qt_action_grants '
+                       'WHERE user_id=%s ORDER BY capability FOR UPDATE', (user_id,))
+        grants = list(cursor.fetchall())
+        cursor.execute('SELECT user_id, person_id, active, mapping_version FROM trading.qt_approver_allowlist '
+                       'WHERE user_id=%s ORDER BY person_id FOR UPDATE', (user_id,))
+        result[user_id] = {'account':dict(account or {}), 'retired':retired,
+                           'grants':grants, 'mappings':list(cursor.fetchall())}
+    return result

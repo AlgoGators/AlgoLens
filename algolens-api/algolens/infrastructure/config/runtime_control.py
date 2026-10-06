@@ -8,7 +8,8 @@ from algolens.application.runtime_control import RuntimeControlError, canonical_
 
 
 class RuntimeControlConfig:
-    def __init__(self, environment=None):
+    def __init__(self, environment=None, *, selected_scope_loader=None):
+        self.selected_scope_loader = selected_scope_loader
         self.environment = os.environ if environment is None else environment
 
     @property
@@ -22,6 +23,8 @@ class RuntimeControlConfig:
         return str(user_id) in raw.split(',')
 
     def scope(self, registry_id, portfolio_id):
+        if self.selected_scope_loader is not None:
+            return self.selected_scope_loader(registry_id, portfolio_id)
         filename = self.environment.get('QT_RUNTIME_CONFIG_MANIFEST')
         if not filename:
             raise RuntimeControlError('runtime_scope_unsupported')

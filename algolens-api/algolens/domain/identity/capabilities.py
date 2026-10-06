@@ -3,6 +3,9 @@
 from collections.abc import Iterable, Mapping
 
 
+EDIT_CONFIG = "edit_config"
+APPROVE_CONFIG = "approve_config"
+
 VIEW_INTERNAL = "view_internal"
 VIEW_QT_PLATFORM = "view_qt_platform"
 EDIT_QT_BOOK = "edit_qt_book"
@@ -16,6 +19,7 @@ SAVE_ANALYSIS = "save_analysis"
 VIEW_INVESTOR_BOOK = "view_investor_book"
 
 CAPABILITIES = frozenset({
+    EDIT_CONFIG, APPROVE_CONFIG,
     VIEW_INTERNAL,
     VIEW_QT_PLATFORM,
     EDIT_QT_BOOK,
@@ -73,6 +77,11 @@ def resolve_capabilities(
         and active_mappings[0].get("person_id") in CANONICAL_APPROVERS
     ):
         resolved.add(APPROVE_QT_OVERRIDE)
+    if (role in _APPROVE_ROLES and len(active_mappings) == 1
+            and active_mappings[0].get("person_id") in CANONICAL_APPROVERS):
+        for grant, capability in (("config_submit", EDIT_CONFIG), ("config_approve", APPROVE_CONFIG)):
+            if len([row for row in active_grants if row.get("capability") == grant]) == 1:
+                resolved.add(capability)
     return tuple(sorted(resolved))
 
 
