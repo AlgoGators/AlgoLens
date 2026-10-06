@@ -18,6 +18,7 @@ def approver_db():
         with connection.cursor() as cursor:
             claim_schema(cursor)
             cursor.execute("CREATE SCHEMA IF NOT EXISTS auth")
+            cursor.execute("DROP TABLE IF EXISTS auth.identity_audit_fixture")
             cursor.execute("DROP TABLE IF EXISTS auth.users CASCADE")
             cursor.execute("""
                 CREATE TABLE auth.users (

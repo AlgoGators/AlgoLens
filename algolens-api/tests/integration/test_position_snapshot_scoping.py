@@ -86,7 +86,7 @@ def test_a_position_closed_yesterday_is_not_a_position_today(cursor):
     _insert(cursor, "ZB.v.0", 8, 119.50, yesterday)
 
     reader = PostgresPortfolioRepository()
-    rows = reader._fetch_current_positions(cursor, STRATEGY, BOOK)
+    rows = reader._fetch_current_positions(cursor, STRATEGY, BOOK, portfolio_type="qt")
 
     symbols = [r["symbol"] for r in rows]
     assert symbols == ["ES.v.0"], (
@@ -104,7 +104,7 @@ def test_current_positions_come_from_one_snapshot_not_many(cursor):
     _insert(cursor, "GC.v.0", 7, 2418.90, today)
 
     reader = PostgresPortfolioRepository()
-    rows = reader._fetch_current_positions(cursor, STRATEGY, BOOK)
+    rows = reader._fetch_current_positions(cursor, STRATEGY, BOOK, portfolio_type="qt")
 
     assert [r["symbol"] for r in rows] == ["GC.v.0"]
 
@@ -124,7 +124,7 @@ def test_the_previous_snapshot_is_the_one_before_the_latest(cursor):
     _insert(cursor, "ES.v.0", 12, 5280.25, today)
 
     reader = PostgresPortfolioRepository()
-    previous = reader._fetch_yesterday_positions(cursor, STRATEGY, BOOK)
+    previous = reader._fetch_yesterday_positions(cursor, STRATEGY, BOOK, portfolio_type="qt")
 
     assert sorted(r["symbol"] for r in previous) == ["ES.v.0", "ZB.v.0"]
 
@@ -133,4 +133,4 @@ def test_a_strategy_with_one_snapshot_has_no_previous_one(cursor):
     _insert(cursor, "ES.v.0", 12, 5280.25, datetime.date.today())
 
     reader = PostgresPortfolioRepository()
-    assert reader._fetch_yesterday_positions(cursor, STRATEGY, BOOK) == []
+    assert reader._fetch_yesterday_positions(cursor, STRATEGY, BOOK, portfolio_type="qt") == []

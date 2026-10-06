@@ -9,8 +9,13 @@ import json
 import sys
 
 import pytest
+import tests
 
-ENGINE_TESTS = Path(__file__).resolve().parents[4] / 'trade-ngin-qt/tests/integration'
+from tests.qt_native_artifacts import require_native_artifact_paths
+
+ENGINE_SOURCE = require_native_artifact_paths(allow_module_level=True).source_dir
+ENGINE_TESTS = ENGINE_SOURCE / 'tests/integration'
+tests.__path__ = [*tests.__path__, str(ENGINE_SOURCE / 'tests')]
 sys.path.insert(0, str(ENGINE_TESTS))
 from test_qt_desk_market_capture import capture
 from test_qt_desk_upstream import upstream, invoke, OLD, MARKET, FINAL, DECISION, ATTEMPT
