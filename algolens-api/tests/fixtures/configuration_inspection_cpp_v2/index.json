@@ -1,0 +1,23 @@
+{
+  "source_directory": "docs/repairs/2026-09-22-qt-remaining-issues/consumption-publication-evidence",
+  "source_brief": "docs/repairs/2026-09-22-qt-remaining-issues/consumption-generated-transport-brief.md",
+  "source_brief_sha256": "42d97ee821384149fb1f92b14235da0acebde12134c0df014caf01bad81dfa6d",
+  "capture_method": "Byte-identical copies of accepted PostgreSQL JSONB text and producer sidecars. Integration test inserts original UTF-8 child text directly as JSONB.",
+  "producer_compact_bytes": null,
+  "producer_compact_bytes_note": "Unknown/not captured for these ten successes. Post-SQL probe compact, committed JSONB text and Flask HTTP byte sizes are separate measurements.",
+  "probe_sha256": "97d6c8e15ea96035ca8a4a2d77dcc1d8a1d9a88bd0690e03197449c3dc16d4f9",
+  "probe_identity_note": "Sidecar association; the accepted publisher review contains the final binary/hash evidence. Probe SHA alone does not pin its implementation.",
+  "test_traps_note": "Later QT and other-book rows, malformed newest metadata and changed attempt/scope links are synthetic test mutations, not producer sidecars.",
+  "children": [
+    {"stem": "publish_required_complete-5bcf79c0c445", "jsonb_text_bytes": 24557, "jsonb_text_sha256": "5bcf79c0c445854a2fd375486484e9dbb193e177fba418500e2d7bf1e1e4169d", "post_sql_probe_compact_bytes": 22844},
+    {"stem": "publish_required_complete_controlled-0e2623f596ae", "jsonb_text_bytes": 25349, "jsonb_text_sha256": "0e2623f596aecaf52533c8fabfd68cadb5feff7f5426faaff97f8c6b3bc8932e", "post_sql_probe_compact_bytes": 23575},
+    {"stem": "publish_required_partial-0a62072ce366", "jsonb_text_bytes": 24572, "jsonb_text_sha256": "0a62072ce3669e0b95fbf5273da54a18da0b9a4ba2e4c8fbf40d4083e3fa9de0", "post_sql_probe_compact_bytes": 22859},
+    {"stem": "publish_required_partial_controlled-e2aa4e09194b", "jsonb_text_bytes": 25364, "jsonb_text_sha256": "e2aa4e09194b2480d891493c03a77635c174588b7dc600ab636689b3bfafbbb4", "post_sql_probe_compact_bytes": 23590},
+    {"stem": "publish_required_unavailable-8568faf3d85d", "jsonb_text_bytes": 20216, "jsonb_text_sha256": "8568faf3d85df073bbf8054c851d693ee936ffbd7012baa80e10622afc9d0531", "post_sql_probe_compact_bytes": 18885},
+    {"stem": "publish_required_unavailable_controlled-94e729d78eab", "jsonb_text_bytes": 20248, "jsonb_text_sha256": "94e729d78eab3e75888eb34b79f560a815cb366994a02e9e2cd4740f9c6e0ccb", "post_sql_probe_compact_bytes": 18917},
+    {"stem": "publish_required_bad_capture_complete-cacaaeacf2f5", "jsonb_text_bytes": 5766, "jsonb_text_sha256": "cacaaeacf2f57c17afc60d8e8acc28fcc196a97a6662e2dc7705a2c8eb64e46d", "post_sql_probe_compact_bytes": 5294},
+    {"stem": "publish_required_bad_capture_complete_controlled-b5b8278979fe", "jsonb_text_bytes": 6558, "jsonb_text_sha256": "b5b8278979fecea566a9c2603cbe1a83d0652a03450fd7658fb094e9f0061910", "post_sql_probe_compact_bytes": 6025},
+    {"stem": "publish_required_early_unavailable_complete-d5324353f082", "jsonb_text_bytes": 5770, "jsonb_text_sha256": "d5324353f08299ad20c7e8adcac1bd5052367eb805d756417d738fbd00f39dee", "post_sql_probe_compact_bytes": 5298},
+    {"stem": "publish_required_early_unavailable_complete_controlled-5a257484e45c", "jsonb_text_bytes": 6562, "jsonb_text_sha256": "5a257484e45c6da43852979861043e1a1e861650b2b633e1bc27b0a176105ab4", "post_sql_probe_compact_bytes": 6029}
+  ]
+}

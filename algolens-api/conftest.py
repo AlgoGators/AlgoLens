@@ -2,7 +2,7 @@
 
 Placed at the backend root (not in tests/) so it only handles sys.path setup and
 does not collide with any fixture conftest under tests/. This lets
-`from services import ...` and `import app` resolve when pytest is run from here.
+`from algolens import ...` and `import app` resolve when pytest is run from here.
 """
 
 import os

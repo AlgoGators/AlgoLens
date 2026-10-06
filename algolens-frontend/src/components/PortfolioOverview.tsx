@@ -1,62 +1,53 @@
 import React, { useState, useMemo } from 'react';
+import { periodReturn } from '../domain/portfolio/periodReturn';
+import { filterByPeriod } from '../domain/portfolio/filterByPeriod';
 import { TrendingUp, TrendingDown, Beaker } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, ResponsiveContainer, Tooltip } from 'recharts';
 import type { PortfolioData } from '../domain/portfolio/portfolioData';
 import { useTheme } from '../adapters/react/ThemeContext';
+import { PortfolioGrouping } from './PortfolioGrouping';
+import { counted } from '../domain/text/pluralize';
+import { formatBarDate } from '../domain/portfolio/formatBarDate';
 
 interface PortfolioOverviewProps {
   data: PortfolioData;
   onBuilderClick: () => void;
+  /** Open a strategy on the book whose row was clicked. */
+  onOpenStrategy?: (strategyId: string, portfolioId: string) => void;
 }
 
-export function PortfolioOverview({ data, onBuilderClick }: PortfolioOverviewProps) {
+export function PortfolioOverview({ data, onBuilderClick, onOpenStrategy }: PortfolioOverviewProps) {
   const [selectedPeriod, setSelectedPeriod] = useState('1M');
   const { theme } = useTheme();
-  const isPositive = data.totalReturn >= 0;
-
   const periods = ['1W', '1M', '3M', '1Y', 'ALL'];
 
   // Filter data based on selected period
-  const filteredData = useMemo(() => {
-    const now = new Date();
-    let daysToShow: number;
-
-    switch (selectedPeriod) {
-      case '1W':
-        daysToShow = 7;
-        break;
-      case '1M':
-        daysToShow = 30;
-        break;
-      case '3M':
-        daysToShow = 90;
-        break;
-      case '1Y':
-        daysToShow = 365;
-        break;
-      case 'ALL':
-      default:
-        return data.historicalData;
+  const filteredData = useMemo(
+    () => filterByPeriod(data.historicalData, selectedPeriod),
+    [selectedPeriod, data.historicalData]
+  );
+  const chartData = useMemo(() => {
+    const values = new Map<string, number | null>(
+      filteredData.map(point => [point.date, point.value]),
+    );
+    const first = filteredData[0]?.date;
+    const last = filteredData[filteredData.length - 1]?.date;
+    for (const excluded of data.historicalCoverage?.excludedDates ?? []) {
+      if (first && last && excluded.date >= first && excluded.date <= last) {
+        values.set(excluded.date, null);
+      }
     }
-
-    const cutoffDate = new Date(now);
-    cutoffDate.setDate(cutoffDate.getDate() - daysToShow);
-
-    return data.historicalData.filter(point => {
-      const pointDate = new Date(point.date);
-      return pointDate >= cutoffDate;
-    });
-  }, [selectedPeriod, data.historicalData]);
+    return Array.from(values, ([date, value]) => ({ date, value }))
+      .sort((a, b) => a.date.localeCompare(b.date));
+  }, [data.historicalCoverage, filteredData]);
 
   // Calculate period-specific return
-  const periodReturn = useMemo(() => {
-    if (filteredData.length < 2) return { value: 0, percent: 0 };
-    const startValue = filteredData[0].value;
-    const endValue = filteredData[filteredData.length - 1].value;
-    const returnValue = endValue - startValue;
-    const returnPercent = startValue > 0 ? (returnValue / startValue) * 100 : 0;
-    return { value: returnValue, percent: returnPercent };
+  const windowReturn = useMemo(() => {
+    return periodReturn(filteredData);
   }, [filteredData]);
+  // The window's direction, for chart colours. An unknown window is
+  // drawn in the neutral-positive colour rather than not drawn at all.
+  const gaining = (windowReturn?.value ?? 0) >= 0;
 
   const periodLabel = selectedPeriod === 'ALL' ? 'All Time' : selectedPeriod;
 
@@ -73,21 +64,57 @@ export function PortfolioOverview({ data, onBuilderClick }: PortfolioOverviewPro
         <div className="text-4xl md:text-5xl mb-2">
           ${data.totalValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
         </div>
-        <div className={`flex items-center gap-2 text-lg ${periodReturn.value >= 0 ? 'text-orange-500' : 'text-red-500'}`}>
-          {periodReturn.value >= 0 ? <TrendingUp className="w-5 h-5" /> : <TrendingDown className="w-5 h-5" />}
-          <span>
-            ${Math.abs(periodReturn.value).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ({periodReturn.percent >= 0 ? '+' : ''}{periodReturn.percent.toFixed(2)}%) {periodLabel}
-          </span>
-        </div>
+        {/* A total that quietly omits a strategy is worse than one that admits
+            it is partial. This is the state right after a strategy changes book,
+            before the engine has published for the new pairing. */}
+        {(data.strategiesAwaitingData ?? 0) > 0 && (
+          <div className={`mb-2 text-sm ${theme === 'dark' ? 'text-amber-400' : 'text-amber-600'}`}>
+            Excludes {counted(data.strategiesAwaitingData ?? 0, 'strategy', 'strategies')} the
+            engine has not published results for yet.
+          </div>
+        )}
+        {data.historicalCoverage?.partial && (
+          <div className={`mb-2 text-sm ${theme === 'dark' ? 'text-amber-400' : 'text-amber-600'}`}>
+            Fund history uses common strategy coverage
+            {data.historicalCoverage.firstCommonDate && data.historicalCoverage.lastCommonDate
+              ? ` from ${formatBarDate(data.historicalCoverage.firstCommonDate)} to ${formatBarDate(data.historicalCoverage.lastCommonDate)}`
+              : ''}; {counted(data.historicalCoverage.excludedDates.length, 'date')} excluded.
+          </div>
+        )}
+        {/* Null means the window holds fewer than two points, so there is no
+            return to state. This used to state "$0.00 (+0.00%)" -- a flat
+            period, rather than a period nothing is known about. */}
+        {windowReturn === null ? (
+          <div className={`text-lg ${theme === 'dark' ? 'text-gray-500' : 'text-gray-400'}`}>
+            &mdash; no data for {periodLabel}
+          </div>
+        ) : (
+          <div className={`flex items-center gap-2 text-lg ${gaining ? 'text-orange-500' : 'text-red-500'}`}>
+            {gaining ? <TrendingUp className="w-5 h-5" /> : <TrendingDown className="w-5 h-5" />}
+            <span>
+              ${Math.abs(windowReturn.value).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ({windowReturn.percent >= 0 ? '+' : ''}{windowReturn.percent.toFixed(2)}%) {periodLabel}
+            </span>
+          </div>
+        )}
+      </div>
+
+      {/* Directly under the fund total, above the chart: the fund splits into
+          portfolios, which contain strategies. Below the chart this sat at the
+          fold and was invisible on a normal window. */}
+      <div className="mb-8">
+        <PortfolioGrouping
+          onOpenStrategy={onOpenStrategy}
+          canOpen={id => data.strategies.some(s => s.id === id)}
+        />
       </div>
 
       <div className="mb-4">
         <ResponsiveContainer width="100%" height={300}>
-          <LineChart data={filteredData}>
+          <LineChart data={chartData}>
             <defs>
               <linearGradient id="lineGradient" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor={periodReturn.value >= 0 ? "#f97316" : "#ef4444"} stopOpacity={theme === 'dark' ? 0.2 : 0.1} />
-                <stop offset="100%" stopColor={periodReturn.value >= 0 ? "#f97316" : "#ef4444"} stopOpacity={0} />
+                <stop offset="0%" stopColor={gaining ? "#f97316" : "#ef4444"} stopOpacity={theme === 'dark' ? 0.2 : 0.1} />
+                <stop offset="100%" stopColor={gaining ? "#f97316" : "#ef4444"} stopOpacity={0} />
               </linearGradient>
             </defs>
             <XAxis
@@ -109,16 +136,17 @@ export function PortfolioOverview({ data, onBuilderClick }: PortfolioOverviewPro
                 fontWeight: '600',
                 padding: '12px'
               }}
-              formatter={(value: number) => [`$${value.toLocaleString('en-US', { minimumFractionDigits: 2 })}`, 'Fund Value']}
-              labelFormatter={(label) => new Date(label).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+              formatter={(value) => [`$${Number(value ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, 'Fund Value']}
+              labelFormatter={(label) => formatBarDate(String(label))}
             />
             <Line
               type="linear"
               dataKey="value"
-              stroke={periodReturn.value >= 0 ? "#f97316" : "#ef4444"}
+              stroke={gaining ? "#f97316" : "#ef4444"}
               strokeWidth={2}
               dot={false}
               fill="url(#lineGradient)"
+              connectNulls={false}
             />
           </LineChart>
         </ResponsiveContainer>

@@ -1,0 +1,75 @@
+{
+  "attempt": {
+    "id": "68536f43-aae0-4486-867a-99bffd3b7c31",
+    "intent_id": 1,
+    "outcome": "published",
+    "publication_id": "68536f43-aae0-4486-867a-99bffd3b7c31",
+    "registry_revision": 0,
+    "run_date": "2026-09-22",
+    "status": "applied"
+  },
+  "capture_helper": "build_live_config_inspection_capture",
+  "capture_time_provenance": "fixed synthetic probe timestamp",
+  "fixture_sha256": "3e1c3bfa25f14c871cb3dd1845d7c0d1a417ad3483465274f2abb8ca4c16c908",
+  "intent": {
+    "action": "run",
+    "engine_strategy_id": "LIVE_TREND",
+    "id": 1,
+    "portfolio_id": "BOOK",
+    "registry_id": "trend",
+    "registry_revision": 0,
+    "status": "approved"
+  },
+  "membership_books": [],
+  "probe_argv": [
+    "/home/devcontainers/qt-validation-20260921/bin/Debug/runtime_publication_probe",
+    "publish_inspection_controlled"
+  ],
+  "recorded_time_provenance": "database clock_timestamp in final publication transaction",
+  "registry": {
+    "id": "trend",
+    "primary_book": "BOOK",
+    "runtime_revision": 0,
+    "strategy_type": "LIVE_TREND"
+  },
+  "system_result_run_date": "2026-09-22",
+  "post_run_attestation": {
+    "kind": "post_run_verification_attestation_not_sql_derived",
+    "source": {
+      "root": ".review/trade-ngin-qt",
+      "branch": "codex/qt-effective-position-reporting",
+      "head": "5ca87f1f4827b34963c4c34692a933c8477b20e9",
+      "head_is_not_clean_source_attestation": true,
+      "actual_byte_sha256": {
+        "src/data/postgres_database_extensions.cpp": "C231BB2279C15074BE545A73F0CF019FED31B0BFF81029F024B0B8424CDCC7E2",
+        "src/core/config_loader.cpp": "ABE65FAEA7AC580F08BB7D5D2D9C9C641E8489E3361519205913683CB4683977",
+        "tests/integration/runtime_publication_probe.cpp": "2708DC7ABF128966E03789BE79C2B35B836C0B35D4D76CAC75871E0BCEAA1D42",
+        "tests/integration/test_runtime_control_schema.py": "EDE40110DFEE473F2BE867DAF0DA252ECC7B70591EFAB41DDCF6A10408A2609D"
+      },
+      "actual_fix1_baseline": "config-publication-producer-fix2-baseline",
+      "fix1_manifest_sha256": "0725E1DD69AADD093BB36EC67669141C60BD50F1B718DC6E32947198BE82B841"
+    },
+    "build": {
+      "tree": "/home/devcontainers/qt-validation-20260921",
+      "binary": "/home/devcontainers/qt-validation-20260921/bin/Debug/runtime_publication_probe",
+      "build_label": "local-config-capture",
+      "build_label_is_not_clean_git_attestation": true,
+      "final_library_and_links_log": "config-publication-producer-fix2-final-build.log",
+      "final_library_and_links_log_sha256": "DFC073C7396BEF1F1E0D22F376197D2FE002FA8C837CE7053F3D01136EA92202",
+      "final_library_and_links_observed_exit": 0,
+      "final_probe_relink_argv": "wsl -d Ubuntu -- env -i PATH=/usr/local/bin:/usr/bin:/bin /usr/bin/unshare -Urn cmake --build /home/devcontainers/qt-validation-20260921 --target runtime_publication_probe -j2",
+      "final_probe_relink_log": "config-publication-producer-fix2-probe-correction-build.log",
+      "final_probe_relink_log_sha256": "BCE6BFA6019FE80D9D21E0739D37F5B3ADDAF32487168B24864AE21B7F9D3918",
+      "final_probe_relink_observed_exit": 0
+    },
+    "fixture_generation": {
+      "probe_argv": ["/home/devcontainers/qt-validation-20260921/bin/Debug/runtime_publication_probe", "publish_inspection_controlled"],
+      "runner_argv": "wsl -d Ubuntu -- env -i PATH=/usr/local/bin:/usr/bin:/bin PYTHON_DOTENV_DISABLED=1 PYTHONDONTWRITEBYTECODE=1 /usr/bin/unshare -Urn /mnt/c/Users/johnp/.gemini/antigravity/scratch/AlgoGators/New_Algo_Xander_Sex/.review/algolens-qt/.cache/qt-validation-venv/bin/python /mnt/c/Users/johnp/.gemini/antigravity/scratch/AlgoGators/New_Algo_Xander_Sex/docs/repairs/2026-09-21-algolens-ui/run-postgres.py /mnt/c/Users/johnp/.gemini/antigravity/scratch/AlgoGators/New_Algo_Xander_Sex/.review/trade-ngin-qt/tests/integration/test_proposal_storage.py /mnt/c/Users/johnp/.gemini/antigravity/scratch/AlgoGators/New_Algo_Xander_Sex/.review/trade-ngin-qt/tests/integration/test_proposal_storage_migration.py /mnt/c/Users/johnp/.gemini/antigravity/scratch/AlgoGators/New_Algo_Xander_Sex/.review/trade-ngin-qt/tests/integration/test_runtime_control_schema.py /mnt/c/Users/johnp/.gemini/antigravity/scratch/AlgoGators/New_Algo_Xander_Sex/.review/trade-ngin-qt/tests/integration/test_stream_storage.py /mnt/c/Users/johnp/.gemini/antigravity/scratch/AlgoGators/New_Algo_Xander_Sex/.review/trade-ngin-qt/tests/integration/test_execution_result_migration.py -q --tb=short --show-capture=no",
+      "runner_log": "config-publication-producer-fix2-full-pg-corrected.log",
+      "runner_log_sha256": "73468482742780E1D771F299CBB14A67D38C79E28432E459FA88D0E76A416567",
+      "observed_exit": 0,
+      "passed": 216,
+      "disposable_postgres_cleanup": true
+    }
+  }
+}

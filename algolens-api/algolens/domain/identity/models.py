@@ -10,7 +10,7 @@ class User:
     email: str
     first_name: str | None = None
     last_name: str | None = None
-    role: str = "general_member"
+    role: str | None = None
     password_hash: str | None = None
 
 
@@ -20,7 +20,7 @@ def user_from_row(row: Mapping[str, Any]) -> User:
         email=row.get("email", ""),
         first_name=row.get("first_name"),
         last_name=row.get("last_name"),
-        role=row.get("role", "general_member"),
+        role=row.get("role"),
         password_hash=row.get("password_hash"),
     )
 

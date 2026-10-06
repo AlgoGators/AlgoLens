@@ -1,46 +1,109 @@
 """Portfolio HTTP routes."""
 
 from datetime import datetime, timezone
+from decimal import Decimal, InvalidOperation
 from functools import wraps
+import json
 import time
 
 from flask import Blueprint, current_app, jsonify, request
-from flask_jwt_extended import get_jwt, get_jwt_identity, jwt_required
+from flask_jwt_extended import get_jwt_identity, jwt_required
 
 from algolens.adapters.serializers.portfolio import (
+    serialize_assignment_history,
+    serialize_assignment_result,
+    serialize_book_list,
     serialize_incubating_strategy_list,
     serialize_incubation_performance,
+    serialize_lifecycle_history,
+    serialize_portfolio_list,
     serialize_strategy_detail,
     serialize_strategy_list,
 )
+from algolens.application.identity.use_cases import DevLogin, UserNotFound, VerifySession
 from algolens.application.portfolio.ports import (
+    BookNotEmpty,
     IncubationError,
+    IncubationStorageError,
+    MembershipAcknowledgementRequired,
+    PortfolioReassignmentAcknowledgementRequired,
     RiskAcknowledgementRequired,
     StrategyNameUnresolved,
+    StrategyNotInRegistry,
 )
 from algolens.application.portfolio.use_cases import (
+    ChangeBookMembership,
+    CreateBook,
+    DeleteBook,
     GetIncubationPerformance,
+    GetHeldCorrelations,
     GetStrategyDetail,
+    ListAssignmentHistory,
+    ListBooks,
     ListIncubatingStrategies,
+    ListLifecycleHistory,
+    ListPortfolios,
     ListPositionOverrides,
     ListStrategies,
+    PreviewPortfolioAssignment,
     PromoteToLive,
+    ReassignStrategyPortfolio,
     RetireStrategy,
     StartIncubation,
     StrategyDataNotFound,
     StrategyNotFound,
     UpsertQtPosition,
 )
-from algolens.domain.portfolio.position_edit import PositionValidationError
-from algolens.infrastructure.config.dependencies import create_portfolio_dependencies
+from algolens.domain.portfolio.position_edit import AmbiguousBook, PositionValidationError
+from algolens.domain.portfolio.qt_workflow_errors import QtWorkflowError
+from algolens.adapters.http.qt_workflow import guard_legacy_write
+from algolens.domain.portfolio.portfolio_assignment import AssignmentValidationError
+from algolens.infrastructure.config.dependencies import (
+    create_dev_auth_config,
+    create_identity_dependencies,
+    create_instrument_catalog,
+    create_market_data,
+    create_portfolio_dependencies,
+    missing_database_environment_variables,
+)
 
 portfolio_bp = Blueprint("portfolio", __name__)
+
+from algolens.adapters.http.capability_guard import requires_capability
+from algolens.domain.identity.capabilities import role_has_capability
 
 # Rendered from PositionValidationError.code rather than from the exception
 # itself, so no exception text can reach a client (CodeQL py/stack-trace-
 # exposure). Every message here is authored, not derived.
+ASSIGNMENT_MESSAGES = {
+    "not_a_member_of_book": "That strategy does not belong to the book named",
+    "strategy_not_found": "Strategy not found",
+    "strategy_retired": "A retired strategy cannot accept position edits",
+    "missing_portfolio_id": "Field 'portfolio_id' is required",
+    "portfolio_id_not_a_string": "Field 'portfolio_id' must be a string",
+    "empty_portfolio_id": "Field 'portfolio_id' must not be empty",
+    "portfolio_id_too_long": "Field 'portfolio_id' is too long",
+    "portfolio_id_invalid_characters": (
+        "Field 'portfolio_id' may contain only letters, digits, underscores and hyphens"
+    ),
+    "strategy_not_found": "Strategy not found",
+    "book_name_too_long": "Field 'name' is too long",
+    "unknown_action": "Action must be 'add' or 'remove'",
+    "last_book": (
+        "A strategy must belong to at least one book. Add it to another book "
+        "before removing it from this one."
+    ),
+    "not_an_object": "Request body must be a JSON object",
+    "strategy_retired": (
+        "A retired strategy cannot be reassigned: its book is closed and moving it "
+        "would rewrite history that has already been reported"
+    ),
+}
+
 VALIDATION_MESSAGES = {
     "not_an_object": "Request body must be a JSON object",
+    "position_date_forbidden": "The server selects today's QT write date; historical dates cannot be supplied.",
+    "invalid_strategy_name": "Field 'strategy_name' must be a nonempty engine strategy name",
     "portfolio_type_forbidden": (
         "portfolio_type may not be supplied by the caller: this endpoint "
         "writes the qt stream only. Other portfolio types are read-only."
@@ -56,26 +119,89 @@ VALIDATION_MESSAGES = {
         "is indistinguishable from an accident when read back months later"
     ),
     "quantity_not_a_number": "Field 'quantity' must be a number",
+    "quantity_not_finite": "Field 'quantity' must be a finite number",
+    "quantity_not_representable": "Field 'quantity' must be exactly representable as Decimal8",
+    "quantity_storage_not_exact": "The database cannot store that quantity exactly. Nothing was saved; ask the QT administrator to check database precision.",
+    "price_storage_not_exact": "The database cannot store that average price exactly. Nothing was saved; ask the QT administrator to check database precision.",
+    "quantity_futures_whole_required": "Futures positions require whole contracts. The quantity was not rounded or saved.",
+    "instrument_type_unavailable": "Instrument type could not be verified. Refresh and ask the QT administrator to check the instrument catalog; nothing was saved.",
+    "instrument_type_ambiguous": "Multiple catalog entries match this instrument. Ask the QT administrator to resolve them; nothing was saved.",
+    "instrument_type_unsupported": "This instrument type is not supported for QT edits. Nothing was saved.",
+    "portfolio_id_not_a_string": "Field 'portfolio_id' must be a string",
+    "empty_portfolio_id": "Field 'portfolio_id' must not be empty",
+    "not_a_member_of_book": "That strategy does not belong to the book named",
+    "strategy_has_no_book": "That strategy is not in any book; nothing to write into",
+    "price_required_for_new_position": (
+        "Enter an average price: this symbol is not in the book yet, so there is "
+        "no existing price to keep"
+    ),
     "price_not_a_number": "Field 'average_price' must be a number",
+    "price_not_finite": "Field 'average_price' must be a finite number",
+    "price_not_representable": "Field 'average_price' must be exactly representable as Decimal8",
     "price_negative": "Field 'average_price' must not be negative",
 }
-
-# Incubation is an internal member-only surface. Default-deny: an unrecognised
-# or absent role is refused, so new roles stay locked out until explicitly added.
-INTERNAL_ROLES = frozenset({"admin", "general_member"})
-
 
 def _portfolio_dependencies():
     return create_portfolio_dependencies()
 
 
+def _dev_user_from_config(config):
+    """Resolve the controlled dev identity exactly as /auth/verify does."""
+    try:
+        return DevLogin(config).execute()
+    except ValueError:
+        current_app.logger.warning(
+            "[DEV_MODE] DEV_USER_ID is not an integer; falling back to 1"
+        )
+
+        class FallbackDevAuthConfig:
+            def is_enabled(self):
+                return config.is_enabled()
+
+            def user_id(self):
+                return 1
+
+            def user_email(self):
+                return config.user_email()
+
+            def user_role(self):
+                return config.user_role()
+
+        return DevLogin(FallbackDevAuthConfig()).execute()
+
+
+def _current_user():
+    user_id = get_jwt_identity()
+    config = create_dev_auth_config()
+    if config.is_enabled():
+        dev_user = _dev_user_from_config(config)
+        if str(dev_user.id) == str(user_id):
+            return dev_user
+
+    users, _hasher, _sessions = create_identity_dependencies()
+    return VerifySession(users).execute(user_id)
+
+
 def internal_only(fn):
-    """Refuse anyone whose JWT role is not an internal one."""
+    """Authorize against the subject's current stored role, not JWT claims."""
 
     @wraps(fn)
     def wrapper(*args, **kwargs):
-        role = get_jwt().get("role")
-        if role not in INTERNAL_ROLES:
+        try:
+            user = _current_user()
+        except UserNotFound:
+            current_app.logger.warning(
+                "Refused %s to %s: authenticated subject has no current user",
+                request.method,
+                request.path,
+            )
+            return jsonify({"error": "Insufficient permissions"}), 403
+        except Exception:
+            current_app.logger.error("Authorization lookup failed")
+            return jsonify({"error": "Authorization check failed"}), 500
+
+        role = user.role
+        if not role_has_capability(role, "view_internal"):
             current_app.logger.warning(
                 "Refused %s to %s: role %r is not internal",
                 request.method,
@@ -95,18 +221,64 @@ def _request_user_id():
     return str(user_id)
 
 
+def _mutation_body_error(payload, acknowledgement=None):
+    if not isinstance(payload, dict):
+        return jsonify({"error": "Request body must be a JSON object", "code": "not_an_object"}), 400
+    if acknowledgement in payload and type(payload[acknowledgement]) is not bool:
+        return jsonify({"error": f"Field '{acknowledgement}' must be a JSON boolean",
+                        "code": "acknowledgement_not_boolean"}), 400
+    return None
+
+
 def _incubation_error_status(exc):
-    return 404 if "not found" in str(exc).lower() else 400
+    """404 for a missing strategy, 400 for a lifecycle rule.
+
+    Decided on the exception type. This used to search the message for the words
+    "not found", which meant a reason string containing them silently turned a
+    400 into a 404.
+    """
+    if isinstance(exc, StrategyNotInRegistry):
+        return 404
+    if getattr(exc, "code", None) in {"open_positions", "positions_unavailable",
+                                      "desk_finalization_pending"}:
+        return 409
+    return 400
+
+
+def _incubation_error_body(exc):
+    code = getattr(exc, "code", None)
+    if code in {"open_positions", "positions_unavailable"}:
+        return {"error": code}
+    if code == "desk_finalization_pending":
+        # The reason names the book/day(s) still awaiting next-day finalization.
+        return {"error": code, "reason": str(exc)}
+    return {"error": str(exc)}
 
 
 @portfolio_bp.route("/strategy/<strategy_id>", methods=["GET"])
+@requires_capability("view_internal")
 @jwt_required()
 def get_strategy(strategy_id):
     start = time.perf_counter()
     try:
+        streams = request.args.getlist("position_stream")
+        if len(streams) > 1:
+            return jsonify({"error": "position_stream must be system or qt", "code": "invalid_position_stream"}), 400
+        from algolens.domain.portfolio.streams import (
+            DEFAULT_POSITION_STREAM, InvalidPositionStream, validate_position_stream,
+        )
+        try:
+            position_stream = validate_position_stream(streams[0] if streams else DEFAULT_POSITION_STREAM)
+        except InvalidPositionStream as exc:
+            return jsonify({"error": str(exc), "code": exc.code}), 400
         current_app.logger.info("Fetching strategy: %s", strategy_id)
         registry, reader = _portfolio_dependencies()
-        strategy = GetStrategyDetail(registry, reader).execute(strategy_id)
+        # Optional. Omitted means the primary book, which is what every
+        # existing caller gets. Named means that book, provided the strategy
+        # is in it.
+        strategy = GetStrategyDetail(registry, reader, create_market_data()).execute(
+            strategy_id, request.args.get("portfolio_id"), position_stream
+        )
         elapsed_ms = (time.perf_counter() - start) * 1000
         current_app.logger.info(
             "[PORTFOLIO_TIMING] detail strategy_id=%s elapsed_ms=%.0f",
@@ -114,9 +286,27 @@ def get_strategy(strategy_id):
             elapsed_ms,
         )
         return jsonify(serialize_strategy_detail(strategy)), 200
+    except AssignmentValidationError as exc:
+        message = ASSIGNMENT_MESSAGES.get(exc.code, str(exc))
+        return jsonify({"error": message, "code": exc.code}), 400
     except StrategyNotFound:
         return jsonify({"error": "Strategy not found"}), 404
-    except StrategyDataNotFound:
+    except StrategyDataNotFound as exc:
+        book = getattr(exc, "portfolio_id", None)
+        if book:
+            return (
+                jsonify(
+                    {
+                        "error": (
+                            f"The engine has not published any results for this "
+                            f"strategy in {book} yet."
+                        ),
+                        "code": "no_data_for_book",
+                        "portfolio_id": book,
+                    }
+                ),
+                404,
+            )
         return jsonify({"error": "No data found for strategy"}), 404
     except Exception as exc:
         current_app.logger.error(
@@ -126,12 +316,23 @@ def get_strategy(strategy_id):
 
 
 @portfolio_bp.route("/strategies", methods=["GET"])
+@requires_capability("view_internal")
 @jwt_required()
 def get_all_strategies():
     start = time.perf_counter()
     current_app.logger.info("[STRATEGIES] === /strategies endpoint called ===")
 
     try:
+        if (
+            create_dev_auth_config().is_enabled()
+            and missing_database_environment_variables()
+        ):
+            current_app.logger.info(
+                "[DEV_MODE] Database configuration is absent; returning an empty "
+                "strategy list for the local dashboard"
+            )
+            return jsonify(serialize_strategy_list([])), 200
+
         registry, reader = _portfolio_dependencies()
         strategies = ListStrategies(registry, reader).execute()
         elapsed_ms = (time.perf_counter() - start) * 1000
@@ -149,7 +350,24 @@ def get_all_strategies():
         return jsonify({"error": "Failed to fetch strategies"}), 500
 
 
+@portfolio_bp.route("/correlations", methods=["GET"])
+@requires_capability("view_internal")
+@jwt_required()
+def get_correlations():
+    """Correlations between the instruments the fund currently holds."""
+    try:
+        registry, reader = _portfolio_dependencies()
+        result = GetHeldCorrelations(registry, reader, create_market_data()).execute()
+        return jsonify(result), 200
+    except Exception as exc:
+        current_app.logger.error(
+            "[CORRELATIONS] Error computing correlations: %s", str(exc), exc_info=True
+        )
+        return jsonify({"error": "Failed to compute correlations"}), 500
+
+
 @portfolio_bp.route("/incubation", methods=["GET"])
+@requires_capability("view_internal")
 @jwt_required()
 @internal_only
 def get_incubation_strategies():
@@ -167,6 +385,7 @@ def get_incubation_strategies():
 
 
 @portfolio_bp.route("/incubation/<strategy_id>/performance", methods=["GET"])
+@requires_capability("view_internal")
 @jwt_required()
 @internal_only
 def get_incubation_perf(strategy_id):
@@ -185,6 +404,7 @@ def get_incubation_perf(strategy_id):
 
 
 @portfolio_bp.route("/incubation/<strategy_id>/start", methods=["POST"])
+@requires_capability("manage_incubation")
 @jwt_required()
 @internal_only
 def start_strategy_incubation(strategy_id):
@@ -212,8 +432,12 @@ def start_strategy_incubation(strategy_id):
         )
         current_app.logger.info("Started incubation for strategy %s", strategy_id)
         return jsonify({"message": "Incubation started"}), 201
+    except IncubationStorageError:
+        # Detail is in the server log. The driver message names columns and
+        # SQL, and a storage fault is not a client error.
+        return jsonify({"error": "Incubation change could not be saved"}), 500
     except IncubationError as exc:
-        return jsonify({"error": str(exc)}), _incubation_error_status(exc)
+        return jsonify(_incubation_error_body(exc)), _incubation_error_status(exc)
     except Exception as exc:
         current_app.logger.error(
             "Failed to start incubation for %s: %s",
@@ -225,6 +449,7 @@ def start_strategy_incubation(strategy_id):
 
 
 @portfolio_bp.route("/incubation/<strategy_id>/promote", methods=["POST"])
+@requires_capability("manage_incubation")
 @jwt_required()
 @internal_only
 def promote_strategy_to_live(strategy_id):
@@ -244,8 +469,12 @@ def promote_strategy_to_live(strategy_id):
         )
         current_app.logger.info("Promoted strategy %s to live", strategy_id)
         return jsonify({"message": "Strategy promoted to live"}), 200
+    except IncubationStorageError:
+        # Detail is in the server log. The driver message names columns and
+        # SQL, and a storage fault is not a client error.
+        return jsonify({"error": "Incubation change could not be saved"}), 500
     except IncubationError as exc:
-        return jsonify({"error": str(exc)}), _incubation_error_status(exc)
+        return jsonify(_incubation_error_body(exc)), _incubation_error_status(exc)
     except Exception as exc:
         current_app.logger.error(
             "Failed to promote %s: %s", strategy_id, str(exc), exc_info=True
@@ -254,6 +483,7 @@ def promote_strategy_to_live(strategy_id):
 
 
 @portfolio_bp.route("/incubation/<strategy_id>/retire", methods=["POST"])
+@requires_capability("manage_incubation")
 @jwt_required()
 @internal_only
 def retire_strategy(strategy_id):
@@ -273,8 +503,12 @@ def retire_strategy(strategy_id):
         )
         current_app.logger.info("Retired strategy %s", strategy_id)
         return jsonify({"message": "Strategy retired"}), 200
+    except IncubationStorageError:
+        # Detail is in the server log. The driver message names columns and
+        # SQL, and a storage fault is not a client error.
+        return jsonify({"error": "Incubation change could not be saved"}), 500
     except IncubationError as exc:
-        return jsonify({"error": str(exc)}), _incubation_error_status(exc)
+        return jsonify(_incubation_error_body(exc)), _incubation_error_status(exc)
     except Exception as exc:
         current_app.logger.error(
             "Failed to retire %s: %s", strategy_id, str(exc), exc_info=True
@@ -283,6 +517,7 @@ def retire_strategy(strategy_id):
 
 
 @portfolio_bp.route("/positions", methods=["POST"])
+@requires_capability("edit_qt_book")
 @jwt_required()
 @internal_only
 def upsert_position():
@@ -292,8 +527,26 @@ def upsert_position():
     come back with acknowledge_risk=true (409 on the first attempt). Every write
     lands in trading.position_overrides in the same transaction.
     """
-    payload = request.get_json(silent=True)
-    acknowledge = bool((payload or {}).get("acknowledge_risk"))
+    # This route alone keeps fractional JSON tokens as Decimal. Other routes
+    # retain Flask's ordinary JSON provider and legacy float behavior.
+    def bounded_decimal(token):
+        if len(token) > 1024:
+            raise ValueError("position numeric token too long")
+        try:
+            return Decimal(token)
+        except InvalidOperation:
+            raise ValueError("invalid position numeric token") from None
+
+    try:
+        payload = (json.loads(request.get_data(), parse_float=bounded_decimal,
+                              parse_int=bounded_decimal)
+                   if request.is_json else None)
+    except (ValueError, UnicodeDecodeError):
+        payload = None
+    error = _mutation_body_error(payload, "acknowledge_risk")
+    if error:
+        return error
+    acknowledge = payload.get("acknowledge_risk", False)
 
     # Parse the user_id from the JWT identity defensively.
     user_id = get_jwt_identity()
@@ -302,15 +555,38 @@ def upsert_position():
 
     try:
         registry, reader = _portfolio_dependencies()
-        result = UpsertQtPosition(registry, reader).execute(
+        guard_legacy_write(registry, payload)
+        result = UpsertQtPosition(
+            registry, reader, create_market_data(), create_instrument_catalog()
+        ).execute(
             payload, user_id=user_id, acknowledge_risk=acknowledge
         )
         return jsonify(result), 201
+    except QtWorkflowError as exc:
+        return jsonify(exc.to_wire(book_id=payload.get('portfolio_id'))), exc.http_status
     except PositionValidationError as exc:
         message = VALIDATION_MESSAGES.get(exc.code, "Invalid request body")
-        return jsonify({"error": message, "code": exc.code}), 400
+        status = 409 if exc.code == "strategy_retired" else 400
+        return jsonify({"error": message, "code": exc.code}), status
     except StrategyNotFound:
         return jsonify({"error": "Strategy not found"}), 404
+    except AmbiguousBook as exc:
+        # 409, not 400: the request is well formed, it just cannot be resolved
+        # to one book. The client is told which books to choose between.
+        return (
+            jsonify(
+                {
+                    "error": (
+                        f"{exc.strategy_id} belongs to {len(exc.books)} books. "
+                        f"Say which one this edit is for."
+                    ),
+                    "code": "ambiguous_book",
+                    "books": exc.books,
+                    "resubmit_with": "portfolio_id",
+                }
+            ),
+            409,
+        )
     except RiskAcknowledgementRequired as exc:
         return jsonify(
             {
@@ -326,9 +602,11 @@ def upsert_position():
         return jsonify(
             {
                 "error": (
-                    "The engine has not written any positions for this strategy "
-                    "yet, so this edit cannot be attached to a book."
-                )
+                    "A unique engine-owned identity could not be resolved in today's "
+                    "QT snapshot. Refresh the book and select a current position; "
+                    "older snapshots cannot be edited."
+                ),
+                "code": "position_identity_unresolved",
             }
         ), 409
     except Exception:
@@ -337,14 +615,20 @@ def upsert_position():
 
 
 @portfolio_bp.route("/overrides/<strategy_id>", methods=["GET"])
+@requires_capability("view_qt_platform")
 @jwt_required()
 @internal_only
 def get_overrides(strategy_id):
     """The audit trail for one strategy, most recent first."""
     try:
         registry, reader = _portfolio_dependencies()
-        overrides = ListPositionOverrides(registry, reader).execute(strategy_id)
+        overrides = ListPositionOverrides(registry, reader).execute(
+            strategy_id, request.args.get("portfolio_id")
+        )
         return jsonify({"overrides": overrides}), 200
+    except AssignmentValidationError as exc:
+        message = ASSIGNMENT_MESSAGES.get(exc.code, "Invalid query parameter")
+        return jsonify({"error": message, "code": exc.code}), 400
     except StrategyNotFound:
         return jsonify({"error": "Strategy not found"}), 404
     except Exception:
@@ -352,3 +636,283 @@ def get_overrides(strategy_id):
             "Failed to fetch overrides for %s", strategy_id, exc_info=True
         )
         return jsonify({"error": "Failed to fetch overrides"}), 500
+
+
+@portfolio_bp.route("/portfolios", methods=["GET"])
+@requires_capability("view_internal")
+@jwt_required()
+def get_portfolios():
+    """The strategies grouped by the portfolio they belong to.
+
+    Readable by any authenticated user -- it is the same information the
+    strategy list already exposes, only grouped.
+    """
+    try:
+        registry, reader = _portfolio_dependencies()
+        return (
+            jsonify(serialize_portfolio_list(ListPortfolios(registry, reader).execute())),
+            200,
+        )
+    except Exception as exc:
+        current_app.logger.error("Failed to list portfolios: %s", str(exc), exc_info=True)
+        return jsonify({"error": "Failed to list portfolios"}), 500
+
+
+@portfolio_bp.route("/strategies/<strategy_id>/portfolio", methods=["PUT"])
+@requires_capability("manage_books")
+@jwt_required()
+@internal_only
+def reassign_strategy_portfolio(strategy_id):
+    """Move a strategy to another portfolio.
+
+    Returns 409 with the consequences when the move would break history
+    continuity and the caller has not acknowledged it -- the same
+    resubmit-to-acknowledge shape as a risk breach on a position edit.
+    """
+    payload = request.get_json(silent=True)
+    error = _mutation_body_error(payload, "acknowledge")
+    if error:
+        return error
+
+    try:
+        registry, _reader = _portfolio_dependencies()
+        result = ReassignStrategyPortfolio(registry).execute(
+            strategy_id,
+            payload.get("portfolio_id"),
+            user_id=_request_user_id(),
+            reason=payload.get("reason"),
+            acknowledge=payload.get("acknowledge", False),
+        )
+        return jsonify(serialize_assignment_result(result)), 200
+    except AssignmentValidationError as exc:
+        message = ASSIGNMENT_MESSAGES.get(exc.code, "Invalid request body")
+        status = 404 if exc.code == "strategy_not_found" else 400
+        return jsonify({"error": message, "code": exc.code}), status
+    except PortfolioReassignmentAcknowledgementRequired as exc:
+        return (
+            jsonify(
+                {
+                    "error": "This reassignment breaks portfolio history continuity",
+                    "assignment_check": exc.verdict,
+                    "resubmit_with": "acknowledge",
+                }
+            ),
+            409,
+        )
+    except Exception as exc:
+        current_app.logger.error(
+            "Failed to reassign %s: %s", strategy_id, str(exc), exc_info=True
+        )
+        return jsonify({"error": "Failed to reassign the strategy"}), 500
+
+
+@portfolio_bp.route("/strategies/<strategy_id>/portfolio/history", methods=["GET"])
+@requires_capability("view_internal")
+@jwt_required()
+@internal_only
+def get_assignment_history(strategy_id):
+    try:
+        registry, _reader = _portfolio_dependencies()
+        history = ListAssignmentHistory(registry).execute(strategy_id)
+        return jsonify(serialize_assignment_history(history)), 200
+    except Exception as exc:
+        current_app.logger.error(
+            "Failed to read assignment history for %s: %s", strategy_id, str(exc), exc_info=True
+        )
+        return jsonify({"error": "Failed to read assignment history"}), 500
+
+
+@portfolio_bp.route("/strategies/<strategy_id>/lifecycle/history", methods=["GET"])
+@requires_capability("view_internal")
+@jwt_required()
+@internal_only
+def get_lifecycle_history(strategy_id):
+    try:
+        registry, reader = _portfolio_dependencies()
+        history = ListLifecycleHistory(registry, reader).execute(strategy_id)
+        return jsonify(serialize_lifecycle_history(history)), 200
+    except StrategyNotFound:
+        return jsonify({"error": "Strategy not found"}), 404
+    except Exception:
+        current_app.logger.error(
+            "Failed to read lifecycle history for %s", strategy_id, exc_info=True
+        )
+        return jsonify({"error": "Failed to read lifecycle history"}), 500
+
+
+@portfolio_bp.route("/books", methods=["GET"])
+@requires_capability("view_internal")
+@jwt_required()
+@internal_only
+def get_books():
+    """Every book and what is in it, including books defined but still empty."""
+    try:
+        registry, reader = _portfolio_dependencies()
+        return jsonify(serialize_book_list(ListBooks(registry, reader).execute())), 200
+    except Exception as exc:
+        current_app.logger.error("Failed to list books: %s", str(exc), exc_info=True)
+        return jsonify({"error": "Failed to list books"}), 500
+
+
+@portfolio_bp.route("/books", methods=["POST"])
+@requires_capability("manage_books")
+@jwt_required()
+@internal_only
+def create_book():
+    try:
+        registry, _reader = _portfolio_dependencies()
+        book = CreateBook(registry).execute(request.get_json(silent=True), _request_user_id())
+        return jsonify(book), 201
+    except AssignmentValidationError as exc:
+        return (
+            jsonify(
+                {
+                    "error": ASSIGNMENT_MESSAGES.get(exc.code, "Invalid request body"),
+                    "code": exc.code,
+                }
+            ),
+            400,
+        )
+    except Exception as exc:
+        current_app.logger.error("Failed to create book: %s", str(exc), exc_info=True)
+        return jsonify({"error": "Failed to create the book"}), 500
+
+
+@portfolio_bp.route("/books/<portfolio_id>", methods=["DELETE"])
+@requires_capability("manage_books")
+@jwt_required()
+@internal_only
+def delete_book(portfolio_id):
+    """Remove a book. Refused while anything still sits in it."""
+    try:
+        registry, _reader = _portfolio_dependencies()
+        return jsonify(DeleteBook(registry).execute(portfolio_id)), 200
+    except AssignmentValidationError as exc:
+        return (
+            jsonify(
+                {
+                    "error": ASSIGNMENT_MESSAGES.get(exc.code, "Invalid request"),
+                    "code": exc.code,
+                }
+            ),
+            400,
+        )
+    except BookNotEmpty as exc:
+        return (
+            jsonify(
+                {
+                    "error": (
+                        f"{exc.portfolio_id} still holds {exc.occupied} "
+                        f"{'strategy' if exc.occupied == 1 else 'strategies'}. "
+                        f"Move them to another book first."
+                    ),
+                    "code": "book_not_empty",
+                }
+            ),
+            409,
+        )
+    except Exception as exc:
+        current_app.logger.error("Failed to delete book: %s", str(exc), exc_info=True)
+        return jsonify({"error": "Failed to delete the book"}), 500
+
+
+@portfolio_bp.route("/books/<portfolio_id>/strategies", methods=["POST"])
+@requires_capability("manage_books")
+@jwt_required()
+@internal_only
+def add_strategy_to_book(portfolio_id):
+    """Put a strategy in this book. It keeps the books it is already in.
+
+    A reason is required, as it is for removal. Adding needs no acknowledgement
+    -- nothing is taken away -- but it still changes what a book contains, and a
+    change with no stated reason is indistinguishable from an accident when the
+    audit trail is read back months later.
+    """
+    payload = request.get_json(silent=True)
+    error = _mutation_body_error(payload, "acknowledge")
+    if error:
+        return error
+    if not str(payload.get("reason") or "").strip():
+        return (
+            jsonify(
+                {
+                    "error": (
+                        "Field 'reason' must not be empty: a book change with no "
+                        "stated reason is indistinguishable from an accident when "
+                        "read back months later"
+                    ),
+                    "code": "empty_reason",
+                }
+            ),
+            400,
+        )
+    return _change_book_membership(portfolio_id, "add")
+
+
+@portfolio_bp.route("/books/<portfolio_id>/strategies/<strategy_id>", methods=["DELETE"])
+@requires_capability("manage_books")
+@jwt_required()
+@internal_only
+def remove_strategy_from_book(portfolio_id, strategy_id):
+    """Take a strategy out of this book.
+
+    Answers 409 with the consequences unless the caller has acknowledged that
+    the book's history becomes discontinuous.
+    """
+    return _change_book_membership(portfolio_id, "remove", strategy_id)
+
+
+def _change_book_membership(portfolio_id, action, strategy_id=None):
+    payload = request.get_json(silent=True)
+    error = _mutation_body_error(payload, "acknowledge")
+    if error:
+        return error
+    if not str(payload.get("reason") or "").strip():
+        return (
+            jsonify(
+                {
+                    "error": (
+                        "Field 'reason' must not be empty: a book change with no "
+                        "stated reason is indistinguishable from an accident when "
+                        "read back months later"
+                    ),
+                    "code": "empty_reason",
+                }
+            ),
+            400,
+        )
+    strategy_id = strategy_id or payload.get("strategy_id")
+    if not strategy_id:
+        return jsonify({"error": "Missing required field: strategy_id"}), 400
+
+    try:
+        registry, _reader = _portfolio_dependencies()
+        result = ChangeBookMembership(registry).execute(
+            strategy_id,
+            portfolio_id,
+            action,
+            user_id=_request_user_id(),
+            reason=payload.get("reason"),
+            acknowledge=payload.get("acknowledge", False),
+        )
+        return jsonify(serialize_assignment_result(result)), 200
+    except AssignmentValidationError as exc:
+        message = ASSIGNMENT_MESSAGES.get(exc.code, "Invalid request")
+        status = 404 if exc.code == "strategy_not_found" else 400
+        return jsonify({"error": message, "code": exc.code}), status
+    except MembershipAcknowledgementRequired as exc:
+        return (
+            jsonify(
+                {
+                    "error": "Removing this strategy breaks the book's history continuity",
+                    "assignment_check": exc.verdict,
+                    "resubmit_with": "acknowledge",
+                }
+            ),
+            409,
+        )
+    except Exception as exc:
+        current_app.logger.error(
+            "Failed to %s membership for %s: %s", action, strategy_id, str(exc), exc_info=True
+        )
+        return jsonify({"error": "Failed to change book membership"}), 500

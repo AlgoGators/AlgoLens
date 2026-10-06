@@ -9,7 +9,7 @@ export const INCUBATION_WINDOW_DAYS = 120;
 
 export function calculateIncubationProgress(
   daysElapsed: number,
-  windowDays: number = INCUBATION_WINDOW_DAYS
+  windowDays: number
 ): number {
   if (windowDays <= 0) return 0;
   const progress = (daysElapsed / windowDays) * 100;
@@ -18,7 +18,7 @@ export function calculateIncubationProgress(
 
 export function calculateDaysRemaining(
   daysElapsed: number,
-  windowDays: number = INCUBATION_WINDOW_DAYS
+  windowDays: number
 ): number {
   return Math.max(windowDays - daysElapsed, 0);
 }
@@ -37,7 +37,10 @@ export function formatIncubationDate(date: string | Date | null): string {
 }
 
 export function formatMockCapital(value: number | null | undefined): string {
-  if (value === null || value === undefined) return '$0';
+  // Not "$0". A strategy whose mock capital has not been set has an unknown
+  // allocation, and "$0" states that it was given nothing -- a different claim,
+  // and one a reader would act on.
+  if (value === null || value === undefined) return '—';
 
   return new Intl.NumberFormat('en-US', {
     style: 'currency',
@@ -90,7 +93,8 @@ export function validateReason(reason: unknown): [boolean, string] {
 }
 
 export function formatEquity(value: number | null | undefined): string {
-  if (value === null || value === undefined) return '$0';
+  // Same reasoning as formatMockCapital: an unpublished figure is not zero.
+  if (value === null || value === undefined) return '—';
 
   return new Intl.NumberFormat('en-US', {
     style: 'currency',
@@ -102,14 +106,14 @@ export function formatEquity(value: number | null | undefined): string {
 
 export function isNearEndOfWindow(
   daysElapsed: number,
-  windowDays: number = INCUBATION_WINDOW_DAYS
+  windowDays: number
 ): boolean {
   return daysElapsed >= windowDays - 14;
 }
 
 export function isWindowComplete(
   daysElapsed: number,
-  windowDays: number = INCUBATION_WINDOW_DAYS
+  windowDays: number
 ): boolean {
   return daysElapsed >= windowDays;
 }

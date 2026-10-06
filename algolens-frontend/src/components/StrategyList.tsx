@@ -1,6 +1,9 @@
 import React from 'react';
-import { ChevronRight, TrendingUp, TrendingDown, BarChart3 } from 'lucide-react';
+import { formatMetric } from '../domain/portfolio/formatMetric';
+import { ChevronRight, TrendingUp, TrendingDown, BarChart3, Briefcase } from 'lucide-react';
 import type { Strategy } from '../domain/portfolio/portfolioData';
+import { distinctBooks } from '../domain/portfolio/bookChoices';
+import { counted } from '../domain/text/pluralize';
 import { useTheme } from '../adapters/react/ThemeContext';
 
 interface StrategyListProps {
@@ -14,7 +17,8 @@ export function StrategyList({ strategies, onSelectStrategy }: StrategyListProps
   return (
     <div className="grid grid-cols-1 md:grid-cols-1 gap-4">
       {strategies.map((strategy) => {
-        const isPositive = strategy.return >= 0;
+        const isPositive = (strategy.return ?? 0) >= 0;
+        const books = distinctBooks(strategy.books ?? (strategy.portfolio_id ? [strategy.portfolio_id] : []));
         
         return (
           <button
@@ -45,9 +49,28 @@ export function StrategyList({ strategies, onSelectStrategy }: StrategyListProps
                 <div className={`text-sm flex items-center gap-3 ${
                   theme === 'dark' ? 'text-gray-500' : 'text-gray-500'
                 }`}>
-                  <span>Managed by {strategy.managers.join(' & ')}</span>
-                  <span>•</span>
-                  <span>{strategy.positions.length} Holdings</span>
+                  <span>{counted(strategy.positions.length, 'Holding')}</span>
+                  {/* The figures on this card are the primary book's. Say so,
+                      and say when there are other books to choose from. */}
+                  {books.length === 1 && (
+                    <span className="flex items-center gap-1" data-testid="card-book">
+                      <Briefcase className="w-3.5 h-3.5" />
+                      <span className="font-mono">{books[0]}</span>
+                    </span>
+                  )}
+                  {books.length > 1 && (
+                    <span
+                      className="flex items-center gap-1"
+                      data-testid="card-book"
+                      title={`Figures shown are for ${strategy.portfolio_id ?? books[0]}. Open the strategy and use the book box beside Positions snapshot to switch.`}
+                    >
+                      <Briefcase className="w-3.5 h-3.5" />
+                      <span>
+                        In {books.length} books · figures for{' '}
+                        <span className="font-mono">{strategy.portfolio_id ?? books[0]}</span>
+                      </span>
+                    </span>
+                  )}
                 </div>
               </div>
               
@@ -68,9 +91,15 @@ export function StrategyList({ strategies, onSelectStrategy }: StrategyListProps
                   }`}>
                     Current Value
                   </div>
-                  <div className="text-lg">
-                    ${strategy.currentValue.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
-                  </div>
+                  {strategy.dataAvailable === false || strategy.currentValue === null ? (
+                    <div className={`text-sm ${theme === 'dark' ? 'text-amber-400' : 'text-amber-600'}`}>
+                      System-model performance unavailable
+                    </div>
+                  ) : (
+                    <div className="text-lg">
+                      ${strategy.currentValue.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                    </div>
+                  )}
                 </div>
 
                 {/* Total Return */}
@@ -80,12 +109,16 @@ export function StrategyList({ strategies, onSelectStrategy }: StrategyListProps
                   }`}>
                     Total Return
                   </div>
-                  <div className={`text-lg flex items-center gap-1 ${
-                    isPositive ? 'text-orange-500' : 'text-red-500'
-                  }`}>
-                    {isPositive ? <TrendingUp className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />}
-                    {isPositive ? '+' : ''}{strategy.returnPercent.toFixed(2)}%
-                  </div>
+                  {strategy.dataAvailable === false || strategy.returnPercent === null ? (
+                    <div className={`text-lg ${theme === 'dark' ? 'text-gray-600' : 'text-gray-400'}`}>—</div>
+                  ) : (
+                    <div className={`text-lg flex items-center gap-1 ${
+                      isPositive ? 'text-orange-500' : 'text-red-500'
+                    }`}>
+                      {isPositive ? <TrendingUp className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />}
+                      {formatMetric(strategy.returnPercent, 2, { suffix: '%', signed: true })}
+                    </div>
+                  )}
                 </div>
 
                 {/* Sharpe Ratio */}
@@ -95,8 +128,8 @@ export function StrategyList({ strategies, onSelectStrategy }: StrategyListProps
                   }`}>
                     Sharpe Ratio
                   </div>
-                  <div className="text-lg">
-                    {strategy.metrics.sharpeRatio.toFixed(2)}
+                  <div className={`text-lg ${strategy.dataAvailable === false ? (theme === 'dark' ? 'text-gray-600' : 'text-gray-400') : ''}`}>
+                    {strategy.dataAvailable === false ? '—' : formatMetric(strategy.metrics.sharpeRatio, 2)}
                   </div>
                 </div>
 
@@ -107,27 +140,27 @@ export function StrategyList({ strategies, onSelectStrategy }: StrategyListProps
                   }`}>
                     Volatility
                   </div>
-                  <div className="text-lg">
-                    {strategy.metrics.volatility.toFixed(1)}%
+                  <div className={`text-lg ${strategy.dataAvailable === false ? (theme === 'dark' ? 'text-gray-600' : 'text-gray-400') : ''}`}>
+                    {strategy.dataAvailable === false ? '—' : formatMetric(strategy.metrics.volatility, 1, { suffix: '%' })}
                   </div>
                 </div>
               </div>
 
               {/* Mini Performance Bar */}
-              <div className="mt-4">
+              {strategy.dataAvailable !== false && strategy.returnPercent !== null && <div className="mt-4">
                 <div className={`h-2 rounded-full overflow-hidden ${
                   theme === 'dark' ? 'bg-gray-800' : 'bg-gray-200'
                 }`}>
-                  <div 
+                  <div
                     className={`h-full transition-all ${
                       isPositive ? 'bg-orange-500' : 'bg-red-500'
                     }`}
-                    style={{ 
-                      width: `${Math.min(Math.abs(strategy.returnPercent) * 2, 100)}%` 
+                    style={{
+                      width: `${Math.min(Math.abs(strategy.returnPercent ?? 0) * 2, 100)}%`
                     }}
                   ></div>
                 </div>
-              </div>
+              </div>}
             </div>
           </button>
         );

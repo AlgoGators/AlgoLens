@@ -1,4 +1,6 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
+import { PortfolioApiService } from '../infrastructure/api/portfolioApi';
+import type { HeldCorrelations } from '../domain/portfolio/portfolioData';
 import { useTheme } from '../adapters/react/ThemeContext';
 import type { Strategy } from '../domain/portfolio/portfolioData';
 import { computeCombinedMetrics } from '../domain/portfolio/computeCombinedMetrics';
@@ -20,6 +22,10 @@ export function StrategyBuilder({ strategies, onClose }: StrategyBuilderProps) {
   const { theme } = useTheme();
   const [selectedStrategies, setSelectedStrategies] = useState<string[]>(strategies.map(s => s.id));
   const [showHoldingsModal, setShowHoldingsModal] = useState(false);
+  // Fund-wide correlations, computed by the API from the price pipeline. Null
+  // until they arrive, and left null if the request fails -- the panel then
+  // says the matrix is unavailable, which is true, rather than drawing zeros.
+  const [correlations, setCorrelations] = useState<HeldCorrelations | null>(null);
   const [expandedSections, setExpandedSections] = useState<ExpandedSections>({
     diversification: false,
     trading: false,
@@ -42,11 +48,21 @@ export function StrategyBuilder({ strategies, onClose }: StrategyBuilderProps) {
     });
   };
 
+  useEffect(() => {
+    let cancelled = false;
+    PortfolioApiService.getCorrelations()
+      .then(result => { if (!cancelled) setCorrelations(result); })
+      .catch(() => { if (!cancelled) setCorrelations(null); });
+    return () => { cancelled = true; };
+  }, []);
+
   // Derive the combined view model from the selected strategies' real data.
   const combinedMetrics = useMemo(
-    () => computeCombinedMetrics(strategies, selectedStrategies),
-    [selectedStrategies, strategies]
+    () => computeCombinedMetrics(strategies, selectedStrategies, correlations),
+    [selectedStrategies, strategies, correlations]
   );
+  const allSelectedAwaitingQt = selectedStrategies.length > 0 &&
+    combinedMetrics.strategiesAwaitingData === selectedStrategies.length;
 
   return (
     <div className={`min-h-screen ${theme === 'dark' ? 'bg-black text-white' : 'bg-white text-black'
@@ -59,33 +75,58 @@ export function StrategyBuilder({ strategies, onClose }: StrategyBuilderProps) {
           theme={theme}
         />
 
-        <PerformanceOverview metrics={combinedMetrics} theme={theme} />
+        {combinedMetrics.strategiesAwaitingData > 0 && (
+          <div
+            role="status"
+            data-testid="builder-coverage"
+            className={`mb-4 p-3 border text-sm ${theme === 'dark'
+              ? 'border-amber-700 bg-amber-950 text-amber-300'
+              : 'border-amber-300 bg-amber-50 text-amber-800'}`}
+          >
+            Partial system coverage: {combinedMetrics.strategiesAwaitingData} selected {combinedMetrics.strategiesAwaitingData === 1 ? 'strategy has' : 'strategies have'} system-model performance unavailable.
+            {' '}{allSelectedAwaitingQt
+              ? 'No selected strategy has a measured system result.'
+              : 'All derived panels below cover measured strategies only; excluded strategies have unknown value and weight.'}
+          </div>
+        )}
 
-        <PerformanceCharts metrics={combinedMetrics} theme={theme} />
+        {allSelectedAwaitingQt ? (
+          <div className={`mb-4 p-4 border ${theme === 'dark'
+            ? 'border-gray-800 bg-gray-950 text-gray-300'
+            : 'border-gray-200 bg-gray-50 text-gray-600'}`}>
+            Portfolio value, performance, allocations, and holdings are unavailable until a selected system result is published.
+          </div>
+        ) : (
+          <>
+            <PerformanceOverview metrics={combinedMetrics} theme={theme} />
 
-        <AllocationCharts metrics={combinedMetrics} theme={theme} />
+            <PerformanceCharts metrics={combinedMetrics} theme={theme} />
 
-        <HoldingsConcentration
-          metrics={combinedMetrics}
-          theme={theme}
-          onShowAll={() => setShowHoldingsModal(true)}
-        />
+            <AllocationCharts metrics={combinedMetrics} theme={theme} />
 
-        <AdvancedSections
-          metrics={combinedMetrics}
-          theme={theme}
-          expanded={expandedSections}
-          onToggle={toggleSection}
-        />
+            <HoldingsConcentration
+              metrics={combinedMetrics}
+              theme={theme}
+              onShowAll={() => setShowHoldingsModal(true)}
+            />
 
-        <StrategySummary metrics={combinedMetrics} theme={theme} />
+            <AdvancedSections
+              metrics={combinedMetrics}
+              theme={theme}
+              expanded={expandedSections}
+              onToggle={toggleSection}
+            />
 
-        {showHoldingsModal && (
-          <HoldingsModal
-            metrics={combinedMetrics}
-            theme={theme}
-            onClose={() => setShowHoldingsModal(false)}
-          />
+            <StrategySummary metrics={combinedMetrics} theme={theme} />
+
+            {showHoldingsModal && (
+              <HoldingsModal
+                metrics={combinedMetrics}
+                theme={theme}
+                onClose={() => setShowHoldingsModal(false)}
+              />
+            )}
+          </>
         )}
       </div>
     </div>

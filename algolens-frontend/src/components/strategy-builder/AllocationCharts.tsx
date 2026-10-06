@@ -7,6 +7,17 @@ interface AllocationChartsProps {
   theme: string;
 }
 
+/*
+ * Both pies are 200px tall, not 180.
+ *
+ * Recharts places a slice's label outside the arc at its mid-angle, and a
+ * slice big enough to sit astride 12 o'clock has a mid-angle of ~90 degrees,
+ * which put its label at y = 12 in a 180px chart. The text is centred on that
+ * point, so it straddled the top edge and was cut off: the Strategy Split pie
+ * showed "21%" and "29%" and nothing at all for the 49.8% slice, the largest
+ * one on the chart. Twenty more pixels puts that label at y = 22, level with
+ * the highest label the asset pie already renders cleanly.
+ */
 export function AllocationCharts({ metrics, theme }: AllocationChartsProps) {
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 mb-4">
@@ -14,9 +25,14 @@ export function AllocationCharts({ metrics, theme }: AllocationChartsProps) {
         }`}>
         <h3 className={`text-xs uppercase tracking-wider mb-3 ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'
           }`}>
-          Asset Allocation
+          {metrics.strategiesAwaitingData > 0 ? 'Measured Asset Allocation' : 'Asset Allocation'}
         </h3>
-        <ResponsiveContainer width="100%" height={180}>
+        {metrics.strategiesAwaitingData > 0 && (
+          <p className={`mb-2 text-xs ${theme === 'dark' ? 'text-amber-400' : 'text-amber-700'}`}>
+            Percentages cover measured strategies only; excluded QT strategies have unknown weight.
+          </p>
+        )}
+        <ResponsiveContainer width="100%" height={200}>
           <PieChart>
             <Pie
               data={metrics.assetAllocation.slice(0, 5)}
@@ -25,7 +41,7 @@ export function AllocationCharts({ metrics, theme }: AllocationChartsProps) {
               cx="50%"
               cy="50%"
               outerRadius={70}
-              label={({ symbol, percentage }) => `${symbol} ${percentage.toFixed(0)}%`}
+              label={({ payload }) => `${payload.symbol} ${payload.percentage.toFixed(0)}%`}
               labelLine={false}
             >
               {metrics.assetAllocation.slice(0, 5).map((entry, index) => (
@@ -40,7 +56,7 @@ export function AllocationCharts({ metrics, theme }: AllocationChartsProps) {
                 fontWeight: '600',
                 color: theme === 'dark' ? '#fff' : '#000'
               }}
-              formatter={(value: number) => [`$${(value / 1000).toFixed(0)}k`]}
+              formatter={(value) => [`$${(Number(value ?? 0) / 1000).toFixed(0)}k`]}
             />
           </PieChart>
         </ResponsiveContainer>
@@ -50,9 +66,14 @@ export function AllocationCharts({ metrics, theme }: AllocationChartsProps) {
         }`}>
         <h3 className={`text-xs uppercase tracking-wider mb-3 ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'
           }`}>
-          Strategy Split
+          {metrics.strategiesAwaitingData > 0 ? 'Measured Strategy Split' : 'Strategy Split'}
         </h3>
-        <ResponsiveContainer width="100%" height={180}>
+        {metrics.strategiesAwaitingData > 0 && (
+          <p className={`mb-2 text-xs ${theme === 'dark' ? 'text-amber-400' : 'text-amber-700'}`}>
+            Shares are within measured strategies only, not the whole selection.
+          </p>
+        )}
+        <ResponsiveContainer width="100%" height={200}>
           <PieChart>
             <Pie
               data={metrics.strategyAllocation}
@@ -61,7 +82,7 @@ export function AllocationCharts({ metrics, theme }: AllocationChartsProps) {
               cx="50%"
               cy="50%"
               outerRadius={70}
-              label={({ percentage }) => `${percentage.toFixed(0)}%`}
+              label={({ payload }) => `${payload.percentage.toFixed(0)}%`}
               labelLine={false}
             >
               {metrics.strategyAllocation.map((entry, index) => (
@@ -76,7 +97,7 @@ export function AllocationCharts({ metrics, theme }: AllocationChartsProps) {
                 fontWeight: '600',
                 color: theme === 'dark' ? '#fff' : '#000'
               }}
-              formatter={(value: number) => [`$${(value / 1000).toFixed(0)}k`]}
+              formatter={(value) => [`$${(Number(value ?? 0) / 1000).toFixed(0)}k`]}
             />
           </PieChart>
         </ResponsiveContainer>

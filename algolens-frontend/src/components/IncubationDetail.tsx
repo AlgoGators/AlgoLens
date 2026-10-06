@@ -1,4 +1,7 @@
 import React, { useMemo, useState } from 'react';
+import { formatPrice } from '../domain/portfolio/formatPrice';
+import { periodReturn } from '../domain/portfolio/periodReturn';
+import { filterByPeriod } from '../domain/portfolio/filterByPeriod';
 import { ArrowLeft, Clock, TrendingDown, TrendingUp } from 'lucide-react';
 import {
   Line,
@@ -20,6 +23,11 @@ import {
   formatMockCapital,
 } from '../domain/portfolio/incubationUtils';
 import { useTheme } from '../adapters/react/ThemeContext';
+import { useAuth } from '../adapters/react/useAuth';
+import { can } from '../domain/identity/user';
+import { IncubationActions } from './IncubationActions';
+import { ConfigurationInspectionPanel } from './ConfigurationInspectionPanel';
+import { formatBarDate } from '../domain/portfolio/formatBarDate';
 
 interface IncubationDetailProps {
   strategy: IncubatingStrategy;
@@ -27,6 +35,8 @@ interface IncubationDetailProps {
   isLoading: boolean;
   error: string | null;
   onBack: () => void;
+  /** Called after a promote or retire so the caller can refetch the list. */
+  onLifecycleChanged: () => void;
 }
 
 export function IncubationDetail({
@@ -35,9 +45,11 @@ export function IncubationDetail({
   isLoading,
   error,
   onBack,
+  onLifecycleChanged,
 }: IncubationDetailProps) {
   const [selectedPeriod, setSelectedPeriod] = useState('1M');
   const { theme } = useTheme();
+  const { user } = useAuth();
   const periods = ['1W', '1M', '3M', 'ALL'];
 
   const historicalData = useMemo(
@@ -48,30 +60,22 @@ export function IncubationDetail({
     [performance]
   );
 
-  const filteredData = useMemo(() => {
-    if (selectedPeriod === 'ALL') return historicalData;
+  const filteredData = useMemo(
+    () => filterByPeriod(historicalData, selectedPeriod),
+    [historicalData, selectedPeriod]
+  );
 
-    const daysToShow =
-      selectedPeriod === '1W' ? 7 : selectedPeriod === '1M' ? 30 : 90;
-    const cutoffDate = new Date();
-    cutoffDate.setDate(cutoffDate.getDate() - daysToShow);
-
-    return historicalData.filter(point => new Date(point.date) >= cutoffDate);
-  }, [historicalData, selectedPeriod]);
-
-  const periodReturn = useMemo(() => {
-    if (filteredData.length < 2) return { value: 0, percent: 0 };
-    const startValue = filteredData[0].value;
-    const endValue = filteredData[filteredData.length - 1].value;
-    const returnValue = endValue - startValue;
-    const returnPercent = startValue > 0 ? (returnValue / startValue) * 100 : 0;
-    return { value: returnValue, percent: returnPercent };
+  const windowReturn = useMemo(() => {
+    return periodReturn(filteredData);
   }, [filteredData]);
+  // The window's direction, for chart colours. An unknown window is
+  // drawn in the neutral-positive colour rather than not drawn at all.
+  const gaining = (windowReturn?.value ?? 0) >= 0;
 
   const currentEquity =
     historicalData.length > 0
       ? historicalData[historicalData.length - 1].value
-      : strategy.mock_capital || 0;
+      : strategy.mock_capital ?? null;
   const progress = calculateIncubationProgress(
     strategy.days_elapsed,
     strategy.window_days
@@ -117,6 +121,13 @@ export function IncubationDetail({
         </div>
       </div>
 
+      <ConfigurationInspectionPanel
+        registryId={strategy.id}
+        portfolioId={strategy.portfolio_id}
+        userId={user?.id}
+        allowed={can(user, 'view_internal')}
+      />
+
       {isLoading ? (
         <div className="flex items-center justify-center min-h-[320px]">
           <div className="text-center">
@@ -138,31 +149,80 @@ export function IncubationDetail({
         </div>
       ) : (
         <>
+          {/* The decision this whole screen exists to support. Both transitions
+              were API-only until now, so a trial could be observed but not
+              concluded. */}
+          <div className="mb-6">
+            <IncubationActions
+              strategyId={strategy.id}
+              strategyName={strategy.name}
+              daysElapsed={strategy.days_elapsed}
+              windowDays={strategy.window_days}
+              theme={theme}
+              onChanged={onLifecycleChanged}
+            />
+          </div>
+
           <div className="mb-6">
             <div className="text-3xl md:text-4xl mb-2">
               {formatEquity(currentEquity)}
             </div>
-            <div
-              className={`flex items-center gap-2 text-lg ${
-                periodReturn.value >= 0 ? 'text-orange-500' : 'text-red-500'
-              }`}
-            >
-              {periodReturn.value >= 0 ? (
-                <TrendingUp className="w-5 h-5" />
-              ) : (
-                <TrendingDown className="w-5 h-5" />
-              )}
-              <span>
-                ${Math.abs(periodReturn.value).toLocaleString('en-US', {
-                  minimumFractionDigits: 2,
-                  maximumFractionDigits: 2,
-                })}{' '}
-                ({periodReturn.percent >= 0 ? '+' : ''}
-                {periodReturn.percent.toFixed(2)}%) {periodLabel}
-              </span>
-            </div>
+            {/* No equity points means the trial has not recorded a day yet.
+                "+0.00%" would state a measured flat return, which is a
+                different and false claim. */}
+            {historicalData.length === 0 ? (
+              <div
+                className={`text-lg ${
+                  theme === 'dark' ? 'text-gray-400' : 'text-gray-500'
+                }`}
+              >
+                No trading days recorded yet
+              </div>
+            ) : windowReturn === null ? (
+              /* Points exist, but fewer than two fall inside the selected
+                 window, so there is no return to state for it. This used to
+                 state "$0.00 (+0.00%)" -- a measured flat period. */
+              <div
+                className={`text-lg ${
+                  theme === 'dark' ? 'text-gray-500' : 'text-gray-400'
+                }`}
+              >
+                &mdash; no data for {periodLabel}
+              </div>
+            ) : (
+              <div
+                className={`flex items-center gap-2 text-lg ${
+                  gaining ? 'text-orange-500' : 'text-red-500'
+                }`}
+              >
+                {gaining ? (
+                  <TrendingUp className="w-5 h-5" />
+                ) : (
+                  <TrendingDown className="w-5 h-5" />
+                )}
+                <span>
+                  ${Math.abs(windowReturn.value).toLocaleString('en-US', {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  })}{' '}
+                  ({windowReturn.percent >= 0 ? '+' : ''}
+                  {windowReturn.percent.toFixed(2)}%) {periodLabel}
+                </span>
+              </div>
+            )}
           </div>
 
+          {historicalData.length === 0 ? (
+            <div
+              className={`mb-4 flex h-[300px] items-center justify-center rounded-lg border text-sm ${
+                theme === 'dark'
+                  ? 'border-gray-800 text-gray-500'
+                  : 'border-gray-200 text-gray-400'
+              }`}
+            >
+              The equity curve appears once the trial has its first day of data.
+            </div>
+          ) : (
           <div className="mb-4">
             <ResponsiveContainer width="100%" height={300}>
               <LineChart data={filteredData}>
@@ -179,14 +239,14 @@ export function IncubationDetail({
                     boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)',
                     color: theme === 'dark' ? '#fff' : '#000',
                   }}
-                  formatter={(value: number) => [
-                    `$${value.toLocaleString('en-US', {
+                  formatter={(value) => [
+                    `$${Number(value ?? 0).toLocaleString('en-US', {
                       minimumFractionDigits: 2,
                     })}`,
                     'Mock Equity',
                   ]}
                   labelFormatter={label =>
-                    new Date(label).toLocaleDateString('en-US', {
+                    formatBarDate(String(label), {
                       month: 'short',
                       day: 'numeric',
                       year: 'numeric',
@@ -196,13 +256,14 @@ export function IncubationDetail({
                 <Line
                   type="linear"
                   dataKey="value"
-                  stroke={periodReturn.value >= 0 ? '#f97316' : '#ef4444'}
+                  stroke={gaining ? '#f97316' : '#ef4444'}
                   strokeWidth={2}
                   dot={false}
                 />
               </LineChart>
             </ResponsiveContainer>
           </div>
+          )}
 
           <div
             className={`flex items-center justify-between mb-8 border-b ${
@@ -306,14 +367,14 @@ export function IncubationDetail({
                 >
                   <div>{formatIncubationDate(position.date)}</div>
                   <div>{position.symbol}</div>
-                  <div className="text-right">{position.quantity ?? 0}</div>
+                  <div className="text-right">{position.quantity ?? '\u2014'}</div>
                   <div className="text-right">
+                    {/* Two decimals is equities precision. Natural gas trades
+                        at 2.958 and Euro FX at 1.0915; rounding those to cents
+                        misstates the entry. */}
                     {position.entry_price === null
-                      ? 'N/A'
-                      : `$${position.entry_price.toLocaleString('en-US', {
-                          minimumFractionDigits: 2,
-                          maximumFractionDigits: 2,
-                        })}`}
+                      ? '\u2014'
+                      : formatPrice(position.entry_price)}
                   </div>
                 </div>
               ))}

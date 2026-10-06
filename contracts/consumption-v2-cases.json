@@ -1,0 +1,2224 @@
+{
+  "description": "Hand-specified synthetic parsed-child contract examples; no C++ producer, database, API, or UI evidence.",
+  "accepted": {
+    "ordinary": {
+      "version": 2,
+      "status": "complete",
+      "reason": "none",
+      "coverage": {
+        "setup": {
+          "status": "complete",
+          "reason": "none"
+        },
+        "market_input": {
+          "status": "complete",
+          "reason": "none"
+        },
+        "cost_history": {
+          "status": "complete",
+          "reason": "none"
+        },
+        "preparation": {
+          "status": "complete",
+          "reason": "none"
+        },
+        "primary": {
+          "status": "complete",
+          "reason": "none"
+        },
+        "execution": {
+          "status": "complete",
+          "reason": "none"
+        },
+        "diagnostics": {
+          "status": "complete",
+          "reason": "none"
+        },
+        "control_flow": {
+          "status": "complete",
+          "reason": "none"
+        }
+      },
+      "nodes": [
+        {
+          "id": 0,
+          "parent": null,
+          "kind": "call",
+          "consumer": "setup.selector",
+          "reads": [],
+          "meta": {
+            "mode": "ordinary"
+          },
+          "outcome": "returned_ok"
+        },
+        {
+          "id": 1,
+          "parent": 0,
+          "kind": "scope",
+          "consumer": "setup.ordinary_selection",
+          "reads": [],
+          "meta": {}
+        },
+        {
+          "id": 2,
+          "parent": 1,
+          "kind": "scope",
+          "consumer": "setup.selection_entry",
+          "reads": [
+            {
+              "field": "setup.selection.enabled_live",
+              "value_type": "bool",
+              "value": true,
+              "origin": "configured_strategy_leaf"
+            },
+            {
+              "field": "setup.selection.default_allocation",
+              "value_type": "number",
+              "value": 0.5,
+              "origin": "configured_strategy_leaf"
+            },
+            {
+              "field": "setup.selection.effective_allocation",
+              "value_type": "number",
+              "value": 0.5,
+              "origin": "derived"
+            }
+          ],
+          "meta": {
+            "enabled_live_read": true,
+            "allocation_read": true,
+            "enabled_live_present": true,
+            "allocation_defaulted": false
+          },
+          "strategy": "ALPHA"
+        },
+        {
+          "id": 3,
+          "parent": null,
+          "kind": "call",
+          "consumer": "setup.factory",
+          "reads": [],
+          "meta": {},
+          "outcome": "returned_ok"
+        },
+        {
+          "id": 4,
+          "parent": 3,
+          "kind": "scope",
+          "consumer": "setup.factory_entry",
+          "reads": [
+            {
+              "field": "setup.factory.effective_allocation",
+              "value_type": "number",
+              "value": 0.5,
+              "origin": "selected_allocation"
+            },
+            {
+              "field": "setup.factory.initial_capital",
+              "value_type": "number",
+              "value": 1000,
+              "origin": "app_config_effective"
+            },
+            {
+              "field": "setup.factory.allocated_capital",
+              "value_type": "number",
+              "value": 500,
+              "origin": "derived"
+            }
+          ],
+          "meta": {
+            "profile": "standard",
+            "construction": "succeeded",
+            "initialize": "succeeded",
+            "start": "succeeded"
+          },
+          "strategy": "ALPHA"
+        },
+        {
+          "id": 5,
+          "parent": null,
+          "kind": "call",
+          "consumer": "portfolio.registration",
+          "reads": [
+            {
+              "field": "portfolio.registration.initial_allocation",
+              "value_type": "number",
+              "value": 0.5,
+              "origin": "selected_allocation"
+            },
+            {
+              "field": "portfolio.registration.stored_allocation",
+              "value_type": "number",
+              "value": 0.5,
+              "origin": "selected_allocation"
+            }
+          ],
+          "meta": {},
+          "outcome": "returned_ok",
+          "strategy": "ALPHA"
+        },
+        {
+          "id": 6,
+          "parent": null,
+          "kind": "scope",
+          "consumer": "runner.market_window",
+          "reads": [
+            {
+              "field": "runner.market_input.historical_days",
+              "value_type": "int32",
+              "value": 30,
+              "origin": "app_config_effective"
+            }
+          ],
+          "meta": {}
+        },
+        {
+          "id": 7,
+          "parent": null,
+          "kind": "call",
+          "consumer": "runner.market_fetch",
+          "reads": [],
+          "meta": {},
+          "outcome": "returned_ok"
+        },
+        {
+          "id": 8,
+          "parent": null,
+          "kind": "call",
+          "consumer": "execution.history_update",
+          "reads": [],
+          "meta": {
+            "cost_model_reached": true,
+            "previous_close_source": "initial_current_close"
+          },
+          "outcome": "returned_ok",
+          "symbol": "ES"
+        },
+        {
+          "id": 9,
+          "parent": 8,
+          "kind": "scope",
+          "consumer": "cost.history",
+          "reads": [
+            {
+              "field": "cost.impact_history.adv_lookback_days",
+              "value_type": "uint53",
+              "value": 20,
+              "origin": "runtime_effective"
+            }
+          ],
+          "meta": {}
+        },
+        {
+          "id": 10,
+          "parent": null,
+          "kind": "call",
+          "consumer": "strategy.preparation",
+          "reads": [],
+          "meta": {
+            "profile": "standard"
+          },
+          "outcome": "returned_ok",
+          "strategy": "ALPHA"
+        },
+        {
+          "id": 11,
+          "parent": null,
+          "kind": "call",
+          "consumer": "portfolio.primary",
+          "reads": [],
+          "meta": {
+            "skip_execution_generation": false
+          },
+          "outcome": "returned_ok"
+        },
+        {
+          "id": 12,
+          "parent": 11,
+          "kind": "call",
+          "consumer": "strategy.primary",
+          "reads": [],
+          "meta": {
+            "profile": "standard"
+          },
+          "outcome": "returned_ok",
+          "strategy": "ALPHA"
+        },
+        {
+          "id": 13,
+          "parent": 11,
+          "kind": "scope",
+          "consumer": "portfolio.pass",
+          "reads": [
+            {
+              "field": "portfolio.pass.use_optimization",
+              "value_type": "bool",
+              "value": false,
+              "origin": "app_config_effective"
+            },
+            {
+              "field": "portfolio.pass.use_risk_management",
+              "value_type": "bool",
+              "value": false,
+              "origin": "app_config_effective"
+            }
+          ],
+          "meta": {},
+          "index": 0
+        },
+        {
+          "id": 14,
+          "parent": null,
+          "kind": "call",
+          "consumer": "execution.batch",
+          "reads": [],
+          "meta": {
+            "state": "returned"
+          },
+          "outcome": "returned_ok",
+          "strategy": "ALPHA"
+        },
+        {
+          "id": 15,
+          "parent": null,
+          "kind": "call",
+          "consumer": "risk.diagnostics",
+          "reads": [],
+          "meta": {},
+          "outcome": "returned_ok"
+        },
+        {
+          "id": 16,
+          "parent": null,
+          "kind": "scope",
+          "consumer": "runner.non_trading_day",
+          "reads": [],
+          "meta": {
+            "skip_strategy_processing": false
+          }
+        },
+        {
+          "id": 17,
+          "parent": null,
+          "kind": "scope",
+          "consumer": "runner.benchmark",
+          "reads": [
+            {
+              "field": "runner.benchmark.mode",
+              "value_type": "benchmark_mode",
+              "value": "deferred",
+              "origin": "app_config_effective"
+            }
+          ],
+          "meta": {
+            "branch": "not_reached"
+          }
+        }
+      ]
+    },
+    "controlled": {
+      "version": 2,
+      "status": "complete",
+      "reason": "none",
+      "coverage": {
+        "setup": {
+          "status": "complete",
+          "reason": "none"
+        },
+        "market_input": {
+          "status": "complete",
+          "reason": "none"
+        },
+        "cost_history": {
+          "status": "complete",
+          "reason": "none"
+        },
+        "preparation": {
+          "status": "complete",
+          "reason": "none"
+        },
+        "primary": {
+          "status": "complete",
+          "reason": "none"
+        },
+        "execution": {
+          "status": "complete",
+          "reason": "none"
+        },
+        "diagnostics": {
+          "status": "complete",
+          "reason": "none"
+        },
+        "control_flow": {
+          "status": "complete",
+          "reason": "none"
+        }
+      },
+      "nodes": [
+        {
+          "id": 0,
+          "parent": null,
+          "kind": "call",
+          "consumer": "setup.selector",
+          "reads": [],
+          "meta": {
+            "mode": "controlled"
+          },
+          "outcome": "returned_ok"
+        },
+        {
+          "id": 1,
+          "parent": 0,
+          "kind": "scope",
+          "consumer": "setup.controlled_validation",
+          "reads": [],
+          "meta": {}
+        },
+        {
+          "id": 2,
+          "parent": 1,
+          "kind": "scope",
+          "consumer": "setup.selection_entry",
+          "reads": [
+            {
+              "field": "setup.selection.enabled_live",
+              "value_type": "bool",
+              "value": true,
+              "origin": "configured_strategy_leaf"
+            },
+            {
+              "field": "setup.selection.default_allocation",
+              "value_type": "number",
+              "value": 0.5,
+              "origin": "configured_strategy_leaf"
+            },
+            {
+              "field": "setup.selection.effective_allocation",
+              "value_type": "number",
+              "value": 0.5,
+              "origin": "derived"
+            }
+          ],
+          "meta": {
+            "enabled_live_read": true,
+            "allocation_read": true,
+            "enabled_live_present": true,
+            "allocation_defaulted": false
+          },
+          "strategy": "ALPHA"
+        },
+        {
+          "id": 3,
+          "parent": null,
+          "kind": "call",
+          "consumer": "setup.factory",
+          "reads": [],
+          "meta": {},
+          "outcome": "returned_ok"
+        },
+        {
+          "id": 4,
+          "parent": 3,
+          "kind": "scope",
+          "consumer": "setup.factory_entry",
+          "reads": [
+            {
+              "field": "setup.factory.effective_allocation",
+              "value_type": "number",
+              "value": 0.5,
+              "origin": "selected_allocation"
+            },
+            {
+              "field": "setup.factory.initial_capital",
+              "value_type": "number",
+              "value": 1000,
+              "origin": "app_config_effective"
+            },
+            {
+              "field": "setup.factory.allocated_capital",
+              "value_type": "number",
+              "value": 500,
+              "origin": "derived"
+            }
+          ],
+          "meta": {
+            "profile": "standard",
+            "construction": "succeeded",
+            "initialize": "succeeded",
+            "start": "succeeded"
+          },
+          "strategy": "ALPHA"
+        },
+        {
+          "id": 5,
+          "parent": null,
+          "kind": "call",
+          "consumer": "portfolio.registration",
+          "reads": [
+            {
+              "field": "portfolio.registration.initial_allocation",
+              "value_type": "number",
+              "value": 0.5,
+              "origin": "selected_allocation"
+            },
+            {
+              "field": "portfolio.registration.stored_allocation",
+              "value_type": "number",
+              "value": 0.5,
+              "origin": "selected_allocation"
+            }
+          ],
+          "meta": {},
+          "outcome": "returned_ok",
+          "strategy": "ALPHA"
+        },
+        {
+          "id": 6,
+          "parent": null,
+          "kind": "scope",
+          "consumer": "runner.market_window",
+          "reads": [
+            {
+              "field": "runner.market_input.historical_days",
+              "value_type": "int32",
+              "value": 30,
+              "origin": "app_config_effective"
+            }
+          ],
+          "meta": {}
+        },
+        {
+          "id": 7,
+          "parent": null,
+          "kind": "call",
+          "consumer": "runner.market_fetch",
+          "reads": [],
+          "meta": {},
+          "outcome": "returned_ok"
+        },
+        {
+          "id": 8,
+          "parent": null,
+          "kind": "call",
+          "consumer": "execution.history_update",
+          "reads": [],
+          "meta": {
+            "cost_model_reached": true,
+            "previous_close_source": "initial_current_close"
+          },
+          "outcome": "returned_ok",
+          "symbol": "ES"
+        },
+        {
+          "id": 9,
+          "parent": 8,
+          "kind": "scope",
+          "consumer": "cost.history",
+          "reads": [
+            {
+              "field": "cost.impact_history.adv_lookback_days",
+              "value_type": "uint53",
+              "value": 20,
+              "origin": "runtime_effective"
+            }
+          ],
+          "meta": {}
+        },
+        {
+          "id": 10,
+          "parent": null,
+          "kind": "call",
+          "consumer": "strategy.preparation",
+          "reads": [],
+          "meta": {
+            "profile": "standard"
+          },
+          "outcome": "returned_ok",
+          "strategy": "ALPHA"
+        },
+        {
+          "id": 11,
+          "parent": null,
+          "kind": "call",
+          "consumer": "portfolio.primary",
+          "reads": [],
+          "meta": {
+            "skip_execution_generation": false
+          },
+          "outcome": "returned_ok"
+        },
+        {
+          "id": 12,
+          "parent": 11,
+          "kind": "call",
+          "consumer": "strategy.primary",
+          "reads": [],
+          "meta": {
+            "profile": "standard"
+          },
+          "outcome": "returned_ok",
+          "strategy": "ALPHA"
+        },
+        {
+          "id": 13,
+          "parent": 11,
+          "kind": "scope",
+          "consumer": "portfolio.pass",
+          "reads": [
+            {
+              "field": "portfolio.pass.use_optimization",
+              "value_type": "bool",
+              "value": false,
+              "origin": "app_config_effective"
+            },
+            {
+              "field": "portfolio.pass.use_risk_management",
+              "value_type": "bool",
+              "value": false,
+              "origin": "app_config_effective"
+            }
+          ],
+          "meta": {},
+          "index": 0
+        },
+        {
+          "id": 14,
+          "parent": null,
+          "kind": "call",
+          "consumer": "execution.batch",
+          "reads": [],
+          "meta": {
+            "state": "returned"
+          },
+          "outcome": "returned_ok",
+          "strategy": "ALPHA"
+        },
+        {
+          "id": 15,
+          "parent": null,
+          "kind": "call",
+          "consumer": "risk.diagnostics",
+          "reads": [],
+          "meta": {},
+          "outcome": "returned_ok"
+        },
+        {
+          "id": 16,
+          "parent": null,
+          "kind": "scope",
+          "consumer": "runner.non_trading_day",
+          "reads": [],
+          "meta": {
+            "skip_strategy_processing": false
+          }
+        },
+        {
+          "id": 17,
+          "parent": null,
+          "kind": "scope",
+          "consumer": "runner.benchmark",
+          "reads": [
+            {
+              "field": "runner.benchmark.mode",
+              "value_type": "benchmark_mode",
+              "value": "deferred",
+              "origin": "app_config_effective"
+            }
+          ],
+          "meta": {
+            "branch": "not_reached"
+          }
+        }
+      ]
+    },
+    "non_trading_skip": {
+      "version": 2,
+      "status": "partial",
+      "reason": "instrumentation_missing",
+      "coverage": {
+        "setup": {
+          "status": "complete",
+          "reason": "none"
+        },
+        "market_input": {
+          "status": "complete",
+          "reason": "none"
+        },
+        "cost_history": {
+          "status": "complete",
+          "reason": "none"
+        },
+        "preparation": {
+          "status": "skipped",
+          "reason": "non_trading_day"
+        },
+        "primary": {
+          "status": "skipped",
+          "reason": "non_trading_day"
+        },
+        "execution": {
+          "status": "partial",
+          "reason": "instrumentation_missing"
+        },
+        "diagnostics": {
+          "status": "complete",
+          "reason": "none"
+        },
+        "control_flow": {
+          "status": "complete",
+          "reason": "none"
+        }
+      },
+      "nodes": [
+        {
+          "id": 0,
+          "parent": null,
+          "kind": "call",
+          "consumer": "setup.selector",
+          "reads": [],
+          "meta": {
+            "mode": "ordinary"
+          },
+          "outcome": "returned_ok"
+        },
+        {
+          "id": 1,
+          "parent": 0,
+          "kind": "scope",
+          "consumer": "setup.ordinary_selection",
+          "reads": [],
+          "meta": {}
+        },
+        {
+          "id": 2,
+          "parent": 1,
+          "kind": "scope",
+          "consumer": "setup.selection_entry",
+          "reads": [
+            {
+              "field": "setup.selection.enabled_live",
+              "value_type": "bool",
+              "value": true,
+              "origin": "configured_strategy_leaf"
+            },
+            {
+              "field": "setup.selection.default_allocation",
+              "value_type": "number",
+              "value": 0.5,
+              "origin": "configured_strategy_leaf"
+            },
+            {
+              "field": "setup.selection.effective_allocation",
+              "value_type": "number",
+              "value": 0.5,
+              "origin": "derived"
+            }
+          ],
+          "meta": {
+            "enabled_live_read": true,
+            "allocation_read": true,
+            "enabled_live_present": true,
+            "allocation_defaulted": false
+          },
+          "strategy": "ALPHA"
+        },
+        {
+          "id": 3,
+          "parent": null,
+          "kind": "call",
+          "consumer": "setup.factory",
+          "reads": [],
+          "meta": {},
+          "outcome": "returned_ok"
+        },
+        {
+          "id": 4,
+          "parent": 3,
+          "kind": "scope",
+          "consumer": "setup.factory_entry",
+          "reads": [
+            {
+              "field": "setup.factory.effective_allocation",
+              "value_type": "number",
+              "value": 0.5,
+              "origin": "selected_allocation"
+            },
+            {
+              "field": "setup.factory.initial_capital",
+              "value_type": "number",
+              "value": 1000,
+              "origin": "app_config_effective"
+            },
+            {
+              "field": "setup.factory.allocated_capital",
+              "value_type": "number",
+              "value": 500,
+              "origin": "derived"
+            }
+          ],
+          "meta": {
+            "profile": "standard",
+            "construction": "succeeded",
+            "initialize": "succeeded",
+            "start": "succeeded"
+          },
+          "strategy": "ALPHA"
+        },
+        {
+          "id": 5,
+          "parent": null,
+          "kind": "call",
+          "consumer": "portfolio.registration",
+          "reads": [
+            {
+              "field": "portfolio.registration.initial_allocation",
+              "value_type": "number",
+              "value": 0.5,
+              "origin": "selected_allocation"
+            },
+            {
+              "field": "portfolio.registration.stored_allocation",
+              "value_type": "number",
+              "value": 0.5,
+              "origin": "selected_allocation"
+            }
+          ],
+          "meta": {},
+          "outcome": "returned_ok",
+          "strategy": "ALPHA"
+        },
+        {
+          "id": 6,
+          "parent": null,
+          "kind": "scope",
+          "consumer": "runner.market_window",
+          "reads": [
+            {
+              "field": "runner.market_input.historical_days",
+              "value_type": "int32",
+              "value": 30,
+              "origin": "app_config_effective"
+            }
+          ],
+          "meta": {}
+        },
+        {
+          "id": 7,
+          "parent": null,
+          "kind": "call",
+          "consumer": "runner.market_fetch",
+          "reads": [],
+          "meta": {},
+          "outcome": "returned_ok"
+        },
+        {
+          "id": 8,
+          "parent": null,
+          "kind": "call",
+          "consumer": "execution.history_update",
+          "reads": [],
+          "meta": {
+            "cost_model_reached": true,
+            "previous_close_source": "initial_current_close"
+          },
+          "outcome": "returned_ok",
+          "symbol": "ES"
+        },
+        {
+          "id": 9,
+          "parent": 8,
+          "kind": "scope",
+          "consumer": "cost.history",
+          "reads": [
+            {
+              "field": "cost.impact_history.adv_lookback_days",
+              "value_type": "uint53",
+              "value": 20,
+              "origin": "runtime_effective"
+            }
+          ],
+          "meta": {}
+        },
+        {
+          "id": 10,
+          "parent": null,
+          "kind": "call",
+          "consumer": "risk.diagnostics",
+          "reads": [],
+          "meta": {},
+          "outcome": "returned_ok"
+        },
+        {
+          "id": 11,
+          "parent": null,
+          "kind": "scope",
+          "consumer": "runner.non_trading_day",
+          "reads": [],
+          "meta": {
+            "skip_strategy_processing": true
+          }
+        },
+        {
+          "id": 12,
+          "parent": null,
+          "kind": "scope",
+          "consumer": "runner.benchmark",
+          "reads": [
+            {
+              "field": "runner.benchmark.mode",
+              "value_type": "benchmark_mode",
+              "value": "deferred",
+              "origin": "app_config_effective"
+            }
+          ],
+          "meta": {
+            "branch": "not_reached"
+          }
+        }
+      ]
+    },
+    "nested_partial": {
+      "version": 2,
+      "status": "partial",
+      "reason": "nonfatal_error",
+      "coverage": {
+        "setup": {
+          "status": "complete",
+          "reason": "none"
+        },
+        "market_input": {
+          "status": "partial",
+          "reason": "nonfatal_error"
+        },
+        "cost_history": {
+          "status": "complete",
+          "reason": "none"
+        },
+        "preparation": {
+          "status": "partial",
+          "reason": "incomplete_call"
+        },
+        "primary": {
+          "status": "complete",
+          "reason": "none"
+        },
+        "execution": {
+          "status": "complete",
+          "reason": "none"
+        },
+        "diagnostics": {
+          "status": "complete",
+          "reason": "none"
+        },
+        "control_flow": {
+          "status": "complete",
+          "reason": "none"
+        }
+      },
+      "nodes": [
+        {
+          "id": 0,
+          "parent": null,
+          "kind": "call",
+          "consumer": "setup.selector",
+          "reads": [],
+          "meta": {
+            "mode": "ordinary"
+          },
+          "outcome": "returned_ok"
+        },
+        {
+          "id": 1,
+          "parent": 0,
+          "kind": "scope",
+          "consumer": "setup.ordinary_selection",
+          "reads": [],
+          "meta": {}
+        },
+        {
+          "id": 2,
+          "parent": 1,
+          "kind": "scope",
+          "consumer": "setup.selection_entry",
+          "reads": [
+            {
+              "field": "setup.selection.enabled_live",
+              "value_type": "bool",
+              "value": true,
+              "origin": "configured_strategy_leaf"
+            },
+            {
+              "field": "setup.selection.default_allocation",
+              "value_type": "number",
+              "value": 0.5,
+              "origin": "configured_strategy_leaf"
+            },
+            {
+              "field": "setup.selection.effective_allocation",
+              "value_type": "number",
+              "value": 0.5,
+              "origin": "derived"
+            }
+          ],
+          "meta": {
+            "enabled_live_read": true,
+            "allocation_read": true,
+            "enabled_live_present": true,
+            "allocation_defaulted": false
+          },
+          "strategy": "ALPHA"
+        },
+        {
+          "id": 3,
+          "parent": null,
+          "kind": "call",
+          "consumer": "setup.factory",
+          "reads": [],
+          "meta": {},
+          "outcome": "returned_ok"
+        },
+        {
+          "id": 4,
+          "parent": 3,
+          "kind": "scope",
+          "consumer": "setup.factory_entry",
+          "reads": [
+            {
+              "field": "setup.factory.effective_allocation",
+              "value_type": "number",
+              "value": 0.5,
+              "origin": "selected_allocation"
+            },
+            {
+              "field": "setup.factory.initial_capital",
+              "value_type": "number",
+              "value": 1000,
+              "origin": "app_config_effective"
+            },
+            {
+              "field": "setup.factory.allocated_capital",
+              "value_type": "number",
+              "value": 500,
+              "origin": "derived"
+            }
+          ],
+          "meta": {
+            "profile": "standard",
+            "construction": "succeeded",
+            "initialize": "succeeded",
+            "start": "succeeded"
+          },
+          "strategy": "ALPHA"
+        },
+        {
+          "id": 5,
+          "parent": null,
+          "kind": "call",
+          "consumer": "portfolio.registration",
+          "reads": [
+            {
+              "field": "portfolio.registration.initial_allocation",
+              "value_type": "number",
+              "value": 0.5,
+              "origin": "selected_allocation"
+            },
+            {
+              "field": "portfolio.registration.stored_allocation",
+              "value_type": "number",
+              "value": 0.5,
+              "origin": "selected_allocation"
+            }
+          ],
+          "meta": {},
+          "outcome": "returned_ok",
+          "strategy": "ALPHA"
+        },
+        {
+          "id": 6,
+          "parent": null,
+          "kind": "scope",
+          "consumer": "runner.market_window",
+          "reads": [
+            {
+              "field": "runner.market_input.historical_days",
+              "value_type": "int32",
+              "value": 30,
+              "origin": "app_config_effective"
+            }
+          ],
+          "meta": {}
+        },
+        {
+          "id": 7,
+          "parent": null,
+          "kind": "call",
+          "consumer": "runner.market_fetch",
+          "reads": [],
+          "meta": {},
+          "outcome": "returned_error"
+        },
+        {
+          "id": 8,
+          "parent": null,
+          "kind": "call",
+          "consumer": "execution.history_update",
+          "reads": [],
+          "meta": {
+            "cost_model_reached": true,
+            "previous_close_source": "initial_current_close"
+          },
+          "outcome": "returned_ok",
+          "symbol": "ES"
+        },
+        {
+          "id": 9,
+          "parent": 8,
+          "kind": "scope",
+          "consumer": "cost.history",
+          "reads": [
+            {
+              "field": "cost.impact_history.adv_lookback_days",
+              "value_type": "uint53",
+              "value": 20,
+              "origin": "runtime_effective"
+            }
+          ],
+          "meta": {}
+        },
+        {
+          "id": 10,
+          "parent": null,
+          "kind": "call",
+          "consumer": "strategy.preparation",
+          "reads": [],
+          "meta": {
+            "profile": "standard"
+          },
+          "outcome": "incomplete",
+          "strategy": "ALPHA"
+        },
+        {
+          "id": 11,
+          "parent": null,
+          "kind": "call",
+          "consumer": "portfolio.primary",
+          "reads": [],
+          "meta": {
+            "skip_execution_generation": false
+          },
+          "outcome": "returned_ok"
+        },
+        {
+          "id": 12,
+          "parent": 11,
+          "kind": "call",
+          "consumer": "strategy.primary",
+          "reads": [],
+          "meta": {
+            "profile": "standard"
+          },
+          "outcome": "returned_ok",
+          "strategy": "ALPHA"
+        },
+        {
+          "id": 13,
+          "parent": 11,
+          "kind": "scope",
+          "consumer": "portfolio.pass",
+          "reads": [
+            {
+              "field": "portfolio.pass.use_optimization",
+              "value_type": "bool",
+              "value": false,
+              "origin": "app_config_effective"
+            },
+            {
+              "field": "portfolio.pass.use_risk_management",
+              "value_type": "bool",
+              "value": false,
+              "origin": "app_config_effective"
+            }
+          ],
+          "meta": {},
+          "index": 0
+        },
+        {
+          "id": 14,
+          "parent": null,
+          "kind": "call",
+          "consumer": "execution.batch",
+          "reads": [],
+          "meta": {
+            "state": "returned"
+          },
+          "outcome": "returned_ok",
+          "strategy": "ALPHA"
+        },
+        {
+          "id": 15,
+          "parent": null,
+          "kind": "call",
+          "consumer": "risk.diagnostics",
+          "reads": [],
+          "meta": {},
+          "outcome": "returned_ok"
+        },
+        {
+          "id": 16,
+          "parent": null,
+          "kind": "scope",
+          "consumer": "runner.non_trading_day",
+          "reads": [],
+          "meta": {
+            "skip_strategy_processing": false
+          }
+        },
+        {
+          "id": 17,
+          "parent": null,
+          "kind": "scope",
+          "consumer": "runner.benchmark",
+          "reads": [
+            {
+              "field": "runner.benchmark.mode",
+              "value_type": "benchmark_mode",
+              "value": "deferred",
+              "origin": "app_config_effective"
+            }
+          ],
+          "meta": {
+            "branch": "not_reached"
+          }
+        }
+      ]
+    },
+    "unavailable_instrumentation_missing": {
+      "version": 2,
+      "status": "unavailable",
+      "reason": "instrumentation_missing",
+      "coverage": {
+        "setup": {
+          "status": "unavailable",
+          "reason": "instrumentation_missing"
+        },
+        "market_input": {
+          "status": "unavailable",
+          "reason": "instrumentation_missing"
+        },
+        "cost_history": {
+          "status": "unavailable",
+          "reason": "instrumentation_missing"
+        },
+        "preparation": {
+          "status": "unavailable",
+          "reason": "instrumentation_missing"
+        },
+        "primary": {
+          "status": "unavailable",
+          "reason": "instrumentation_missing"
+        },
+        "execution": {
+          "status": "unavailable",
+          "reason": "instrumentation_missing"
+        },
+        "diagnostics": {
+          "status": "unavailable",
+          "reason": "instrumentation_missing"
+        },
+        "control_flow": {
+          "status": "unavailable",
+          "reason": "instrumentation_missing"
+        }
+      },
+      "nodes": []
+    },
+    "unavailable_unsupported_consumer": {
+      "version": 2,
+      "status": "unavailable",
+      "reason": "unsupported_consumer",
+      "coverage": {
+        "setup": {
+          "status": "unavailable",
+          "reason": "unsupported_consumer"
+        },
+        "market_input": {
+          "status": "unavailable",
+          "reason": "unsupported_consumer"
+        },
+        "cost_history": {
+          "status": "unavailable",
+          "reason": "unsupported_consumer"
+        },
+        "preparation": {
+          "status": "unavailable",
+          "reason": "unsupported_consumer"
+        },
+        "primary": {
+          "status": "unavailable",
+          "reason": "unsupported_consumer"
+        },
+        "execution": {
+          "status": "unavailable",
+          "reason": "unsupported_consumer"
+        },
+        "diagnostics": {
+          "status": "unavailable",
+          "reason": "unsupported_consumer"
+        },
+        "control_flow": {
+          "status": "unavailable",
+          "reason": "unsupported_consumer"
+        }
+      },
+      "nodes": []
+    },
+    "unavailable_capacity_exceeded": {
+      "version": 2,
+      "status": "unavailable",
+      "reason": "capacity_exceeded",
+      "coverage": {
+        "setup": {
+          "status": "unavailable",
+          "reason": "capacity_exceeded"
+        },
+        "market_input": {
+          "status": "unavailable",
+          "reason": "capacity_exceeded"
+        },
+        "cost_history": {
+          "status": "unavailable",
+          "reason": "capacity_exceeded"
+        },
+        "preparation": {
+          "status": "unavailable",
+          "reason": "capacity_exceeded"
+        },
+        "primary": {
+          "status": "unavailable",
+          "reason": "capacity_exceeded"
+        },
+        "execution": {
+          "status": "unavailable",
+          "reason": "capacity_exceeded"
+        },
+        "diagnostics": {
+          "status": "unavailable",
+          "reason": "capacity_exceeded"
+        },
+        "control_flow": {
+          "status": "unavailable",
+          "reason": "capacity_exceeded"
+        }
+      },
+      "nodes": []
+    },
+    "unavailable_invalid_observed_value": {
+      "version": 2,
+      "status": "unavailable",
+      "reason": "invalid_observed_value",
+      "coverage": {
+        "setup": {
+          "status": "unavailable",
+          "reason": "invalid_observed_value"
+        },
+        "market_input": {
+          "status": "unavailable",
+          "reason": "invalid_observed_value"
+        },
+        "cost_history": {
+          "status": "unavailable",
+          "reason": "invalid_observed_value"
+        },
+        "preparation": {
+          "status": "unavailable",
+          "reason": "invalid_observed_value"
+        },
+        "primary": {
+          "status": "unavailable",
+          "reason": "invalid_observed_value"
+        },
+        "execution": {
+          "status": "unavailable",
+          "reason": "invalid_observed_value"
+        },
+        "diagnostics": {
+          "status": "unavailable",
+          "reason": "invalid_observed_value"
+        },
+        "control_flow": {
+          "status": "unavailable",
+          "reason": "invalid_observed_value"
+        }
+      },
+      "nodes": []
+    },
+    "unavailable_invalid_observed_identity": {
+      "version": 2,
+      "status": "unavailable",
+      "reason": "invalid_observed_identity",
+      "coverage": {
+        "setup": {
+          "status": "unavailable",
+          "reason": "invalid_observed_identity"
+        },
+        "market_input": {
+          "status": "unavailable",
+          "reason": "invalid_observed_identity"
+        },
+        "cost_history": {
+          "status": "unavailable",
+          "reason": "invalid_observed_identity"
+        },
+        "preparation": {
+          "status": "unavailable",
+          "reason": "invalid_observed_identity"
+        },
+        "primary": {
+          "status": "unavailable",
+          "reason": "invalid_observed_identity"
+        },
+        "execution": {
+          "status": "unavailable",
+          "reason": "invalid_observed_identity"
+        },
+        "diagnostics": {
+          "status": "unavailable",
+          "reason": "invalid_observed_identity"
+        },
+        "control_flow": {
+          "status": "unavailable",
+          "reason": "invalid_observed_identity"
+        }
+      },
+      "nodes": []
+    },
+    "rich": {
+      "version": 2,
+      "status": "complete",
+      "reason": "none",
+      "coverage": {
+        "setup": {
+          "status": "complete",
+          "reason": "none"
+        },
+        "market_input": {
+          "status": "complete",
+          "reason": "none"
+        },
+        "cost_history": {
+          "status": "complete",
+          "reason": "none"
+        },
+        "preparation": {
+          "status": "complete",
+          "reason": "none"
+        },
+        "primary": {
+          "status": "complete",
+          "reason": "none"
+        },
+        "execution": {
+          "status": "complete",
+          "reason": "none"
+        },
+        "diagnostics": {
+          "status": "complete",
+          "reason": "none"
+        },
+        "control_flow": {
+          "status": "complete",
+          "reason": "none"
+        }
+      },
+      "nodes": [
+        {
+          "id": 0,
+          "parent": null,
+          "kind": "call",
+          "consumer": "setup.selector",
+          "reads": [],
+          "meta": {
+            "mode": "ordinary"
+          },
+          "outcome": "returned_ok"
+        },
+        {
+          "id": 1,
+          "parent": 0,
+          "kind": "scope",
+          "consumer": "setup.ordinary_selection",
+          "reads": [],
+          "meta": {}
+        },
+        {
+          "id": 2,
+          "parent": 1,
+          "kind": "scope",
+          "consumer": "setup.selection_entry",
+          "reads": [
+            {
+              "field": "setup.selection.enabled_live",
+              "value_type": "bool",
+              "value": true,
+              "origin": "configured_strategy_leaf"
+            },
+            {
+              "field": "setup.selection.default_allocation",
+              "value_type": "number",
+              "value": 0.5,
+              "origin": "configured_strategy_leaf"
+            },
+            {
+              "field": "setup.selection.effective_allocation",
+              "value_type": "number",
+              "value": 0.5,
+              "origin": "derived"
+            }
+          ],
+          "meta": {
+            "enabled_live_read": true,
+            "allocation_read": true,
+            "enabled_live_present": true,
+            "allocation_defaulted": false
+          },
+          "strategy": "ALPHA"
+        },
+        {
+          "id": 3,
+          "parent": null,
+          "kind": "call",
+          "consumer": "setup.factory",
+          "reads": [],
+          "meta": {},
+          "outcome": "returned_ok"
+        },
+        {
+          "id": 4,
+          "parent": 3,
+          "kind": "scope",
+          "consumer": "setup.factory_entry",
+          "reads": [
+            {
+              "field": "setup.factory.effective_allocation",
+              "value_type": "number",
+              "value": 0.5,
+              "origin": "selected_allocation"
+            },
+            {
+              "field": "setup.factory.initial_capital",
+              "value_type": "number",
+              "value": 1000,
+              "origin": "app_config_effective"
+            },
+            {
+              "field": "setup.factory.allocated_capital",
+              "value_type": "number",
+              "value": 500,
+              "origin": "derived"
+            }
+          ],
+          "meta": {
+            "profile": "standard",
+            "construction": "succeeded",
+            "initialize": "succeeded",
+            "start": "succeeded"
+          },
+          "strategy": "ALPHA"
+        },
+        {
+          "id": 5,
+          "parent": null,
+          "kind": "call",
+          "consumer": "portfolio.registration",
+          "reads": [
+            {
+              "field": "portfolio.registration.initial_allocation",
+              "value_type": "number",
+              "value": 0.5,
+              "origin": "selected_allocation"
+            },
+            {
+              "field": "portfolio.registration.stored_allocation",
+              "value_type": "number",
+              "value": 0.5,
+              "origin": "selected_allocation"
+            }
+          ],
+          "meta": {},
+          "outcome": "returned_ok",
+          "strategy": "ALPHA"
+        },
+        {
+          "id": 6,
+          "parent": null,
+          "kind": "scope",
+          "consumer": "runner.market_window",
+          "reads": [
+            {
+              "field": "runner.market_input.historical_days",
+              "value_type": "int32",
+              "value": 30,
+              "origin": "app_config_effective"
+            }
+          ],
+          "meta": {}
+        },
+        {
+          "id": 7,
+          "parent": null,
+          "kind": "call",
+          "consumer": "runner.market_fetch",
+          "reads": [],
+          "meta": {},
+          "outcome": "returned_ok"
+        },
+        {
+          "id": 8,
+          "parent": null,
+          "kind": "call",
+          "consumer": "execution.history_update",
+          "reads": [],
+          "meta": {
+            "cost_model_reached": true,
+            "previous_close_source": "initial_current_close"
+          },
+          "outcome": "returned_ok",
+          "symbol": "ES"
+        },
+        {
+          "id": 9,
+          "parent": 8,
+          "kind": "scope",
+          "consumer": "cost.history",
+          "reads": [
+            {
+              "field": "cost.impact_history.adv_lookback_days",
+              "value_type": "uint53",
+              "value": 20,
+              "origin": "runtime_effective"
+            }
+          ],
+          "meta": {}
+        },
+        {
+          "id": 10,
+          "parent": null,
+          "kind": "call",
+          "consumer": "strategy.preparation",
+          "reads": [],
+          "meta": {
+            "profile": "standard"
+          },
+          "outcome": "returned_ok",
+          "strategy": "ALPHA"
+        },
+        {
+          "id": 11,
+          "parent": null,
+          "kind": "call",
+          "consumer": "portfolio.primary",
+          "reads": [],
+          "meta": {
+            "skip_execution_generation": false
+          },
+          "outcome": "returned_ok"
+        },
+        {
+          "id": 12,
+          "parent": 11,
+          "kind": "call",
+          "consumer": "strategy.primary",
+          "reads": [],
+          "meta": {
+            "profile": "standard"
+          },
+          "outcome": "returned_ok",
+          "strategy": "ALPHA"
+        },
+        {
+          "id": 13,
+          "parent": 11,
+          "kind": "scope",
+          "consumer": "portfolio.pass",
+          "reads": [
+            {
+              "field": "portfolio.pass.use_optimization",
+              "value_type": "bool",
+              "value": true,
+              "origin": "app_config_effective"
+            },
+            {
+              "field": "portfolio.pass.use_risk_management",
+              "value_type": "bool",
+              "value": true,
+              "origin": "app_config_effective"
+            }
+          ],
+          "meta": {},
+          "index": 0
+        },
+        {
+          "id": 14,
+          "parent": null,
+          "kind": "call",
+          "consumer": "execution.batch",
+          "reads": [],
+          "meta": {
+            "state": "returned"
+          },
+          "outcome": "returned_ok",
+          "strategy": "ALPHA"
+        },
+        {
+          "id": 15,
+          "parent": null,
+          "kind": "call",
+          "consumer": "risk.diagnostics",
+          "reads": [],
+          "meta": {},
+          "outcome": "returned_ok"
+        },
+        {
+          "id": 16,
+          "parent": null,
+          "kind": "scope",
+          "consumer": "runner.non_trading_day",
+          "reads": [],
+          "meta": {
+            "skip_strategy_processing": false
+          }
+        },
+        {
+          "id": 17,
+          "parent": null,
+          "kind": "scope",
+          "consumer": "runner.benchmark",
+          "reads": [
+            {
+              "field": "runner.benchmark.mode",
+              "value_type": "benchmark_mode",
+              "value": "deferred",
+              "origin": "app_config_effective"
+            }
+          ],
+          "meta": {
+            "branch": "not_reached"
+          }
+        },
+        {
+          "id": 18,
+          "parent": 10,
+          "kind": "scope",
+          "consumer": "strategy.history",
+          "reads": [
+            {
+              "field": "strategy.history.max_history_size",
+              "value_type": "uint53",
+              "value": 1024,
+              "origin": "constructor_effective"
+            },
+            {
+              "field": "strategy.history.ema_windows",
+              "value_type": "int32_pairs",
+              "value": [
+                [
+                  8,
+                  32
+                ],
+                [
+                  8,
+                  32
+                ]
+              ],
+              "origin": "constructor_effective"
+            }
+          ],
+          "meta": {}
+        },
+        {
+          "id": 19,
+          "parent": 10,
+          "kind": "scope",
+          "consumer": "strategy.volatility",
+          "reads": [
+            {
+              "field": "strategy.volatility.vol_lookback_short",
+              "value_type": "int32",
+              "value": -1,
+              "origin": "runtime_effective"
+            }
+          ],
+          "meta": {}
+        },
+        {
+          "id": 20,
+          "parent": 10,
+          "kind": "scope",
+          "consumer": "strategy.forecast",
+          "reads": [
+            {
+              "field": "strategy.forecast.fdm",
+              "value_type": "int32_number_pairs",
+              "value": [
+                [
+                  1,
+                  -0.5
+                ]
+              ],
+              "origin": "constructor_effective"
+            }
+          ],
+          "meta": {}
+        },
+        {
+          "id": 21,
+          "parent": 10,
+          "kind": "scope",
+          "consumer": "strategy.regime",
+          "reads": [
+            {
+              "field": "strategy.regime.vol_lookback_long",
+              "value_type": "int32",
+              "value": 64,
+              "origin": "constructor_effective"
+            }
+          ],
+          "meta": {}
+        },
+        {
+          "id": 22,
+          "parent": 10,
+          "kind": "scope",
+          "consumer": "strategy.sizing",
+          "reads": [
+            {
+              "field": "strategy.sizing.capital_allocation",
+              "value_type": "number",
+              "value": 500,
+              "origin": "derived"
+            },
+            {
+              "field": "strategy.sizing.symbol_limit.symbol.present",
+              "value_type": "bool",
+              "value": true,
+              "origin": "runtime_effective",
+              "symbol": "ES"
+            },
+            {
+              "field": "strategy.sizing.symbol_limit.symbol.value",
+              "value_type": "number",
+              "value": 5,
+              "origin": "derived",
+              "symbol": "ES"
+            }
+          ],
+          "meta": {}
+        },
+        {
+          "id": 23,
+          "parent": 10,
+          "kind": "scope",
+          "consumer": "strategy.buffering",
+          "reads": [
+            {
+              "field": "strategy.buffering.use_position_buffering",
+              "value_type": "bool",
+              "value": true,
+              "origin": "constructor_effective"
+            },
+            {
+              "field": "strategy.buffering.symbol_limit.symbol.present",
+              "value_type": "bool",
+              "value": false,
+              "origin": "runtime_effective",
+              "symbol": "NQ"
+            }
+          ],
+          "meta": {}
+        },
+        {
+          "id": 24,
+          "parent": 10,
+          "kind": "scope",
+          "consumer": "strategy.base_risk",
+          "reads": [
+            {
+              "field": "strategy.base_risk.risk_max_leverage",
+              "value_type": "fixed_decimal8",
+              "value": "92233720368.54775807",
+              "origin": "runtime_effective"
+            },
+            {
+              "field": "strategy.base_risk.trading_multiplier.symbol.present",
+              "value_type": "bool",
+              "value": true,
+              "origin": "runtime_effective",
+              "symbol": "ES"
+            },
+            {
+              "field": "strategy.base_risk.trading_multiplier.symbol.value",
+              "value_type": "number",
+              "value": 1.5,
+              "origin": "runtime_effective",
+              "symbol": "ES"
+            }
+          ],
+          "meta": {
+            "supported": true
+          }
+        },
+        {
+          "id": 25,
+          "parent": 10,
+          "kind": "scope",
+          "consumer": "strategy.position_limits",
+          "reads": [
+            {
+              "field": "strategy.position_limits.symbol.present",
+              "value_type": "bool",
+              "value": false,
+              "origin": "runtime_effective",
+              "symbol": "ES"
+            }
+          ],
+          "meta": {
+            "supported": true
+          }
+        },
+        {
+          "id": 26,
+          "parent": 13,
+          "kind": "call",
+          "consumer": "portfolio.optimization",
+          "reads": [
+            {
+              "field": "portfolio.optimization.total_capital",
+              "value_type": "fixed_decimal8",
+              "value": "-92233720368.54775808",
+              "origin": "derived"
+            }
+          ],
+          "meta": {
+            "skip": "none"
+          },
+          "outcome": "returned_ok"
+        },
+        {
+          "id": 27,
+          "parent": 26,
+          "kind": "scope",
+          "consumer": "portfolio.symbol_collection",
+          "reads": [],
+          "meta": {}
+        },
+        {
+          "id": 28,
+          "parent": 27,
+          "kind": "scope",
+          "consumer": "portfolio.optimization_strategy",
+          "reads": [
+            {
+              "field": "portfolio.optimization.strategy.enabled",
+              "value_type": "bool",
+              "value": true,
+              "origin": "derived"
+            },
+            {
+              "field": "portfolio.optimization.strategy.allocation",
+              "value_type": "number",
+              "value": 0.5,
+              "origin": "selected_allocation"
+            }
+          ],
+          "meta": {},
+          "strategy": "ALPHA"
+        },
+        {
+          "id": 29,
+          "parent": 26,
+          "kind": "scope",
+          "consumer": "portfolio.numeric_aggregation",
+          "reads": [],
+          "meta": {}
+        },
+        {
+          "id": 30,
+          "parent": 29,
+          "kind": "scope",
+          "consumer": "portfolio.optimization_strategy",
+          "reads": [
+            {
+              "field": "portfolio.optimization.strategy.enabled",
+              "value_type": "bool",
+              "value": true,
+              "origin": "derived"
+            },
+            {
+              "field": "portfolio.optimization.strategy.allocation",
+              "value_type": "number",
+              "value": 0.5,
+              "origin": "selected_allocation"
+            }
+          ],
+          "meta": {},
+          "strategy": "ALPHA"
+        },
+        {
+          "id": 31,
+          "parent": 26,
+          "kind": "scope",
+          "consumer": "portfolio.redistribution",
+          "reads": [],
+          "meta": {}
+        },
+        {
+          "id": 32,
+          "parent": 31,
+          "kind": "scope",
+          "consumer": "portfolio.optimization_strategy",
+          "reads": [
+            {
+              "field": "portfolio.optimization.strategy.enabled",
+              "value_type": "bool",
+              "value": true,
+              "origin": "derived"
+            },
+            {
+              "field": "portfolio.optimization.strategy.allocation",
+              "value_type": "number",
+              "value": 0.5,
+              "origin": "selected_allocation"
+            }
+          ],
+          "meta": {},
+          "strategy": "ALPHA"
+        },
+        {
+          "id": 33,
+          "parent": 26,
+          "kind": "scope",
+          "consumer": "portfolio.estimate",
+          "reads": [],
+          "meta": {},
+          "symbol": "ES",
+          "index": 0
+        },
+        {
+          "id": 34,
+          "parent": 33,
+          "kind": "call",
+          "consumer": "cost.estimate",
+          "reads": [
+            {
+              "field": "cost.spread.baseline_spread_ticks",
+              "value_type": "number",
+              "value": 1,
+              "origin": "runtime_effective"
+            }
+          ],
+          "meta": {
+            "asset_lookup": "exact_symbol",
+            "input_source": "explicit_values"
+          },
+          "outcome": "returned_ok"
+        },
+        {
+          "id": 35,
+          "parent": 26,
+          "kind": "call",
+          "consumer": "optimizer.primary",
+          "reads": [
+            {
+              "field": "optimizer.use_buffering",
+              "value_type": "bool",
+              "value": false,
+              "origin": "app_config_effective"
+            }
+          ],
+          "meta": {
+            "buffer_branch": "disabled"
+          },
+          "outcome": "returned_ok"
+        },
+        {
+          "id": 36,
+          "parent": 13,
+          "kind": "call",
+          "consumer": "portfolio.risk",
+          "reads": [
+            {
+              "field": "portfolio.risk.lookback_period",
+              "value_type": "int32",
+              "value": 20,
+              "origin": "app_config_effective"
+            }
+          ],
+          "meta": {
+            "skip": "none",
+            "manager_source": "external"
+          },
+          "outcome": "returned_ok"
+        },
+        {
+          "id": 37,
+          "parent": 36,
+          "kind": "call",
+          "consumer": "risk.primary",
+          "reads": [
+            {
+              "field": "risk.capital",
+              "value_type": "fixed_decimal8",
+              "value": "1.25",
+              "origin": "runtime_effective"
+            }
+          ],
+          "meta": {},
+          "outcome": "returned_ok"
+        },
+        {
+          "id": 38,
+          "parent": 11,
+          "kind": "call",
+          "consumer": "cost.strategy_execution",
+          "reads": [
+            {
+              "field": "cost.charge.point_value",
+              "value_type": "number",
+              "value": 50,
+              "origin": "runtime_effective"
+            }
+          ],
+          "meta": {
+            "input_source": "internally_tracked"
+          },
+          "outcome": "returned_ok",
+          "strategy": "ALPHA",
+          "symbol": "ES"
+        },
+        {
+          "id": 39,
+          "parent": 11,
+          "kind": "call",
+          "consumer": "cost.compatibility_execution",
+          "reads": [],
+          "meta": {},
+          "outcome": "returned_ok",
+          "symbol": "ES"
+        },
+        {
+          "id": 40,
+          "parent": 14,
+          "kind": "call",
+          "consumer": "execution.attempt",
+          "reads": [],
+          "meta": {
+            "state": "returned",
+            "branch": "current_position",
+            "price_source": "market_prices",
+            "returned": true
+          },
+          "outcome": "returned_ok",
+          "symbol": "ES",
+          "index": 0
+        },
+        {
+          "id": 41,
+          "parent": 40,
+          "kind": "scope",
+          "consumer": "cost.execution",
+          "reads": [
+            {
+              "field": "cost.impact.min_adv",
+              "value_type": "number",
+              "value": 100,
+              "origin": "runtime_effective"
+            }
+          ],
+          "meta": {
+            "input_source": "internally_tracked"
+          }
+        },
+        {
+          "id": 42,
+          "parent": null,
+          "kind": "call",
+          "consumer": "runner.pnl_finalization",
+          "reads": [
+            {
+              "field": "runner.pnl_finalization.strategy_allocation",
+              "value_type": "number",
+              "value": 0.5,
+              "origin": "code_default"
+            }
+          ],
+          "meta": {
+            "allocation_lookup": "fallback"
+          },
+          "outcome": "returned_ok",
+          "strategy": "ALPHA"
+        }
+      ]
+    }
+  },
+  "rejected": [
+    {
+      "name": "unknown_root_key",
+      "base": "ordinary",
+      "path": "extra",
+      "value": "x"
+    },
+    {
+      "name": "wrong_version",
+      "base": "ordinary",
+      "path": "version",
+      "value": 1
+    },
+    {
+      "name": "bad_parent",
+      "base": "ordinary",
+      "path": "nodes.9.parent",
+      "value": 0
+    },
+    {
+      "name": "wrong_origin",
+      "base": "ordinary",
+      "path": "nodes.6.reads.0.origin",
+      "value": "derived"
+    },
+    {
+      "name": "bool_numeric",
+      "base": "ordinary",
+      "path": "nodes.6.reads.0.value",
+      "value": true
+    },
+    {
+      "name": "invalid_strategy_identity",
+      "base": "ordinary",
+      "path": "nodes.2.strategy",
+      "value": "ALPHA\nBAD"
+    },
+    {
+      "name": "stale_complete_after_error",
+      "base": "nested_partial",
+      "path": "coverage.market_input.status",
+      "value": "complete"
+    },
+    {
+      "name": "skip_without_decision",
+      "base": "non_trading_skip",
+      "path": "nodes.11.meta.skip_strategy_processing",
+      "value": false
+    },
+    {
+      "name": "duplicate_read",
+      "base": "ordinary",
+      "append_to": "nodes.9.reads",
+      "item": {
+        "field": "cost.impact_history.adv_lookback_days",
+        "value_type": "uint53",
+        "value": 20,
+        "origin": "runtime_effective"
+      }
+    }
+  ]
+}

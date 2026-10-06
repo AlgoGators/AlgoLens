@@ -9,6 +9,7 @@ import {
   isWindowComplete,
 } from '../domain/portfolio/incubationUtils';
 import { useTheme } from '../adapters/react/ThemeContext';
+import { counted } from '../domain/text/pluralize';
 
 interface IncubationOverviewProps {
   strategies: IncubatingStrategy[];
@@ -18,8 +19,14 @@ export function IncubationOverview({ strategies }: IncubationOverviewProps) {
   const { theme } = useTheme();
 
   const summary = useMemo(() => {
-    const totalMockCapital = strategies.reduce(
-      (sum, strategy) => sum + (strategy.mock_capital || 0),
+    // Strategies whose mock capital has not been set are counted separately
+    // rather than folded in as zero, so the total is never quietly short.
+    const withCapital = strategies.filter(
+      strategy => strategy.mock_capital !== null && strategy.mock_capital !== undefined
+    );
+    const missingCapital = strategies.length - withCapital.length;
+    const totalMockCapital = withCapital.reduce(
+      (sum, strategy) => sum + (strategy.mock_capital as number),
       0
     );
     const averageProgress =
@@ -43,7 +50,25 @@ export function IncubationOverview({ strategies }: IncubationOverviewProps) {
         !isWindowComplete(strategy.days_elapsed, strategy.window_days)
     ).length;
 
-    return { totalMockCapital, averageProgress, completed, nearEnd };
+    // The window is a per-strategy field. Report the shared value when every
+    // strategy agrees, and a range when they do not, rather than asserting a
+    // single fund-wide policy the data may not support.
+    const windows = [...new Set(strategies.map(s => s.window_days))].sort((a, b) => a - b);
+    const windowLabel =
+      windows.length === 0
+        ? '—'
+        : windows.length === 1
+          ? counted(windows[0], 'day')
+          : `${windows[0]}–${windows[windows.length - 1]} days`;
+
+    return {
+      totalMockCapital,
+      missingCapital,
+      averageProgress,
+      completed,
+      nearEnd,
+      windowLabel,
+    };
   }, [strategies]);
 
   return (
@@ -70,7 +95,15 @@ export function IncubationOverview({ strategies }: IncubationOverviewProps) {
             theme === 'dark' ? 'text-gray-300' : 'text-gray-700'
           }`}
         >
-          <span>{strategies.length} incubating strategies</span>
+          <span>{counted(strategies.length, 'incubating strategy', 'incubating strategies')}</span>
+          {summary.missingCapital > 0 && (
+            <>
+              <span className="hidden sm:inline">•</span>
+              <span className={theme === 'dark' ? 'text-amber-400' : 'text-amber-600'}>
+                excludes {summary.missingCapital} with no capital set
+              </span>
+            </>
+          )}
           <span className="hidden sm:inline">•</span>
           <span className="flex items-center gap-2 text-orange-500">
             <TrendingUp className="w-5 h-5" />
@@ -112,7 +145,12 @@ export function IncubationOverview({ strategies }: IncubationOverviewProps) {
           >
             Observation Window
           </div>
-          <div className="text-2xl">120 days</div>
+          {/* Read from the strategies themselves. It was hardcoded to
+              "120 days", which stated a fund policy the data does not
+              necessarily agree with -- window_days is per strategy. */}
+          <div className="text-2xl">
+            {summary.windowLabel}
+          </div>
         </div>
       </div>
 

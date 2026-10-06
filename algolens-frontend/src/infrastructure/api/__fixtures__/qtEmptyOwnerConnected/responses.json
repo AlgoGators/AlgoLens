@@ -1,0 +1,51 @@
+[
+  {
+    "http_status": 200,
+    "request_method": "GET",
+    "response_body": "{\"action_grants\":{\"can_approve\":false,\"can_confirm\":true,\"can_save_draft\":true},\"book_id\":\"EQ_BOOK\",\"capability\":{\"available\":true,\"required\":true,\"version\":1},\"empty_owner\":{\"configured_owner_names\":[\"EQUITY_MEAN_REVERSION\"],\"model_publication_id\":\"adca2e55-3178-4c0a-9560-828a15c4387f\",\"owner_document_digest\":\"324c89b5c306c1dc737043c2846e281f24c116006e61ba3ab8836ffffab385ef\",\"schema_version\":\"qt-empty-owner-choice/v2\"},\"provenance_digest\":\"c592416318cb45006a2eade60d483b71ef6d8a547809bd97e7b6cb02136947d6\",\"read_only_reason\":null,\"saved_qt_rows\":[],\"schema_version\":\"qt-workflow/v2\",\"seed_publication_id\":\"adca2e55-3178-4c0a-9560-828a15c4387f\",\"seed_rows\":[],\"source_day\":\"2026-09-27\",\"source_digest\":\"b92a4b1cb5b8c54fe89b309fa047143033aee5eaf076db8ed01c5e1440c38cff\",\"workflow_state\":\"ready\"}\n",
+    "response_sha256": "d310c919d429aab4b71b3bd0df348c9266ec6c6daf52f6c5e36a7c0e39b4970f",
+    "route": "/portfolio/qt-books/EQ_BOOK/proposal"
+  },
+  {
+    "http_status": 200,
+    "request_method": "GET",
+    "response_body": "{\"book_id\":\"EQ_BOOK\",\"draft_digest\":null,\"draft_id\":null,\"draft_revision\":0,\"empty_owner\":{\"configured_owner_names\":[\"EQUITY_MEAN_REVERSION\"],\"model_publication_id\":\"adca2e55-3178-4c0a-9560-828a15c4387f\",\"owner_document_digest\":\"324c89b5c306c1dc737043c2846e281f24c116006e61ba3ab8836ffffab385ef\",\"schema_version\":\"qt-empty-owner-choice/v2\"},\"provenance_digest\":\"c592416318cb45006a2eade60d483b71ef6d8a547809bd97e7b6cb02136947d6\",\"schema_version\":\"qt-workflow/v2\",\"selection_rows\":[],\"source_day\":\"2026-09-27\",\"source_digest\":\"b92a4b1cb5b8c54fe89b309fa047143033aee5eaf076db8ed01c5e1440c38cff\",\"state\":\"absent\"}\n",
+    "response_sha256": "2646fd4b17c902951be9d7741edbced91f5fd7db811b9173e2320e6fbee28d38",
+    "route": "/portfolio/qt-books/EQ_BOOK/draft"
+  },
+  {
+    "http_status": 200,
+    "request_method": "PUT",
+    "response_body": "{\"book_id\":\"EQ_BOOK\",\"draft_digest\":\"4a3bc494577c19c2b2e75a4601089a9dad54972213487d1729d8d18f0ae0d771\",\"draft_id\":\"e39ada9a-936f-4a5d-863d-2d0bcb0ebd92\",\"draft_revision\":1,\"empty_owner\":{\"configured_owner_names\":[\"EQUITY_MEAN_REVERSION\"],\"model_publication_id\":\"adca2e55-3178-4c0a-9560-828a15c4387f\",\"owner_document_digest\":\"324c89b5c306c1dc737043c2846e281f24c116006e61ba3ab8836ffffab385ef\",\"schema_version\":\"qt-empty-owner-choice/v2\"},\"provenance_digest\":\"c592416318cb45006a2eade60d483b71ef6d8a547809bd97e7b6cb02136947d6\",\"schema_version\":\"qt-workflow/v2\",\"selection_rows\":[],\"source_day\":\"2026-09-27\",\"source_digest\":\"b92a4b1cb5b8c54fe89b309fa047143033aee5eaf076db8ed01c5e1440c38cff\",\"state\":\"saved\"}\n",
+    "response_sha256": "ddcdb7ec799d644f00cc87362ae6cf568aeef11f6b0ec13609a7379cc0c79c97",
+    "route": "/portfolio/qt-books/EQ_BOOK/draft"
+  },
+  {
+    "http_status": 200,
+    "request_method": "POST",
+    "response_body": "{\"availability\":\"ready\",\"book_id\":\"EQ_BOOK\",\"confirmable\":true,\"draft_id\":\"e39ada9a-936f-4a5d-863d-2d0bcb0ebd92\",\"draft_revision\":1,\"evaluation\":{\"optimizer\":{\"aggregate_bindings\":[],\"config_source_id\":null,\"cost_penalty\":null,\"current_weights\":[],\"diagnostics\":[],\"evaluated_book_digest\":null,\"solved_weights\":[],\"status\":\"disabled\",\"target_weights\":[],\"trace\":[]},\"selected_costs\":{\"by_component\":[],\"diagnostics\":[],\"evaluated_book_digest\":\"4a3bc494577c19c2b2e75a4601089a9dad54972213487d1729d8d18f0ae0d771\",\"status\":\"evaluated\",\"total_exact\":\"0\"},\"selected_risk\":{\"breaches\":[],\"config_source_id\":\"owned-empty-risk-policy/v1\",\"diagnostics\":[\"This selection has no instruments; price and correlation history are not applicable.\"],\"evaluated_book_digest\":\"4a3bc494577c19c2b2e75a4601089a9dad54972213487d1729d8d18f0ae0d771\",\"market_snapshot_id\":\"owned-empty-global-valuation/v1\",\"metrics\":[{\"code\":\"portfolio_var\",\"source_id\":\"owned-empty-global-valuation/v1\",\"unit\":\"ratio\",\"value_diagnostic\":\"0\"},{\"code\":\"jump_risk\",\"source_id\":\"owned-empty-global-valuation/v1\",\"unit\":\"ratio\",\"value_diagnostic\":\"0\"},{\"code\":\"correlation_risk\",\"source_id\":\"owned-empty-global-valuation/v1\",\"unit\":\"ratio\",\"value_diagnostic\":\"0\"},{\"code\":\"gross_leverage\",\"source_id\":\"owned-empty-global-valuation/v1\",\"unit\":\"ratio\",\"value_diagnostic\":\"0\"},{\"code\":\"net_leverage\",\"source_id\":\"owned-empty-global-valuation/v1\",\"unit\":\"ratio\",\"value_diagnostic\":\"0\"},{\"code\":\"max_portfolio_risk\",\"source_id\":\"owned-empty-global-valuation/v1\",\"unit\":\"ratio\",\"value_diagnostic\":\"0\"},{\"code\":\"max_jump_risk\",\"source_id\":\"owned-empty-global-valuation/v1\",\"unit\":\"ratio\",\"value_diagnostic\":\"0\"},{\"code\":\"max_leverage_risk\",\"source_id\":\"owned-empty-global-valuation/v1\",\"unit\":\"ratio\",\"value_diagnostic\":\"0\"},{\"code\":\"portfolio_multiplier\",\"source_id\":\"owned-empty-global-valuation/v1\",\"unit\":\"ratio\",\"value_diagnostic\":\"1\"},{\"code\":\"jump_multiplier\",\"source_id\":\"owned-empty-global-valuation/v1\",\"unit\":\"ratio\",\"value_diagnostic\":\"1\"},{\"code\":\"correlation_multiplier\",\"source_id\":\"owned-empty-global-valuation/v1\",\"unit\":\"ratio\",\"value_diagnostic\":\"1\"},{\"code\":\"leverage_multiplier\",\"source_id\":\"owned-empty-global-valuation/v1\",\"unit\":\"ratio\",\"value_diagnostic\":\"1\"},{\"code\":\"portfolio_var_gate\",\"source_id\":\"owned-empty-global-valuation/v1\",\"unit\":\"ratio\",\"value_diagnostic\":\"0\"},{\"code\":\"recommended_scale\",\"source_id\":\"owned-empty-global-valuation/v1\",\"unit\":\"ratio\",\"value_diagnostic\":\"1\"}],\"passed\":true,\"status\":\"evaluated\"}},\"optimizer_book_digest\":\"4a3bc494577c19c2b2e75a4601089a9dad54972213487d1729d8d18f0ae0d771\",\"payload_digest\":\"b655861dafc5c77364fff54d1d9ca379074ce564611b4819cd33544796301c29\",\"preview_id\":\"90dbafad-5392-4aa2-b11d-853dfb754c3f\",\"provenance_digest\":\"c592416318cb45006a2eade60d483b71ef6d8a547809bd97e7b6cb02136947d6\",\"read_set_digest\":\"2f475ab0d0e8f2e02580ec0831ec9ecf180d843fe0045b6fb8aced1fc16cd9f3\",\"requires_override\":false,\"schema_version\":\"qt-workflow/v1\",\"selected_book_digest\":\"4a3bc494577c19c2b2e75a4601089a9dad54972213487d1729d8d18f0ae0d771\",\"selection_rows\":[],\"source_day\":\"2026-09-27\",\"source_digest\":\"b92a4b1cb5b8c54fe89b309fa047143033aee5eaf076db8ed01c5e1440c38cff\",\"unavailable_reasons\":[]}\n",
+    "response_sha256": "e8f67c2f829c080f26e8aa6a9e44b497218de432d5b4e681c414d13b1d664286",
+    "route": "/portfolio/qt-previews"
+  },
+  {
+    "http_status": 200,
+    "request_method": "POST",
+    "response_body": "{\"approvals\":[],\"approvals_count\":0,\"book_id\":\"EQ_BOOK\",\"can_approve\":false,\"decision_id\":\"20063fa4-0b62-4662-9fcb-d25cdeabfae1\",\"preview_id\":\"90dbafad-5392-4aa2-b11d-853dfb754c3f\",\"read_set_digest\":\"2f475ab0d0e8f2e02580ec0831ec9ecf180d843fe0045b6fb8aced1fc16cd9f3\",\"receipt\":null,\"report_blocked_reasons\":[\"desk_receipt_pending\"],\"report_ready\":false,\"request_id\":null,\"required_approvals\":2,\"schema_version\":\"qt-workflow/v1\",\"selected_book_digest\":\"4a3bc494577c19c2b2e75a4601089a9dad54972213487d1729d8d18f0ae0d771\",\"status\":\"confirmed_decision\"}\n",
+    "response_sha256": "9a86e1900951d10977d77f62d5dcf14c6454d31bc46550c985623628e4c9e1ce",
+    "route": "/portfolio/qt-previews/90dbafad-5392-4aa2-b11d-853dfb754c3f/confirm"
+  },
+  {
+    "http_status": 200,
+    "request_method": "GET",
+    "response_body": "{\"approvals\":[],\"approvals_count\":0,\"book_id\":\"EQ_BOOK\",\"can_approve\":false,\"decision_id\":\"20063fa4-0b62-4662-9fcb-d25cdeabfae1\",\"preview_id\":\"90dbafad-5392-4aa2-b11d-853dfb754c3f\",\"read_set_digest\":\"2f475ab0d0e8f2e02580ec0831ec9ecf180d843fe0045b6fb8aced1fc16cd9f3\",\"receipt\":{\"published_book_digest\":\"4a3bc494577c19c2b2e75a4601089a9dad54972213487d1729d8d18f0ae0d771\",\"report_eligibility\":{\"reason_codes\":[],\"row_manifest_digest\":\"c2fa973944ea2ea8493dc83edf731c1262c61538e5fdf4b0133bc6c3b1cb9c06\",\"status\":\"eligible\"},\"status\":\"processed\"},\"report_blocked_reasons\":[],\"report_ready\":true,\"request_id\":null,\"required_approvals\":2,\"schema_version\":\"qt-workflow/v1\",\"selected_book_digest\":\"4a3bc494577c19c2b2e75a4601089a9dad54972213487d1729d8d18f0ae0d771\",\"status\":\"confirmed_decision\"}\n",
+    "response_sha256": "20b1e0a5769ad9a0e032a07a0c3822dea16272e38dc1da7a2e4b207579488085",
+    "route": "/portfolio/qt-decisions/20063fa4-0b62-4662-9fcb-d25cdeabfae1"
+  },
+  {
+    "http_status": 200,
+    "request_method": "GET",
+    "response_body": "{\"book_id\":\"EQ_BOOK\",\"draft_digest\":\"4a3bc494577c19c2b2e75a4601089a9dad54972213487d1729d8d18f0ae0d771\",\"draft_id\":\"e39ada9a-936f-4a5d-863d-2d0bcb0ebd92\",\"draft_revision\":1,\"empty_owner\":{\"configured_owner_names\":[\"EQUITY_MEAN_REVERSION\"],\"model_publication_id\":\"adca2e55-3178-4c0a-9560-828a15c4387f\",\"owner_document_digest\":\"324c89b5c306c1dc737043c2846e281f24c116006e61ba3ab8836ffffab385ef\",\"schema_version\":\"qt-empty-owner-choice/v2\"},\"provenance_digest\":\"8f6fd74f67b918c50610b418968f4aa0459ab53dbaa0f4b207aca1ecdec72227\",\"schema_version\":\"qt-workflow/v2\",\"selection_rows\":[],\"source_day\":\"2026-09-27\",\"source_digest\":\"b92a4b1cb5b8c54fe89b309fa047143033aee5eaf076db8ed01c5e1440c38cff\",\"state\":\"consumed\",\"successor\":{\"attempt_id\":\"38f5f181-2369-47b0-a781-01465f368e76\",\"decision_id\":\"20063fa4-0b62-4662-9fcb-d25cdeabfae1\",\"preview_id\":\"90dbafad-5392-4aa2-b11d-853dfb754c3f\",\"publication_digest\":\"5431df1230977139c0a0cf5258ae2ddcfa2ce3bf16c135d1a0aa6095fbfc5140\"}}\n",
+    "response_sha256": "755f0e9d5850fe368f8c7f848f4b77c7925ce422af546c9e86277a057e53f5c3",
+    "route": "/portfolio/qt-books/EQ_BOOK/draft"
+  }
+]

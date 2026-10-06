@@ -1,0 +1,30 @@
+# Disposable synthetic smoke overlay. No deployment, published ports, host
+# network, production env files, credentials, registry push, or security bypass.
+services:
+  smoke:
+    image: algolens-qt-smoke:${APP_RELEASE_SHA:?Exact SHA required}
+    network_mode: none
+    read_only: true
+    user: "1000:1000"
+    cap_drop: [ALL]
+    tmpfs:
+      - /tmp:mode=1777
+      - /app/logs:uid=1000,gid=1000,mode=0700
+    environment:
+      APP_RELEASE_SHA: ${APP_RELEASE_SHA:?Exact SHA required}
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTHON_DOTENV_DISABLED: "1"
+      QT_SYNTHETIC_SENTINEL: not-inherited
+      DB_PASSWORD: synthetic-not-inherited
+    volumes:
+      - type: bind
+        source: ${QT_SMOKE_BUNDLE:?Synthetic bundle required}
+        target: /app/qt-evaluator-bundle
+        read_only: true
+        bind: {create_host_path: false}
+      - type: bind
+        source: ${QT_SMOKE_SCRIPT:?Smoke script required}
+        target: /app/container_smoke.py
+        read_only: true
+        bind: {create_host_path: false}
+    command: [python, /app/container_smoke.py]

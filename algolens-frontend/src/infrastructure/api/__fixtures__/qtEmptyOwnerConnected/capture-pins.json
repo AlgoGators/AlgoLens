@@ -1,0 +1,13 @@
+{
+  "actual_model_invoked": false,
+  "api_unchanged": true,
+  "native_build_record_sha256": "4e6f920805802cf60bbadd04f78c1b973e65dcfafe7feaa5e0ec1befd313d1ef",
+  "native_unchanged": true,
+  "owned_cleanup_verified": true,
+  "responses_sha256": "ca461920df7233a8f321a0b2ad280c777b7d57d13fdc30ad6e6089d0f6d9b2bb",
+  "runtime_evidence_sha256": "9e247b15cb2cdfd1e07c76aaa435d51579b21427f87e275190e1fccc0dcd6cd2",
+  "runtime_exit_code": 0,
+  "runtime_log_sha256": "bc023b80d77ece3f50507998e5230775febd341623527b2bf29a02c9b8fa5073",
+  "schema_version": "qt-empty-http-acceptance/v1",
+  "source_unchanged": true
+}

@@ -15,23 +15,23 @@ import {
 describe('incubationUtils', () => {
   describe('calculateIncubationProgress', () => {
     it('returns 0 at day 0', () => {
-      expect(calculateIncubationProgress(0)).toBe(0);
+      expect(calculateIncubationProgress(0, 120)).toBe(0);
     });
 
     it('returns 50 at day 60', () => {
-      expect(calculateIncubationProgress(60)).toBe(50);
+      expect(calculateIncubationProgress(60, 120)).toBe(50);
     });
 
     it('returns 100 at day 120', () => {
-      expect(calculateIncubationProgress(120)).toBe(100);
+      expect(calculateIncubationProgress(120, 120)).toBe(100);
     });
 
     it('caps progress at 100 if past window', () => {
-      expect(calculateIncubationProgress(150)).toBe(100);
+      expect(calculateIncubationProgress(150, 120)).toBe(100);
     });
 
     it('clamps negative elapsed days at 0', () => {
-      expect(calculateIncubationProgress(-1)).toBe(0);
+      expect(calculateIncubationProgress(-1, 120)).toBe(0);
     });
 
     it('handles zero window gracefully', () => {
@@ -40,12 +40,12 @@ describe('incubationUtils', () => {
   });
 
   describe('calculateDaysRemaining', () => {
-    it('uses the default incubation window', () => {
-      expect(calculateDaysRemaining(20)).toBe(INCUBATION_WINDOW_DAYS - 20);
+    it('counts down against the window it is given', () => {
+      expect(calculateDaysRemaining(20, 120)).toBe(INCUBATION_WINDOW_DAYS - 20);
     });
 
     it('does not return negative days', () => {
-      expect(calculateDaysRemaining(150)).toBe(0);
+      expect(calculateDaysRemaining(150, 120)).toBe(0);
     });
   });
 
@@ -70,9 +70,15 @@ describe('incubationUtils', () => {
       expect(formatMockCapital(250000)).toBe('$250,000');
     });
 
-    it('returns $0 for nullish input', () => {
-      expect(formatMockCapital(null)).toBe('$0');
-      expect(formatMockCapital(undefined)).toBe('$0');
+    it('marks a capital figure that was never set as unknown, not as zero', () => {
+      // "$0" reads as "this strategy was allocated nothing", which is a claim.
+      // An unset figure is not a claim, and must not look like one.
+      expect(formatMockCapital(null)).toBe('—');
+      expect(formatMockCapital(undefined)).toBe('—');
+    });
+
+    it('still formats a real zero as a real zero', () => {
+      expect(formatMockCapital(0)).toBe('$0');
     });
   });
 
@@ -114,10 +120,10 @@ describe('incubationUtils', () => {
 
   describe('window status helpers', () => {
     it('reports near end and complete states', () => {
-      expect(isNearEndOfWindow(100)).toBe(false);
-      expect(isNearEndOfWindow(110)).toBe(true);
-      expect(isWindowComplete(100)).toBe(false);
-      expect(isWindowComplete(120)).toBe(true);
+      expect(isNearEndOfWindow(100, 120)).toBe(false);
+      expect(isNearEndOfWindow(110, 120)).toBe(true);
+      expect(isWindowComplete(100, 120)).toBe(false);
+      expect(isWindowComplete(120, 120)).toBe(true);
     });
   });
 });

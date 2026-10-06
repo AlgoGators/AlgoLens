@@ -1,4 +1,6 @@
 import { BarChart, Bar, Cell, XAxis, YAxis, ResponsiveContainer, Tooltip } from 'recharts';
+import { formatMetric } from '../../domain/portfolio/formatMetric';
+import { formatAxisDollars } from '../../domain/portfolio/formatPrice';
 import { ChevronUp, ChevronDown } from 'lucide-react';
 import type { CombinedMetrics } from '../../domain/portfolio/computeCombinedMetrics';
 
@@ -22,7 +24,7 @@ export function AdvancedSections({ metrics, theme, expanded, onToggle }: Advance
     <div className="space-y-3">
       {/* Correlation Matrix */}
       <button onClick={() => onToggle('diversification')} className={headerClass}>
-        <span className={labelClass}>Correlation Matrix (Top 5)</span>
+        <span className={labelClass}>Correlation Matrix (Top 5, QT Holdings Source)</span>
         {expanded.diversification ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
       </button>
 
@@ -32,8 +34,8 @@ export function AdvancedSections({ metrics, theme, expanded, onToggle }: Advance
           {metrics.advancedMetrics.correlationMatrix.length === 0 ? (
             <div className={`text-xs ${theme === 'dark' ? 'text-gray-500' : 'text-gray-500'
               }`}>
-              Correlation data unavailable — a real correlation matrix needs per-symbol
-              price history, which the API does not expose yet (tracked in issue #56).
+              Correlation unavailable for these holdings — QT holdings correlation data
+              with overlapping price history is unavailable for at least one selected symbol.
             </div>
           ) : (
             <>
@@ -53,14 +55,22 @@ export function AdvancedSections({ metrics, theme, expanded, onToggle }: Advance
                         <td className="p-1 font-mono">{metrics.advancedMetrics.topHoldings[i].symbol}</td>
                         {row.map((corr, j) => (
                           <td key={j} className="p-1">
+                            {/* A pair the pipeline could not measure shows as
+                                unknown. Rendering null as 0.00 would claim
+                                two instruments are uncorrelated, which is a
+                                strong and specific claim about risk. */}
                             <div
-                              className="w-12 h-8 flex items-center justify-center text-white text-xs font-mono"
-                              style={{
+                              className={`w-12 h-8 flex items-center justify-center text-xs font-mono ${
+                                corr === null
+                                  ? theme === 'dark' ? 'text-gray-600' : 'text-gray-400'
+                                  : 'text-white'
+                              }`}
+                              style={corr === null ? undefined : {
                                 backgroundColor: `rgba(${corr > 0.7 ? '239, 68, 68' : corr > 0.4 ? '251, 146, 60' : '34, 197, 94'
                                   }, ${Math.abs(corr) * 0.7 + 0.3})`
                               }}
                             >
-                              {corr.toFixed(2)}
+                              {corr === null ? '—' : corr.toFixed(2)}
                             </div>
                           </td>
                         ))}
@@ -71,7 +81,16 @@ export function AdvancedSections({ metrics, theme, expanded, onToggle }: Advance
               </div>
               <div className={`text-xs mt-3 ${theme === 'dark' ? 'text-gray-600' : 'text-gray-400'
                 }`}>
-                ■ Green: Low correlation (0.3-0.4) • ■ Orange: Moderate (0.4-0.7) • ■ Red: High (0.7+)
+                ■ Low (under 0.4) • ■ Moderate (0.4&ndash;0.7) • ■ High (0.7+)
+              </div>
+              {/* What the matrix rests on. A correlation over a fortnight and
+                  one over a year read identically on screen and mean very
+                  different things. */}
+              <div className={`text-xs mt-1 ${theme === 'dark' ? 'text-gray-600' : 'text-gray-400'
+                }`}>
+                Pearson correlation of daily log returns over{' '}
+                {metrics.advancedMetrics.correlationObservations} trading days, from the
+                daily bars in the market data pipeline for symbols held in QT.
               </div>
             </>
           )}
@@ -92,30 +111,32 @@ export function AdvancedSections({ metrics, theme, expanded, onToggle }: Advance
             <div className={`p-2 border ${theme === 'dark' ? 'border-gray-800' : 'border-gray-200'
               }`}>
               <div className={`text-xs ${theme === 'dark' ? 'text-gray-500' : 'text-gray-400'}`}>
-                TRADES
+                FILLS TODAY
               </div>
-              <div className="text-base tabular-nums">{metrics.metrics.totalTrades}</div>
+              <div className="text-base tabular-nums">{metrics.metrics.executionsToday}</div>
             </div>
             <div className={`p-2 border ${theme === 'dark' ? 'border-gray-800' : 'border-gray-200'
               }`}>
               <div className={`text-xs ${theme === 'dark' ? 'text-gray-500' : 'text-gray-400'}`}>
                 PROFIT FACTOR
               </div>
-              <div className="text-base tabular-nums">{metrics.metrics.profitFactor.toFixed(2)}</div>
+              <div className="text-base tabular-nums">{formatMetric(metrics.metrics.profitFactor, 2)}</div>
             </div>
             <div className={`p-2 border ${theme === 'dark' ? 'border-gray-800' : 'border-gray-200'
               }`}>
               <div className={`text-xs ${theme === 'dark' ? 'text-gray-500' : 'text-gray-400'}`}>
                 AVG WIN
               </div>
-              <div className="text-base text-green-500 tabular-nums">${metrics.metrics.avgWin.toFixed(0)}</div>
+              {/* The engine's avg_win is the mean daily PERCENTAGE return on
+                  winning days. This rendered it with a "$". */}
+              <div className="text-base text-green-500 tabular-nums">{formatMetric(metrics.metrics.avgWin, 2, { suffix: '%' })}</div>
             </div>
             <div className={`p-2 border ${theme === 'dark' ? 'border-gray-800' : 'border-gray-200'
               }`}>
               <div className={`text-xs ${theme === 'dark' ? 'text-gray-500' : 'text-gray-400'}`}>
                 AVG LOSS
               </div>
-              <div className="text-base text-red-500 tabular-nums">${Math.abs(metrics.metrics.avgLoss).toFixed(0)}</div>
+              <div className="text-base text-red-500 tabular-nums">{formatMetric(metrics.metrics.avgLoss, 2, { suffix: '%', abs: true })}</div>
             </div>
           </div>
 
@@ -125,7 +146,7 @@ export function AdvancedSections({ metrics, theme, expanded, onToggle }: Advance
               <XAxis
                 type="number"
                 tick={{ fill: theme === 'dark' ? '#6b7280' : '#9ca3af', fontSize: 10 }}
-                tickFormatter={(value) => `$${(value / 1000).toFixed(0)}k`}
+                tickFormatter={formatAxisDollars}
               />
               <YAxis
                 dataKey="symbol"
@@ -143,7 +164,7 @@ export function AdvancedSections({ metrics, theme, expanded, onToggle }: Advance
                 }}
                 itemStyle={{ color: theme === 'dark' ? '#fff' : '#000' }}
                 labelStyle={{ color: theme === 'dark' ? '#fff' : '#000' }}
-                formatter={(value: number) => [`$${value.toLocaleString()}`, 'P&L']}
+                formatter={(value) => [`$${Number(value ?? 0).toLocaleString()}`, 'P&L']}
               />
               <Bar dataKey="pnl">
                 {metrics.symbolPnL.map((entry, index) => (
@@ -168,22 +189,22 @@ export function AdvancedSections({ metrics, theme, expanded, onToggle }: Advance
             <div className={`p-2 border ${theme === 'dark' ? 'border-gray-800' : 'border-gray-200'
               }`}>
               <div className={`text-xs ${theme === 'dark' ? 'text-gray-500' : 'text-gray-400'}`}>GROSS LEV</div>
-              <div className="text-base tabular-nums">{metrics.metrics.grossLeverage.toFixed(2)}x</div>
+              <div className="text-base tabular-nums">{formatMetric(metrics.metrics.grossLeverage, 2, { suffix: 'x' })}</div>
             </div>
             <div className={`p-2 border ${theme === 'dark' ? 'border-gray-800' : 'border-gray-200'
               }`}>
               <div className={`text-xs ${theme === 'dark' ? 'text-gray-500' : 'text-gray-400'}`}>NET LEV</div>
-              <div className="text-base tabular-nums">{metrics.metrics.netLeverage.toFixed(2)}x</div>
+              <div className="text-base tabular-nums">{formatMetric(metrics.metrics.netLeverage, 2, { suffix: 'x' })}</div>
             </div>
             <div className={`p-2 border ${theme === 'dark' ? 'border-gray-800' : 'border-gray-200'
               }`}>
               <div className={`text-xs ${theme === 'dark' ? 'text-gray-500' : 'text-gray-400'}`}>EQ/MARGIN</div>
-              <div className="text-base tabular-nums">{metrics.metrics.equityToMarginRatio.toFixed(2)}</div>
+              <div className="text-base tabular-nums">{formatMetric(metrics.metrics.equityToMarginRatio, 2)}</div>
             </div>
             <div className={`p-2 border ${theme === 'dark' ? 'border-gray-800' : 'border-gray-200'
               }`}>
               <div className={`text-xs ${theme === 'dark' ? 'text-gray-500' : 'text-gray-400'}`}>CUSHION</div>
-              <div className="text-base tabular-nums">{metrics.metrics.marginCushion.toFixed(1)}%</div>
+              <div className="text-base tabular-nums">{formatMetric(metrics.metrics.marginCushion, 1, { suffix: '%' })}</div>
             </div>
           </div>
         </div>

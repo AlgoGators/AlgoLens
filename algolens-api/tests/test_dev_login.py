@@ -59,15 +59,15 @@ def test_dev_login_respects_env_overrides(client, monkeypatch):
     assert body["user"]["role"] == "general_member"
 
 
-def test_dev_cookie_passes_the_auth_gate(client, monkeypatch):
-    """The cookie dev-login sets must satisfy @jwt_required on a protected GET.
-
-    /portfolio/strategies is @jwt_required. A GET is a safe method, so no CSRF
-    header is needed -- the cookie alone must get us past auth (not 401/422). It
-    may still be 500 if no DB is configured, but that is behind the auth gate.
-    """
+def test_dev_dashboard_without_database_configuration_is_empty(client, monkeypatch):
+    """Local development renders the empty dashboard without inventing data."""
     monkeypatch.setenv("DEV_MODE", "1")
     monkeypatch.setenv("FLASK_ENV", "development")
+    for name in ("DB_HOST", "DB_USER", "DB_PASSWORD", "DB_NAME"):
+        monkeypatch.delenv(name, raising=False)
     client.post("/auth/dev-login")  # sets the cookie on the client's jar
+
     resp = client.get("/portfolio/strategies")
-    assert resp.status_code not in (401, 422)
+
+    assert resp.status_code == 200
+    assert resp.get_json() == {"strategies": []}

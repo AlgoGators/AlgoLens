@@ -13,6 +13,7 @@ venv
 .venv
 algolens-api/.venv
 
+algolens-api/logs/
 algolens-api/logs/algolens.log
 
 tables/

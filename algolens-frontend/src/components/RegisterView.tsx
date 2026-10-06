@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import logo from '../assets/logo.png';
-import { useAuth } from '../adapters/react/AuthContext';
+import { useAuth } from '../adapters/react/useAuth';
 
 interface RegisterViewProps {
   onBackToLogin: () => void;
@@ -94,6 +94,7 @@ export function RegisterView({ onBackToLogin }: RegisterViewProps) {
             )}
 
             <div>
+              <label className="sr-only" htmlFor="email">Student email</label>
               <input
                 id="email"
                 type="email"
@@ -131,6 +132,7 @@ export function RegisterView({ onBackToLogin }: RegisterViewProps) {
             </div>
 
             <div>
+              <label className="sr-only" htmlFor="firstName">First name</label>
               <input
                 id="firstName"
                 type="text"
@@ -144,6 +146,7 @@ export function RegisterView({ onBackToLogin }: RegisterViewProps) {
             </div>
 
             <div>
+              <label className="sr-only" htmlFor="lastName">Last name</label>
               <input
                 id="lastName"
                 type="text"
@@ -157,6 +160,7 @@ export function RegisterView({ onBackToLogin }: RegisterViewProps) {
             </div>
 
             <div>
+              <label className="sr-only" htmlFor="password">Password</label>
               <input
                 id="password"
                 type="password"
@@ -170,6 +174,7 @@ export function RegisterView({ onBackToLogin }: RegisterViewProps) {
             </div>
 
             <div>
+              <label className="sr-only" htmlFor="confirmPassword">Confirm password</label>
               <input
                 id="confirmPassword"
                 type="password"

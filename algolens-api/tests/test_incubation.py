@@ -57,6 +57,20 @@ def test_start_incubation_requires_positive_mock_capital():
     assert reader.started is None
 
 
+def test_start_incubation_requires_finite_mock_capital():
+    reader = RecordingReader()
+
+    with pytest.raises(IncubationError, match="finite"):
+        StartIncubation(reader).execute(
+            strategy_id="trendfollowing",
+            mock_capital=float("nan"),
+            reason="Testing incubation",
+            user_id="1",
+        )
+
+    assert reader.started is None
+
+
 def test_promote_to_live_requires_non_empty_reason():
     reader = RecordingReader()
 

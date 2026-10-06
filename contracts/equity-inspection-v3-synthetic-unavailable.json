@@ -1,0 +1,119 @@
+{
+  "api_version": 1,
+  "publication": {
+    "authority": "inspection_only",
+    "captured_at": "2026-09-26T12:00:00Z",
+    "equity_run_consumption": {
+      "available": false,
+      "catalog_version": "qt-equity-main08b15c-run/v1",
+      "complete": false,
+      "profile": "mean_reversion",
+      "run_key": {
+        "date": "2026-09-26",
+        "portfolio_id": "BOOK",
+        "strategy_id": "LIVE_EQUITY_MEAN_REVERSION",
+        "strategy_name": "EQUITY_MEAN_REVERSION"
+      },
+      "schema_version": "qt-equity-run-consumption/v1",
+      "scope": "full_run",
+      "stages": {
+        "corporate_actions": {
+          "executions": [],
+          "outcome": "not_reached",
+          "reads": {},
+          "skip_reason": null,
+          "symbols": {}
+        },
+        "cost_history": {
+          "executions": [],
+          "outcome": "not_reached",
+          "reads": {},
+          "skip_reason": null,
+          "symbols": {}
+        },
+        "eod": {
+          "executions": [],
+          "outcome": "not_reached",
+          "reads": {},
+          "skip_reason": null,
+          "symbols": {}
+        },
+        "execution": {
+          "executions": [],
+          "outcome": "not_reached",
+          "reads": {},
+          "skip_reason": null,
+          "symbols": {}
+        },
+        "market_input": {
+          "executions": [],
+          "outcome": "not_reached",
+          "reads": {},
+          "skip_reason": null,
+          "symbols": {}
+        },
+        "preparation": {
+          "executions": [],
+          "outcome": "not_reached",
+          "reads": {},
+          "skip_reason": null,
+          "symbols": {}
+        },
+        "primary": {
+          "executions": [],
+          "outcome": "not_reached",
+          "reads": {},
+          "skip_reason": null,
+          "symbols": {}
+        },
+        "prior": {
+          "executions": [],
+          "outcome": "not_reached",
+          "reads": {},
+          "skip_reason": null,
+          "symbols": {}
+        },
+        "result_assembly": {
+          "executions": [],
+          "outcome": "not_reached",
+          "reads": {},
+          "skip_reason": null,
+          "symbols": {}
+        },
+        "setup": {
+          "executions": [],
+          "outcome": "not_reached",
+          "reads": {},
+          "skip_reason": null,
+          "symbols": {}
+        }
+      },
+      "unavailable_reason": "instrumentation_missing"
+    },
+    "identity": {
+      "capture_id": "81000000-0000-4000-8000-000000000001",
+      "control_mode": "uncontrolled",
+      "engine_strategy_id": "LIVE_EQUITY_MEAN_REVERSION",
+      "portfolio_id": "BOOK",
+      "producer_version": "synthetic-proposed-example",
+      "publication_id": "81000000-0000-4000-8000-000000000001",
+      "registry_id": "equity_alpha",
+      "registry_revision": 1,
+      "run_date": "2026-09-26",
+      "runtime_attempt_id": null
+    },
+    "profile": "live_equity_mean_reversion",
+    "publication_recorded_at": "2026-09-26T12:00:01Z",
+    "publication_schema_version": 3,
+    "reason": "consumption_unavailable",
+    "status": "unavailable",
+    "stream": "system"
+  },
+  "read_at": "2026-09-26T12:01:00Z",
+  "reason": "consumption_unavailable",
+  "scope": {
+    "portfolio_id": "BOOK",
+    "registry_id": "equity_alpha"
+  },
+  "status": "unavailable"
+}

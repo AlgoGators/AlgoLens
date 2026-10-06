@@ -1,3 +1,5 @@
+import { positionEditDemoEnabled, positionEditDemoResponse } from '../demo/positionEditDemo';
+
 export const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
 
 // Environment detection
@@ -39,6 +41,86 @@ if (isProd) {
   }
 }
 
+/**
+ * A non-2xx answer from the API.
+ *
+ * `message` keeps the full diagnostic string for logs. `code` and
+ * `serverMessage` carry what the server itself said, so a screen can react to
+ * a known condition -- a book with no engine data yet -- and show a sentence
+ * rather than a status line with a JSON body glued to it.
+ */
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly code?: string,
+    readonly serverMessage?: string,
+  ) {
+    super(message);
+    this.name = 'ApiError';
+  }
+}
+
+/** The server rejected the cookie itself; callers should return to auth once. */
+export class SessionExpiredError extends Error {
+  constructor(readonly status: 401 | 422) {
+    super('Your session expired. Please sign in again.');
+    this.name = 'SessionExpiredError';
+  }
+}
+
+/** Fetch never produced an HTTP response. No retry has been attempted. */
+export class HttpTransportError extends Error {
+  constructor(message = 'The service could not be reached. Please try again.') {
+    super(message);
+    this.name = 'HttpTransportError';
+  }
+}
+
+function throwIfSessionExpired(response: Response): void {
+  if (response.status === 401 || response.status === 422) {
+    throw new SessionExpiredError(response.status);
+  }
+}
+
+async function requestOnce(url: string, init: RequestInit): Promise<Response> {
+  try {
+    const response = positionEditDemoResponse(url, init) ?? await fetch(url, init);
+    throwIfSessionExpired(response);
+    return response;
+  } catch (error) {
+    if (error instanceof SessionExpiredError || error instanceof ApiError) throw error;
+    if (error instanceof TypeError) throw new HttpTransportError();
+    throw error;
+  }
+}
+
+/** One credentialed read for private inspection data. Never reads or logs error bodies. */
+export function getWithAuth(url: string, signal?: AbortSignal): Promise<Response> {
+  return requestOnce(url, {
+    method: 'GET',
+    credentials: 'include',
+    cache: 'no-store',
+    headers: { Accept: 'application/json', 'Cache-Control': 'no-store' },
+    signal,
+  });
+}
+
+function parseErrorBody(body: string): { code?: string; error?: string } {
+  try {
+    const parsed = JSON.parse(body);
+    if (parsed && typeof parsed === 'object') {
+      return {
+        code: typeof parsed.code === 'string' ? parsed.code : undefined,
+        error: typeof parsed.error === 'string' ? parsed.error : undefined,
+      };
+    }
+  } catch {
+    // Not JSON: nothing structured to report.
+  }
+  return {};
+}
+
 export async function fetchWithAuth(url: string): Promise<Response> {
   log('info', `fetchWithAuth called for URL: ${url}`);
 
@@ -49,12 +131,13 @@ export async function fetchWithAuth(url: string): Promise<Response> {
 
   try {
     const startTime = performance.now();
-    const response = await fetch(url, {
+    const init: RequestInit = {
       credentials: 'include',
       headers: {
         'Content-Type': 'application/json',
       },
-    });
+    };
+    const response = positionEditDemoResponse(url, init) ?? await fetch(url, init);
     const elapsed = (performance.now() - startTime).toFixed(2);
 
     log('info', `Response received in ${elapsed}ms`);
@@ -77,12 +160,11 @@ export async function fetchWithAuth(url: string): Promise<Response> {
     if (!response.ok) {
       // Handle 401 Unauthorized or 422 JWT decode errors (e.g., expired/invalid cookie)
       if (response.status === 401 || response.status === 422) {
-        log('warn', `Session error (${response.status}) - redirecting to login`);
-        // The cookie is httpOnly, so there is nothing for JS to clear; a full
-        // navigation re-runs AuthContext's /verify check, which will find no
-        // session and render the login view.
-        window.location.href = '/login';
-        throw new Error('Session expired or invalid. Please log in again.');
+        log('warn', `Session error (${response.status})`);
+        // Do not force navigation here. A request helper cannot know whether
+        // the auth shell is already restoring the session; redirecting from
+        // every concurrent 401 created loops and erased the scoped error.
+        throw new SessionExpiredError(response.status);
       }
 
       // Try to get error body for more details
@@ -93,7 +175,13 @@ export async function fetchWithAuth(url: string): Promise<Response> {
       } catch {
         log('warn', 'Could not read error response body');
       }
-      throw new Error(`API request failed: ${response.status} ${response.statusText}. Body: ${errorBody}`);
+      const { code, error: serverMessage } = parseErrorBody(errorBody);
+      throw new ApiError(
+        `API request failed: ${response.status} ${response.statusText}. Body: ${errorBody}`,
+        response.status,
+        code,
+        serverMessage,
+      );
     }
 
     return response;
@@ -119,12 +207,12 @@ export async function fetchWithAuth(url: string): Promise<Response> {
         log('error', `  Current origin: ${window.location.origin}`);
         log('error', `  API target: ${url}`);
 
-        throw new Error(`Network error: Cannot reach ${API_BASE_URL}. Possible CORS issue or backend not running. Check browser Network tab for details.`);
+        throw new HttpTransportError();
       }
 
       if (errMsg.includes('cors')) {
         log('error', '>>> DIAGNOSIS: Explicit CORS error');
-        throw new Error(`CORS error: Backend at ${API_BASE_URL} is not allowing requests from ${window.location.origin}`);
+        throw new HttpTransportError();
       }
     }
 
@@ -166,20 +254,52 @@ function readCookie(name: string): string | null {
  * 409-you-must-acknowledge apart from an outright refusal, and that decision
  * belongs to them, not here.
  */
-export async function postWithAuth(url: string, body: unknown): Promise<Response> {
+async function writeWithAuth(
+  method: 'POST' | 'PUT',
+  url: string,
+  body: unknown,
+): Promise<Response> {
   const csrf = readCookie('csrf_access_token');
-  if (!csrf) {
+  if (!csrf && !positionEditDemoEnabled()) {
     log('warn', 'No csrf_access_token cookie found; the request will likely 401');
   }
 
-  log('info', `POST ${url}`);
-  return fetch(url, {
-    method: 'POST',
+  log('info', `${method} ${url}`);
+  return requestOnce(url, {
+    method,
     credentials: 'include',
     headers: {
       'Content-Type': 'application/json',
       ...(csrf ? { 'X-CSRF-TOKEN': csrf } : {}),
     },
     body: JSON.stringify(body),
+  });
+}
+
+export async function postWithAuth(url: string, body: unknown): Promise<Response> {
+  return writeWithAuth('POST', url, body);
+}
+
+export async function putWithAuth(url: string, body: unknown): Promise<Response> {
+  return writeWithAuth('PUT', url, body);
+}
+
+export async function deleteWithAuth(url: string, body?: unknown): Promise<Response> {
+  const csrf = readCookie('csrf_access_token');
+  if (!csrf && !positionEditDemoEnabled()) {
+    log('warn', 'No csrf_access_token cookie found; the request will likely 401');
+  }
+
+  log('info', `DELETE ${url}`);
+  // A DELETE carries a body here because removing a strategy from a book needs
+  // a reason and an acknowledgement, exactly like the other write paths.
+  return requestOnce(url, {
+    method: 'DELETE',
+    credentials: 'include',
+    headers: {
+      ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
+      ...(csrf ? { 'X-CSRF-TOKEN': csrf } : {}),
+    },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
 }

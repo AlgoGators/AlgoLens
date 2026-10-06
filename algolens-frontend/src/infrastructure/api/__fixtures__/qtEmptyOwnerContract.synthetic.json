@@ -1,0 +1,130 @@
+{
+  "draft_absent": {
+    "book_id": "EQ_BOOK",
+    "draft_digest": null,
+    "draft_id": null,
+    "draft_revision": 0,
+    "empty_owner": {
+      "configured_owner_names": [
+        "EQUITY_MEAN_REVERSION"
+      ],
+      "model_publication_id": "f0000000-0000-4000-8000-000000000001",
+      "owner_document_digest": "e6cc9bb1deeedf0fe615c7e8b5a24c905430502c97ce8df591f826da76f62624",
+      "schema_version": "qt-empty-owner-choice/v2"
+    },
+    "provenance_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "schema_version": "qt-workflow/v2",
+    "selection_rows": [],
+    "source_day": "2026-09-26",
+    "source_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "state": "absent"
+  },
+  "draft_consumed": {
+    "book_id": "EQ_BOOK",
+    "draft_digest": "4a3bc494577c19c2b2e75a4601089a9dad54972213487d1729d8d18f0ae0d771",
+    "draft_id": "f0000000-0000-4000-8000-000000000001",
+    "draft_revision": 1,
+    "empty_owner": {
+      "configured_owner_names": [
+        "EQUITY_MEAN_REVERSION"
+      ],
+      "model_publication_id": "f0000000-0000-4000-8000-000000000001",
+      "owner_document_digest": "e6cc9bb1deeedf0fe615c7e8b5a24c905430502c97ce8df591f826da76f62624",
+      "schema_version": "qt-empty-owner-choice/v2"
+    },
+    "provenance_digest": "4b0448804ac4e3e815e0fbbc757d4d1da07471ae2e5bf1ec2e005d20cc6aa359",
+    "schema_version": "qt-workflow/v2",
+    "selection_rows": [],
+    "source_day": "2026-09-26",
+    "source_digest": "c7d759d3103742b6392fb410927ded29858f2ca167eade6b7a8e356e217254d8",
+    "state": "consumed",
+    "successor": {
+      "attempt_id": "00000000-0000-4000-8000-000000000003",
+      "decision_id": "00000000-0000-4000-8000-000000000002",
+      "preview_id": "00000000-0000-4000-8000-000000000004",
+      "publication_digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+    }
+  },
+  "draft_saved": {
+    "book_id": "EQ_BOOK",
+    "draft_digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "draft_id": "f0000000-0000-4000-8000-000000000001",
+    "draft_revision": 1,
+    "empty_owner": {
+      "configured_owner_names": [
+        "EQUITY_MEAN_REVERSION"
+      ],
+      "model_publication_id": "f0000000-0000-4000-8000-000000000001",
+      "owner_document_digest": "e6cc9bb1deeedf0fe615c7e8b5a24c905430502c97ce8df591f826da76f62624",
+      "schema_version": "qt-empty-owner-choice/v2"
+    },
+    "provenance_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "schema_version": "qt-workflow/v2",
+    "selection_rows": [],
+    "source_day": "2026-09-26",
+    "source_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "state": "saved"
+  },
+  "evidence_scope": "synthetic_contract_examples_only",
+  "native_or_sql_acceptance": false,
+  "proposal": {
+    "action_grants": {
+      "can_approve": false,
+      "can_confirm": true,
+      "can_save_draft": true
+    },
+    "book_id": "EQ_BOOK",
+    "capability": {
+      "available": true,
+      "required": true,
+      "version": 1
+    },
+    "empty_owner": {
+      "configured_owner_names": [
+        "EQUITY_MEAN_REVERSION"
+      ],
+      "model_publication_id": "f0000000-0000-4000-8000-000000000001",
+      "owner_document_digest": "e6cc9bb1deeedf0fe615c7e8b5a24c905430502c97ce8df591f826da76f62624",
+      "schema_version": "qt-empty-owner-choice/v2"
+    },
+    "provenance_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "read_only_reason": null,
+    "saved_qt_rows": [],
+    "schema_version": "qt-workflow/v2",
+    "seed_publication_id": "f0000000-0000-4000-8000-000000000001",
+    "seed_rows": [],
+    "source_day": "2026-09-26",
+    "source_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "workflow_state": "ready"
+  },
+  "proposal_consumed": {
+    "action_grants": {
+      "can_approve": false,
+      "can_confirm": true,
+      "can_save_draft": true
+    },
+    "book_id": "EQ_BOOK",
+    "capability": {
+      "available": true,
+      "required": true,
+      "version": 1
+    },
+    "empty_owner": {
+      "configured_owner_names": [
+        "EQUITY_MEAN_REVERSION"
+      ],
+      "model_publication_id": "f0000000-0000-4000-8000-000000000001",
+      "owner_document_digest": "e6cc9bb1deeedf0fe615c7e8b5a24c905430502c97ce8df591f826da76f62624",
+      "schema_version": "qt-empty-owner-choice/v2"
+    },
+    "provenance_digest": "4b0448804ac4e3e815e0fbbc757d4d1da07471ae2e5bf1ec2e005d20cc6aa359",
+    "read_only_reason": null,
+    "saved_qt_rows": [],
+    "schema_version": "qt-workflow/v2",
+    "seed_publication_id": "f0000000-0000-4000-8000-000000000001",
+    "seed_rows": [],
+    "source_day": "2026-09-26",
+    "source_digest": "c7d759d3103742b6392fb410927ded29858f2ca167eade6b7a8e356e217254d8",
+    "workflow_state": "ready"
+  }
+}

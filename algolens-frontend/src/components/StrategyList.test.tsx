@@ -1,0 +1,100 @@
+// @vitest-environment jsdom
+//
+// A strategy card's figures belong to one book. The card says which, and says
+// when there are others to choose from.
+
+import { render, screen } from '@testing-library/react';
+import { describe, expect, it, vi } from 'vitest';
+
+import { StrategyList } from './StrategyList';
+import type { Strategy } from '../domain/portfolio/portfolioData';
+
+vi.mock('../adapters/react/ThemeContext', () => ({
+  useTheme: () => ({ theme: 'light' }),
+}));
+
+function strategy(over: Partial<Strategy>): Strategy {
+  return {
+    id: 'trendfollowing',
+    name: 'Trend Following',
+    description: '',
+    invested: 1,
+    currentValue: 1,
+    return: 0,
+    returnPercent: 0,
+    positions: [],
+    historicalData: [],
+    bestDay: null,
+    worstDay: null,
+    metrics: { sharpeRatio: null, volatility: null },
+    executions: [],
+    finalizedPositions: [],
+    managers: [],
+    lastUpdate: '',
+    portfolio_id: 'CONSERVATIVE_PORTFOLIO',
+    ...over,
+  } as unknown as Strategy;
+}
+
+describe('the book on a strategy card', () => {
+  it('names the one book a strategy is in', () => {
+    render(<StrategyList strategies={[strategy({ books: ['CONSERVATIVE_PORTFOLIO'] })]} onSelectStrategy={() => {}} />);
+    expect(screen.getByTestId('card-book').textContent).toBe('CONSERVATIVE_PORTFOLIO');
+  });
+
+  it('falls back to the primary when no membership list came back', () => {
+    render(<StrategyList strategies={[strategy({ books: undefined })]} onSelectStrategy={() => {}} />);
+    expect(screen.getByTestId('card-book').textContent).toBe('CONSERVATIVE_PORTFOLIO');
+  });
+
+  it('says how many books, and whose figures the card shows', () => {
+    render(
+      <StrategyList
+        strategies={[strategy({ books: ['AGGRESSIVE_PORTFOLIO', 'CONSERVATIVE_PORTFOLIO'] })]}
+        onSelectStrategy={() => {}}
+      />,
+    );
+    expect(screen.getByTestId('card-book').textContent).toBe(
+      'In 2 books · figures for CONSERVATIVE_PORTFOLIO',
+    );
+    expect(screen.getByTestId('card-book').getAttribute('title')).toContain('Positions snapshot');
+  });
+});
+
+describe('the holdings count on a card', () => {
+  it('says "1 Holding", not "1 Holdings"', () => {
+    render(
+      <StrategyList
+        strategies={[strategy({ positions: [{ symbol: 'ES.v.0' }] as never })]}
+        onSelectStrategy={() => {}}
+      />,
+    );
+    expect(screen.getByText('1 Holding')).toBeTruthy();
+  });
+
+  it('pluralises every other count, including none', () => {
+    render(
+      <StrategyList
+        strategies={[
+          strategy({ id: 'a', positions: [] }),
+          strategy({ id: 'b', positions: [{ symbol: 'ES.v.0' }, { symbol: 'NQ.v.0' }] as never }),
+        ]}
+        onSelectStrategy={() => {}}
+      />,
+    );
+    expect(screen.getByText('0 Holdings')).toBeTruthy();
+    expect(screen.getByText('2 Holdings')).toBeTruthy();
+  });
+});
+
+describe('missing system performance with real holdings', () => {
+  it('keeps the holding count and renders unknown value without a zero substitute', () => {
+    render(<StrategyList strategies={[strategy({
+      dataAvailable: false, currentValue: null,
+      positions: [{ symbol: 'ES.v.0' }] as never,
+    })]} onSelectStrategy={() => {}} />);
+    expect(screen.getByText('1 Holding')).toBeTruthy();
+    expect(screen.getByText(/System-model performance unavailable/i)).toBeTruthy();
+    expect(screen.queryByText('$0')).toBeNull();
+  });
+});

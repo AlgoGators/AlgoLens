@@ -1,0 +1,1237 @@
+# QT Platform — audit of the preview branch
+
+**Date:** 2026-09-02 · **Branch:** `AlgoLens/qt-platform-preview` · **Method:** every feature driven in a browser and via curl against a production-shaped local Postgres, not inferred from reading code.
+
+The short version: **the platform works, but it did not when this audit started.** Three of the bugs below would have made the core QT feature — a human editing a position through a risk gate — fail or silently pass on the first real use. None of them were visible to the unit suite, because the suite feeds the domain plain Python floats and a real database does not.
+
+Everything in §1 is fixed and verified. §2 is what a demo environment needs that the first seed lacked. §3 was what remained open.
+
+**Update, same day:** §3 has since been worked to completion. Every P0 and P1 item is fixed and verified, P2-a and P2-d are done, and P1-h turned out not to be a bug. What is left is §6 — two questions that are genuinely the team's to answer, not code.
+
+---
+
+## 1. Fixed in this audit — verified, not assumed
+
+Each entry says what was wrong, why the tests missed it, and how it was verified. Ordered by severity.
+
+### 1.1 Every real edit crashed: `Decimal + float` in the risk maths — **CRITICAL**
+- **What:** `POST /portfolio/positions` returned 500 on every call. `evaluate_risk` summed the existing book (rows from NUMERIC columns arrive as `decimal.Decimal`) with the proposal (a `float`). Python refuses to add the two.
+- **Why the suite missed it:** every test built the book from float literals. The mismatch only exists across a psycopg2 boundary.
+- **Fix:** coerce at the repository boundary (`_plain_position`) in `fetch_qt_book` and `_fetch_existing_position`, and `float()` inside `_notional` so the domain is safe regardless of caller.
+- **Verified:** curl 409 → 201; test `test_evaluate_risk_accepts_decimal_rows_from_the_database`.
+
+### 1.2 The risk gate never fired for the normal edit — **CRITICAL**
+- **What:** The UI sends no `average_price` on a quantity-only edit, meaning "keep it". The write path honoured that, but the **risk check was handed the raw proposal**, priced the position at zero notional, and passed everything. ES 12→20 against a $70k cap saved with `passed: true`.
+- **Why the suite missed it:** the risk tests always supplied a price.
+- **Fix:** `with_known_price()` — the proposal is priced from the existing row before evaluation. An explicit price is never overridden; a genuinely new symbol with no price stays unpriced.
+- **Verified:** curl now returns 409 with `ES notional 105,605 exceeds its cap of 70,000`; three new tests.
+
+### 1.3 Every quantity-only edit wiped the average price — **CRITICAL**
+- **What:** the INSERT into `trading.positions` passed `normalized["average_price"]` (None) instead of the after-state, which had carried the existing price forward. The audit row recorded the correct price; the book lost it.
+- **Consequence:** the next detail load crashed (1.4), and notional/VaR for that position became zero.
+- **Fix:** INSERT writes `after["quantity"]` / `after.get("average_price")`.
+- **Verified:** curl edit then `SELECT` shows `5280.25` retained; audit `before_px = after_px = 5280.25`.
+
+### 1.4 A NULL price took the whole strategy detail page down — **HIGH**
+- **What:** `transform_positions` did `float(None)`. One bad row → `GET /portfolio/strategy/<id>` 500 → dashboard error state.
+- **Fix:** NULL price → `0.0` for the maths plus a `priceUnknown: true` flag on the position, so the row renders and the UI can say so. (Showing it properly is §3, item P1-e.)
+- **Verified:** detail 200 before and after an edit; test `test_a_null_average_price_does_not_take_down_the_detail_view`.
+
+### 1.5 Raw database errors leaked to clients as 400 — **HIGH (security hygiene)**
+- **What:** incubation start/promote/retire wrapped psycopg2 errors as `IncubationError(f"Database error: {exc}")`, and the routes return `str(exc)`. Column names and SQL reached the browser, with a *client-error* status for a *server* fault. Same class as the CodeQL `py/stack-trace-exposure` alerts fixed in PR #80.
+- **Fix:** `IncubationStorageError` → logged with traceback server-side, answered `500 {"error": "Incubation change could not be saved"}`.
+- **Verified:** route test `test_storage_failure_is_a_500_with_a_fixed_message`.
+
+### 1.6 Strategy Builder showed fabricated zeros for an unpublished strategy — **MEDIUM**
+- **What:** a strategy the engine has not published for (the state right after a book move) reached the Builder maths with placeholder zeros: `VAL $0k · RET +0.0% · SR 0.00` and a `0.0% of portfolio` summary line — all reading as measurements.
+- **Fix:** `computeCombinedMetrics` excludes `dataAvailable === false`; the selection card shows *awaiting engine data*.
+- **Verified:** browser — "2 of 2 selected", Carry card shows the notice, summary excludes it.
+
+### 1.7 Dev white-screen on every hot reload of the auth provider — **MEDIUM (dev only)**
+- **What:** `AuthContext.tsx` exported both a component and the `useAuth` hook. React Fast Refresh cannot preserve such a module, so each hot update remounted the provider with a new context while consumers held the old hook → `useAuth must be used within an AuthProvider`, blank app until a full reload. This is why "I don't see it" happened twice today.
+- **Fix:** hook moved to `useAuth.ts`; nine importers rewired.
+- **Verified:** build clean, app reloads and logs in normally.
+
+### 1.8 Fixed earlier today, listed for completeness
+- Strategies with no engine row **vanished** from the dashboard and the fund headline silently shrank by their value — now listed as *awaiting engine data* with an explicit "Excludes N strategies…" notice.
+- Sortino and information ratio were computed from hardcoded constants (`12.5`, `× 0.7`) and captioned "vs SPX" — now real, `null` when undefined.
+- `$0` shown for a strategy the engine had not priced — now *awaiting engine data*.
+- `portfolio_assignments.to_portfolio_id NOT NULL` made every book removal unrecordable → transaction rollback — now nullable.
+- `RealDictCursor` rows accessed positionally — books listing 500'd.
+- Move controls on the read-only Portfolio tab — removed; grouping collapsed by default.
+
+---
+
+## 2. Demo-environment gaps (not app bugs — but they hid the app bugs above)
+
+The first local seed did not match the production `trading` schema closely enough for the write paths to run at all. Each of these produced a 500 that looked like an application failure:
+
+| Missing from the first seed | What it broke |
+|---|---|
+| `positions.date` column + unique index on `(portfolio_id, strategy_id, strategy_name, date, symbol, portfolio_type)` | `write_qt_position` — Postgres rejects `ON CONFLICT` with no matching index |
+| `strategy_registry.updated_at` | incubation start/promote/retire |
+| `trading.strategy_lifecycle_log` | incubation audit insert |
+| password on the seeded user | login |
+
+All four are now in **`algolens-api/scripts/demo_seed.sql`**, with the schema the app creates lazily (books, memberships, assignment audit) declared in the same place so the shape is visible. The seed embeds the `admin@admin.com / admin` login; it exists only in that database.
+
+**Lesson worth keeping:** unit tests with float fixtures gave 120+ green results while the feature was completely broken against Postgres. `tests/integration` now closes that gap, and the CI job fails if those tests *skip* rather than run — a missing service would otherwise drop the only coverage of the write path while the job stayed green.
+
+---
+
+## 3. Still open — ordered by when, then by speed
+
+**How to read this:** bands are *when it must be done*. Inside a band, items are sorted fastest-first, so the top of each band is the best thing to pick up next. Effort: **S** < 1 h · **M** half a day · **L** multi-day · **D** = a decision someone has to make, not code.
+
+### P0 — before the QT desk relies on this
+
+| # | Item | Effort | Notes |
+|---|---|---|---|
+| ~~P0-a~~ | ~~Position response serialises numbers as strings~~ — **FIXED** | S | `jsonify` stringifies Decimal. Coerce in the serializer. Any client that parses these as numbers breaks. |
+| ~~P0-b~~ | ~~Add `tsc --noEmit` to frontend CI~~ — **FIXED**, and it immediately caught that `Book`/`AssignmentRecord` were never declared | S | There is no `tsconfig.json` and no `typescript` dependency. Nothing typechecks. Today's `number \| null` widenings and placeholder shapes were verified by grep, not a compiler. |
+| ~~P0-c~~ | ~~Integration test against Postgres~~ — **FIXED**: `tests/integration`, 4 cases driving the real write, plus a CI guard that fails if they silently skip | M | Would have caught 1.1, 1.2 and 1.3 outright. |
+| ~~P0-d~~ | ~~Canonical migrations in trade-ngin~~ — **FIXED**: migration 009 + rollback; lazy DDL removed from the app | M | The app creates them lazily with `CREATE TABLE IF NOT EXISTS`. trade-ngin owns this schema (migrations 004/005). Lazy creation must not survive into production. |
+| ~~P0-e~~ | ~~Portfolio tab grouping ignores multi-book membership~~ — **FIXED**, and it also stopped hiding incubating strategies (P1-i) | M | `ListPortfolios` buckets by `registry.portfolio_id` (primary only). A strategy in two books shows under one on the Portfolio tab and under both on Books. Same data, two answers. |
+
+### P1 — this week
+
+| # | Item | Effort | Notes |
+|---|---|---|---|
+| ~~P1-a~~ | ~~`IncubationDetail` shows `+0.00%` over an empty chart~~ — **FIXED**: "No trading days recorded yet" | S | |
+| ~~P1-b~~ | ~~`priceUnknown` positions render `$0`~~ — **FIXED**: em dashes, excluded from the total, and the total says how many | S | |
+| ~~P1-c~~ | ~~404 vs 400 decided by searching the message for "not found"~~ — **FIXED**: typed `StrategyNotInRegistry` | S | |
+| ~~P1-d~~ | ~~`book_not_empty` is a bare `ValueError`~~ — **FIXED**: typed `BookNotEmpty` carrying the count | S | |
+| ~~P1-e~~ | ~~"Add to book" records a hardcoded reason~~ — **FIXED**: required by the API, asked for by the form | S | |
+| ~~P1-f~~ | ~~Override history rendered by nothing~~ — **FIXED**: on the positions tab, with a three-state risk column | M | |
+| ~~P1-g~~ | ~~Incubation lifecycle is API-only~~ — **FIXED**: promote and retire on the detail view, with a partial-window warning | M | |
+| ~~P1-h~~ | ~~`retired → incubating` vs membership freezing `retired`~~ — **NOT A BUG.** Different questions: a strategy may be retried; its *closed history* may never change books. Documented and pinned by a test so it is not "reconciled" later | D | |
+| ~~P1-i~~ | ~~Fund headline silently excludes incubating strategies~~ — **FIXED** with P0-e: listed, marked, mock capital shown and excluded from totals | S | By design (mock capital), but there is no note. Same shape as the "Excludes N…" notice already added for unpublished ones. |
+
+### P2 — later
+
+| # | Item | Effort | Notes |
+|---|---|---|---|
+| ~~P2-a~~ | ~~Node 20 deprecation warnings~~ — **FIXED** in trade-ngin; versions read from the GitHub API, not guessed | S | |
+| P2-b | The `history_discontinuity` warning names a real problem the feature does not solve | **L / D** | Attribution across a book move still spans two compositions. Options: forbid moves on live strategies, or snapshot-and-restart the curve at the move. |
+| ~~P2-c~~ | ~~`refactor/models-range-filter` deletes the three-stream read side~~ — **DECIDED 2026-09-06**: the streams stay; that deletion does not land | **D** | John rejected the scope-down premise. See §10. |
+| ~~P2-d~~ | ~~Demo seed is not part of any test run~~ — **SUPERSEDED**: `tests/integration` builds its own isolated schema per test, so it needs no seed and cannot be polluted by one | S | |
+
+---
+
+## 4. What was verified working, in the browser, today
+
+| Feature | Evidence |
+|---|---|
+| Login, dashboard load, fund total | `$541,200`, notice "Excludes 1 strategy the engine has not published results for yet" |
+| Portfolio tab grouping | collapsed by default, expands, **zero** move controls |
+| Strategy detail | 200; 4 Adjust buttons; attribution chart present |
+| **Position edit — breach path** | Adjust ES 12→20 → amber banner "ES notional 105,605 exceeds its cap of 70,000" → *Override and save* → row shows 20; audit `overrode_risk = t` |
+| **Position edit — clean path** | ES 20→12 → saved with no banner; row shows 12 |
+| Strategy Builder | "2 of 2 selected"; placeholder card reads *awaiting engine data*; excluded from value and summary |
+| Books — create / add / remove / delete | created AUDIT_BOOK → added Trend Following (non-primary) → removal warned → *Remove anyway* → removed → deleted when empty |
+| Books — last-book guard | removing Breakout from its only book: refused, **no override offered** |
+| Books — primary badges | 3 (one per strategy) |
+| Incubation — list & detail | Breakout: $250,000 mock capital, 0d/120d, detail renders (empty chart — P1-a) |
+| Incubation — lifecycle via API | live→incubating→live→incubating→retired→incubating; five audit rows; domain errors clean, no SQL text |
+
+Test counts after this audit: **126 backend** (was 107), **82 frontend** (was 81), production build clean.
+
+---
+
+## 5. Things I decided without asking, so you can reverse them
+
+- **NULL price → `0.0` + `priceUnknown` flag** rather than hiding the row. Hiding positions is worse than a flagged zero; P1-b turns the flag into a visible "—".
+- **Storage failures → 500 with a fixed message.** The detail is in the server log. If you want the message to carry a correlation id, that is a two-line change.
+- **`retired → incubating` left as-is.** It is pre-existing behaviour; flagged as P1-h rather than changed unilaterally.
+- **Demo seed committed to `algolens-api/scripts/`** with the `admin/admin` login. It is local-only and documented as such; delete the user block if you would rather it were not in the repo.
+
+---
+
+## 6. What is left, and why it is not code
+
+Two items from §3 remain open. Neither is a defect, and neither should be closed by whoever picks this up next without the team actually deciding.
+
+### P2-b — the history-discontinuity warning describes a problem the feature does not solve
+
+Moving or removing a strategy from a book makes that book's history discontinuous: every number computed across the boundary — cumulative return, drawdown, and the qt/system/benchmark attribution this branch just fixed — spans two different compositions. The platform now *states* that cost, records an acknowledgement, and audits who accepted it. It does not repair the maths.
+
+Three ways out, in rising order of cost:
+
+1. **Forbid book changes on live strategies.** Simplest, and defensible: assign at creation, retire and re-create to move. Costs flexibility the desk may want.
+2. **Snapshot and restart the curve at the boundary.** The book's history becomes explicitly segmented, and every chart has to learn about segments.
+3. **Leave it as it is** — the cost is stated, acknowledged and audited, and readers are trusted to know a composition change happened.
+
+Option 3 is what ships today. It is a reasonable answer, but it should be a chosen one rather than a default, because the moment there is a year of live history the cost of changing it rises sharply.
+
+### P2-c — `refactor/models-range-filter` deletes the other half of this feature — **DECIDED**
+
+That branch is still on the remote and removes 220 lines: the stream constants and the whole of `AlphaAttribution.tsx`. When the edit surface was going to live in another repo, losing AlgoLens's read side was survivable. It is not now — merging it would delete the three-stream comparison that the position edit path exists to make meaningful.
+
+**Answered on 2026-09-06.** The scope-down premise behind that commit is rejected: the streams and the alpha-attribution comparison stay. The deletion does not land. What remains worth taking from the branch is the range-filter and `models/`/`lib/` layering work in `ed82b577`, rebased onto the QT lane rather than merged over it.
+
+---
+
+## 7. Second pass — an independent review of everything §1–§5 built
+
+Everything above was written by the same hands that wrote the code. This pass had four
+separate reviewers read the branch cold against the stated design intent — domain and
+application, infrastructure and HTTP, frontend, and docs/CI/migrations — and then every
+finding was verified against the code before being fixed. Ranked by what it would have cost.
+
+| # | Finding | Fixed by | Proof |
+|---|---|---|---|
+| 7.1 | **The integration suite drops the `trading` schema of whatever database it is pointed at, and its own docstring said to point it at the demo cluster.** It did exactly that mid-session and wiped the seeded demo. | Fixture marks the schema it builds and refuses to drop one it did not create; docstring now says to use a database of its own. | Pointed at `algolens_demo`: refused, 11 tables and 3 strategies intact. Pointed at `algolens_test`: 7 pass. |
+| 7.2 | `delete_book` counted only primaries, so a book holding a strategy's **non-primary** membership could be deleted out from under its positions and limits. | Occupancy is the union of primaries and memberships. | `test_a_book_holding_a_non_primary_member_cannot_be_deleted` (Postgres) |
+| 7.3 | `ChangeBookMembership` raised `AssignmentValidationError` for an unknown action **without importing it** — a `NameError` masked as a generic 500. No test had ever called the use case. | Import added; `tests/test_book_membership_use_case.py` drives the use case through every branch. | 8 new tests |
+| 7.4 | The `409 ambiguous_book` reply was handled by nothing in the UI: the `books` list was discarded and the user saw a raw error with no way to answer. | `savePosition` returns `needs_book`; the editor gains a `needs_book` phase and a book picker, and resubmits with the choice. | State-machine tests; `tsc` clean |
+| 7.5 | Strategy cards showed **+0.00% return, 0.00 Sharpe, 0.0% volatility** for a strategy the engine had not published, next to "awaiting engine data" for its value. | All four tiles honour `dataAvailable === false`. | `StrategyList.tsx` |
+| 7.6 | Migration **`008` collides**: `feat/config-from-database` already reserved `008_strategy_config.sql`, and the trade-ngin README described that file rather than the one on this branch. | Renumbered to `009_books_and_membership.sql`; README lists both; every reference updated. | `git mv`; grep for `008` |
+| 7.7 | `QT_PLATFORM_PREVIEW.md` still said there was no assignment UI, no override history view, and no typechecking — all false for six commits. | Rewritten to describe the branch as it is. | — |
+| 7.8 | `resolve_target_book` with a blank primary and no memberships raised `AmbiguousBook` with **zero** candidates, telling the client to choose between nothing. | Distinct `strategy_has_no_book` validation error. | `TestBookResolutionEdges` |
+| 7.9 | Book names were compared **case-sensitively** against rows nothing forces to upper case, so a hand-written `macro_book` row would be reported as not-a-member and then duplicated under `MACRO_BOOK`. | `match_book` compares without case and returns the stored spelling; every membership and edit path writes with that spelling. | Domain + use-case tests |
+| 7.10 | `evaluate_risk` treated a **published envelope with no limits** (`{}`) as "not checked", the same as an outage. | `is None`, not falsiness. `{}` is a check that found nothing. | `TestEmptyEnvelope` |
+| 7.11 | The demo seed and the integration fixture declared `position_overrides` with **every constraint stripped** (nullable `before_state`, untyped `user_id`, no `CHECK`s), so a write production would refuse passed here. | Both now carry migration 004's constraints verbatim. The write path passes against them. | 7 integration tests |
+| 7.12 | Removing a strategy's primary book repointed the primary **silently**; the caller learned nothing. | `remove_membership` reports `primary_portfolio_id`; the use case and serialiser pass it through. | `test_removing_the_primary_book_repoints_it_and_says_so` |
+| 7.13 | `StrategyRegistryPort` declared 4 methods; the use cases called 13. | Port now declares every method the application layer calls. | `ports.py` |
+| 7.14 | The audit trail of a **retired** strategy was unreadable: `ListPositionOverrides` used the live-only lookup. | Uses `get_any`. Retirement must not lose the record of what was done. | `use_cases.py` |
+| 7.15 | `computeCombinedMetrics` divided by `totalInvested` / `totalValue` unguarded; a zero-invested selection rendered `NaN%`. | `share()` helper, 0 when the denominator is 0. | New vitest case |
+| 7.16 | A fund whose strategies were all still awaiting engine data was shown the **empty-portfolio screen**, so the "excludes N strategies" notice could never render. | The dashboard gate counts awaiting strategies as something to show. | `Dashboard.tsx` |
+| 7.17 | `portfolioApi.ts` carried a byte-for-byte private copy of `httpClient.fetchWithAuth`. | Deleted; nine call sites use the shared one. | `tsc` |
+| 7.18 | Cosmetic: unused `useContext` import; seed comment said pbkdf2 for a scrypt hash. | Fixed. | — |
+| 7.19 | **Every blue button added since the DDD split was invisible.** `src/index.css` was a 39KB Tailwind 4.1.3 output committed at #71, and nothing compiled Tailwind at build time, so any utility a later component used that the snapshot lacked (`bg-blue-600`, `bg-amber-600`, `disabled:opacity-40`, `bg-black/50`, `normal-case`, ...) rendered as nothing. "Add", "Create book", "Promote to live", the modal Save buttons and the modal backdrop were white on white. Found when John asked how to add a strategy to a book and the form showed only Cancel. | Tailwind 4.3.3 + `@tailwindcss/vite` compile the sheet from source; `index.css` is now `@import "tailwindcss"` plus the existing `styles/globals.css` tokens. | Add / Create book render, computed `bg` is blue and disabled opacity 0.4; add and remove driven in the browser; build 92KB CSS |
+| 7.20 | **A strategy in several books could only ever be looked at in one of them.** The detail endpoint read `strategy_registry.portfolio_id` unconditionally, so every book except the primary was unreachable: the banner said the strategy also traded elsewhere and offered no way to see it, and the editor could only ever write to the primary. The `ambiguous_book` picker added in 7.4 was therefore unreachable too. Found when John asked why the book could not be chosen in the Add position dialog. | `GET /portfolio/strategy/<id>` takes an optional `portfolio_id`, validated against membership and matched without case; the detail view has a book switcher that rescopes positions, the audit trail and the editor. | Driven in the browser: switching books swaps the universe, an edit made on the second book lands there and is audited there |
+| 7.21 | Refreshing after an edit flipped the dashboard into its loading state, unmounting the strategy view and discarding which book was on screen. | The post-edit re-read is silent; only the first load shows the spinner. | Saved while on the second book; the view stays on it |
+| 7.22 | **The manual position write could not have worked in production at all.** The INSERT omitted `daily_unrealized_pnl`, `daily_realized_pnl` and `last_update`, which are NOT NULL with no default in the schema trade-ngin ships. Every manual edit would have returned 500 on first use. Invisible locally because `demo_seed.sql` and the integration fixture each invented a looser `positions` table. | INSERT supplies all three (0, 0, now()); ON CONFLICT still leaves them alone, since they belong to the engine. Both fixtures now use the shipped shape. | Built a database from trade-ngin's own baseline plus migrations 001-009 and drove the real API against it: edit 201, engine PnL and last_update preserved |
+| 7.23 | `average_price` is NOT NULL in production, but opening a new position with a blank price wrote NULL. | Refused in the domain with a message that explains it, instead of a constraint violation. | 400 `price_required_for_new_position` against the production-shaped database |
+| 7.24 | **The three tables nothing defines were still unverified.** `strategy_registry`, `live_results` and `executions` are created by no migration and no test in either repository, so AlgoLens's model of them was a guess with nothing to check it against. | Declared the contract in `schema_contract.py`, sourced per table from the engine's own INSERT statements in `postgres_database.cpp` and from trade-ngin's migration test. `scripts/check_schema.py` checks any database against it; an integration test checks the demo seed against it on every run. `strategy_registry` is explicitly marked UNVERIFIED, and a test fails if that marker is removed without evidence. | Checker catches both a missing read column and an unsupplied NOT NULL column; 10 unit tests guard the checker itself |
+| 7.25 | The UI's Gross Leverage read `live_results.gross_leverage`, a column the engine explicitly stopped writing; its value now goes to `portfolio_leverage`. The figure shown was whatever the column held on the day it was abandoned. | Falls back to `portfolio_leverage` when the dead column is null, with the engine's comment cited. | 170 backend tests |
+| 7.26 | The new seed-contract fixture dropped schemas without the ownership guard added in 7.1, reintroducing the same footgun in a second place. | Guard moved to `tests/integration/conftest.py` and used by both fixtures. | Pointing ALGOLENS_TEST_DB at the demo fails both fixtures and leaves all 11 tables intact |
+| 7.27 | **The risk gate checked limits the engine never publishes.** It looked for `max_gross_notional`, `max_position_count` and `max_symbol_notional`. trade-ngin's `store_risk_limits` header states it deliberately publishes none of those, because it enforces leverage ratios and per-symbol CONTRACT caps instead. Against a real envelope the gate would find no key it understood, report no breaches and record **passed** — a green light derived from limits nobody set. It only looked functional because the demo seed invented the keys the code was looking for. | Checks `max_symbol_position_contracts`, `max_gross_leverage` and `max_net_leverage`; legacy dollar caps still honoured when present; an envelope with no recognised key is reported as not evaluated, never passed. The verdict now carries `checked`, naming which limits were actually compared. | Against the live demo: 8 contracts passes, 14 breaches its cap of 10, acknowledgement still required once |
+| 7.28 | **Every futures exposure was understated by the contract size.** Notional was `quantity x entry price`, omitting the multiplier. Twelve ES read as $63,363 against a true $3,186,450. The same figure feeds the risk gate, so limits were compared against numbers ~50x too small. | `notional = quantity x market price x contract size`, the formula trade-ngin uses. Contract sizes read from `metadata.contract_metadata."Contract Size"`, the table its InstrumentRegistry reads. | Demo book totals $8,167,795 where it previously showed $173,809 |
+| 7.29 | The column labelled **Market Price** displayed the average entry price. There was no market price anywhere in the app. | Latest close read from `futures_data.ohlcv_1d`, the table data-ngin writes and trade-ngin reads, using the engine's own `DISTINCT ON (symbol) ... ORDER BY symbol, time DESC` query. Unknown prices render as an em dash rather than falling back to cost basis. | Browser: ES shows 5,310.75 market against 5,280.25 entry |
+| 7.30 | Symbols were upper-cased whole, turning `ES.v.0` into `ES.V.0`. Continuous-contract symbols pass from data-ngin through `trading.positions` verbatim with a lower-case roll marker, so an edit to a held position matched no row, was treated as opening a new one, and would have written a duplicate under a symbol the engine never uses. | Root upper-cased, roll suffix preserved. | `es.v.0`, `ES.V.0` and `ES.v.0` all normalise to `ES.v.0` |
+| 7.31 | **The News tab was entirely fabricated.** Static markup claiming a 27.3% fund return, +8.1% alpha versus the S&P 500, per-strategy returns, Fed rates and CPI, shown to every logged-in member and formatted exactly like the real figures on the Portfolio tab. | Replaced with an honest empty state. There is no feed behind the tab and it now says so. | Screen carries no numbers |
+| 7.32 | **Privacy settings claimed Two-Factor Authentication was ON for every account.** Component state seeded `true`, backed by no endpoint; a toggle the user flipped was forgotten on unmount. | All four controls show `not configured` until something real backs them. | No security state is asserted |
+| 7.33 | Incubation showed a hardcoded `120 days` observation window although `window_days` is per strategy, and folded strategies with no mock capital into the headline total as $0. `formatMockCapital(null)` returned `$0`, stating an allocation of nothing where none was set. | Window derived from the data, shown as a range when strategies disagree; the total excludes unset figures and says how many; unknown capital renders as an em dash. | 89 frontend tests |
+| 7.34 | The share column read 588% because it divided exposure by portfolio VALUE while its own footer totalled exposure. | Both use the same denominator. | Shares sum to 100% |
+| 7.35 | The bell asserted **"Daily Trading Report Available"** on a clock: any weekday after 09:30 EST, weekends and holidays included, with an unread dot indistinguishable from a real alert. Nothing checked that a report existed. | Removed. No endpoint reports whether one was generated, so the bell no longer claims one was. | Dashboard shows no unread marker |
+| 7.36 | **A built-in strategy served whenever the registry read failed or the table was empty.** `DEFAULT_REGISTRY` was one "Trend Following" with $500,000 of initial equity, managed by "AlgoLens System". A connection blip produced a fabricated strategy card with fabricated capital laid over whatever `live_results` happened to match, and nothing in the response said so. A test asserted this behaviour. It was a mock database wearing the real one's clothes. | Removed. An empty table is an empty list; a failed read raises and the route returns a database error. `initial_equity` NULL stays unknown instead of becoming $500,000, and a strategy with unknown starting equity reports `invested`, `return` and `returnPercent` as null. | 180 backend tests; the test that locked the fallback in now asserts the error |
+| 7.37 | Eleven engine metrics passed through `float_or_default`, which turned a NULL from `live_results` into 0. The UI then showed "$0 margin posted", "0.00x leverage", "$0 cash" as measurements. | `float_or_none`; nulls reach the client as null and render as an em dash. `float_or_default` deleted so it cannot be reintroduced. | NULLed `margin_posted` and `cash_available` in the demo: API returns null, Financial Analysis tab shows — for both |
+| 7.38 | `compute_return_stats` reported best day, worst day, win rate, average win/loss and profit factor as 0 when there was nothing to measure, and profit factor as 0 for a book with gains and no losses (which is undefined, not zero). `compute_sharpe` returned 0 when volatility was 0. | All undefined cases return null. | Unit tests |
+| 7.39 | The Sharpe tile's tooltip stated the formula subtracts a risk-free rate. The computation never has: the engine publishes no Sharpe and no risk-free rate exists in any source, so it is return over volatility at 0%. The Win Rate tooltip said "winning trades"; it is winning DAYS on the equity curve. | Tooltips state what is actually computed. Sharpe tile in the builder says "0% risk-free". | — |
+| 7.40 | Closed lots (`transform_finalized`) turned an unknown entry or exit price into $0.00 and an unknown realised P&L into 0, and used yesterday's entry price as today's "exit" price for a lot that was gone. | Unknown stays null. | Unit tests |
+| 7.41 | **Strategy Builder combined volatility, Sharpe, drawdown and win rate were value-weighted averages of each strategy's own figure**, presented under the same labels as the real thing. The volatility of a combined book depends on how its parts co-move; two offsetting strategies would have shown high volatility where the book was flat. | Computed from the combined equity curve, the way Sortino and the information ratio already were; null when the curve is too short. | Test: two opposing curves combine to ~0 volatility and ~0 drawdown |
+| 7.42 | Builder VaR was derived from that weighted-average volatility and rendered as a dollar figure regardless. | Null when combined volatility is unknown; otherwise from the curve-derived figure. | tsc |
+| 7.43 | `StrategySummary` divided by a zero portfolio value and printed `NaN% of portfolio`. | Guarded; unknown share says so. | — |
+| 7.44 | Account settings rendered five controls (change password, tax documents, bank accounts, deactivate, close) as live buttons with no handler. Same class as the fake 2FA toggle. | Disabled and captioned "Not available yet". | — |
+| 7.45 | Tooltips asserted "above 1 is good, above 2 is excellent" and "a 60%+ win rate is generally considered good": rules of thumb the fund never set, shown as evaluative fact. | Removed; tooltips describe the metric, not a verdict on it. | — |
+| 7.46 | Dead code carrying the same fabrications: `_notional` (unknown price → $0 exposure) in the risk module, `strategy_config_from_mapping` (NULL equity → $500,000), the unreachable `ReassignPortfolioModal`, a captured Microsoft OAuth URL with a real client id in `Header.tsx`, and a frontend default of 120 days that would have silently replaced a missing `window_days`. | All removed. The frontend never substitutes a window; the API is its only source. | tsc; grep |
+| 7.47 | **The demo's engine results were hand-typed literals that contradicted the series they summarised.** `current_portfolio_value` sat $3,453 away from the equity curve's last point, and volatility claimed 12.6% where the curve's actual annualised volatility was 2.1%. The chart and the tiles beside it described different books. | `live_results` is now derived in the seed from the curve, the positions, the market prices and the executions. Fields with no basis in the data (margin posted, equity-to-margin, cushion, cash available) are NULL, which the app renders as unknown. | Every derived field reconciles to its source with a difference of exactly 0 |
+| 7.48 | The equity curve was a smooth drift plus one sine wave, so derived volatility came out near 2% and the Sharpe ratio built on it exceeded 12. A demo that implies impossible statistics teaches the reader to disbelieve the tiles. | The curve is built from daily returns at a target annualised volatility per strategy, using deterministic shocks derived from md5 so the seed is reproducible. | Volatilities land within ~1pt of target; Sharpe ratios 4.6, 2.6, 0.05 |
+| 7.49 | **Contract sizes were wrong for treasuries and grains.** Seeded from trade-ngin's fallback list, which holds underlying units, they were used as price multipliers: forty ZN read as $449,400,000 against a $264,000 book. ZN and ZB are quoted as a percentage of par on $100,000 face, so a point is $1,000; ZS is quoted in cents on 5,000 bushels, so a point is $50. | Point values seeded. Flagged for the engine team: anything using that fallback list as a price multiplier inherits the same 100x error. | Carry's exposure falls from $531M to $8.3M; leverage 31x |
+| 7.50 | The curve's first point did not equal the registry's `initial_equity`, so a return measured against the curve differed from one measured against the registry: the card showed +11.67% where the list endpoint said +12.08%. | Day zero carries no return, so the first point IS the starting equity. | Difference exactly 0 for all four strategies |
+| 7.51 | **Every period return on every chart was one bar short.** The cutoff carried the current clock time, so the oldest daily bar in the window fell just outside it: "1M" measured 29 days and reported +2.06% where the full month was +2.69%. | Cutoff set to midnight in all three components that slice by period. | 1M now reports +2.70%, matching the database |
+| 7.52 | Execution notional was `quantity x price`, omitting the contract size: four ES at 5,276 read as $21,104 where the fill is worth $1,055,200. The same omission that understated position exposure. | Priced at contract value; unknown contract size renders as unknown and the total says how many fills it excluded. | ES fill now $1,055,200 |
+| 7.53 | **Top Holdings weights reached 407%** under a column headed WEIGHT. Asset values are notional exposure; the denominator was portfolio equity. | Share of total exposure, so the column sums to 100. | Weights now 24.5%, 17.3%, 16.3% |
+| 7.54 | **The information ratio read 37,874.** The benchmark stream differed from the book by a constant drift, so tracking error was floating-point dust and the ratio divided by it. | The ratio refuses a tracking error under a basis point. The seed gives the benchmark its own shocks, so it has real tracking error; qt and system stay identical, because nothing has edited qt. | Ratio now 1.73; qt and system verified identical |
+| 7.55 | Max Drawdown rendered as **"+4.18%"**, prefixed and coloured as a gain, under a heading that means the worst peak-to-trough fall. Currency figures rendered with three decimals ($58,338.552) because the format set a minimum but no maximum. | Drawdown carries no gain styling; 18 currency formats pinned to cents. | Reads 4.18% and $58,338.55 |
+| 7.56 | **"Today's Positions" showed every symbol the strategy had ever held.** The query took the latest row per symbol with no date predicate. `trading.positions` holds one row per open position per day, and the engine writes nothing at all for a position that closed -- not even a zero-quantity row -- so a closed lot stayed in the view forever, frozen at the last day it was open. The `quantity != 0` guard did nothing: there is no row to be zero. Total notional, every position weight, and the current book the risk gate checks an edit against all inherited it. | Both position queries read a dated snapshot: the latest `date` for that strategy and book, and for the comparison, the one before it. | Postgres integration tests; a lot closed yesterday leaves the view |
+| 7.57 | The finalized-positions panel asked for `CURRENT_DATE - 1` literally, so it had nothing to compare against every Monday and after every holiday -- markets shut, the engine writes no rows, and the panel went blank with no explanation. | "The previous snapshot", which is the question the panel is actually asking. | Integration test across a weekend gap |
+| 7.58 | **`FinalizedPosition` was typed with non-null prices while the API already sent null**, and three renders called `.toFixed` on them. The first lot to close without a published exit price would have thrown and taken the Trading tab down; the P&L total and the per-symbol chart would have gone `NaN` first. The demo never caught it because yesterday's positions were a verbatim copy of today's, so the panel was permanently empty -- "Total P&L $0.00" over no rows. | Types match the wire. Unknown renders as an em dash, the total counts only settled lots and says how many it left out. The seed now closes one lot and resizes another, so the path is exercised. | Frontend + backend tests; ZB renders "—" for its exit |
+| 7.59 | **AlgoLens recomputed nine metrics the engine already publishes** -- Sharpe, Sortino, max drawdown, win rate, average win, average loss, profit factor, best day, worst day -- from a 90-point equity curve, and showed the results under the same names. The dashboard could disagree with the engine about the engine's own book with nothing on screen saying which number the reader had. | The published figure wins; the local computation is the fallback for a row written before the engine published that column. Sortino and downside deviation, which the engine publishes and AlgoLens never showed, are now available. | `published_or_computed` tests; tiles match `trading.live_results` row for row |
+| 7.60 | `avg_win` and `avg_loss` are the engine's mean daily **percentage** return on winning and losing days. AlgoLens computed a mean daily **dollar** change and rendered it with a currency symbol -- a different quantity wearing the same label. | The engine's definition, rendered as a percentage. | Reads 0.78% / 0.55%, matching the row |
+| 7.61 | **"Net P&L" was the return since inception**, sitting as the fourth card of a P&L Breakdown whose other three are unrealised P&L, realised P&L and commissions -- a layout that invites the reader to add them. On the demo book it read $92,405.72 next to three figures summing to $7,259.40. | Net P&L is those three. The return since inception keeps its home in the header beside the chart. | Reads $7,259.40 = $6,330.00 + $950.00 - $20.60 |
+| 7.62 | "Total Trades" was a count of **today's fills**. `trading.live_results` carries no lifetime trade count; the engine removed `total_trades` pending closing-trade logic. The Strategy Builder also captioned a day-based win rate with it, inviting it to be read as a share of winning trades. | Renamed "Fills Today" everywhere. The win rate is captioned "of daily returns". | Reads "Fills Today 2" |
+| 7.63 | **`trading.live_results` was a reconstruction** guessed at from AlgoLens's reads: the app's own columns and nothing else. It omitted `strategy_id`, which is a real column and part of the engine's `ON CONFLICT (portfolio_id, strategy_id, date)` key, along with twenty-odd figures the engine publishes every run. | The table is no longer a guess. Its shape is the union of the engine's two writers, and the schema contract cites them by file and line. | `check_schema.py` satisfied; seed derives every published metric with the engine's own formulas |
+| 7.64 | The seed computed volatility with `stddev_samp` where the engine's `calculate_annualized_volatility` divides by n, and computed downside deviation over all days where the engine divides by the count of negative days. Different numbers under the same names. | Population standard deviation; downside deviation over negatives only. | Matches the engine's formulas |
+| 7.65 | **The Strategy Builder reported the whole portfolio as profit** when any selected strategy had no starting equity on record: the invested total skipped it while the value total kept it, and the header rendered `returnPercent.toFixed(2)` with no null handling. The comment said the strategy was "left out"; arithmetically it was left in at zero. | A selection with any unknown basis has an unknown return, and says so. | Test: a null-basis strategy makes the combined return null |
+| 7.66 | **The Strategy Builder invented 91 days of history when nothing was selected**: a flat 0% line across three months and 31 empty P&L bars, every point stamped with a real date and none of it in any table. Its metrics were zeros, not unknowns. | An empty selection has no series and no measurements. | Test asserts both series are empty |
+| 7.67 | **"Others" was counted as an instrument.** The holdings table, the holdings count and the top-3 weight all read the grouped pie data, so the sub-3% bucket appeared as a row with a colour dot beside real contracts, and a book of nine instruments reported six holdings. | `holdings` (ungrouped) drives anything that counts or lists; `assetAllocation` stays the chart's. | Reads 9 holdings; "Others" absent from the table |
+| 7.68 | A strategy the engine has published nothing for carried zeros in every metric, relying on every caller to check `dataAvailable` first; a zero that slips past that check reads as a measurement. | Nulls, which render as em dashes wherever they land. | tsc |
+| 7.69 | The information ratio's caption read "vs system alone" while the computation uses the **benchmark** stream. A strategy summary printed `$592,405.719` -- three decimals on a dollar figure, from a format with a minimum and no maximum. | Caption names the series it uses; every remaining currency format pinned. | Reads "vs benchmark stream" and $592,406 |
+| 7.70 | **The "Show All" holdings dialog footed $18,373,725 of notional exposure with $1,190,191.75** -- `metrics.totalValue`, the portfolio's equity, a different quantity fifteen times smaller presented as the sum of the rows above it. The weight column was correct and the footer read "100.00%" as a hardcoded string, so nothing on the page disagreed with itself. | Total and weight are both summed from the rows on screen. The weight can now fall short of 100 when a holding is missing rather than asserting completeness. | Nine rows sum to $18,373,725.00 under a footer saying $18,373,725.00 |
+| 7.71 | **A price rounded to cents stopped its own row reconciling.** Natural gas closed at 2.958 and rendered "$2.96", so 30 contracts at $10,000 a point read as $888,000 against a Notional column correctly saying $887,400. Euro FX at 1.0915 the same. Futures are not all quoted in cents. | Two to four decimals, so the smallest tick in this universe survives and ES still reads $5,310.75. Applied to position prices, fill prices, closed-lot entry and exit, and the incubation table. | NG reads $2.958 against $887,400.00 |
+| 7.72 | **A book header was a dollar short of its own rows**: $592,406 and $250,360 under a heading saying $842,765. Every figure correctly rounded from $592,405.72, $250,359.74 and their true sum $842,765.46 -- and still a column that does not add. | The header sums what is printed beneath it. | Reads $842,766 |
+| 7.73 | **Chart axes collapsed small values to a single repeated tick.** The P&L-by-symbol axis divided by 1,000 and rounded, so a chart whose largest bar was $640 labelled its gridlines "$0k $0k $0k $1k $1k"; the cumulative-return axis rounded to whole percent, which reads 0% at every gridline for a book whose range is under a point. | Adaptive formatters: thousands only once there are thousands, decimals on a percentage once the range is small. | — |
+| 7.74 | **A pie omitted the label for its largest slice.** Recharts places a label outside the arc at the slice's mid-angle; a slice big enough to straddle 12 o'clock has a mid-angle near 90 degrees, putting its label at y=12 in a 180px chart, centred on that point and so clipped by the top edge. Strategy Split showed 21% and 29% and nothing for the 49.8% slice. | Pies are 200px, which puts that label at y=22 -- level with the highest label the asset pie already drew cleanly. | Computed label positions for both pies |
+| 7.75 | The discretionary-alpha axis pinned its top to an exact data value (`domain: dataMax + 500`), so it drew $287,080 / $307,080 / $327,080 and then $365,458: three even steps and a fourth of nearly double. A reader judging a move by how far the line rose was reading a ruler with an uneven last inch. | `domain: auto`, so recharts picks evenly spaced ticks. | — |
+| 7.76 | **The demo's equity curve ran on calendar days.** Ninety consecutive dates, twenty-six of them Saturdays and Sundays, each carrying a return. Futures markets are shut then and the engine writes no equity point at all, so a third of the history was days that never happened -- and both `sqrt(252)` and the `252/n` annualisation exponent assume the points ARE trading days. | Ninety weekdays, so the demo produces what the engine produces and the annualisation constants mean what they say. | Zero weekend points; 2026-05-01 to 2026-09-03 |
+| 7.77 | **Sharpe ratios of 4.67 and 0.05 sat next to each other on the dashboard.** Nothing was miscalculated: the curve's shocks were never centred, and over ninety draws the sample mean misses zero by enough to swamp the drift it is added to. Trend Following was seeded to drift +4.9% and realised +18.5%; Carry was seeded +3.2% and realised +0.1%. Every strategy's return was two to three times more dice than drift, and annualising a lucky quarter turned +18.5% into +60.8% a year against 13% volatility. The ratio faithfully reported a coin that had come up heads. | Shocks are demeaned and rescaled to the target volatility, so the realised return and volatility are the seeded ones and the Sharpe ratio is their ratio -- chosen deliberately and defensible on sight. The daily path keeps its noise; only its mean and spread are calibrated. | 1.12, 0.67, 0.90 and -0.67, each exact to two decimals |
+| 7.78 | The drift was a simple daily rate of `annual/252`, which compounds to `e^r - 1`: a 14% target realised as 15.03%. And the annualisation raised the total to `252/points` where n points are n-1 returns. | Drift as a daily log return; exponent over the count of returns. | Realised annualised returns land on 14.00, 5.00, 19.00 and -6.00 |
+| 7.79 | **The correlation matrix explained its own absence with a claim that was not true.** "A real correlation matrix needs per-symbol price history, which the API does not expose yet (tracked in issue #56)." The history was never missing: `futures_data.ohlcv_1d` is the table every market price on the site already comes from. Nothing read it, and the panel described that gap as a property of the data. Before it was an empty state it was filled with `Math.random`. | `GET /portfolio/correlations` computes Pearson correlations of daily log returns from that table, scoped to the books the fund reports on. Pairs are aligned on date before differencing; a pair that cannot be measured is null, not zero; and the panel states the window it rests on. | 15 unit tests; matrix matches a SQL `corr()` cross-check cell for cell |
+| 7.80 | **Every symbol's price moved on the same sine wave.** `close = px * (1 + 0.004 * sin(d/4))` for all eleven contracts, across equities, treasuries, metals, energy, FX and grains. Any correlation computed from it is 1.00 everywhere -- which is the real reason the matrix could not ship -- and the market-price column was decorative. The bars also fell on calendar days: 88 of 330 were weekends. | Ninety weekdays with a factor structure: index futures move together and against treasuries, the two treasuries move almost as one, gold and silver share a metals factor, crude and gas share an energy factor, beans are largely idiosyncratic. Returns are then standardised to realistic volatilities, which is a positive scaling and leaves the correlations alone. The last bar is pinned to the marked price, so every notional already verified is unchanged. | ES/NQ 0.85, ZN/ZB 0.96, GC/SI 0.87, GC/ZN 0.41, CL/NG 0.37, 6E near zero |
+| 7.81 | The new fund-wide symbol query read `trading.positions` without constraining `portfolio_id`, which `test_portfolio_queries.py` exists to prevent. | Scoped to the books the registry reports, primary and membership. The guard was right and stays as it is. | The guard passes rather than being exempted |
+
+### Reviewed and deliberately left
+
+- **Position edits on retired strategies are refused** (the live-only `get`). A retired strategy has no capital to edit; only its audit trail needs to stay readable, and now does.
+- **Book and position writers let raw `psycopg2` errors propagate** to the route's generic 500, rather than wrapping them as the incubation writers do. The client never sees database text either way; unifying the pattern is a refactor, not a fix.
+- **The HTTP adapter imports the dependency factory and two domain exception classes.** `test_domain_boundaries.py` permits both and they are the composition root's job. Tightening the rule is a team decision.
+- **`services/` under `algolens-api` is dead code with passing tests**, present on `main` since the DDD split (#71). Out of scope here; worth deleting in its own PR.
+- **No React component tests.** The state machines that make the acknowledge-once gate safe are tested; the component wiring is verified by driving the app. Adding React Testing Library is a dependency decision.
+
+### Verified after the fixes
+
+- 207 backend unit tests, 13 Postgres integration tests, 94 frontend tests, `tsc --noEmit` clean, production build clean.
+- `check_schema.py` reports the contract satisfied against the rebuilt demo database.
+- Tailwind is compiled at build time; the frozen stylesheet is gone. Dashboard, Books, strategy detail and the edit modal checked in the browser after the switch.
+- Demo database rebuilt from the seed plus migration 009 and back at baseline.
+
+Reconciled against SQL after the last pass:
+
+| On screen | Source |
+| --- | --- |
+| Fund total $1,190,191.75 | Sum of the three live strategies' `current_portfolio_value`, exact |
+| Top Holdings ZN 24.5% / ES 17.3% / 6E 16.3% | Share of total exposure; SQL gives 24.46 / 17.34 / 16.34 |
+| HHI 1487, 9 holdings, top-3 weight 58% | Sum of squared exposure shares over the ungrouped list |
+| Trend Following notional $8,167,795.00 | Equals `live_results.gross_notional`, and the four position rows sum to it exactly |
+| Sharpe 4.67, drawdown 3.56%, win rate 56.18%, profit factor 1.79 | Read from `trading.live_results`, not recomputed |
+| Avg win 0.78% / avg loss 0.55% | `live_results.avg_win` / `avg_loss`, the engine's percentages |
+| Net P&L $7,259.40 | $6,330.00 unrealised + $950.00 realised - $20.60 commissions |
+| Combined return +13.35% ($140.2k) | $1,190,191.75 against $1,050,000 of registry starting equity |
+| VaR (95%) $9.8k | 1.645 x (7.94% x $1,190,191.75) / sqrt(252) |
+| ES fill $1,055,200.00 | 4 x 5,276.00 x 50 |
+| ZB closed lot, exit "—" | Held yesterday, no row today; nothing records the exit |
+
+One thing the browser could not confirm: the two pie charts and the daily-P&L
+bars render no geometry in the preview pane, because the pane reports
+`document.visibilityState === "hidden"` and recharts drives its entry animation
+from `requestAnimationFrame`. The axes and their domains come from the same
+data, and that data reconciles above; the line chart, which animates by stroke
+rather than geometry, draws normally. Worth a glance in a real browser.
+
+---
+
+## 8. Third pass — the two engine numbers, and whether any of this deploys
+
+Two things were flagged at the end of §7 as worth raising rather than fixing.
+Both are fixed here, in `trade-ngin` on the same `qt-platform-preview` branch.
+Then a third question, which is the one that mattered most: whether the platform
+this branch describes can actually be pointed at production.
+
+### 8.1 The profit-factor sentinel
+
+Profit factor is gross profit over gross loss. A book that has not had a losing
+day has no gross loss, so the ratio has no denominator and no value. The engine
+wrote **999.99** for that case, described in its own source as a "convention:
+very large profit factor if there are no losses". The backtest path wrote 999.0.
+
+It is not a large profit factor. It is a placeholder for an absent one, and once
+it is sitting in a numeric column nothing downstream can tell the two apart: it
+averages into a fund-level figure, it sorts to the top of a leaderboard, and it
+renders on a dashboard as "999.99x", which is the number a reader remembers.
+
+- `HistoricalMetrics::profit_factor` and the backtest's are `std::optional<double>`
+  now, from the calculators through to the column. An undefined ratio is left out
+  of the metric map, which stores the column NULL.
+- `gross_profit` and `gross_loss` are written alongside it either way, so nothing
+  a reader actually needs is lost when the ratio is absent.
+- The daily email omits the Profit Factor row rather than printing 999.99.
+- **Migration 010** clears the sentinel from rows already written. Its predicate
+  is narrow — a value at or above 999 *and* `gross_loss = 0` — so a genuine
+  profit factor of 999 is left alone, and the rollback reconstructs the sentinel
+  from that same condition.
+- AlgoLens does not rely on that migration having run: `published_profit_factor`
+  drops any published value at or above 999. A production database is not
+  migrated the moment this code deploys.
+
+**The same sentinel, twice more.** `calculate_sortino_ratio` and
+`calculate_calmar_ratio` returned 999.0 on a zero denominator, and 0.0 when the
+numerator was negative — two confident values for the same division by zero, one
+reading as a spectacular result and the other as a measured absence of one. Both
+are `std::optional<double>` now, and both degenerate branches are empty: a
+Sortino needs a return below the target and a Calmar needs a drawdown. The
+reason survives in each case — `downside_volatility` and `max_drawdown` are
+reported separately, and a zero in either is the whole explanation. The backtest
+coordinator leaves the column out when the ratio is absent, and the two console
+apps print `n/a (no returns below target)` rather than a number.
+
+One test had settled for `EXPECT_LE(std::abs(sortino), 999.0)`, which was only
+ever a bound on how wrong the answer could be. It now asserts there is no answer.
+
+**And the zero defaults behind them.** The sentinels were the loud half. The
+quiet half was every sibling that returned **0.0** on the same division by zero
+— no 999, no obvious tell, and a value that reads as "earned nothing per unit of
+risk" rather than "this has no value". Three calculators had it:
+
+| | Was | Now |
+| --- | --- | --- |
+| `BacktestMetricsCalculator::calculate_sharpe_ratio` | 0.0 on zero volatility | empty |
+| `LiveMetricsCalculator::calculate_sharpe_ratio` / `calculate_sortino_ratio` | 0.0 | empty |
+| `LiveHistoricalMetricsCalculator` — `sharpe_ratio`, `sortino_ratio` | left at the field default 0.0 | empty |
+
+The third is the consequential one: it is the struct that writes
+`trading.live_results`, so a zero there was a zero on the dashboard. The runner
+now leaves both columns out of the metric map when they are undefined, which
+stores NULL, and `volatility` and `downside_deviation` go in regardless — an
+absent ratio always has its explanation in the same row.
+
+`LiveDataLoader` needed splitting to read them: its nullable reader had the
+profit-factor sentinel baked in, and a Sharpe ratio of 999 would be absurd but it
+would still be a Sharpe ratio. The 999 threshold now applies only to the column
+it was written for.
+
+Two comments in the live calculator said *"cannot calculate Sharpe ratio"* and
+*"cannot calculate Sortino ratio"* immediately before returning 0.0 — a number
+that says it can. Both now return nothing, which is what the comment always said.
+
+AlgoLens needed no change: `published_or_computed` already falls back to a local
+computation on NULL, `compute_sharpe` already returns None on zero volatility,
+and the demo seed already writes NULL through `CASE WHEN st.volatility > 0`. The
+three were in agreement about the right answer; only the engine was not.
+
+### 8.2 Contract size is not a price multiplier
+
+A futures contract has a **contract size** — 5,000 bushels of corn, $100,000 of
+face value in ten-year notes — and a **price multiplier**, the currency worth of
+one point of the quoted price. For most contracts these are the same number,
+because the price is quoted per unit of the underlying: crude in dollars per
+barrel on 1,000 barrels, gold in dollars per ounce on 100 ounces. Code that
+confuses them is right by accident.
+
+It stops being right where the quote convention differs, and there the error is
+a clean factor of 100:
+
+| Group | Quoted as | Contract size | One point is |
+| --- | --- | --- | --- |
+| ZN, ZB, ZF, UB | percentage of par | $100,000 face | $1,000 |
+| ZC, ZS, ZW, KE | cents per bushel | 5,000 bushels | $50 |
+| ZL | cents per pound | 60,000 lb | $600 |
+| LE, HE | cents per pound | 40,000 lb | $400 |
+| GF | cents per pound | 50,000 lb | $500 |
+
+Four tables in `trade-ngin` held per-symbol constants and disagreed with each
+other, because they were answering two questions under one name:
+
+| | ZN | ZC | ZL | LE | ZR | GC |
+| --- | --- | --- | --- | --- | --- | --- |
+| `email_sender.cpp` (twice) | 100000 | 5000 | 60000 | 40000 | 2000 | 100 |
+| `live_pnl_manager.cpp` | 1000 | 5000 | 60000 | 40000 | 2000 | **1000** |
+| `backtest_pnl_manager.cpp` | 1000 | 50 | 600 | 400 | **20** | 100 |
+| correct | 1000 | 50 | 600 | 400 | 2000 | 100 |
+
+So every treasury and grain line in the daily email overstated notional by 100x,
+live P&L on grains and livestock was 100x too large, the live path priced gold
+ten times too high, and the backtest priced rough rice at a hundredth of what it
+is worth.
+
+`instruments/contract_multiplier.{hpp,cpp}` is now the one table, stating the
+quote convention beside every contract size, and the other four call it. It is
+covered by 16 unit tests. `InstrumentRegistry`, which reads `"Contract Size"`
+from `metadata.contract_metadata` and used to assign it straight to
+`spec.multiplier`, resolves it instead — and **does not assume which quantity
+that column holds**, because that is not settled: the column name says contract
+size and the AlgoLens demo seed holds point values. The resolver recognises
+either and logs which it saw. AlgoLens does the same thing, in
+`domain/portfolio/contract_multipliers.py`, so the engine and the dashboard
+cannot price the same position differently.
+
+Symbols reduce to a root now instead of matching by substring, which is how
+`M6E` came to be priced as `6E`.
+
+### 8.3 What was deliberately NOT changed, and needs a decision
+
+`InstrumentRegistry::get_instrument` rewrites **ES to MES, YM to MYM and NQ to
+MNQ** before every lookup: this deployment reads a full-size equity-index ticker
+as the micro contract. The old fallback tables did the same, and additionally
+read `M6E` as `6E`, `M6B` as `6B`, `MGC` as `GC` and `MSF` as `6S`.
+
+Every one of those is a **factor of ten**, and nothing in either repository
+settles it. If the fund trades full-size Russell contracts, RTY is priced at a
+tenth of what it should be; if it trades E-micro euro, M6E is priced ten times
+too high. Correcting them without knowing would silently move published exposure
+by 10x, so they are preserved exactly, in a `deployment_aliases()` map that says
+so in as many words.
+
+AlgoLens does **not** apply that remap and never has. If production's
+`metadata.contract_metadata` carries both an `ES` row and an `MES` row, the
+engine and the dashboard will differ by ten times on equity-index exposure.
+
+This is the query that settles it:
+
+```sql
+SELECT "Databento Symbol", "IB Symbol", "Name", "Contract Size"
+  FROM metadata.contract_metadata
+ WHERE "Databento Symbol" IN ('ES','MES','NQ','MNQ','YM','MYM','RTY','M2K',
+                              '6E','M6E','6B','M6B','GC','MGC','ZN','ZC','ZS');
+```
+
+Against the answer, one of two things follows: either the aliases go (the fund
+holds full-size contracts and the engine has been under-pricing them), or
+AlgoLens gains the same remap.
+
+### 8.4 Can any of this be deployed? — fourteen mismatches, then two
+
+The real question behind "is it migratable" turned out to be answerable exactly.
+Build a database from `trade-ngin/migrations` alone and check it against
+AlgoLens's schema contract:
+
+```
+14 schema mismatch(es):
+  [missing_column] trading.live_results.sharpe_ratio
+  [missing_column] trading.live_results.sortino_ratio
+  [missing_column] trading.live_results.downside_deviation
+  [missing_column] trading.live_results.max_drawdown
+  [missing_column] trading.live_results.win_rate
+  [missing_column] trading.live_results.avg_win
+  [missing_column] trading.live_results.avg_loss
+  [missing_column] trading.live_results.profit_factor
+  [missing_column] trading.live_results.best_day
+  [missing_column] trading.live_results.worst_day
+  [missing_column] trading.executions.execution_time
+  [missing_column] trading.executions.commissions_fees
+  [missing_table]  futures_data.ohlcv_1d
+  [missing_table]  metadata.contract_metadata
+```
+
+**Nothing in either repository creates `trading.live_results` or
+`trading.executions`, and nothing has ever added a column to either.** Migration
+001 ALTERs `positions` and `equity_curve`; these two tables it does not touch.
+Their shape exists only as whatever was done by hand on the box that runs the
+engine.
+
+That was survivable while the engine was the only reader of its own writes. It
+stopped being survivable in §7, when AlgoLens started reading ten published
+metrics out of `live_results` instead of recomputing them. Deploying that build
+against a database without those columns is a 500 on the dashboard, and no
+schema step would have added them.
+
+**Migration 011** declares every column the live runner's metric maps write and
+every column the execution writer names, with `ADD COLUMN IF NOT EXISTS`. It is
+a no-op on a database that already has them, which a working production box does.
+It does not create the tables: a database with no `trading.live_results` has
+never run the engine, and inventing it here would guess at the key and the
+uniqueness constraint. Its rollback refuses by default, because reverting an
+additive migration means dropping published metrics that cannot be recomputed.
+
+Migration 010 could not run on such a database either — it UPDATEs
+`profit_factor`, which did not exist, and failed the whole migration. Both it
+and its rollback now guard on the column.
+
+After 011 the same check reports **two** mismatches, and both are correct:
+`futures_data.ohlcv_1d` and `metadata.contract_metadata` belong to data-ngin and
+are rightly not created by trade-ngin's migrations. They are now declared in the
+schema contract so their absence is *reported* rather than discovered as a 500 —
+without them there are no market prices, no exposures and no correlation matrix
+at all.
+
+**Apply order: 011, then 010, then deploy.**
+
+### 8.5 Two more things the demo could not have shown
+
+Both found by asking what a production database contains that the demo seed does
+not, and both now covered by tests that plant exactly that.
+
+- **`trading.live_results.gross_leverage` is a dead column.** The engine stopped
+  writing it and puts that number in `portfolio_leverage`; the old column was
+  never dropped, so in production it holds a value frozen on the day of that
+  change. AlgoLens read it *in preference*. The demo seed leaves it NULL, so the
+  demo showed the live figure and every test passed. `live_leverage` now reads
+  `portfolio_leverage` first and keeps the dead column only as a fallback for a
+  row old enough to predate it.
+- **An unsequenced parameter index in `update_live_results`.** Three
+  `param_idx++` in one expression, whose operands C++ leaves unsequenced: the
+  compiler may number the WHERE placeholders in any order while the three values
+  are appended in a fixed one. The strategy id can bind to the date predicate,
+  the UPDATE matches nothing, and yesterday's metrics are silently never
+  finalised. It surfaced as `-Wsequence-point` in the build log, where it had
+  been sitting all along.
+
+### Verified after this pass
+
+- **225 backend unit tests** (18 new in `test_production_shapes.py`, 4 more for
+  the dead leverage column), **21 Postgres integration tests** (8 new, which plant
+  the production shapes into a seeded database and read them back through the
+  application's own SQL), **94 frontend tests**, `tsc --noEmit` clean.
+- 16 new C++ unit tests for the contract table, plus 4 for the registry's
+  resolution of the metadata column; the profit-factor tests now assert an
+  absent ratio where they used to assert 999.
+- `check_schema.py` against a database built from `trade-ngin/migrations`:
+  14 mismatches before 011, 2 after, both data-ngin's.
+- Driven in the browser after the change. ZN reads $4,494.0k (40 × 112.35 ×
+  1,000), not $449m; ZS $788.6k (15 × 1,051.50 × 50); Gross Leverage 15.60x,
+  equal to `portfolio_leverage`; Profit Factor 1.18; Net P&L $7,259.40 =
+  $6,330.00 + $950.00 − $20.60; the correlation matrix still reports ES/NQ 0.85
+  and GC/ZN 0.41 over 89 trading days.
+
+### Still open after this pass
+
+- **The equity-index aliases in §8.3.** One query settles it; the answer moves a
+  published exposure figure by 10x either way, so it is not mine to pick.
+- **`trading.strategy_registry` is still a reconstruction.** No migration creates
+  it and no engine code writes it. A schema dump from a real database is the only
+  thing that settles it, and it is the last table in the contract whose shape is
+  a guess.
+
+---
+
+## 9. Fourth pass — the open issues, and what needs a database I cannot reach
+
+### 9.1 What I could not do, and why
+
+Four of the items at the end of §8 need the production database. **I have no
+access to it.** The host answers on the network and so does the EC2 box, but
+there are no credentials on this machine — only `.env.example` with placeholders
+— and the real values live in `/home/ec2-user/algolens-docker/.env`, gitignored,
+on a host this session is not permitted to reach.
+
+So the ES/MES question, the `strategy_registry` dump, and applying migrations 010
+and 011 are all still open, and none of them is open because it is hard.
+`scripts/production_readiness.sh` now answers all of them in one read-only pass —
+it writes nothing, takes the DSN as an argument rather than hunting for
+credentials, and prints the four things no amount of reading the code can settle.
+
+**One item I will not do even with access.** Running a live trading cycle
+submits orders. That is not mine to run. What is worth having instead: build the
+engine, run its suite (CI does), and if the desk wants a full cycle exercised,
+run it against a restored copy with execution disabled, with someone watching.
+
+### 9.2 The open issues, reviewed
+
+Both `QT ISSUE` threads were filed on 2026-09-05 and neither has a reply yet.
+The bodies are the substance.
+
+**AlgoLens #83 — the position read is not filtered by stream. FIXED HERE.**
+
+This was correct and it was a live gap in a query I had edited earlier in this
+same audit. `trading.positions` carries one row per (symbol, date, **stream**).
+Every production row is `portfolio_type = 'system'` today, so a query with no
+stream predicate is accidentally right and no test could tell. The moment
+trade-ngin migration 002 backfills the qt stream, every symbol and date has two
+rows and `DISTINCT ON (symbol) ORDER BY updated_at DESC` returns whichever was
+written last.
+
+The worst case is the write path: after a desk edit the qt row has the newest
+`updated_at`, so the edit appears to have worked — and would look identical if it
+had been written to the wrong stream.
+
+All three position reads take a stream now, defaulting to `PRIMARY_STREAM`,
+because that is what every other headline figure on the page already means. The
+issue asked for the default to be the model's book; I used the real book instead,
+to match the equity curve sitting directly above the table. Worth a word if that
+is wrong.
+
+Two things the issue did not mention and that mattered:
+
+- The **snapshot date has to be resolved within the stream**. Taking `max(date)`
+  across all of them asks the qt stream for a day only the system stream reached,
+  and returns an empty table on any day the engine ran and the desk did not.
+- `held_symbols`, which feeds the correlation matrix, had the same gap. Unscoped,
+  it would have correlated a portfolio nobody holds.
+
+`_has_portfolio_type` is per-table now. It checked `equity_curve` and was about
+to gate a predicate on `positions`. Migration 001 adds the column to both
+together, so in a healthy database the answer is the same — but a query against
+one table has no business trusting the shape of another, and a half-restore would
+have made the positions read name a column that is not there.
+
+Nine integration tests, against real PostgreSQL, planting both streams for the
+same symbols and dates with the qt rows written last. **This unblocks applying
+migration 002 to production**, which #83 lists as blocked.
+
+**AlgoLens #84 — the equity strategy maps to BASE_PORTFOLIO.** A data fix on the
+live database, and not mine to make. Worth noting that its author ran a read-only
+query against production on 2026-09-05 and got
+
+    inc_meanrev | LIVE_EQUITY_MEAN_REVERSION | BASE_PORTFOLIO | incubating
+
+which is the first direct evidence of `trading.strategy_registry`'s real shape
+this audit has seen. It confirms `id`, `strategy_type`, `portfolio_id` and
+`lifecycle` exist with those names. It does not confirm the other nine columns
+the contract declares, so the table stays marked unverified until a full dump.
+The issue also flags `inc_tf_base` and `inc_tf_fast` as resolving to
+BASE_PORTFOLIO and worth reviewing at the same time.
+
+**AlgoLens #29** — the older, unscoped `portfolio_id` version of the same bug —
+is fixed on this branch and has been since the first pass.
+
+### 9.3 The review comment on PR #80 — answered
+
+`raohemdutt` left a detailed plan for how this branch should travel, measured
+commit by commit against `main` with #80 merged, and it ends *"Tell me the order
+you prefer and I will line up the reviews accordingly."* That is a question for
+John, not something to action unilaterally. In summary:
+
+- Four commits fold into **#80 before it merges**, one of them as a hand-port
+  rather than a cherry-pick because it changes `evaluate_risk`'s signature.
+- The rest become **small separate PRs**, with the Postgres integration fixture
+  going **first of all of them** — *"every blocking defect on #80 dies against
+  that fixture and survives every fake"*.
+- The **Books** work travels as one ordered stack of ten commits, paired with
+  trade-ngin's `009_books_and_membership.sql`, after #60 lands.
+- **Never travels**: the two preview documents as they stand (their content
+  becomes issues), and `algolens-api/logs/algolens.log.10`.
+- **`refactor/models-range-filter` at 7832aaf2** deletes `streams.py` and
+  `AlphaAttribution.tsx`, which #80 imports. **Answered:** the deletion does not
+  land — see §10. Only `ed82b577` travels, rebased onto the QT lane.
+
+### 9.3b The order, as agreed — and the seven commits the plan had not seen
+
+The reply to that review lived on #80 and has since been deleted along with the
+claim quoted in it, so this section is the record.
+
+The reviewer's order stands as written: the Postgres integration fixture
+(`8e1ef5bf` + `559e96ce` + `1a55e65b`) first of everything, because every blocking
+defect on #80 dies against it and survives every fake — it has since caught the
+position-snapshot bug and the stream bug, both SQL, both invisible to doubles. Then
+the four commits folded into #80, with `74819cd3` hand-ported rather than
+cherry-picked because it imports `match_book` and changes `evaluate_risk`'s
+signature. Then the Books stack as one ordered ten, paired with
+`009_books_and_membership.sql`, after #60.
+
+Seven commits landed after `d96d5f25` and so are not placed anywhere in that plan:
+
+| Commit | Where it goes |
+|---|---|
+| `170b9d09` | Its own PR, **after** the fixture PR and **paired with trade-ngin migration 011**. This is the one that stops AlgoLens recomputing the engine's published metrics. |
+| `f434ced8` | Its own small PR, **immediately after the fixture**. The #83 fix; unblocks applying migration 002. |
+| `9172d9d7`, `df6c9525` | Docs and a read-only script. No code path. Travels whenever. |
+| `994eb852` | Two test files shared a basename and pytest collected neither. Folds into the fixture PR. |
+| `476d2f35`, `09bb7a5a` | Audit-document edits only. Per the rule that the preview documents do not travel, these should not either — their content is in the issues. |
+| `5bf87a92` | The React component tests. Its own small PR; depends on nothing. |
+
+**The cross-repo pairing is mandatory and was not when the plan was written.**
+`170b9d09` reads ten metric columns out of `trading.live_results` instead of
+recomputing them, and no migration in either repository has ever created those
+columns (§8). trade-ngin `011_live_results_and_executions_columns.sql` declares
+them additively. So: **011, then 010, then `check_schema.py`, then `170b9d09`
+deploys** — and not before.
+
+### 9.4 Two things from that review, done
+
+- **`algolens-api/logs/algolens.log.10` was tracked in git**: 10,239,989 bytes,
+  containing a developer's Windows path. `.gitignore` covered `algolens.log` but
+  not the rotated files beside it. Untracked, and the whole `logs/` directory is
+  ignored now.
+- **`algolens-api/services/` deleted**, with its test. Ninety lines of production
+  code that nothing under `algolens/` has imported since the DDD split in #71,
+  kept alive by a 185-line test suite that was the only thing referring to it. A
+  passing test on unreachable code is worse than no test, because it reads as
+  coverage.
+
+### Verified after this pass
+
+- 248 backend tests (9 new stream-scoping integration tests; the 12 that only
+  exercised the deleted `services/` package are gone with it).
+- The demo book still renders identically after the stream predicate: four
+  positions, $8,167,795.00 of notional, and the correlation matrix still nine
+  symbols over 89 days. The demo's positions are all `qt`, which is why the
+  default was invisible — and is itself evidence that `qt` is the right default.
+- `scripts/production_readiness.sh` run end-to-end against the demo database:
+  eighteen required columns present, no profit-factor sentinels, one stream.
+
+### Still open
+
+- **The ES/MES question** (§8.3) and everything else in §9.1 — blocked on
+  database access, not on work.
+- ~~**The PR-splitting plan** in §9.3~~ — answered on #80: the reviewer's order
+  stands, with the seven later commits placed into it.
+- **P2-b, attribution across a book move.** Still the three options in §6. The
+  platform states the cost, records an acknowledgement and audits who accepted
+  it; it does not repair the maths, and which of the three is right is a desk
+  decision rather than an engineering one.
+- ~~**No React component tests.**~~ — done: `@testing-library/react` and a
+  per-file jsdom environment are in, and `PositionBreakdown.test.tsx` covers the
+  twelve honest-null behaviours that only exist once the component renders.
+
+---
+
+## 10. `refactor/models-range-filter` — decided
+
+Asked three times across this audit (P2-c in §3, §6, §9.3) and by two other
+people on #80. **Answered by John on 2026-09-06: the streams stay.**
+
+The commit that raised the question is `7832aaf2`, *"Remove qt/system/benchmark
+streams and alpha-attribution feature"*, on the branch `refactor/models-range-filter`.
+It was not an accident — its message argues that AlgoLens should narrow to
+portfolio visualisation and incubation, and drops the `portfolio_type` filter and
+the chart that compared the streams as surplus to that.
+
+That premise is rejected. The three-stream read side is the reason the platform
+exists: the qt book is what the desk actually holds, the system book is what the
+model says it should hold, and the whole point of the edit surface built in §1–§5
+is to make the gap between them visible and adjustable. Issue #83 is direct
+evidence that the read side is load-bearing rather than decorative.
+
+**What this means concretely.**
+
+- `streams.py`, `AlphaAttribution.tsx`, the 103 lines of `repositories.py` and
+  `tests/test_stream_scoping.py` stay. #80 imports the first of those and
+  `f434ced8` adds to the last.
+- The deletion in `7832aaf2` does not merge — not before the QT lane, not after
+  it.
+- The range-filter and `models/`/`lib/` layering work in `ed82b577` on that same
+  branch is worth having and does not depend on the deletion. **The bug fix in it
+  is already taken** — see §10.1. The layering half (moving `src/domain/` to
+  `src/models/` + `src/lib/` across ~28 importers) is a separate call and should
+  travel on its own, rebased onto the QT lane.
+- Nothing in the merge ordering waits on this any more.
+
+The claim has been removed from the #80 thread rather than left standing where
+someone could act on it. The comment quoting it went with it, so §9.3b above is
+now the only record of the agreed merge order.
+
+### 10.1 The one thing worth taking from that branch, taken
+
+`ed82b577` carries a real bug fix behind the layering churn, and it applies to
+this branch unchanged: **the 1W/1M/3M/1Y buttons measured their window from the
+wall clock rather than from the data.**
+
+That is right only while the engine published this morning. It is wrong every
+other time, and it fails quietly rather than loudly:
+
+- The demo series ends 2026-09-03 and today is 2026-09-06. "1W" was returning
+  **four bars** — four days of trading under a button that says a week — and "1M"
+  twenty where the month holds twenty-three.
+- A strategy that stopped publishing more than the window ago returns **nothing**,
+  and the chart draws that as an empty panel rather than as a series that ended.
+  Any retired or paused strategy hits this every time it is opened.
+
+`domain/portfolio/filterByPeriod.ts` anchors the window to the newest bar in the
+series instead, keeps the inclusive calendar-day boundary from §1 (the fix that
+stopped every window being short by one bar), and reduces both ends to UTC
+midnight so the answer cannot depend on the reader's timezone. `PortfolioOverview`,
+`StrategyDetail` and `IncubationDetail` all use it; the switch statement was
+copied into each of the three.
+
+Eleven unit tests, including the past-dated regression and the inclusive boundary.
+Verified in the browser against the demo book: 1W now renders six points on both
+the fund chart and the strategy chart — Aug 27, 28, 31 and Sep 1, 2, 3, which is
+the trading week ending on the last bar — against four before.
+
+---
+
+## 11. The production database, read at last
+
+John supplied credentials on 2026-09-06. Everything in §9.1 that was blocked on
+access is answered here, and three of the answers are not what the code implied.
+
+### 11.1 The ten-times question is settled: AlgoLens was right
+
+`metadata."Contract Size"` holds **point values**, not underlying units — ZN is
+1000, ZC is 50, ZL 600, LE 400, CL 1000. The production table is correct as it
+stands, and AlgoLens reading the column straight through has always been right.
+
+Both spellings of every equity-index contract exist, each with its own correct
+point value: ES 50 and MES 5, NQ 20 and MNQ 2, YM 5 and MYM 0.5, RTY 50 and
+M2K 5. And the book trades the micros **directly**:
+
+| root | rows | first | last |
+|---|---|---|---|
+| MES | 128 | 2025-10-06 | 2026-05-03 |
+| MYM | 152 | 2025-10-06 | 2026-05-03 |
+| MNQ | 116 | 2025-10-06 | 2026-05-03 |
+| M2K | 80 | 2025-10-06 | 2026-05-03 |
+| YM | 42 | 2025-01-29 | 2025-11-10 |
+| NQ | 39 | 2025-09-02 | 2025-11-10 |
+| RTY | 11 | 2025-09-02 | 2025-10-28 |
+| ES | 1 | 2025-10-04 | 2025-10-04 (quantity **0**) |
+
+So `InstrumentRegistry`'s remap never once helped a position the fund holds. What
+it did was read the full-size NQ and YM held between September and November 2025
+as their micros — a tenth of their value. RTY was never in the registry's remap
+list, and the single ES row has no quantity.
+
+**Removed**, with John's approval, from both `get_instrument` and
+`has_instrument`, and the same four entries removed from `deployment_aliases()`.
+The remaining aliases in that table (MGC, MSF, M6B, M6E reading as full-size)
+stay: the book holds none of them, so nothing settles them, and they only fire
+when a metadata row carries no contract size at all — which in production never
+happens.
+
+Historical equity-index valuations move; nothing current does.
+
+### 11.2 `trading.strategy_registry` is no longer a reconstruction
+
+Fourteen columns, dumped and recorded: `id`, `strategy_type`, `portfolio_id`,
+`name`, `description`, `initial_equity`, `managers` (jsonb), `is_active`,
+`sort_order`, `created_at`, `updated_at`, `lifecycle`, `incubation_started_at`,
+`mock_capital`. Everything the contract declared is there.
+
+Four rows, and they confirm **#84**: `inc_meanrev`, `inc_tf_base` and
+`inc_tf_fast` all point at `BASE_PORTFOLIO`. The mechanism is visible now too —
+`LIVE_EQUITY_MEAN_REVERSION`'s results are written under `EQUITY_MR_PORTFOLIO`,
+so a registry row naming `BASE_PORTFOLIO` sends every read to the wrong book,
+where the only row is a stale one from 2025-08-15.
+
+### 11.3 The engine has not advanced the live book since 3 May
+
+`positions`, `equity_curve` and `live_results` all end **2026-05-03**;
+`executions` the day before. Market data is fine — `futures_data.ohlcv_1d` runs
+to 2026-08-06 with no gap and all 36 symbols.
+
+It is not a crash. `live_run_metadata` shows the engine ran on **2026-09-01, 02
+and 04**, and `live_results` rows were written on those days. But every one of
+them is for `LIVE_EQUITY_MEAN_REVERSION` over 2026-04-01 to 2026-04-21 — the E2
+verification of the new equity strategy, whose `strategy_trading_days_metadata`
+row was seeded by hand on 2026-09-01.
+
+So the engine works and is being run. **The live trend-following book simply has
+not been advanced since 3 May**, while attention moved to the incubating equity
+strategy. Three months of the fund's own history is missing, and the site shows a
+book frozen in May.
+
+This also makes §10.1 sharper than it looked. With the series ending 2026-05-03
+and today four months later, the production dashboard's 1W, 1M and 3M buttons
+return **nothing at all**: three of the five range buttons render empty charts
+right now. Anchoring the window to the data is what makes them show anything.
+
+### 11.4 Migrations applied to production
+
+Backup first: whole-database structure, plus `trading` and `auth` with their
+data, under `algolens-prod/backups/`. The `trading` schema is 17 MB; the 9.6 GB
+is `futures_data`, which no migration touches.
+
+| Migration | Result |
+|---|---|
+| 004 position_overrides | table, 3 indexes, 2 append-only rules |
+| 005 risk_limits | table + index |
+| 009 books and membership | 3 tables, seeded 4 membership rows from `strategy_registry` |
+| 011 live_results/executions columns | **no-op** — every column already existed |
+
+`check_schema.py` then reported **"Schema contract satisfied: every declared read
+and write is supported"**, exit 0, against production. The deploy gate is green.
+
+Not applied at the time, deliberately: **010**, which clears the profit-factor
+sentinel. It is one row (`LIVE_TREND_FOLLOWING` / `CONSERVATIVE_PORTFOLIO` /
+2025-10-06, 999.99 against zero gross loss) and it edits a published historical
+number, so it waited for a separate yes. **That yes was given on 2026-09-15 and
+it is applied — see §13.**
+
+### Still open after this pass
+
+- **P2-b, attribution across a book move.** Unchanged: a desk decision.
+- **Running a live cycle.** Still nobody's, and still not mine.
+- **The stopped book.** Whoever owns the daily run has to decide whether to
+  backfill 4 May to today, or start again from now.
+
+---
+
+## 12. Attribution across a book move — decided, and built
+
+Open since the first pass as P2-b, and the last of the three questions that
+needed a person rather than a keyboard. **John chose option B on 2026-09-06: the
+line breaks at the move.**
+
+The problem, stated once more: a strategy that changes book keeps producing one
+continuous equity curve, but the money behind it changed. Drawn as a single line
+it invites the reading that is wrong — that the whole line describes one thing
+whose return can be measured end to end. The platform warned about this and then
+drew the misleading line anyway.
+
+### What now happens
+
+- `domain/portfolio/history_segments.py` decides **where** the breaks are, from
+  `trading.portfolio_assignments`. Only a genuine move counts: a row with no
+  `from_portfolio_id` is a first placement and a row whose from and to match is
+  a re-record, and neither changes the composition. Two moves in one day collapse
+  to one break naming the first book and the last.
+- The API returns them as `historyBreaks` on the strategy payload. **The equity
+  values are untouched** — these say where the line must break, nothing more.
+- `domain/portfolio/historySegments.ts` decides **how** they are drawn: a
+  null-valued spacer between segments, which is how recharts is told to lift the
+  pen. `connectNulls` is deliberately not set.
+- The window return is measured over `latestSegment` only. A 1M return that
+  spans a book change is two portfolios added together, which is not a number
+  about anything.
+- Under the chart, in words: which day, which two books, and why the line stops.
+
+The day of the move opens the new segment rather than closing the old one. The
+move takes effect that day, so that day's equity is the first of the new book's
+history.
+
+### A second bug, found by looking at it
+
+The first caption read **"History restarts Aug 2, 2026"** for a move dated the
+3rd. `new Date('2026-08-03')` is parsed as UTC midnight and rendered in the
+reader's timezone, so everyone west of Greenwich saw the day before.
+
+`domain/portfolio/formatBarDate.ts` builds a local date from the day parts
+instead, and the chart's tooltip uses it too — it had the same fault, on every
+date it has ever shown.
+
+### Verified
+
+- 18 backend tests, 15 frontend tests on the splitting, 6 on the date format.
+  236 backend and 138 frontend in total, all green.
+- Driven in the browser against a seeded move in the demo book: the plotted path
+  comes back with **two** subpaths where it had one, and the caption reads
+  "History restarts Aug 3, 2026: moved from AGGRESSIVE_PORTFOLIO to
+  CONSERVATIVE_PORTFOLIO."
+
+### What this deliberately does not do
+
+It does not restate cumulative return per segment, and it does not touch
+`bestDay`/`worstDay` — a best day is a day, and stays comparable across a move.
+What it stops is a *window* figure spanning a break and a *line* drawn straight
+through one. Segmented cumulative returns are a further step, and worth taking
+only if someone asks for them.
+
+---
+
+## 13. Migration 010 and issue #84 — applied to production
+
+Both were open only because they change published data on the live database and
+needed a person to say so. John said so on 2026-09-15. Everything below was done
+read-only first, then backed up row by row, then applied.
+
+The backup is `algolens-prod/backups/20260915-222812-pre-010-and-84/`: the full
+prior contents of `strategy_registry`, `strategy_book_memberships` and every
+sentinel row as CSV, plus a `restore.sql` of literal `UPDATE`s that puts exactly
+these rows back. It is narrower and faster than the whole-database dumps from
+§11.4, which are still there.
+
+### 13.1 Migration 010 — applied
+
+One row matched, exactly the one the migration was written for:
+
+```
+LIVE_TREND_FOLLOWING | CONSERVATIVE_PORTFOLIO | 2025-10-06 | 999.99 | gross_profit 564.631426 | gross_loss 0.0
+```
+
+No row anywhere carried a value at or above 999 with a non-zero gross loss, so
+the migration's narrow predicate had nothing to decline. `trading.backtest_results`
+does not exist on this deployment and the guard skipped it silently, as designed.
+
+After: no sentinel anywhere in `trading.live_results`; that row reads
+`profit_factor = NULL` with `gross_profit` and `gross_loss` untouched, so the
+rollback can still reconstruct it exactly. Total row count unchanged at 289.
+
+An absent ratio is now absent in the column, not a number that reads as a
+thousand-to-one return. Nothing on screen moved — AlgoLens already dropped any
+value at or above 999 — but every other consumer of that table now sees the
+truth without needing to know the convention.
+
+### 13.2 Issue #84 — one row was wrong, not three
+
+The issue says `inc_meanrev`, `inc_tf_base` and `inc_tf_fast` all point at
+`BASE_PORTFOLIO` and are all wrong. The first half is true. The second is not,
+and acting on it would have broken two working strategies. What the results
+actually say:
+
+| registry row | strategy_type | book | results in that book | verdict |
+|---|---|---|---|---|
+| `inc_meanrev` | `LIVE_EQUITY_MEAN_REVERSION` | BASE_PORTFOLIO | 1, stale, 2025-08-15, zero PnL | **wrong** |
+| `inc_tf_base` | `LIVE_TREND_FOLLOWING` | BASE_PORTFOLIO | 37, 2025-10-05 → 2025-11-10 | correct |
+| `inc_tf_fast` | `LIVE_TREND_FOLLOWING_TREND_FOLLOWING_FAST` | BASE_PORTFOLIO | 11, 2025-01-29 → 2026-02-05 | correct |
+
+`inc_tf_base` is named "Trend Following (Base book)" and its results are in the
+base book. `inc_tf_fast` likewise. They point at `BASE_PORTFOLIO` because that is
+where they are. Only `inc_meanrev` names a book its results are not in: its 21
+real rows, 2026-04-01 to 2026-04-21, are under `EQUITY_MR_PORTFOLIO`, and the
+single `BASE_PORTFOLIO` row is a stale zero from 2025-08-15.
+
+So one row moved. `strategy_registry.portfolio_id` and
+`strategy_book_memberships` were corrected in the same transaction — the primary
+book and the membership set, which migration 009 seeded from each other and which
+must not be allowed to disagree. The write was guarded on exact row counts, on
+the destination book actually holding results, on no strategy being left in no
+book, and on the other two rows being untouched; any of those failing would have
+rolled the whole thing back.
+
+**No `trading.portfolio_assignments` row was written.** That table drives the
+history segmentation in §12: a row there means the money moved between books on
+that day, and the equity line breaks at it. Nothing moved. The registry row was
+recorded wrong on 2026-08-10, months after the April trial it describes. This is
+a correction, not a move, and drawing a break would invent an event that never
+happened.
+
+### Verified
+
+Through AlgoLens's own repository code — `list_incubating_strategies()` and
+`fetch_incubation_performance()`, the methods the HTTP routes call — against
+production, read-only:
+
+| | before | after |
+|---|---|---|
+| `inc_meanrev` equity points | 1 | **21** (2026-04-01 → 2026-04-21) |
+| `inc_meanrev` position rows | 0 | **15** (ABT, TMUS) |
+| `inc_tf_base` | 35 points, 395 positions | unchanged |
+| `inc_tf_fast` | 12 points, 111 positions | unchanged |
+
+The incubation view for the mean-reversion trial showed a single stale point and
+no positions — a flat line at a 2025 value for a strategy that traded in April
+2026. It now shows the trial that actually happened: $100,000 to $99,618.87 over
+21 days, a loss of $381.13, in two equity symbols.
+
+Every registry row now resolves to a book that holds its results — 21, 37, 11 and
+211 — and `check_schema.py` against production still reports **"Schema contract
+satisfied"**, exit 0.
+
+### Still open after this pass
+
+Unchanged from §11.4, minus the two just closed:
+
+- **P2-b is closed** (§12). **010 is applied.** **#84 is fixed.**
+- **The stopped book.** `positions`, `equity_curve` and `live_results` still end
+  2026-05-03. Backfill 4 May to today, or start again from now — still whoever
+  owns the daily run.
+- **Running a live cycle.** Still not mine.
+- **Two strategies write results with no registry row at all:**
+  `LIVE_EQUITY_BPGV_ROTATION` under `BPGV_ROTATION_PORTFOLIO` (1 row, 2026-08-05)
+  and `LIVE_TREND_FOLLOWING&TREND_FOLLOWING_FAST` under `BASE_PORTFOLIO` (1 row,
+  2025-11-12, and the `&` in that id looks like a join gone wrong rather than a
+  strategy). Neither is reachable from the dashboard, because every read is
+  scoped by a registry row. Found while fixing #84; worth its own issue.
+
+---
+
+## 14. Which book is this page about? — fixed
+
+Asked on 2026-09-16, looking at Trend Following's positions: *how do I know
+which book this is, and how does it work for the others?* Answering it by
+putting Trend Following in a second book on the local demo turned up four faults.
+
+| # | Fault | Fix |
+|---|---|---|
+| 14.1 | The book was named only in small grey type beside "Today's Positions". Nothing at the top of the page said which book the value, the chart or the attribution belonged to. | A **Book** row under the strategy name, always shown: the book's name when there is one, a picker marking the primary when there are several. |
+| 14.2 | **Only the positions table followed the picker.** The value, the chart, the attribution, Financial Analysis and Trading Activity all stayed on the primary book, unlabelled, while the picker named another. The API scopes *every* one of those by (strategy, book); the component comment claiming they were "strategy-level" was wrong. | The whole page renders from the chosen book. |
+| 14.3 | Choosing a book the engine had not traded yet printed `API request failed: 404 NOT FOUND. Body: {"code":"no_data_for_book",...}` and **left the primary book's positions on screen under the other book's name**. The API had gone out of its way to make this a typed, normal state; the client dumped the body. | `ApiError` carries the server's `code` and sentence. `no_data_for_book` renders an empty state for that book and nothing else; any other failure shows the server's sentence and puts the picker back on the book actually shown. |
+| 14.4 | Adding a strategy to a book on the Books tab did not reach the strategy page until a full reload — the picker simply was not there. | Leaving the Books tab re-reads the portfolio quietly. |
+
+### Verified
+
+- 6 new component tests in `StrategyDetail.test.tsx`; 144 frontend tests, `tsc --noEmit` clean.
+- Driven against the local demo, with Trend Following given a smaller ledger in
+  AGGRESSIVE_PORTFOLIO (ES and GC only): switching the picker moved the value
+  from $523,681.65 to $209,472.66, the positions heading to AGGRESSIVE_PORTFOLIO,
+  the rows to ES and GC, total notional to $1,284,132.50 (3 × 5,310.75 × 50 +
+  2 × 2,437.60 × 100), and Trading Activity to that book's single ES fill.
+- An empty book reads "Nothing published for Trend Following in
+  AGGRESSIVE_PORTFOLIO yet", with no raw API text and none of the primary
+  book's figures.
+- Carry added to a second book on the Books tab; Portfolio → Carry offered both
+  books without a reload.
+
+A test note worth keeping: a `vi.fn` spy that returns a rejected promise fails
+the test even when the component catches the rejection, so these tests stub the
+API with a plain function.
+
+### Found, and left for a decision
+
+- **The fund headline and the book totals disagree once a strategy has data in
+  two books.** The headline adds each strategy's *primary* book; the Portfolios
+  grouping adds every book. On the demo that is $1,097,036 against $1,306,509,
+  the difference being Trend Following's AGGRESSIVE ledger. Which is right
+  depends on whether a second book is additional fund capital or another view
+  of the same money — a desk decision, not a display bug.
+- **Strategy cards on the Portfolio tab do not name a book**, and the rows in
+  the Portfolios grouping are not clickable. Making a row open the strategy on
+  that book would answer "which book" from the overview too; it is a feature,
+  not a fix, so it is not done here.
+
+---
+
+## 15. Choose the book when opening a strategy — built
+
+Asked on 2026-09-16: *when a strategy lives in several books, let me choose the
+book when I click it, to see its positions.*
+
+### What now happens
+
+- **Strategy cards name their book.** One book: its name. Several: "In 2 books ·
+  figures for CONSERVATIVE_PORTFOLIO", because the card's numbers are the
+  primary book's.
+- **Clicking a strategy in several books asks which book.** A dialog lists
+  every book, primary first and marked, each with the strategy's value *in that
+  book* — or "nothing published yet" where the engine has not traded it there,
+  never $0. Choosing one opens the strategy on that book's Positions tab.
+  Escape, the close button or a click outside dismisses it; focus starts on the
+  primary, so Enter opens that.
+- **A strategy in one book opens directly**, as before.
+- **Rows in the Portfolios section open the strategy on that row's book**, with
+  no question, since the book is already known. Incubating rows stay plain
+  text: they have no page on this tab, and a row that looks clickable and does
+  nothing is worse.
+- **The page never shows one book's numbers under another's name while
+  loading.** Until the chosen book arrives, the body reads "Loading Trend
+  Following in AGGRESSIVE_PORTFOLIO…". A slow answer for an earlier choice is
+  dropped rather than overwriting a later one.
+- The picker in the Book row still switches books once the page is open.
+
+### Verified
+
+- 25 new tests (`bookChoices`, `BookChooser`, `StrategyList`,
+  `PortfolioGrouping`, and four more on `StrategyDetail`, including the
+  out-of-order response); 169 frontend tests, `tsc --noEmit` clean.
+- Driven on the local demo: Trend Following's card read "In 2 books"; the
+  dialog offered CONSERVATIVE_PORTFOLIO (primary, $523,682) and
+  AGGRESSIVE_PORTFOLIO ($209,473); choosing AGGRESSIVE opened Positions on that
+  book at $209,472.66 with ES and GC and $1,284,132.50 notional. Breakout opened
+  with no dialog. Carry's dialog read "nothing published yet" for AGGRESSIVE, and
+  choosing it showed the empty-book notice. Escape closed the dialog. The
+  Portfolios row "Trend Following" under AGGRESSIVE opened straight onto that
+  book; Mean Reversion's row was not a button.
+
+---
+
+## 16. The book box moves beside the positions — replaces §15's dialog
+
+Asked on 2026-09-17: *make the book name next to "Today's Positions" a box I can
+click to choose the book, instead of choosing it from a dialog when I open the
+strategy on the home screen.*
+
+- **Clicking a strategy card opens it directly**, on its primary book. The §15
+  dialog (`BookChooser`) and its tests are removed.
+- **The book name beside "Today's Positions" is now a box** when the strategy is
+  in more than one book: it shows the book on screen and opens to the others,
+  primary first and marked. Choosing one switches the whole page, as the picker
+  did. A strategy in one book keeps the plain name.
+- **The same box is in the Book row at the top**, which Financial Analysis and
+  Trading Activity need since they have no positions heading, **and inside the
+  "nothing published" notice**, so an empty book is never a dead end. All three
+  are one piece of state (`BookSelect`), so they cannot disagree.
+- The "also trades in" notice now says to choose the book in the box above.
+- Kept from §15: cards naming their book, Portfolios rows opening straight onto
+  their book, the loading notice, and dropping out-of-order answers.
+
+### Verified
+
+- 167 frontend tests, `tsc --noEmit` clean. New: the heading box's contents,
+  switching from it, its absence for a one-book strategy, the way back from an
+  empty book, and the heading showing the box instead of a second copy of the
+  name.
+- Driven on the local demo: Trend Following opened with no dialog; the heading
+  box read CONSERVATIVE_PORTFOLIO (primary) / AGGRESSIVE_PORTFOLIO; choosing
+  AGGRESSIVE moved the page to $209,472.66, ES and GC, $1,284,132.50, with the
+  top box following. Carry → AGGRESSIVE showed the notice with its own box, and
+  choosing CONSERVATIVE there brought back $254,345.19 and the positions.
+  Breakout showed "Today's Positions AGGRESSIVE_PORTFOLIO" with no box.
+
+---
+
+## 17. "1 Holdings" — and the rest of the dashboard swept for it
+
+Asked on 2026-09-17 whether the "4 Holdings" line on a strategy card is
+computed or written down. It is computed — the count, the number of books and
+the book's name all are; only the words are literal — but the word never
+changed with the count.
+
+Four places said a count and then a noun that assumed it was not one:
+
+| Where | Was | Now |
+|---|---|---|
+| Strategy card | "1 Holdings" | "1 Holding" |
+| Strategy Builder's selection list | "1 positions" | "1 position" |
+| Incubation overview | "1 incubating strategies" | "1 incubating strategy" |
+| Incubation observation window | "1 days" | "1 day" |
+
+`domain/text/pluralize.ts` now owns this: `counted(1, 'Holding')` is "1
+Holding". The three places that already got it right by hand — the fund's
+"Excludes N strategies" notice, the positions footer's "excludes N positions
+with no known price", and the Portfolios section's counts — go through the same
+helper, so there is one way to do it rather than four.
+
+Checked and left alone: "In N books" and "belongs to N books" only ever appear
+when N is more than one; "46d elapsed", "Trades: N" and "Total Positions: N"
+are labelled counts, not phrases. The API's `book_not_empty` message already
+picks "strategy" for one. `BookNotEmpty`'s own `str()` still reads "1
+strategies", but it is deliberately never rendered to a client — the adapter
+builds the message — so it shows up only in a log line.
+
+### Verified
+
+- 173 frontend tests (6 new: the helper, and the card at one, none and two
+  holdings), `tsc --noEmit` clean.
+- On the demo: the Incubation tab, which has exactly one incubating strategy,
+  now reads "1 incubating strategy"; the cards still read 4, 3 and 2 Holdings.

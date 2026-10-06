@@ -1,0 +1,52 @@
+{
+  "matrix_sha256": "e4f8ba7e6630bdc25cb636b502bbd6073a258b6d5716bace70185d05cb8933c7",
+  "case": "original_S_split",
+  "preparation": {
+    "path": "/mnt/c/Users/johnp/.gemini/antigravity/scratch/AlgoGators/New_Algo_Xander_Sex/docs/repairs/2026-09-26-hemdutt-issue-completion/equity-model-entry-staging/actual-mr-run-staging/equity-model-run-2556e11bf6d440ac918637158d38fc8f/retained/action-preparation.json",
+    "sha256": "dbb999febd5a9758d0b2be3a7fa5a0d5e11ec0e44a688cfd76ca7d8fcf02085e"
+  },
+  "prepare": {
+    "exit_code": 0,
+    "exactly_one_case_passed": true,
+    "stdout": {
+      "path": "/mnt/c/Users/johnp/.gemini/antigravity/scratch/AlgoGators/New_Algo_Xander_Sex/docs/repairs/2026-09-26-hemdutt-issue-completion/equity-action-model-bridge-staging/connected/candidate-2/ACTION-MATRIX-1-original_S_split/prepare.stdout",
+      "sha256": "435ea3426f8adc8c549afc410b483876f7a5e3ef16d7fdabd8706a1e3397474a"
+    },
+    "stderr": {
+      "path": "/mnt/c/Users/johnp/.gemini/antigravity/scratch/AlgoGators/New_Algo_Xander_Sex/docs/repairs/2026-09-26-hemdutt-issue-completion/equity-action-model-bridge-staging/connected/candidate-2/ACTION-MATRIX-1-original_S_split/prepare.stderr",
+      "sha256": "ea5747531c3936f5f0abeb3b90d287100f574c3eb89d74894b3d2656bdba3b10"
+    },
+    "closure": {
+      "path": "/mnt/c/Users/johnp/.gemini/antigravity/scratch/AlgoGators/New_Algo_Xander_Sex/docs/repairs/2026-09-26-hemdutt-issue-completion/equity-action-model-bridge-staging/connected/candidate-2/ACTION-CONTROL-102-closure.json",
+      "sha256": "1d2042b80a4a20db7300fd0e40c7bf3fa73e8fb04fce17d1e34ce989036257e8"
+    },
+    "cleanup_container": "24a2216cae57a26921f5729519d59bd2c073555cff6b26efdbf79a62e9ede1d1",
+    "owned_scratch_absent": true
+  },
+  "run": {
+    "exit_code": 0,
+    "exactly_one_case_passed": true,
+    "stdout": {
+      "path": "/mnt/c/Users/johnp/.gemini/antigravity/scratch/AlgoGators/New_Algo_Xander_Sex/docs/repairs/2026-09-26-hemdutt-issue-completion/equity-action-model-bridge-staging/connected/candidate-2/ACTION-MATRIX-1-original_S_split/run.stdout",
+      "sha256": "0be0fdb28441799c67da16542f9e2aa02290ddb65262beac02d0c716bf31f8c2"
+    },
+    "stderr": {
+      "path": "/mnt/c/Users/johnp/.gemini/antigravity/scratch/AlgoGators/New_Algo_Xander_Sex/docs/repairs/2026-09-26-hemdutt-issue-completion/equity-action-model-bridge-staging/connected/candidate-2/ACTION-MATRIX-1-original_S_split/run.stderr",
+      "sha256": "abf4bcc530d0b09b5f3fc2a956560526a2a9b002840f1a936814e76b2a28e4d9"
+    },
+    "closure": {
+      "path": "/mnt/c/Users/johnp/.gemini/antigravity/scratch/AlgoGators/New_Algo_Xander_Sex/docs/repairs/2026-09-26-hemdutt-issue-completion/equity-action-model-bridge-staging/connected/candidate-2/ACTION-CONTROL-103-closure.json",
+      "sha256": "44ea3bf92061f4445e4ba94396dbffb83f1bdb49f3be8661ffef61f041c51e5f"
+    },
+    "cleanup_container": "fc14bcf2005751542cb0c97dc0d26874d1e3e05ea348c3c3788a82d498e183a4",
+    "owned_scratch_absent": true
+  },
+  "request": {
+    "path": "/mnt/c/Users/johnp/.gemini/antigravity/scratch/AlgoGators/New_Algo_Xander_Sex/docs/repairs/2026-09-26-hemdutt-issue-completion/equity-action-model-bridge-staging/connected/candidate-2/MR-ACTUAL-REQUEST-103.json",
+    "sha256": "f023dd22d33474de1a0e91a00560313dcf2fb039f9e40f1c2446279abbb2c385"
+  },
+  "control": {
+    "path": "/mnt/c/Users/johnp/.gemini/antigravity/scratch/AlgoGators/New_Algo_Xander_Sex/docs/repairs/2026-09-26-hemdutt-issue-completion/equity-action-model-bridge-staging/connected/candidate-2/ACTION-CONTROL-103.json",
+    "sha256": "fcb3579fe289c6848c520925706deda0289398dfffb871ff4269ee5b867d937d"
+  }
+}

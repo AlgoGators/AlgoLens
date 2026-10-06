@@ -1,0 +1,22 @@
+{
+  "source_run": "docs/repairs/2026-09-22-qt-remaining-issues/consumption-generated-transport-api-focused-3.log",
+  "capture_method": "Flask response.get_data bytes copied from pytest tmp_path after the successful isolated PostgreSQL run",
+  "producer_compact_bytes": null,
+  "producer_compact_bytes_note": "Unknown/not captured. Probe post-SQL compact bytes and committed JSONB text bytes are distinct measurements in the API fixture sidecars and index.json.",
+  "responses": [
+    {"stem": "publish_required_complete-5bcf79c0c445", "bytes": 23008, "sha256": "3760fe2e1cd1a6bb13037407527a17565196d9fb1e3442273b868910ed603dfc", "kind": "generated"},
+    {"stem": "publish_required_complete_controlled-0e2623f596ae", "bytes": 23739, "sha256": "4e80af1e241fabd1eaa34550640c6ba214fbdb8aafdf4a14749fbd5104539cae", "kind": "generated"},
+    {"stem": "publish_required_partial-0a62072ce366", "bytes": 23023, "sha256": "3fe021f894f867f23148111e588628661f7b472143771e9c97eb2fce2ebceb3d", "kind": "generated"},
+    {"stem": "publish_required_partial_controlled-e2aa4e09194b", "bytes": 23754, "sha256": "8517b356381b26ee261ddc358a87146a3509e05ecc2a4817453735692c3d2665", "kind": "generated"},
+    {"stem": "publish_required_unavailable-8568faf3d85d", "bytes": 19049, "sha256": "cf4049ea2d3866bb2a2363fc24103c557643c26f0c2846410d2de079995bcf05", "kind": "generated"},
+    {"stem": "publish_required_unavailable_controlled-94e729d78eab", "bytes": 19081, "sha256": "4396175f9be92b08c1c09d14355a85fbea6341940a9301e2dc13dd09644880fe", "kind": "generated"},
+    {"stem": "publish_required_bad_capture_complete-cacaaeacf2f5", "bytes": 5470, "sha256": "07cf7018c006844bab9afd5b9794b05d6767a5da45d9b7ed272c7de1adf15214", "kind": "generated"},
+    {"stem": "publish_required_bad_capture_complete_controlled-b5b8278979fe", "bytes": 6201, "sha256": "a10ade67777353d3520b5c51a7b3127550642c49360a57d605854a4e72dd66ef", "kind": "generated"},
+    {"stem": "publish_required_early_unavailable_complete-d5324353f082", "bytes": 5478, "sha256": "afb4b30f07f23f94fc270c4d993bf59419c6c404692c3fc068012a4eea5eba42", "kind": "generated"},
+    {"stem": "publish_required_early_unavailable_complete_controlled-5a257484e45c", "bytes": 6209, "sha256": "f84b1c0a547ded5ea640c0a51e051adaa2abd0936d34170ffb480fe4a43b7b54", "kind": "generated"},
+    {"stem": "mutation-malformed-newest-publish_required_complete-5bcf79c0c445", "bytes": 185, "sha256": "93e71ebf137ea844859b0d30bba8d7b8d5eda7b619dc8849365a94c17f92d565", "kind": "synthetic-negative-mutation"},
+    {"stem": "mutation-malformed-newest-publish_required_bad_capture_complete_controlled-b5b8278979fe", "bytes": 185, "sha256": "fc473cd1f13036676388cf6aaf13360fa267305eefbc96a88b94f024b761c6ee", "kind": "synthetic-negative-mutation"},
+    {"stem": "mutation-mismatched-attempt", "bytes": 185, "sha256": "18f0b7dbd77a34590ba7fb1f2b6d0ce2c20993e2f858416367b12045235c3321", "kind": "synthetic-negative-mutation"},
+    {"stem": "mutation-scope-changed", "bytes": 179, "sha256": "fad39e04655c138688c1200eb41a6ce839f608de71f73610d1416c4bd8daf6a0", "kind": "synthetic-negative-mutation"}
+  ]
+}

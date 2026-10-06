@@ -1,33 +1,88 @@
 import React from 'react';
 import { useTheme } from '../adapters/react/ThemeContext';
-import type { Execution, FinalizedPosition } from '../domain/portfolio/portfolioData';
+import type { Execution, FinalizedPosition, PositionStream } from '../domain/portfolio/portfolioData';
+import { formatMetric } from '../domain/portfolio/formatMetric';
+import { formatPrice } from '../domain/portfolio/formatPrice';
+import { formatBarDate } from '../domain/portfolio/formatBarDate';
 
 interface TradingActivityProps {
   executions: Execution[];
   finalizedPositions: FinalizedPosition[];
+  executionsAvailable?: boolean;
+  executionUnavailableReason?: string | null;
+  executionDate?: string | null;
+  activityStream?: PositionStream | null;
+  finalizedPositionsAvailable?: boolean;
 }
 
-export function TradingActivity({ executions, finalizedPositions }: TradingActivityProps) {
+function formatExecutionDate(stamp: string): string {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(stamp)) {
+    return formatBarDate(stamp, { month: 'short', day: 'numeric' });
+  }
+  const instant = new Date(stamp);
+  return Number.isNaN(instant.getTime())
+    ? stamp
+    : instant.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+export function TradingActivity({
+  executions,
+  finalizedPositions,
+  executionsAvailable,
+  executionUnavailableReason,
+  executionDate,
+  activityStream,
+  finalizedPositionsAvailable,
+}: TradingActivityProps) {
   const { theme } = useTheme();
 
-  const totalNotional = executions.reduce((sum, exec) => sum + exec.notional, 0);
+  // Only fills whose contract size is known contribute to the total, and the
+  // count below says how many were left out rather than adding them as zero.
+  const priced = executions.filter(e => e.notional != null);
+  const unpricedFills = executions.length - priced.length;
+  const totalNotional = priced.reduce((sum, exec) => sum + (exec.notional as number), 0);
   const totalCommissions = executions.reduce((sum, exec) => sum + exec.commission, 0);
+
+  // Only lots whose realised P&L the engine actually published contribute to
+  // the total, and the count below says how many were left out. Summing an
+  // unknown as zero would report a partial total as a complete one.
+  const settled = finalizedPositions.filter(p => p.realizedPnL != null);
+  const unsettledLots = finalizedPositions.length - settled.length;
+  const totalRealized = settled.reduce((sum, p) => sum + (p.realizedPnL as number), 0);
+  const activityLabel = activityStream === 'system'
+    ? 'Model / System'
+    : activityStream === 'qt' ? 'QT' : 'Position';
 
   return (
     <div className="space-y-6">
-      {/* Daily Executions */}
+      {/* The endpoint returns newest-first rows capped at 100. It does not
+          certify that every row is from today. */}
       <div>
         <h3 className={`text-sm uppercase tracking-wider mb-4 ${
           theme === 'dark' ? 'text-gray-400' : 'text-gray-500'
         }`}>
-          Daily Executions
+          {executionsAvailable === true && executionDate
+            ? `Executions \u00b7 ${formatBarDate(executionDate)}`
+            : 'Recent Executions'}
         </h3>
+        <p className={`-mt-2 mb-3 text-xs ${theme === 'dark' ? 'text-gray-500' : 'text-gray-500'}`}>
+          {executionsAvailable === true
+            ? `Attributed fills for the ${activityLabel} stream and execution date.`
+            : 'Newest, up to 100 records from a legacy payload; not certified as a complete daily ledger.'}
+        </p>
         
-        <div className={`border rounded-lg overflow-hidden ${
+        {executionsAvailable === false ? (
+          <div className={`rounded-lg border p-4 text-sm ${
+            theme === 'dark' ? 'border-gray-800 text-amber-400' : 'border-gray-200 text-amber-700'
+          }`}>
+            {executionUnavailableReason || 'Execution activity is unavailable for this strategy and stream.'}
+          </div>
+        ) : (
+        <div className={`border rounded-lg overflow-x-auto ${
           theme === 'dark' ? 'border-gray-800' : 'border-gray-200'
         }`}>
           {/* Header */}
-          <div className={`grid grid-cols-7 gap-4 p-4 text-sm border-b ${
+          <div className={`grid min-w-[760px] grid-cols-7 gap-4 p-4 text-sm border-b ${
             theme === 'dark'
               ? 'bg-gray-900 border-gray-800 text-gray-400'
               : 'bg-gray-50 border-gray-200 text-gray-500'
@@ -45,7 +100,7 @@ export function TradingActivity({ executions, finalizedPositions }: TradingActiv
           {executions.map((execution, index) => (
             <div
               key={`${execution.symbol}-${index}`}
-              className={`grid grid-cols-7 gap-4 p-4 transition-colors ${
+              className={`grid min-w-[760px] grid-cols-7 gap-4 p-4 transition-colors ${
                 theme === 'dark' ? 'hover:bg-gray-900' : 'hover:bg-gray-50'
               } ${
                 index !== executions.length - 1
@@ -57,7 +112,7 @@ export function TradingActivity({ executions, finalizedPositions }: TradingActiv
             >
               <div className={`text-sm ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>
                 {execution.date
-                  ? new Date(execution.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+                  ? formatExecutionDate(execution.date)
                   : '-'}
               </div>
               <div>{execution.symbol}</div>
@@ -72,10 +127,10 @@ export function TradingActivity({ executions, finalizedPositions }: TradingActiv
               </div>
               <div className="text-right">{execution.quantity}</div>
               <div className="text-right">
-                ${execution.price.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                {formatPrice(execution.price)}
               </div>
               <div className="text-right">
-                ${execution.notional.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                {execution.notional == null ? '—' : `$${execution.notional.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
               </div>
               <div className="text-right">
                 ${execution.commission.toFixed(2)}
@@ -84,25 +139,37 @@ export function TradingActivity({ executions, finalizedPositions }: TradingActiv
           ))}
 
           {/* Summary */}
-          <div className={`grid grid-cols-7 gap-4 p-4 border-t ${
+          <div className={`grid min-w-[760px] grid-cols-7 gap-4 p-4 border-t ${
             theme === 'dark'
               ? 'bg-gray-900 border-gray-800'
               : 'bg-gray-50 border-gray-200'
           }`}>
-            <div className="col-span-5">Trades: {executions.length}</div>
+            <div className="col-span-5">
+              {executionsAvailable === true ? 'Fills' : 'Fills shown'}: {executions.length}
+              {unpricedFills > 0 && (
+                <span className={`ml-2 text-sm ${theme === 'dark' ? 'text-amber-400' : 'text-amber-700'}`}>
+                  ({unpricedFills} {unpricedFills === 1 ? 'fill has' : 'fills have'} unknown notional; total is partial)
+                </span>
+              )}
+            </div>
             <div className="text-right">
               <div className={`text-sm ${
                 theme === 'dark' ? 'text-gray-400' : 'text-gray-500'
               }`}>
                 Total
               </div>
-              <div>${totalNotional.toLocaleString('en-US', { minimumFractionDigits: 2 })}</div>
+              <div>
+                {priced.length === 0
+                  ? '\u2014'
+                  : `$${totalNotional.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+              </div>
             </div>
             <div className="text-right">
               ${totalCommissions.toFixed(2)}
             </div>
           </div>
         </div>
+        )}
       </div>
 
       {/* Finalized Positions */}
@@ -110,9 +177,15 @@ export function TradingActivity({ executions, finalizedPositions }: TradingActiv
         <h3 className={`text-sm uppercase tracking-wider mb-4 ${
           theme === 'dark' ? 'text-gray-400' : 'text-gray-500'
         }`}>
-          Yesterday's Finalized Position Results
+          {activityLabel} Finalized Position Results
         </h3>
-        
+        {!activityStream || finalizedPositionsAvailable !== true ? (
+          <div role="status" className={`rounded-lg border p-4 text-sm ${
+            theme === 'dark' ? 'border-gray-800 text-amber-400' : 'border-gray-200 text-amber-700'
+          }`}>
+            {activityLabel} closed-position comparison unavailable. Fills above remain independently reported.
+          </div>
+        ) : (
         <div className={`border rounded-lg overflow-hidden ${
           theme === 'dark' ? 'border-gray-800' : 'border-gray-200'
         }`}>
@@ -146,15 +219,21 @@ export function TradingActivity({ executions, finalizedPositions }: TradingActiv
               <div>{position.symbol}</div>
               <div className="text-right">{position.quantity.toFixed(2)}</div>
               <div className="text-right">
-                ${position.entryPrice.toFixed(2)}
+                {position.entryPrice == null ? '\u2014' : formatPrice(position.entryPrice)}
               </div>
+              {/* A lot that is gone today exited at a price nothing here
+                  records. Unknown, not yesterday's entry price. */}
               <div className="text-right">
-                ${position.exitPrice.toFixed(2)}
+                {position.exitPrice == null ? '\u2014' : formatPrice(position.exitPrice)}
               </div>
               <div className={`text-right ${
-                position.realizedPnL >= 0 ? 'text-orange-500' : 'text-red-500'
+                position.realizedPnL == null
+                  ? ''
+                  : position.realizedPnL >= 0 ? 'text-orange-500' : 'text-red-500'
               }`}>
-                ${position.realizedPnL.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                {position.realizedPnL == null
+                  ? '\u2014'
+                  : `$${position.realizedPnL.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
               </div>
             </div>
           ))}
@@ -165,23 +244,36 @@ export function TradingActivity({ executions, finalizedPositions }: TradingActiv
               ? 'bg-gray-900 border-gray-800' 
               : 'bg-gray-50 border-gray-200'
           }`}>
-            <div className="col-span-4">Total Positions: {finalizedPositions.length}</div>
+            <div className="col-span-4">
+              Total Positions: {finalizedPositions.length}
+              {unsettledLots > 0 && (
+                <span className={`ml-2 text-sm ${
+                  theme === 'dark' ? 'text-amber-400' : 'text-amber-600'
+                }`}>
+                  ({unsettledLots} with no realised P&L on record, not in the total)
+                </span>
+              )}
+            </div>
             <div className="text-right">
               <div className={`text-sm ${
                 theme === 'dark' ? 'text-gray-400' : 'text-gray-500'
               }`}>
                 Total P&L
               </div>
+              {/* Only lots the engine published a realised P&L for are in
+                  this total. Counting an unknown as zero would report a
+                  partial figure as a complete one. */}
               <div className={
-                finalizedPositions.reduce((sum, pos) => sum + pos.realizedPnL, 0) >= 0 
-                  ? 'text-orange-500' 
-                  : 'text-red-500'
+                settled.length === 0 ? '' : totalRealized >= 0 ? 'text-orange-500' : 'text-red-500'
               }>
-                ${finalizedPositions.reduce((sum, pos) => sum + pos.realizedPnL, 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                {settled.length === 0
+                  ? '\u2014'
+                  : `$${totalRealized.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
               </div>
             </div>
           </div>
         </div>
+        )}
       </div>
     </div>
   );

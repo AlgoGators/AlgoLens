@@ -2,6 +2,7 @@
 
 import logging
 import os
+import re
 from datetime import timedelta
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
@@ -14,23 +15,47 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 
 from algolens.adapters.http.auth import auth_bp
 from algolens.adapters.http.portfolio import portfolio_bp
+from algolens.adapters.http.qt_workflow import qt_workflow_bp
+from algolens.adapters.http.runtime_control import runtime_control_bp
+from algolens.adapters.http.configuration_inspection import configuration_inspection_bp
+from algolens.adapters.http.investor_books import investor_books_bp
 from algolens.infrastructure.db.postgres import get_db_connection
+from algolens.infrastructure.config.production_readiness import (
+    ReadinessResult,
+    ReadinessSnapshotCache,
+    evaluate_runtime_readiness,
+    load_runtime_contract,
+)
 from extensions import limiter
 
 ENV_PATH = Path(__file__).resolve().parents[3] / ".env"
 
 
-def create_app():
+def create_app(*, rehearsal_root=None):
     load_dotenv(dotenv_path=ENV_PATH)
 
     env = os.getenv("FLASK_ENV", "production")
     debug = os.getenv("FLASK_DEBUG", "False").lower() == "true"
-    is_production = env == "production"
+    # Rehearsal is an explicit caller-selected context, with production security
+    # controls. Setting FLASK_ENV alone never enables the alternate database.
+    if env == "rehearsal" and rehearsal_root is None:
+        raise RuntimeError("Explicit rehearsal root required")
+    is_production = env == "production" or rehearsal_root is not None
+    production_contract = (
+        load_runtime_contract(context="rehearsal", rehearsal_root=rehearsal_root)
+        if rehearsal_root is not None else
+        load_runtime_contract() if is_production else None
+    )
+    readiness_cache = ReadinessSnapshotCache(5.0)
 
     app = Flask(__name__)
     app.config["ALGOLENS_ENV"] = env
     app.config["ALGOLENS_DEBUG"] = debug
     app.config["ALGOLENS_IS_PRODUCTION"] = is_production
+    app.config["PRODUCTION_RUNTIME_CONTRACT"] = production_contract
+    if rehearsal_root is not None:
+        from algolens.infrastructure.db.rehearsal import RehearsalDatabase
+        app.extensions['qt_rehearsal_database'] = RehearsalDatabase(rehearsal_root)
 
     app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1)
 
@@ -98,8 +123,8 @@ def create_app():
             request.path,
             request.remote_addr,
         )
-        if request.get_json(silent=True):
-            data = request.get_json()
+        data = request.get_json(silent=True)
+        if isinstance(data, dict):
             safe_data = {
                 key: ("***" if key in ["password"] else value)
                 for key, value in data.items()
@@ -200,36 +225,74 @@ def create_app():
 
     app.register_blueprint(auth_bp, url_prefix="/auth")
     app.register_blueprint(portfolio_bp, url_prefix="/portfolio")
+    app.register_blueprint(qt_workflow_bp, url_prefix="/portfolio")
+    app.config['QT_EVALUATOR_BUNDLE_DIR'] = os.getenv('QT_EVALUATOR_BUNDLE_DIR') or None
+    app.register_blueprint(runtime_control_bp, url_prefix="/portfolio")
+    app.register_blueprint(configuration_inspection_bp, url_prefix="/portfolio")
+    app.register_blueprint(investor_books_bp, url_prefix="/portfolio")
+
+    release_sha = os.getenv("APP_RELEASE_SHA", "")
+    release_sha = release_sha.lower() if re.fullmatch(r"[0-9a-fA-F]{40}", release_sha) else None
+
+    @app.route("/version", methods=["GET"])
+    def version():
+        # Release identity is public and independent of database readiness.
+        response = jsonify({"release": release_sha})
+        response.headers["Cache-Control"] = "no-store"
+        return response
 
     @app.route("/health", methods=["GET"])
     def health_check():
-        app.logger.info("[HEALTH] Health check called")
+        return {"status": "ok", "checks": {"process": "ok"}}, 200
 
-        health_status = {"status": "ok", "checks": {}}
-
+    @app.route("/ready", methods=["GET"])
+    def readiness_check():
         try:
-            app.logger.info("[HEALTH] Testing database connection...")
-            conn = get_db_connection()
-            with conn.cursor() as cursor:
-                cursor.execute("SELECT 1")
-            conn.close()
-            health_status["checks"]["database"] = "ok"
-            app.logger.info("[HEALTH] Database connection successful")
-        except Exception as exc:
-            health_status["checks"]["database"] = (
-                "error" if is_production else f"error: {str(exc)}"
+            checker = app.config.get("PRODUCTION_READINESS_CHECKER")
+            if checker is not None:
+                result = checker()
+            elif production_contract is None:
+                result = ReadinessResult(
+                    {"configuration": "error"},
+                    ("production_runtime_not_configured",),
+                    {"schema": "algolens-readiness-evidence/v1", "status": "not_ready"},
+                )
+            else:
+                result = readiness_cache.get(
+                    lambda: evaluate_runtime_readiness(
+                        production_contract,
+                        application=app,
+                        connection_factory=get_db_connection,
+                    )
+                )
+        except Exception:
+            app.logger.error("Production readiness check failed")
+            result = ReadinessResult(
+                {"configuration": "error"},
+                ("production_readiness_failed",),
+                {"schema": "algolens-readiness-evidence/v1", "status": "not_ready"},
             )
-            health_status["status"] = "degraded"
-            app.logger.error(
-                "[HEALTH] Database connection failed: %s", str(exc), exc_info=True
-            )
+        return (
+            result.public_payload(),
+            200 if result.ready else 503,
+            {"Cache-Control": "no-store"},
+        )
 
-        if not is_production:
-            health_status["environment"] = env
-            health_status["debug"] = debug
-            health_status["cors_origins"] = os.getenv("CORS_ORIGINS", "*")
-
-        app.logger.info("[HEALTH] Health check result: %s", health_status)
-        return health_status, 200 if health_status["status"] == "ok" else 503
+    # T1 owns the default-deny route guard.  Install it only after every
+    # blueprint and application route is registered so its route inventory is
+    # complete.  This lane can still be tested before T1 is integrated; in
+    # that state the capability readiness probe remains fail-closed.
+    try:
+        from algolens.adapters.http.capability_guard import install_capability_guard
+    except ModuleNotFoundError as error:
+        if error.name != "algolens.adapters.http.capability_guard":
+            raise
+        app.config["CAPABILITY_GUARD_INSTALLED"] = False
+    else:
+        install_capability_guard(
+            app,
+            explicitly_open_endpoints={"version", "health_check", "readiness_check"},
+        )
+        app.config["CAPABILITY_GUARD_INSTALLED"] = True
 
     return app

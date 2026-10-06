@@ -1,0 +1,1402 @@
+{
+  "actual_published_source": false,
+  "contract_sha256": "ae4a443f84a7e6e636068a2540c60e229828244cc9b294fe831a4dc6bc3e2ce6",
+  "evidence_scope": "synthetic_inspection_protocol_examples",
+  "native_financial_proof": false,
+  "publications": {
+    "derived_D_only": {
+      "authority": "inspection_only",
+      "captured_at": "2026-09-26T12:00:00Z",
+      "equity_run_consumption": {
+        "available": true,
+        "catalog_version": "qt-equity-main08b15c-run/v2",
+        "complete": true,
+        "profile": "mean_reversion",
+        "run_key": {
+          "date": "2026-09-26",
+          "portfolio_id": "BOOK",
+          "strategy_id": "LIVE_EQUITY_MEAN_REVERSION",
+          "strategy_name": "EQUITY_MEAN_REVERSION"
+        },
+        "schema_version": "qt-equity-run-consumption/v2",
+        "scope": "full_run",
+        "stages": {
+          "corporate_actions": {
+            "executions": [],
+            "outcome": "returned_ok",
+            "reads": {
+              "basis_frame_digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+              "effective_event_count": 0,
+              "original_action_count": 0,
+              "original_action_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "path": "proved_action_adjusted_prior",
+              "successor_action_count": 1,
+              "successor_action_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            },
+            "skip_reason": null,
+            "symbols": {}
+          },
+          "cost_history": {
+            "executions": [],
+            "outcome": "returned_ok",
+            "reads": {},
+            "skip_reason": null,
+            "symbols": {
+              "SYN": {
+                "adv_lookback_days": 21,
+                "previous_close_forwarded": 0.0,
+                "previous_close_source": "no_previous_close"
+              }
+            }
+          },
+          "eod": {
+            "executions": [],
+            "outcome": "skipped",
+            "reads": {
+              "initial_capital_exact": "0.14",
+              "path": "proved_desk_successor",
+              "previous_equity_exact": "0.14",
+              "previous_total_pnl_exact": "0.14",
+              "previous_total_realized_pnl_exact": "0.14",
+              "previous_total_transaction_costs_exact": "0.14"
+            },
+            "skip_reason": "proved_desk_successor",
+            "symbols": {}
+          },
+          "execution": {
+            "executions": [
+              {
+                "execution_id": "actual-fixture-ID",
+                "index": 0,
+                "portfolio_id": "BOOK",
+                "reads": {
+                  "apply_regulatory_fees": false,
+                  "asset_lookup_path": "exact_symbol",
+                  "asset_type": "EQUITY",
+                  "baseline_spread_ticks": 0.5,
+                  "commission_per_unit": 0.5,
+                  "commissions_fees_exact": "0.14",
+                  "effective_adv": 0.5,
+                  "effective_volatility_multiplier": 1.0,
+                  "implicit_price_impact_exact": "0.14",
+                  "input_source": "internally_tracked",
+                  "max_commission_pct": 0.5,
+                  "max_impact_bps": 0.5,
+                  "max_participation": 0.5,
+                  "max_spread_ticks": 0.5,
+                  "max_total_implicit_bps": 0.5,
+                  "min_adv": 0.5,
+                  "min_commission_per_order": 0.5,
+                  "min_participation": 0.5,
+                  "min_spread_ticks": 0.5,
+                  "point_value": 0.5,
+                  "quantity": 0.5,
+                  "reference_price": 0.5,
+                  "retrieved_adv": 0.5,
+                  "retrieved_volatility_multiplier": 1.0,
+                  "selected_k_bps": 0.5,
+                  "slippage_market_impact_exact": "0.14",
+                  "spread_cost_multiplier": 0.5,
+                  "tick_constrained": false,
+                  "tick_size": 0.5,
+                  "total_transaction_costs_exact": "0.14",
+                  "volatility_calculation_reached": false
+                },
+                "strategy_id": "LIVE_EQUITY_MEAN_REVERSION",
+                "strategy_name": "EQUITY_MEAN_REVERSION",
+                "symbol": "SYN"
+              }
+            ],
+            "outcome": "returned_ok",
+            "reads": {},
+            "skip_reason": null,
+            "symbols": {}
+          },
+          "market_input": {
+            "executions": [],
+            "outcome": "returned_ok",
+            "reads": {
+              "asset_type": "EQUITY",
+              "end_day": "2026-09-25",
+              "frequency": "DAILY",
+              "historical_days": 21,
+              "start_day": "2026-09-25"
+            },
+            "skip_reason": null,
+            "symbols": {}
+          },
+          "preparation": {
+            "executions": [],
+            "outcome": "returned_ok",
+            "reads": {},
+            "skip_reason": null,
+            "symbols": {
+              "SYN": {
+                "lookback_period": 21,
+                "max_history_size": 21,
+                "vol_lookback": 21
+              }
+            }
+          },
+          "primary": {
+            "executions": [],
+            "outcome": "returned_ok",
+            "reads": {
+              "portfolio_invocation": {
+                "available": true,
+                "compatibility_charges": [
+                  {
+                    "call": "returned_ok",
+                    "index": 0,
+                    "purpose": "compatibility",
+                    "reads": {
+                      "asset_lookup_path": "exact_symbol",
+                      "input_source": "internally_tracked",
+                      "quantity": 0.5,
+                      "reference_price": 16.0
+                    },
+                    "strategy_id": "",
+                    "symbol": "SYN"
+                  }
+                ],
+                "full_run_certification": false,
+                "outcome": "returned_ok",
+                "passes": [
+                  {
+                    "index": 0,
+                    "optimization_helper": "not_reached",
+                    "reads": {
+                      "use_optimization": false,
+                      "use_risk_management": false
+                    },
+                    "risk": {
+                      "call": "not_reached",
+                      "reads": {},
+                      "skip": "none"
+                    },
+                    "risk_helper": "not_reached"
+                  }
+                ],
+                "schema_version": "qt-equity-portfolio-consumption/v1",
+                "scope": "portfolio_invocation",
+                "skip_execution_generation": false,
+                "strategy_charges": [
+                  {
+                    "call": "returned_ok",
+                    "index": 0,
+                    "purpose": "per_strategy",
+                    "reads": {
+                      "asset_lookup_path": "exact_symbol",
+                      "input_source": "internally_tracked",
+                      "quantity": 0.5,
+                      "reference_price": 16.0
+                    },
+                    "strategy_id": "LIVE_EQUITY_MEAN_REVERSION",
+                    "symbol": "SYN"
+                  }
+                ],
+                "unavailable_reason": null
+              },
+              "strategy_invocation": {
+                "available": true,
+                "full_run_certification": false,
+                "profile": "mean_reversion",
+                "schema_version": "qt-equity-strategy-consumption/v1",
+                "scope": "strategy_invocation",
+                "symbols": {
+                  "SYN": {
+                    "observed_state": {},
+                    "reads": {
+                      "entry_threshold": 1.5,
+                      "lookback_period": 21
+                    }
+                  }
+                }
+              }
+            },
+            "skip_reason": null,
+            "symbols": {}
+          },
+          "prior": {
+            "executions": [],
+            "outcome": "returned_ok",
+            "reads": {
+              "accounting_input_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "decision_id": "81000000-0000-4000-8000-000000000001",
+              "finalization_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "finalization_id": "81000000-0000-4000-8000-000000000001",
+              "finalization_source_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "mode": "verified_desk_prior",
+              "observation_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "results_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "source_day": "2026-09-25",
+              "valuation_day": "2026-09-26"
+            },
+            "skip_reason": null,
+            "symbols": {}
+          },
+          "result_assembly": {
+            "executions": [],
+            "outcome": "returned_ok",
+            "reads": {
+              "currency": "USD",
+              "current_portfolio_value_exact": "0.14",
+              "total_realized_pnl_exact": "0.14",
+              "total_transaction_costs_exact": "0.14",
+              "total_unrealized_pnl_exact": "0.14"
+            },
+            "skip_reason": null,
+            "symbols": {}
+          },
+          "setup": {
+            "executions": [],
+            "outcome": "returned_ok",
+            "reads": {
+              "allow_fractional_positions": false,
+              "capital_allocation": 0.5,
+              "max_drawdown": 0.5,
+              "max_leverage": 0.5,
+              "reserve_capital": 0.5,
+              "use_optimization": false,
+              "use_risk_management": false
+            },
+            "skip_reason": null,
+            "symbols": {}
+          }
+        },
+        "unavailable_reason": null
+      },
+      "identity": {
+        "capture_id": "81000000-0000-4000-8000-000000000001",
+        "control_mode": "uncontrolled",
+        "engine_strategy_id": "LIVE_EQUITY_MEAN_REVERSION",
+        "portfolio_id": "BOOK",
+        "producer_version": "synthetic-proposed-example",
+        "publication_id": "81000000-0000-4000-8000-000000000001",
+        "registry_id": "equity_alpha",
+        "registry_revision": 1,
+        "run_date": "2026-09-26",
+        "runtime_attempt_id": null
+      },
+      "profile": "live_equity_mean_reversion",
+      "publication_recorded_at": "2026-09-26T12:00:01Z",
+      "publication_schema_version": 3,
+      "reason": "none",
+      "status": "available",
+      "stream": "system"
+    },
+    "original_S_and_derived_D": {
+      "authority": "inspection_only",
+      "captured_at": "2026-09-26T12:00:00Z",
+      "equity_run_consumption": {
+        "available": true,
+        "catalog_version": "qt-equity-main08b15c-run/v2",
+        "complete": true,
+        "profile": "mean_reversion",
+        "run_key": {
+          "date": "2026-09-26",
+          "portfolio_id": "BOOK",
+          "strategy_id": "LIVE_EQUITY_MEAN_REVERSION",
+          "strategy_name": "EQUITY_MEAN_REVERSION"
+        },
+        "schema_version": "qt-equity-run-consumption/v2",
+        "scope": "full_run",
+        "stages": {
+          "corporate_actions": {
+            "executions": [],
+            "outcome": "returned_ok",
+            "reads": {
+              "basis_frame_digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+              "effective_event_count": 0,
+              "original_action_count": 2,
+              "original_action_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "path": "proved_action_adjusted_prior",
+              "successor_action_count": 3,
+              "successor_action_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            },
+            "skip_reason": null,
+            "symbols": {}
+          },
+          "cost_history": {
+            "executions": [],
+            "outcome": "returned_ok",
+            "reads": {},
+            "skip_reason": null,
+            "symbols": {
+              "SYN": {
+                "adv_lookback_days": 21,
+                "previous_close_forwarded": 0.0,
+                "previous_close_source": "no_previous_close"
+              }
+            }
+          },
+          "eod": {
+            "executions": [],
+            "outcome": "skipped",
+            "reads": {
+              "initial_capital_exact": "0.14",
+              "path": "proved_desk_successor",
+              "previous_equity_exact": "0.14",
+              "previous_total_pnl_exact": "0.14",
+              "previous_total_realized_pnl_exact": "0.14",
+              "previous_total_transaction_costs_exact": "0.14"
+            },
+            "skip_reason": "proved_desk_successor",
+            "symbols": {}
+          },
+          "execution": {
+            "executions": [
+              {
+                "execution_id": "actual-fixture-ID",
+                "index": 0,
+                "portfolio_id": "BOOK",
+                "reads": {
+                  "apply_regulatory_fees": false,
+                  "asset_lookup_path": "exact_symbol",
+                  "asset_type": "EQUITY",
+                  "baseline_spread_ticks": 0.5,
+                  "commission_per_unit": 0.5,
+                  "commissions_fees_exact": "0.14",
+                  "effective_adv": 0.5,
+                  "effective_volatility_multiplier": 1.0,
+                  "implicit_price_impact_exact": "0.14",
+                  "input_source": "internally_tracked",
+                  "max_commission_pct": 0.5,
+                  "max_impact_bps": 0.5,
+                  "max_participation": 0.5,
+                  "max_spread_ticks": 0.5,
+                  "max_total_implicit_bps": 0.5,
+                  "min_adv": 0.5,
+                  "min_commission_per_order": 0.5,
+                  "min_participation": 0.5,
+                  "min_spread_ticks": 0.5,
+                  "point_value": 0.5,
+                  "quantity": 0.5,
+                  "reference_price": 0.5,
+                  "retrieved_adv": 0.5,
+                  "retrieved_volatility_multiplier": 1.0,
+                  "selected_k_bps": 0.5,
+                  "slippage_market_impact_exact": "0.14",
+                  "spread_cost_multiplier": 0.5,
+                  "tick_constrained": false,
+                  "tick_size": 0.5,
+                  "total_transaction_costs_exact": "0.14",
+                  "volatility_calculation_reached": false
+                },
+                "strategy_id": "LIVE_EQUITY_MEAN_REVERSION",
+                "strategy_name": "EQUITY_MEAN_REVERSION",
+                "symbol": "SYN"
+              }
+            ],
+            "outcome": "returned_ok",
+            "reads": {},
+            "skip_reason": null,
+            "symbols": {}
+          },
+          "market_input": {
+            "executions": [],
+            "outcome": "returned_ok",
+            "reads": {
+              "asset_type": "EQUITY",
+              "end_day": "2026-09-25",
+              "frequency": "DAILY",
+              "historical_days": 21,
+              "start_day": "2026-09-25"
+            },
+            "skip_reason": null,
+            "symbols": {}
+          },
+          "preparation": {
+            "executions": [],
+            "outcome": "returned_ok",
+            "reads": {},
+            "skip_reason": null,
+            "symbols": {
+              "SYN": {
+                "lookback_period": 21,
+                "max_history_size": 21,
+                "vol_lookback": 21
+              }
+            }
+          },
+          "primary": {
+            "executions": [],
+            "outcome": "returned_ok",
+            "reads": {
+              "portfolio_invocation": {
+                "available": true,
+                "compatibility_charges": [
+                  {
+                    "call": "returned_ok",
+                    "index": 0,
+                    "purpose": "compatibility",
+                    "reads": {
+                      "asset_lookup_path": "exact_symbol",
+                      "input_source": "internally_tracked",
+                      "quantity": 0.5,
+                      "reference_price": 16.0
+                    },
+                    "strategy_id": "",
+                    "symbol": "SYN"
+                  }
+                ],
+                "full_run_certification": false,
+                "outcome": "returned_ok",
+                "passes": [
+                  {
+                    "index": 0,
+                    "optimization_helper": "not_reached",
+                    "reads": {
+                      "use_optimization": false,
+                      "use_risk_management": false
+                    },
+                    "risk": {
+                      "call": "not_reached",
+                      "reads": {},
+                      "skip": "none"
+                    },
+                    "risk_helper": "not_reached"
+                  }
+                ],
+                "schema_version": "qt-equity-portfolio-consumption/v1",
+                "scope": "portfolio_invocation",
+                "skip_execution_generation": false,
+                "strategy_charges": [
+                  {
+                    "call": "returned_ok",
+                    "index": 0,
+                    "purpose": "per_strategy",
+                    "reads": {
+                      "asset_lookup_path": "exact_symbol",
+                      "input_source": "internally_tracked",
+                      "quantity": 0.5,
+                      "reference_price": 16.0
+                    },
+                    "strategy_id": "LIVE_EQUITY_MEAN_REVERSION",
+                    "symbol": "SYN"
+                  }
+                ],
+                "unavailable_reason": null
+              },
+              "strategy_invocation": {
+                "available": true,
+                "full_run_certification": false,
+                "profile": "mean_reversion",
+                "schema_version": "qt-equity-strategy-consumption/v1",
+                "scope": "strategy_invocation",
+                "symbols": {
+                  "SYN": {
+                    "observed_state": {},
+                    "reads": {
+                      "entry_threshold": 1.5,
+                      "lookback_period": 21
+                    }
+                  }
+                }
+              }
+            },
+            "skip_reason": null,
+            "symbols": {}
+          },
+          "prior": {
+            "executions": [],
+            "outcome": "returned_ok",
+            "reads": {
+              "accounting_input_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "decision_id": "81000000-0000-4000-8000-000000000001",
+              "finalization_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "finalization_id": "81000000-0000-4000-8000-000000000001",
+              "finalization_source_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "mode": "verified_desk_prior",
+              "observation_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "results_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "source_day": "2026-09-25",
+              "valuation_day": "2026-09-26"
+            },
+            "skip_reason": null,
+            "symbols": {}
+          },
+          "result_assembly": {
+            "executions": [],
+            "outcome": "returned_ok",
+            "reads": {
+              "currency": "USD",
+              "current_portfolio_value_exact": "0.14",
+              "total_realized_pnl_exact": "0.14",
+              "total_transaction_costs_exact": "0.14",
+              "total_unrealized_pnl_exact": "0.14"
+            },
+            "skip_reason": null,
+            "symbols": {}
+          },
+          "setup": {
+            "executions": [],
+            "outcome": "returned_ok",
+            "reads": {
+              "allow_fractional_positions": false,
+              "capital_allocation": 0.5,
+              "max_drawdown": 0.5,
+              "max_leverage": 0.5,
+              "reserve_capital": 0.5,
+              "use_optimization": false,
+              "use_risk_management": false
+            },
+            "skip_reason": null,
+            "symbols": {}
+          }
+        },
+        "unavailable_reason": null
+      },
+      "identity": {
+        "capture_id": "81000000-0000-4000-8000-000000000001",
+        "control_mode": "uncontrolled",
+        "engine_strategy_id": "LIVE_EQUITY_MEAN_REVERSION",
+        "portfolio_id": "BOOK",
+        "producer_version": "synthetic-proposed-example",
+        "publication_id": "81000000-0000-4000-8000-000000000001",
+        "registry_id": "equity_alpha",
+        "registry_revision": 1,
+        "run_date": "2026-09-26",
+        "runtime_attempt_id": null
+      },
+      "profile": "live_equity_mean_reversion",
+      "publication_recorded_at": "2026-09-26T12:00:01Z",
+      "publication_schema_version": 3,
+      "reason": "none",
+      "status": "available",
+      "stream": "system"
+    },
+    "original_S_only": {
+      "authority": "inspection_only",
+      "captured_at": "2026-09-26T12:00:00Z",
+      "equity_run_consumption": {
+        "available": true,
+        "catalog_version": "qt-equity-main08b15c-run/v2",
+        "complete": true,
+        "profile": "mean_reversion",
+        "run_key": {
+          "date": "2026-09-26",
+          "portfolio_id": "BOOK",
+          "strategy_id": "LIVE_EQUITY_MEAN_REVERSION",
+          "strategy_name": "EQUITY_MEAN_REVERSION"
+        },
+        "schema_version": "qt-equity-run-consumption/v2",
+        "scope": "full_run",
+        "stages": {
+          "corporate_actions": {
+            "executions": [],
+            "outcome": "returned_ok",
+            "reads": {
+              "basis_frame_digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+              "effective_event_count": 0,
+              "original_action_count": 1,
+              "original_action_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "path": "proved_action_adjusted_prior",
+              "successor_action_count": 0,
+              "successor_action_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            },
+            "skip_reason": null,
+            "symbols": {}
+          },
+          "cost_history": {
+            "executions": [],
+            "outcome": "returned_ok",
+            "reads": {},
+            "skip_reason": null,
+            "symbols": {
+              "SYN": {
+                "adv_lookback_days": 21,
+                "previous_close_forwarded": 0.0,
+                "previous_close_source": "no_previous_close"
+              }
+            }
+          },
+          "eod": {
+            "executions": [],
+            "outcome": "skipped",
+            "reads": {
+              "initial_capital_exact": "0.14",
+              "path": "proved_desk_successor",
+              "previous_equity_exact": "0.14",
+              "previous_total_pnl_exact": "0.14",
+              "previous_total_realized_pnl_exact": "0.14",
+              "previous_total_transaction_costs_exact": "0.14"
+            },
+            "skip_reason": "proved_desk_successor",
+            "symbols": {}
+          },
+          "execution": {
+            "executions": [
+              {
+                "execution_id": "actual-fixture-ID",
+                "index": 0,
+                "portfolio_id": "BOOK",
+                "reads": {
+                  "apply_regulatory_fees": false,
+                  "asset_lookup_path": "exact_symbol",
+                  "asset_type": "EQUITY",
+                  "baseline_spread_ticks": 0.5,
+                  "commission_per_unit": 0.5,
+                  "commissions_fees_exact": "0.14",
+                  "effective_adv": 0.5,
+                  "effective_volatility_multiplier": 1.0,
+                  "implicit_price_impact_exact": "0.14",
+                  "input_source": "internally_tracked",
+                  "max_commission_pct": 0.5,
+                  "max_impact_bps": 0.5,
+                  "max_participation": 0.5,
+                  "max_spread_ticks": 0.5,
+                  "max_total_implicit_bps": 0.5,
+                  "min_adv": 0.5,
+                  "min_commission_per_order": 0.5,
+                  "min_participation": 0.5,
+                  "min_spread_ticks": 0.5,
+                  "point_value": 0.5,
+                  "quantity": 0.5,
+                  "reference_price": 0.5,
+                  "retrieved_adv": 0.5,
+                  "retrieved_volatility_multiplier": 1.0,
+                  "selected_k_bps": 0.5,
+                  "slippage_market_impact_exact": "0.14",
+                  "spread_cost_multiplier": 0.5,
+                  "tick_constrained": false,
+                  "tick_size": 0.5,
+                  "total_transaction_costs_exact": "0.14",
+                  "volatility_calculation_reached": false
+                },
+                "strategy_id": "LIVE_EQUITY_MEAN_REVERSION",
+                "strategy_name": "EQUITY_MEAN_REVERSION",
+                "symbol": "SYN"
+              }
+            ],
+            "outcome": "returned_ok",
+            "reads": {},
+            "skip_reason": null,
+            "symbols": {}
+          },
+          "market_input": {
+            "executions": [],
+            "outcome": "returned_ok",
+            "reads": {
+              "asset_type": "EQUITY",
+              "end_day": "2026-09-25",
+              "frequency": "DAILY",
+              "historical_days": 21,
+              "start_day": "2026-09-25"
+            },
+            "skip_reason": null,
+            "symbols": {}
+          },
+          "preparation": {
+            "executions": [],
+            "outcome": "returned_ok",
+            "reads": {},
+            "skip_reason": null,
+            "symbols": {
+              "SYN": {
+                "lookback_period": 21,
+                "max_history_size": 21,
+                "vol_lookback": 21
+              }
+            }
+          },
+          "primary": {
+            "executions": [],
+            "outcome": "returned_ok",
+            "reads": {
+              "portfolio_invocation": {
+                "available": true,
+                "compatibility_charges": [
+                  {
+                    "call": "returned_ok",
+                    "index": 0,
+                    "purpose": "compatibility",
+                    "reads": {
+                      "asset_lookup_path": "exact_symbol",
+                      "input_source": "internally_tracked",
+                      "quantity": 0.5,
+                      "reference_price": 16.0
+                    },
+                    "strategy_id": "",
+                    "symbol": "SYN"
+                  }
+                ],
+                "full_run_certification": false,
+                "outcome": "returned_ok",
+                "passes": [
+                  {
+                    "index": 0,
+                    "optimization_helper": "not_reached",
+                    "reads": {
+                      "use_optimization": false,
+                      "use_risk_management": false
+                    },
+                    "risk": {
+                      "call": "not_reached",
+                      "reads": {},
+                      "skip": "none"
+                    },
+                    "risk_helper": "not_reached"
+                  }
+                ],
+                "schema_version": "qt-equity-portfolio-consumption/v1",
+                "scope": "portfolio_invocation",
+                "skip_execution_generation": false,
+                "strategy_charges": [
+                  {
+                    "call": "returned_ok",
+                    "index": 0,
+                    "purpose": "per_strategy",
+                    "reads": {
+                      "asset_lookup_path": "exact_symbol",
+                      "input_source": "internally_tracked",
+                      "quantity": 0.5,
+                      "reference_price": 16.0
+                    },
+                    "strategy_id": "LIVE_EQUITY_MEAN_REVERSION",
+                    "symbol": "SYN"
+                  }
+                ],
+                "unavailable_reason": null
+              },
+              "strategy_invocation": {
+                "available": true,
+                "full_run_certification": false,
+                "profile": "mean_reversion",
+                "schema_version": "qt-equity-strategy-consumption/v1",
+                "scope": "strategy_invocation",
+                "symbols": {
+                  "SYN": {
+                    "observed_state": {},
+                    "reads": {
+                      "entry_threshold": 1.5,
+                      "lookback_period": 21
+                    }
+                  }
+                }
+              }
+            },
+            "skip_reason": null,
+            "symbols": {}
+          },
+          "prior": {
+            "executions": [],
+            "outcome": "returned_ok",
+            "reads": {
+              "accounting_input_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "decision_id": "81000000-0000-4000-8000-000000000001",
+              "finalization_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "finalization_id": "81000000-0000-4000-8000-000000000001",
+              "finalization_source_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "mode": "verified_desk_prior",
+              "observation_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "results_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "source_day": "2026-09-25",
+              "valuation_day": "2026-09-26"
+            },
+            "skip_reason": null,
+            "symbols": {}
+          },
+          "result_assembly": {
+            "executions": [],
+            "outcome": "returned_ok",
+            "reads": {
+              "currency": "USD",
+              "current_portfolio_value_exact": "0.14",
+              "total_realized_pnl_exact": "0.14",
+              "total_transaction_costs_exact": "0.14",
+              "total_unrealized_pnl_exact": "0.14"
+            },
+            "skip_reason": null,
+            "symbols": {}
+          },
+          "setup": {
+            "executions": [],
+            "outcome": "returned_ok",
+            "reads": {
+              "allow_fractional_positions": false,
+              "capital_allocation": 0.5,
+              "max_drawdown": 0.5,
+              "max_leverage": 0.5,
+              "reserve_capital": 0.5,
+              "use_optimization": false,
+              "use_risk_management": false
+            },
+            "skip_reason": null,
+            "symbols": {}
+          }
+        },
+        "unavailable_reason": null
+      },
+      "identity": {
+        "capture_id": "81000000-0000-4000-8000-000000000001",
+        "control_mode": "uncontrolled",
+        "engine_strategy_id": "LIVE_EQUITY_MEAN_REVERSION",
+        "portfolio_id": "BOOK",
+        "producer_version": "synthetic-proposed-example",
+        "publication_id": "81000000-0000-4000-8000-000000000001",
+        "registry_id": "equity_alpha",
+        "registry_revision": 1,
+        "run_date": "2026-09-26",
+        "runtime_attempt_id": null
+      },
+      "profile": "live_equity_mean_reversion",
+      "publication_recorded_at": "2026-09-26T12:00:01Z",
+      "publication_schema_version": 3,
+      "reason": "none",
+      "status": "available",
+      "stream": "system"
+    },
+    "unavailable_partial": {
+      "authority": "inspection_only",
+      "captured_at": "2026-09-26T12:00:00Z",
+      "equity_run_consumption": {
+        "available": false,
+        "catalog_version": "qt-equity-main08b15c-run/v2",
+        "complete": false,
+        "profile": "mean_reversion",
+        "run_key": {
+          "date": "2026-09-26",
+          "portfolio_id": "BOOK",
+          "strategy_id": "LIVE_EQUITY_MEAN_REVERSION",
+          "strategy_name": "EQUITY_MEAN_REVERSION"
+        },
+        "schema_version": "qt-equity-run-consumption/v2",
+        "scope": "full_run",
+        "stages": {
+          "corporate_actions": {
+            "executions": [],
+            "outcome": "threw",
+            "reads": {
+              "original_action_count": 1,
+              "path": "proved_action_adjusted_prior"
+            },
+            "skip_reason": null,
+            "symbols": {}
+          },
+          "cost_history": {
+            "executions": [],
+            "outcome": "returned_ok",
+            "reads": {},
+            "skip_reason": null,
+            "symbols": {
+              "SYN": {
+                "adv_lookback_days": 21,
+                "previous_close_forwarded": 0.0,
+                "previous_close_source": "no_previous_close"
+              }
+            }
+          },
+          "eod": {
+            "executions": [],
+            "outcome": "skipped",
+            "reads": {
+              "initial_capital_exact": "0.14",
+              "path": "proved_desk_successor",
+              "previous_equity_exact": "0.14",
+              "previous_total_pnl_exact": "0.14",
+              "previous_total_realized_pnl_exact": "0.14",
+              "previous_total_transaction_costs_exact": "0.14"
+            },
+            "skip_reason": "proved_desk_successor",
+            "symbols": {}
+          },
+          "execution": {
+            "executions": [
+              {
+                "execution_id": "actual-fixture-ID",
+                "index": 0,
+                "portfolio_id": "BOOK",
+                "reads": {
+                  "apply_regulatory_fees": false,
+                  "asset_lookup_path": "exact_symbol",
+                  "asset_type": "EQUITY",
+                  "baseline_spread_ticks": 0.5,
+                  "commission_per_unit": 0.5,
+                  "commissions_fees_exact": "0.14",
+                  "effective_adv": 0.5,
+                  "effective_volatility_multiplier": 1.0,
+                  "implicit_price_impact_exact": "0.14",
+                  "input_source": "internally_tracked",
+                  "max_commission_pct": 0.5,
+                  "max_impact_bps": 0.5,
+                  "max_participation": 0.5,
+                  "max_spread_ticks": 0.5,
+                  "max_total_implicit_bps": 0.5,
+                  "min_adv": 0.5,
+                  "min_commission_per_order": 0.5,
+                  "min_participation": 0.5,
+                  "min_spread_ticks": 0.5,
+                  "point_value": 0.5,
+                  "quantity": 0.5,
+                  "reference_price": 0.5,
+                  "retrieved_adv": 0.5,
+                  "retrieved_volatility_multiplier": 1.0,
+                  "selected_k_bps": 0.5,
+                  "slippage_market_impact_exact": "0.14",
+                  "spread_cost_multiplier": 0.5,
+                  "tick_constrained": false,
+                  "tick_size": 0.5,
+                  "total_transaction_costs_exact": "0.14",
+                  "volatility_calculation_reached": false
+                },
+                "strategy_id": "LIVE_EQUITY_MEAN_REVERSION",
+                "strategy_name": "EQUITY_MEAN_REVERSION",
+                "symbol": "SYN"
+              }
+            ],
+            "outcome": "returned_ok",
+            "reads": {},
+            "skip_reason": null,
+            "symbols": {}
+          },
+          "market_input": {
+            "executions": [],
+            "outcome": "returned_ok",
+            "reads": {
+              "asset_type": "EQUITY",
+              "end_day": "2026-09-25",
+              "frequency": "DAILY",
+              "historical_days": 21,
+              "start_day": "2026-09-25"
+            },
+            "skip_reason": null,
+            "symbols": {}
+          },
+          "preparation": {
+            "executions": [],
+            "outcome": "returned_ok",
+            "reads": {},
+            "skip_reason": null,
+            "symbols": {
+              "SYN": {
+                "lookback_period": 21,
+                "max_history_size": 21,
+                "vol_lookback": 21
+              }
+            }
+          },
+          "primary": {
+            "executions": [],
+            "outcome": "returned_ok",
+            "reads": {
+              "portfolio_invocation": {
+                "available": true,
+                "compatibility_charges": [
+                  {
+                    "call": "returned_ok",
+                    "index": 0,
+                    "purpose": "compatibility",
+                    "reads": {
+                      "asset_lookup_path": "exact_symbol",
+                      "input_source": "internally_tracked",
+                      "quantity": 0.5,
+                      "reference_price": 16.0
+                    },
+                    "strategy_id": "",
+                    "symbol": "SYN"
+                  }
+                ],
+                "full_run_certification": false,
+                "outcome": "returned_ok",
+                "passes": [
+                  {
+                    "index": 0,
+                    "optimization_helper": "not_reached",
+                    "reads": {
+                      "use_optimization": false,
+                      "use_risk_management": false
+                    },
+                    "risk": {
+                      "call": "not_reached",
+                      "reads": {},
+                      "skip": "none"
+                    },
+                    "risk_helper": "not_reached"
+                  }
+                ],
+                "schema_version": "qt-equity-portfolio-consumption/v1",
+                "scope": "portfolio_invocation",
+                "skip_execution_generation": false,
+                "strategy_charges": [
+                  {
+                    "call": "returned_ok",
+                    "index": 0,
+                    "purpose": "per_strategy",
+                    "reads": {
+                      "asset_lookup_path": "exact_symbol",
+                      "input_source": "internally_tracked",
+                      "quantity": 0.5,
+                      "reference_price": 16.0
+                    },
+                    "strategy_id": "LIVE_EQUITY_MEAN_REVERSION",
+                    "symbol": "SYN"
+                  }
+                ],
+                "unavailable_reason": null
+              },
+              "strategy_invocation": {
+                "available": true,
+                "full_run_certification": false,
+                "profile": "mean_reversion",
+                "schema_version": "qt-equity-strategy-consumption/v1",
+                "scope": "strategy_invocation",
+                "symbols": {
+                  "SYN": {
+                    "observed_state": {},
+                    "reads": {
+                      "entry_threshold": 1.5,
+                      "lookback_period": 21
+                    }
+                  }
+                }
+              }
+            },
+            "skip_reason": null,
+            "symbols": {}
+          },
+          "prior": {
+            "executions": [],
+            "outcome": "returned_ok",
+            "reads": {
+              "accounting_input_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "decision_id": "81000000-0000-4000-8000-000000000001",
+              "finalization_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "finalization_id": "81000000-0000-4000-8000-000000000001",
+              "finalization_source_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "mode": "verified_desk_prior",
+              "observation_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "results_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "source_day": "2026-09-25",
+              "valuation_day": "2026-09-26"
+            },
+            "skip_reason": null,
+            "symbols": {}
+          },
+          "result_assembly": {
+            "executions": [],
+            "outcome": "returned_ok",
+            "reads": {
+              "currency": "USD",
+              "current_portfolio_value_exact": "0.14",
+              "total_realized_pnl_exact": "0.14",
+              "total_transaction_costs_exact": "0.14",
+              "total_unrealized_pnl_exact": "0.14"
+            },
+            "skip_reason": null,
+            "symbols": {}
+          },
+          "setup": {
+            "executions": [],
+            "outcome": "returned_ok",
+            "reads": {
+              "allow_fractional_positions": false,
+              "capital_allocation": 0.5,
+              "max_drawdown": 0.5,
+              "max_leverage": 0.5,
+              "reserve_capital": 0.5,
+              "use_optimization": false,
+              "use_risk_management": false
+            },
+            "skip_reason": null,
+            "symbols": {}
+          }
+        },
+        "unavailable_reason": "stage_failed"
+      },
+      "identity": {
+        "capture_id": "81000000-0000-4000-8000-000000000001",
+        "control_mode": "uncontrolled",
+        "engine_strategy_id": "LIVE_EQUITY_MEAN_REVERSION",
+        "portfolio_id": "BOOK",
+        "producer_version": "synthetic-proposed-example",
+        "publication_id": "81000000-0000-4000-8000-000000000001",
+        "registry_id": "equity_alpha",
+        "registry_revision": 1,
+        "run_date": "2026-09-26",
+        "runtime_attempt_id": null
+      },
+      "profile": "live_equity_mean_reversion",
+      "publication_recorded_at": "2026-09-26T12:00:01Z",
+      "publication_schema_version": 3,
+      "reason": "consumption_unavailable",
+      "status": "unavailable",
+      "stream": "system"
+    },
+    "unchanged_v1": {
+      "authority": "inspection_only",
+      "captured_at": "2026-09-26T12:00:00Z",
+      "equity_run_consumption": {
+        "available": true,
+        "catalog_version": "qt-equity-main08b15c-run/v1",
+        "complete": true,
+        "profile": "mean_reversion",
+        "run_key": {
+          "date": "2026-09-26",
+          "portfolio_id": "BOOK",
+          "strategy_id": "LIVE_EQUITY_MEAN_REVERSION",
+          "strategy_name": "EQUITY_MEAN_REVERSION"
+        },
+        "schema_version": "qt-equity-run-consumption/v1",
+        "scope": "full_run",
+        "stages": {
+          "corporate_actions": {
+            "executions": [],
+            "outcome": "returned_ok",
+            "reads": {
+              "effective_event_count": 21,
+              "path": "system_history",
+              "spinoff_child_policy_effective": "hold",
+              "spinoff_child_policy_requested": "hold"
+            },
+            "skip_reason": null,
+            "symbols": {}
+          },
+          "cost_history": {
+            "executions": [],
+            "outcome": "returned_ok",
+            "reads": {},
+            "skip_reason": null,
+            "symbols": {
+              "SYN": {
+                "adv_lookback_days": 21,
+                "previous_close_forwarded": 0.0,
+                "previous_close_source": "no_previous_close"
+              }
+            }
+          },
+          "eod": {
+            "executions": [],
+            "outcome": "returned_ok",
+            "reads": {
+              "initial_capital_exact": "0.14",
+              "path": "system_finalization",
+              "previous_equity_exact": "0.14",
+              "previous_total_pnl_exact": "0.14",
+              "previous_total_realized_pnl_exact": "0.14",
+              "previous_total_transaction_costs_exact": "0.14"
+            },
+            "skip_reason": null,
+            "symbols": {}
+          },
+          "execution": {
+            "executions": [
+              {
+                "execution_id": "actual-fixture-ID",
+                "index": 0,
+                "portfolio_id": "BOOK",
+                "reads": {
+                  "apply_regulatory_fees": false,
+                  "asset_lookup_path": "exact_symbol",
+                  "asset_type": "EQUITY",
+                  "baseline_spread_ticks": 0.5,
+                  "commission_per_unit": 0.5,
+                  "commissions_fees_exact": "0.14",
+                  "effective_adv": 0.5,
+                  "effective_volatility_multiplier": 1.0,
+                  "implicit_price_impact_exact": "0.14",
+                  "input_source": "internally_tracked",
+                  "max_commission_pct": 0.5,
+                  "max_impact_bps": 0.5,
+                  "max_participation": 0.5,
+                  "max_spread_ticks": 0.5,
+                  "max_total_implicit_bps": 0.5,
+                  "min_adv": 0.5,
+                  "min_commission_per_order": 0.5,
+                  "min_participation": 0.5,
+                  "min_spread_ticks": 0.5,
+                  "point_value": 0.5,
+                  "quantity": 0.5,
+                  "reference_price": 0.5,
+                  "retrieved_adv": 0.5,
+                  "retrieved_volatility_multiplier": 1.0,
+                  "selected_k_bps": 0.5,
+                  "slippage_market_impact_exact": "0.14",
+                  "spread_cost_multiplier": 0.5,
+                  "tick_constrained": false,
+                  "tick_size": 0.5,
+                  "total_transaction_costs_exact": "0.14",
+                  "volatility_calculation_reached": false
+                },
+                "strategy_id": "LIVE_EQUITY_MEAN_REVERSION",
+                "strategy_name": "EQUITY_MEAN_REVERSION",
+                "symbol": "SYN"
+              }
+            ],
+            "outcome": "returned_ok",
+            "reads": {},
+            "skip_reason": null,
+            "symbols": {}
+          },
+          "market_input": {
+            "executions": [],
+            "outcome": "returned_ok",
+            "reads": {
+              "asset_type": "EQUITY",
+              "end_day": "2026-09-25",
+              "frequency": "DAILY",
+              "historical_days": 21,
+              "start_day": "2026-09-25"
+            },
+            "skip_reason": null,
+            "symbols": {}
+          },
+          "preparation": {
+            "executions": [],
+            "outcome": "returned_ok",
+            "reads": {},
+            "skip_reason": null,
+            "symbols": {
+              "SYN": {
+                "lookback_period": 21,
+                "max_history_size": 21,
+                "vol_lookback": 21
+              }
+            }
+          },
+          "primary": {
+            "executions": [],
+            "outcome": "returned_ok",
+            "reads": {
+              "portfolio_invocation": {
+                "available": true,
+                "compatibility_charges": [
+                  {
+                    "call": "returned_ok",
+                    "index": 0,
+                    "purpose": "compatibility",
+                    "reads": {
+                      "asset_lookup_path": "exact_symbol",
+                      "input_source": "internally_tracked",
+                      "quantity": 0.5,
+                      "reference_price": 16.0
+                    },
+                    "strategy_id": "",
+                    "symbol": "SYN"
+                  }
+                ],
+                "full_run_certification": false,
+                "outcome": "returned_ok",
+                "passes": [
+                  {
+                    "index": 0,
+                    "optimization_helper": "not_reached",
+                    "reads": {
+                      "use_optimization": false,
+                      "use_risk_management": false
+                    },
+                    "risk": {
+                      "call": "not_reached",
+                      "reads": {},
+                      "skip": "none"
+                    },
+                    "risk_helper": "not_reached"
+                  }
+                ],
+                "schema_version": "qt-equity-portfolio-consumption/v1",
+                "scope": "portfolio_invocation",
+                "skip_execution_generation": false,
+                "strategy_charges": [
+                  {
+                    "call": "returned_ok",
+                    "index": 0,
+                    "purpose": "per_strategy",
+                    "reads": {
+                      "asset_lookup_path": "exact_symbol",
+                      "input_source": "internally_tracked",
+                      "quantity": 0.5,
+                      "reference_price": 16.0
+                    },
+                    "strategy_id": "LIVE_EQUITY_MEAN_REVERSION",
+                    "symbol": "SYN"
+                  }
+                ],
+                "unavailable_reason": null
+              },
+              "strategy_invocation": {
+                "available": true,
+                "full_run_certification": false,
+                "profile": "mean_reversion",
+                "schema_version": "qt-equity-strategy-consumption/v1",
+                "scope": "strategy_invocation",
+                "symbols": {
+                  "SYN": {
+                    "observed_state": {},
+                    "reads": {
+                      "entry_threshold": 1.5,
+                      "lookback_period": 21
+                    }
+                  }
+                }
+              }
+            },
+            "skip_reason": null,
+            "symbols": {}
+          },
+          "prior": {
+            "executions": [],
+            "outcome": "returned_ok",
+            "reads": {
+              "mode": "system_reference",
+              "source_day": "2026-09-25"
+            },
+            "skip_reason": null,
+            "symbols": {}
+          },
+          "result_assembly": {
+            "executions": [],
+            "outcome": "returned_ok",
+            "reads": {
+              "currency": "USD",
+              "current_portfolio_value_exact": "0.14",
+              "total_realized_pnl_exact": "0.14",
+              "total_transaction_costs_exact": "0.14",
+              "total_unrealized_pnl_exact": "0.14"
+            },
+            "skip_reason": null,
+            "symbols": {}
+          },
+          "setup": {
+            "executions": [],
+            "outcome": "returned_ok",
+            "reads": {
+              "allow_fractional_positions": false,
+              "capital_allocation": 0.5,
+              "max_drawdown": 0.5,
+              "max_leverage": 0.5,
+              "reserve_capital": 0.5,
+              "use_optimization": false,
+              "use_risk_management": false
+            },
+            "skip_reason": null,
+            "symbols": {}
+          }
+        },
+        "unavailable_reason": null
+      },
+      "identity": {
+        "capture_id": "81000000-0000-4000-8000-000000000001",
+        "control_mode": "uncontrolled",
+        "engine_strategy_id": "LIVE_EQUITY_MEAN_REVERSION",
+        "portfolio_id": "BOOK",
+        "producer_version": "synthetic-proposed-example",
+        "publication_id": "81000000-0000-4000-8000-000000000001",
+        "registry_id": "equity_alpha",
+        "registry_revision": 1,
+        "run_date": "2026-09-26",
+        "runtime_attempt_id": null
+      },
+      "profile": "live_equity_mean_reversion",
+      "publication_recorded_at": "2026-09-26T12:00:01Z",
+      "publication_schema_version": 3,
+      "reason": "none",
+      "status": "available",
+      "stream": "system"
+    }
+  },
+  "semantics": {
+    "effective_event_count": "zero because this MODEL run did not reapply already proved actions",
+    "original_action_count": "immutable proved S adjustments",
+    "successor_action_count": "nonmutating derived next MODEL D seed frame events; never physical S restatement"
+  }
+}

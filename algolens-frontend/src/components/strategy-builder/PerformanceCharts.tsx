@@ -1,5 +1,7 @@
 import { LineChart, Line, BarChart, Bar, Cell, XAxis, YAxis, ResponsiveContainer, Tooltip } from 'recharts';
+import { formatAxisDollars, formatAxisPercent } from '../../domain/portfolio/formatPrice';
 import type { CombinedMetrics } from '../../domain/portfolio/computeCombinedMetrics';
+import { formatBarDate } from '../../domain/portfolio/formatBarDate';
 
 interface PerformanceChartsProps {
   metrics: CombinedMetrics;
@@ -16,20 +18,24 @@ export function PerformanceCharts({ metrics, theme }: PerformanceChartsProps) {
           }`}>
           Daily P&L (30D)
         </h3>
+        {!metrics.coverage.comparableDailyReturns && (
+          <p className={`mb-2 text-xs ${theme === 'dark' ? 'text-amber-400' : 'text-amber-700'}`}>
+            Unavailable: common coverage does not support comparable daily returns.
+          </p>
+        )}
         <ResponsiveContainer width="100%" height={200}>
           <BarChart data={metrics.dailyPnL}>
             <XAxis
               dataKey="date"
               tick={{ fill: theme === 'dark' ? '#6b7280' : '#9ca3af', fontSize: 10 }}
               tickFormatter={(value) => {
-                const date = new Date(value);
-                return `${date.getMonth() + 1}/${date.getDate()}`;
+                return formatBarDate(String(value), { month: 'numeric', day: 'numeric' });
               }}
               interval="preserveStartEnd"
             />
             <YAxis
               tick={{ fill: theme === 'dark' ? '#6b7280' : '#9ca3af', fontSize: 10 }}
-              tickFormatter={(value) => `${(value / 1000).toFixed(0)}k`}
+              tickFormatter={formatAxisDollars}
             />
             <Tooltip
               contentStyle={{
@@ -39,7 +45,7 @@ export function PerformanceCharts({ metrics, theme }: PerformanceChartsProps) {
                 fontSize: '12px',
                 color: theme === 'dark' ? '#fff' : '#000'
               }}
-              formatter={(value: number) => [`$${value.toLocaleString('en-US', { minimumFractionDigits: 0 })}`, 'P&L']}
+              formatter={(value) => [`$${Number(value ?? 0).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`, 'P&L']}
             />
             <Bar dataKey="pnl">
               {metrics.dailyPnL.map((entry, index) => (
@@ -57,20 +63,27 @@ export function PerformanceCharts({ metrics, theme }: PerformanceChartsProps) {
           }`}>
           Cumulative Return (90D)
         </h3>
+        {metrics.coverage.partial && (
+          <p className={`mb-2 text-xs ${theme === 'dark' ? 'text-amber-400' : 'text-amber-700'}`}>
+            Common coverage only; {metrics.coverage.excludedDates.length} excluded {metrics.coverage.excludedDates.length === 1 ? 'date' : 'dates'}.
+          </p>
+        )}
         <ResponsiveContainer width="100%" height={200}>
           <LineChart data={metrics.historicalPerformance}>
             <XAxis
               dataKey="date"
               tick={{ fill: theme === 'dark' ? '#6b7280' : '#9ca3af', fontSize: 10 }}
               tickFormatter={(value) => {
-                const date = new Date(value);
-                return `${date.getMonth() + 1}/${date.getDate()}`;
+                return formatBarDate(String(value), { month: 'numeric', day: 'numeric' });
               }}
               interval="preserveStartEnd"
             />
+            {/* Whole percent hid the whole axis on a book whose 90-day range
+                is under a point: every tick read "0%". Same fault as the P&L
+                axis that read "$0k $0k $0k". */}
             <YAxis
               tick={{ fill: theme === 'dark' ? '#6b7280' : '#9ca3af', fontSize: 10 }}
-              tickFormatter={(value) => `${value.toFixed(0)}%`}
+              tickFormatter={formatAxisPercent}
             />
             <Tooltip
               contentStyle={{
@@ -80,7 +93,7 @@ export function PerformanceCharts({ metrics, theme }: PerformanceChartsProps) {
                 fontSize: '12px',
                 color: theme === 'dark' ? '#fff' : '#000'
               }}
-              formatter={(value: number) => [`${value.toFixed(2)}%`, 'Return']}
+              formatter={(value) => [`${Number(value ?? 0).toFixed(2)}%`, 'Return']}
             />
             <Line
               type="monotone"
@@ -88,6 +101,7 @@ export function PerformanceCharts({ metrics, theme }: PerformanceChartsProps) {
               stroke="#f97316"
               strokeWidth={2}
               dot={false}
+              connectNulls={false}
             />
           </LineChart>
         </ResponsiveContainer>

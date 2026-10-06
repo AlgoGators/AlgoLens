@@ -1,0 +1,36 @@
+{
+  "schema": "algolens-database-identity/v1",
+  "state": "dependency-placeholder",
+  "provided_by": "T3",
+  "database": {
+    "name": "new_algo_data",
+    "server_addr": "T3_REQUIRED",
+    "data_directory": "T3_REQUIRED",
+    "role": "T3_REQUIRED",
+    "role_contract_sha256": "T3_REQUIRED",
+    "schema_sha256": "T3_REQUIRED"
+  },
+  "live_books": [
+    {
+      "registry_id": "trendfollowing",
+      "strategy_id": "LIVE_TREND_FOLLOWING",
+      "book_id": "CONSERVATIVE_PORTFOLIO",
+      "lifecycle": "live",
+      "evaluator_build": "T2_REQUIRED",
+      "evaluator_sha256": "T2_REQUIRED",
+      "evaluator_bundle_sha256": "T2_REQUIRED"
+    }
+  ],
+  "dependencies": {
+    "capability": {
+      "schema": "qt-capabilities/v1",
+      "state": "dependency-placeholder",
+      "sha256": "T1_REQUIRED"
+    },
+    "worker": {
+      "schema": "qt-worker-service/v1",
+      "state": "dependency-placeholder",
+      "sha256": "T4_REQUIRED"
+    }
+  }
+}

@@ -2,13 +2,43 @@
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Any, Callable, Protocol
 
 from algolens.application.shared.errors import ValidationError
+from algolens.domain.portfolio.streams import DEFAULT_POSITION_STREAM
 
 
 class IncubationError(ValidationError):
     """Raised when an incubation operation violates lifecycle constraints."""
+
+
+class InstrumentCatalogPort(Protocol):
+    def resolve_asset_type(self, symbol: str) -> str:
+        """Return a unique supported catalog type, or raise a validation error."""
+        ...
+
+
+class OpenPositionsError(IncubationError):
+    """An effective nonzero position prevents a lifecycle close."""
+
+    code = "open_positions"
+
+
+class PositionsUnavailableError(IncubationError):
+    """A previously-live strategy lacks reliable evidence that it is flat."""
+
+    code = "positions_unavailable"
+
+
+class DeskFinalizationPendingError(IncubationError):
+    """A processed QT desk day on the strategy's books awaits its next-day finalization.
+
+    The desk finalizers write qt-stream rows for that day. Changing the lifecycle
+    away from live first would let them finalize a non-live scope, so the change
+    waits until every such day is finalized.
+    """
+
+    code = "desk_finalization_pending"
 
 
 class StrategyNameUnresolved(Exception):
@@ -42,12 +72,44 @@ class PortfolioDetailRows:
     positions: Sequence[Mapping[str, Any]]
     executions: Sequence[Mapping[str, Any]]
     yesterday_positions: Sequence[Mapping[str, Any]]
+    position_date: Any = None
+    position_strategy_names: Sequence[str] = ()
+    position_stream: str | None = "qt"
+    execution_date: Any = None
+    executions_available: bool = True
+    qt_positions: Sequence[Mapping[str, Any]] | None = None
+    activity_stream: str | None = None
+    finalized_positions_available: bool = False
 
 
 @dataclass(frozen=True)
 class IncubationPerformanceRows:
     positions: Sequence[Mapping[str, Any]]
     equity_curve: Sequence[Mapping[str, Any]]
+
+
+class PortfolioReassignmentAcknowledgementRequired(Exception):
+    """Moving a live strategy breaks both portfolios' histories.
+
+    Same shape as RiskAcknowledgementRequired: the caller is told what it costs
+    and must come back with an explicit acknowledgement. Maps to HTTP 409.
+    """
+
+    def __init__(self, verdict):
+        super().__init__("This reassignment breaks portfolio history continuity")
+        self.verdict = verdict
+
+
+class MembershipAcknowledgementRequired(Exception):
+    """Removing a strategy from a book breaks that book's history.
+
+    Only removal raises this. Adding a strategy to another book takes nothing
+    away from the books it is already in, so it needs no acknowledgement.
+    """
+
+    def __init__(self, verdict):
+        super().__init__("Removing this strategy breaks the book's history continuity")
+        self.verdict = verdict
 
 
 class StrategyRegistryPort(Protocol):
@@ -57,6 +119,56 @@ class StrategyRegistryPort(Protocol):
     def get(self, strategy_id: str) -> dict[str, Any] | None:
         ...
 
+    def reassign_portfolio(
+        self, strategy_id: str, portfolio_id: str, audit: "dict[str, Any]"
+    ) -> "dict[str, Any]":
+        ...
+
+    def list_assignment_history(
+        self, strategy_id: str, limit: int = 100
+    ) -> Sequence[dict[str, Any]]:
+        # Sequence, not list: `list` is a method name on this Protocol, so it no
+        # longer refers to the builtin inside this class body.
+        ...
+
+    # -- lifecycle-blind read ------------------------------------------------
+    def get_any(self, strategy_id: str) -> dict[str, Any] | None:
+        """Like get, but incubating and retired strategies are visible too."""
+        ...
+
+    # -- books ---------------------------------------------------------------
+    def list_declared_books(self) -> Sequence[dict[str, Any]]:
+        ...
+
+    def list_portfolio_ids_in_use(self) -> Sequence[str]:
+        ...
+
+    def create_book(self, book: dict[str, Any], user_id: str) -> dict[str, Any]:
+        ...
+
+    def delete_book(self, portfolio_id: str) -> dict[str, Any]:
+        """Raises BookNotEmpty while any strategy is still a member."""
+        ...
+
+    # -- membership ----------------------------------------------------------
+    def list_memberships(self) -> Sequence[dict[str, Any]]:
+        ...
+
+    def books_for_strategy(self, strategy_id: str) -> Sequence[str]:
+        """Every book the strategy is in; the primary alone if none recorded."""
+        ...
+
+    def add_membership(
+        self, strategy_id: str, portfolio_id: str, audit: dict[str, Any]
+    ) -> None:
+        ...
+
+    def remove_membership(
+        self, strategy_id: str, portfolio_id: str, audit: dict[str, Any]
+    ) -> None:
+        """Repoints the primary if the removed book was it."""
+        ...
+
 
 class PortfolioReaderPort(Protocol):
     def fetch_summary_row(
@@ -64,7 +176,10 @@ class PortfolioReaderPort(Protocol):
     ) -> Mapping[str, Any] | None:
         ...
 
-    def fetch_detail_rows(self, strategy_type: str, portfolio_id: str) -> PortfolioDetailRows:
+    def fetch_detail_rows(
+        self, strategy_type: str, portfolio_id: str,
+        position_stream: str = DEFAULT_POSITION_STREAM,
+    ) -> PortfolioDetailRows:
         ...
 
     def list_incubating_strategies(self) -> Sequence[Mapping[str, Any]]:
@@ -90,6 +205,11 @@ class PortfolioReaderPort(Protocol):
     def retire_strategy(self, strategy_id: str, reason: str, user_id: str) -> None:
         ...
 
+    def list_lifecycle_history(
+        self, strategy_id: str, limit: int = 100
+    ) -> Sequence[Mapping[str, Any]]:
+        ...
+
     # -- qt stream writes (F2) ------------------------------------------------
 
     def fetch_risk_envelope(
@@ -113,13 +233,52 @@ class PortfolioReaderPort(Protocol):
         portfolio_id: str,
         normalized: Mapping[str, Any],
         user_id: str,
-        verdict: Mapping[str, Any],
-        overrode_risk: bool,
+        risk_check: Callable[
+            [
+                Mapping[str, Any] | None,
+                Sequence[Mapping[str, Any]],
+                Mapping[str, Any] | None,
+            ],
+            Mapping[str, Any],
+        ],
     ) -> Mapping[str, Any]:
-        """Upsert one qt position and its audit row, atomically."""
+        """Evaluate and upsert against one locked book snapshot, atomically."""
         ...
 
     def fetch_overrides(
-        self, strategy_type: str, limit: int = 100
+        self, strategy_type: str, portfolio_id: str, limit: int = 100
     ) -> Sequence[Mapping[str, Any]]:
         ...
+
+
+class BookNotEmpty(Exception):
+    """A book still holds strategies and cannot be deleted. Maps to HTTP 409.
+
+    Carries the count so the adapter can build its own message. Rendering
+    str(exc) straight into a response is how raw database text reached clients
+    from the incubation routes; the shape is avoided here rather than repeated.
+    """
+
+    def __init__(self, portfolio_id, occupied):
+        super().__init__(f"{portfolio_id} still holds {occupied} strategies")
+        self.portfolio_id = portfolio_id
+        self.occupied = occupied
+
+
+class StrategyNotInRegistry(IncubationError):
+    """No such strategy. Maps to HTTP 404.
+
+    Typed rather than detected by searching the message for "not found": a
+    reason string containing those words would otherwise change the status code
+    of an unrelated failure.
+    """
+
+
+class IncubationStorageError(IncubationError):
+    """The database refused an incubation write.
+
+    Distinct from IncubationError so the HTTP layer can answer 500 with a fixed
+    message. The parent is rendered with str(exc), which is right for the
+    domain messages it carries and wrong for a psycopg2 error: those name
+    columns and SQL, and were reaching clients as a 400.
+    """

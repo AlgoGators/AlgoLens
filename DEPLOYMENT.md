@@ -1,152 +1,42 @@
-# AlgoLens Deployment Guide
+# AlgoLens deployment preparation
 
-## Overview
+Production remains read-only. **Do not send any emails.** No checklist or workflow
+input replaces the user's explicit authorization.
 
-Pushing to `main` automatically deploys via GitHub Actions. The workflow SSHes into EC2, pulls the latest code, builds the frontend, and restarts services.
+## Current release procedure
 
-For manual deploys or hotfixes, follow the steps below.
+The only current procedure is the [guarded exact-SHA rollout](deployment/ROLLOUT.md).
+It requires a tested commit, coordinated schema verification, backup/rollback
+evidence, maintenance approval, protected-environment controls and a verified
+existing Compose frontend/backend pair. It never automatically applies a migration.
 
----
+The prepared workflow is manual-only; pushing to main does not deploy. It updates
+the serving API on loopback5000 and frontend on loopback3000, then checks source
+identity through Nginx and loopback. Nginx is the public proxy, not the application
+backend. The port5001 systemd backend is legacy and is not updated by this workflow.
 
-## Prerequisites
+The historical npx frontend must first undergo a separately approved host cutover.
+Until both serving containers are verified, the helper refuses before build/update.
+Neither that cutover nor any production verification has been performed here.
 
-### SSH Key
-You need `dominick-pem.pem` to access the EC2 instance. It is **not in the repo** — get it from a current team member.
+## Schema and environment contracts
 
-**Windows** — restrict permissions before first use:
-```powershell
-icacls "C:\path\to\dominick-pem.pem" /inheritance:r /grant:r "$($env:USERNAME):R"
-```
+The read-only checker is [check_schema.py](algolens-api/scripts/check_schema.py);
+the declared contract is [schema_contract.py](algolens-api/algolens/infrastructure/db/schema_contract.py).
+The broader [readiness script](algolens-api/scripts/production_readiness.sh) is a
+separate approved diagnostic, not a migration or permission to access production.
+Migration012 must be coordinated with compatible application code under its
+dedicated rollout plan; no numeric ordering shortcut replaces that review.
 
-**Mac/Linux:**
-```bash
-chmod 400 ~/path/to/dominick-pem.pem
-```
+Keep runtime secrets outside Git and outside frontend build context. The prepared
+Compose file requires an explicitly verified absolute runtime env-file path and
+an exact release SHA. The frontend receives only its public API origin/release ID.
 
-### Node.js v18+
-```bash
-node -v
-```
+## Historical reference only
 
----
-
-## Port Reference
-
-| Service | Port | Notes |
-|---|---|---|
-| Frontend | 3000 | `algolens.service` via `npx serve ./algolens-frontend/build` |
-| Backend API | **5000** | Docker container — authoritative backend with DB credentials |
-| Legacy backend | ~~5001~~ | `algolens-backend.service` — no DB env vars, do not route to this |
-| Nginx (public) | 80 / 443 | `/` → 3000 · `/auth` → 5000 · `/portfolio` → 5000 |
-
-All new API routes added to `deployment/algolens.conf` must proxy to port **5000**.
-
----
-
-## Automatic Deploy (GitHub Actions)
-
-Push to `main`. The workflow (`.github/workflows/deploy.yml`) will:
-
-1. SSH into EC2
-2. `git pull origin main`
-3. `cd algolens-frontend && npm ci && npm run build` — builds frontend with `VITE_API_URL` from `/home/ec2-user/AlgoLens/algolens-frontend/.env`
-4. Copy `deployment/algolens-backend.service`, `deployment/algolens.service`, `deployment/algolens.conf` into system paths
-5. Reload nginx, restart `algolens` and `algolens-backend` systemd services
-
-> The backend Docker container is **not** restarted by CI/CD. Restart it manually when needed (see below).
-
----
-
-## Manual Deploy Steps
-
-### 1. SSH into EC2
-```bash
-ssh -i "/path/to/dominick-pem.pem" ec2-user@ec2-18-226-98-126.us-east-2.compute.amazonaws.com
-```
-
-### 2. Pull latest code
-```bash
-cd /home/ec2-user/AlgoLens
-git pull origin main
-```
-
-### 3. Build frontend
-```bash
-cd algolens-frontend
-npm ci
-npm run build
-cd ..
-```
-
-### 4. Restart frontend service
-```bash
-sudo systemctl restart algolens
-```
-
-### 5. Reload nginx (if config changed)
-```bash
-sudo nginx -t && sudo systemctl reload nginx
-```
-
----
-
-## Backend Changes
-
-The backend runs as a Docker container using `/home/ec2-user/algolens-docker/.env` for all secrets.
-
-**Restart the backend container:**
-```bash
-docker restart algolens-docker-backend-1
-```
-
-**View backend logs:**
-```bash
-docker logs algolens-docker-backend-1 --tail 50
-```
-
-**If you change DB credentials or DB name:**
-1. Edit `/home/ec2-user/algolens-docker/.env`
-2. Restart the container: `docker restart algolens-docker-backend-1`
-3. Verify: `docker logs algolens-docker-backend-1 --tail 10`
-
----
-
-## Environment Files (not in git)
-
-| Path on EC2 | Contents |
-|---|---|
-| `/home/ec2-user/AlgoLens/algolens-frontend/.env` | `VITE_API_URL=https://algolens.algogators.com` |
-| `/home/ec2-user/algolens-docker/.env` | `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`, `JWT_SECRET_KEY` |
-
-These files are gitignored. Do not commit them. Share via password manager or private message only.
-
----
-
-## Adding New API Endpoints
-
-1. Add the route to the Flask backend (`algolens-api/algolens/adapters/http/`)
-2. Register the blueprint in `algolens-api/algolens/infrastructure/config/app_factory.py`
-3. Add a `location` block to `deployment/algolens.conf`:
-```nginx
-location /your-route {
-    proxy_pass http://localhost:5000/your-route;
-    proxy_http_version 1.1;
-    proxy_set_header Host $host;
-    proxy_set_header X-Real-IP $remote_addr;
-    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-    proxy_set_header X-Forwarded-Proto $scheme;
-}
-```
-4. Push to `main` — CI/CD deploys the updated nginx config automatically.
-
----
-
-## Server Info
-
-| | |
-|---|---|
-| **URL** | https://algolens.algogators.com |
-| **EC2 host** | ec2-18-226-98-126.us-east-2.compute.amazonaws.com |
-| **EC2 user** | `ec2-user` |
-| **Database** | PostgreSQL · `13.58.153.216:5432` · db: `new_algo_data` |
-| **Swap** | 2 GB `/swapfile` (required for frontend builds — do not remove) |
+[Archived installation notes](deployment/HISTORICAL_DEPLOYMENT_2026-09-21.md)
+preserve previous operational context. Their mutable-main, service-restart and
+migration examples are obsolete, **not current instructions**, and must not be
+used to bypass the guarded rollout. For endpoint routing, the existing /auth and
+/portfolio prefixes already proxy to5000; other roots require a separately reviewed
+Nginx route (the prepared /version route is one example).

@@ -2,11 +2,7 @@ import React from 'react';
 import { TrendingUp, BarChart3, PieChart } from 'lucide-react';
 import { useTheme } from '../adapters/react/ThemeContext';
 
-interface EmptyPortfolioScreenProps {
-  onClose?: () => void;
-}
-
-export function EmptyPortfolioScreen({ onClose }: EmptyPortfolioScreenProps) {
+export function EmptyPortfolioScreen() {
   const { theme } = useTheme();
 
   return (
@@ -26,14 +22,14 @@ export function EmptyPortfolioScreen({ onClose }: EmptyPortfolioScreenProps) {
 
         {/* Title */}
         <h1 className="text-2xl md:text-3xl mb-4">
-          No Active Positions
+          No Strategies Available
         </h1>
 
         {/* Description */}
         <p className={`text-base md:text-lg mb-8 ${
           theme === 'dark' ? 'text-gray-400' : 'text-gray-600'
         }`}>
-          Your portfolio is currently empty. Add positions to start tracking your investment performance.
+          No strategies are available for this account. Portfolio setup is managed by your fund team.
         </p>
 
         {/* Features */}
@@ -81,17 +77,18 @@ export function EmptyPortfolioScreen({ onClose }: EmptyPortfolioScreenProps) {
 
         {/* Action Button */}
         <button
-          onClick={onClose}
-          className="w-full py-4 px-6 bg-orange-500 hover:bg-orange-600 text-white rounded-lg transition-colors"
+          disabled
+          aria-describedby="portfolio-setup-help"
+          className="w-full py-4 px-6 bg-orange-500 opacity-60 cursor-not-allowed text-white rounded-lg"
         >
-          Get Started
+          Self-service setup unavailable
         </button>
 
         {/* Helper Text */}
-        <p className={`text-xs mt-6 ${
+        <p id="portfolio-setup-help" className={`text-xs mt-6 ${
           theme === 'dark' ? 'text-gray-600' : 'text-gray-400'
         }`}>
-          Contact your fund manager to add positions to your portfolio
+          Contact your fund manager to check your strategy access and portfolio setup.
         </p>
       </div>
     </div>

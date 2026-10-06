@@ -59,3 +59,93 @@ def serialize_incubation_performance(performance):
             for point in performance["equity_curve"]
         ],
     }
+
+
+def serialize_portfolio(portfolio):
+    return {
+        "portfolio_id": portfolio["portfolio_id"],
+        "total_value": _float_or_none(portfolio["total_value"]),
+        "strategies_awaiting_data": portfolio.get("strategies_awaiting_data", 0),
+        "strategy_count": len(portfolio["strategies"]),
+        "strategies": [
+            {
+                "id": s["id"],
+                "name": s["name"],
+                "strategy_type": s["strategy_type"],
+                "lifecycle": s["lifecycle"],
+                "current_value": _float_or_none(s["current_value"]),
+                "is_primary": s.get("is_primary", True),
+                "mock_capital": _float_or_none(s.get("mock_capital")),
+            }
+            for s in portfolio["strategies"]
+        ],
+    }
+
+
+def serialize_portfolio_list(portfolios):
+    return {"portfolios": [serialize_portfolio(p) for p in portfolios]}
+
+
+def serialize_assignment_result(result):
+    out = {
+        "changed": result["changed"],
+        "portfolio_id": result["portfolio_id"],
+        "assignment_check": result["verdict"],
+    }
+    if "primary_portfolio_id" in result:
+        # Only membership removals carry this. A client that removed the
+        # primary book needs to know where the primary went without a refetch.
+        out["primary_portfolio_id"] = result["primary_portfolio_id"]
+    return out
+
+
+def serialize_assignment_history(rows):
+    return {
+        "assignments": [
+            {
+                "id": row["id"],
+                "strategy_id": row["strategy_id"],
+                "user_id": row["user_id"],
+                "from_portfolio_id": row["from_portfolio_id"],
+                "to_portfolio_id": row["to_portfolio_id"],
+                "lifecycle_at_move": row["lifecycle_at_move"],
+                "reason": row["reason"],
+                "consequences": row["consequences"],
+                "acknowledged": row["acknowledged"],
+                "created_at": _isoformat(row["created_at"]),
+            }
+            for row in rows
+        ]
+    }
+
+
+def serialize_lifecycle_history(rows):
+    return {
+        "history": [
+            {
+                "id": row["id"],
+                "strategy_id": row["strategy_id"],
+                "before_state": row["before_state"],
+                "after_state": row["after_state"],
+                "reason": row["reason"],
+                "user_id": row["user_id"],
+                "created_at": _isoformat(row["created_at"]),
+            }
+            for row in rows
+        ]
+    }
+
+
+def serialize_book(book):
+    return {
+        "portfolio_id": book["portfolio_id"],
+        "name": book["name"],
+        "description": book["description"],
+        "declared": book["declared"],
+        "strategy_count": book["strategy_count"],
+        "strategies": book["strategies"],
+    }
+
+
+def serialize_book_list(books):
+    return {"books": [serialize_book(b) for b in books]}

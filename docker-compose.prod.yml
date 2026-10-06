@@ -1,11 +1,12 @@
 services:
   frontend:
-    image: ghcr.io/algogators/algolens-frontend:latest
+    image: algolens-frontend:${ALGOLENS_RELEASE_SHA:?Exact tested release SHA required}
     build:
       context: ./algolens-frontend
       dockerfile: Dockerfile
       args:
         VITE_API_URL: ${VITE_API_URL:-https://algolens.algogators.com}
+        APP_RELEASE_SHA: ${ALGOLENS_RELEASE_SHA:?Exact tested release SHA required}
     ports:
       - "127.0.0.1:3000:80"
     depends_on:
@@ -13,16 +14,59 @@ services:
     restart: unless-stopped
 
   backend:
-    image: ghcr.io/algogators/algolens-backend:latest
+    image: algolens-backend:${ALGOLENS_RELEASE_SHA:?Exact tested release SHA required}
+    build:
+      context: ./algolens-api
+      dockerfile: Dockerfile
+      args:
+        APP_RELEASE_SHA: ${ALGOLENS_RELEASE_SHA:?Exact tested release SHA required}
     ports:
       - "127.0.0.1:5000:5000"
     env_file:
-      - .env
+      - ${ALGOLENS_RUNTIME_ENV_FILE:?Verified absolute runtime env file required}
+    environment:
+      APP_RELEASE_SHA: ${ALGOLENS_RELEASE_SHA:?Exact tested release SHA required}
+      FLASK_ENV: production
+      FLASK_DEBUG: "false"
+      DEV_MODE: "0"
+      QT_EMAIL_DELIVERY_ENABLED: "false"
+      QT_EVALUATOR_BUNDLE_DIR: /app/qt-evaluator-bundle
+      QT_RELEASE_ARTIFACT_MANIFEST: /app/production-contracts/release-artifacts.json
+      QT_DATABASE_IDENTITY_MANIFEST: /app/production-contracts/database-identity.json
+      QT_RUNTIME_CONFIG_MANIFEST: /app/runtime-control/manifest.json
+      QT_RUNTIME_CONFIG_SHA256: ${ALGOLENS_RUNTIME_CONFIG_SHA256:?Runtime config digest required}
+      QT_RUNTIME_CONTROL_ENABLED: "false"
     volumes:
       - backend-logs:/app/logs
+      # Empty allowlist by default. Only a separately reviewed, credential-free
+      # manifest may replace it; mounting it does not enable runtime control.
+      - type: bind
+        source: ${ALGOLENS_RUNTIME_MANIFEST_FILE:?Runtime control manifest required}
+        target: /app/runtime-control/manifest.json
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${ALGOLENS_EVALUATOR_BUNDLE_DIR:?Immutable evaluator bundle directory required}
+        target: /app/qt-evaluator-bundle
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${ALGOLENS_RELEASE_ARTIFACT_MANIFEST_FILE:?release-artifacts/v1 manifest required}
+        target: /app/production-contracts/release-artifacts.json
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${ALGOLENS_DATABASE_IDENTITY_MANIFEST_FILE:?Database identity manifest required}
+        target: /app/production-contracts/database-identity.json
+        read_only: true
+        bind:
+          create_host_path: false
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:5000/ready"]
       interval: 30s
       timeout: 10s
       retries: 3

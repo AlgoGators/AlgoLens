@@ -7,6 +7,9 @@ Ported from AlgoLens PR #31 (closed August 2026 on a miscommunication) onto the
 layered package.
 """
 
+from pathlib import Path
+from datetime import date
+
 import pytest
 
 from algolens.application.portfolio.ports import RiskAcknowledgementRequired
@@ -19,8 +22,10 @@ from algolens.domain.portfolio.position_edit import (
     PositionValidationError,
     build_after_state,
     evaluate_risk,
+    resolve_target_book,
     validate_position_payload,
 )
+from algolens.domain.portfolio.portfolio_assignment import AssignmentValidationError
 
 
 def _payload(**overrides):
@@ -75,6 +80,26 @@ def test_boolean_quantity_is_not_a_number():
         validate_position_payload(_payload(quantity=True))
 
 
+@pytest.mark.parametrize("field", ["quantity", "average_price"])
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")],
+                         ids=["nan", "positive-infinity", "negative-infinity"])
+def test_non_finite_position_numbers_are_refused(field, value):
+    with pytest.raises(PositionValidationError) as exc:
+        validate_position_payload(_payload(**{field: value}))
+    expected = "quantity_not_finite" if field == "quantity" else "price_not_finite"
+    assert exc.value.code == expected
+
+
+@pytest.mark.parametrize("field,code", [
+    ("quantity", "quantity_not_representable"),
+    ("average_price", "price_not_representable"),
+])
+def test_large_finite_integer_is_rejected_as_unrepresentable(field, code):
+    with pytest.raises(PositionValidationError) as exc:
+        validate_position_payload(_payload(**{field: 10 ** 400}))
+    assert exc.value.code == code
+
+
 def test_negative_average_price_is_refused():
     with pytest.raises(PositionValidationError, match="average_price"):
         validate_position_payload(_payload(average_price=-1))
@@ -114,36 +139,156 @@ def test_missing_envelope_is_reported_as_not_evaluated_not_as_a_pass():
     assert verdict["breaches"] == []
 
 
-def test_symbol_notional_breach_is_reported():
-    envelope = {"max_symbol_notional": {"ES": 1000.0}}
-    proposed = {"symbol": "ES", "quantity": 10, "average_price": 500.0}
+def test_a_per_symbol_contract_cap_is_the_limit_the_engine_publishes():
+    # trade-ngin publishes max_symbol_position_contracts, in CONTRACTS. This is
+    # the limit that actually exists; the dollar caps below are legacy.
+    envelope = {"max_symbol_position_contracts": {"ES": 10}}
+    proposed = {"symbol": "ES", "quantity": 14, "average_price": 500.0}
     verdict = evaluate_risk(envelope, [], proposed)
     assert verdict["passed"] is False
-    assert verdict["breaches"][0]["limit"] == "max_symbol_notional"
+    assert verdict["breaches"][0]["limit"] == "max_symbol_position_contracts"
+    assert verdict["checked"] == ["max_symbol_position_contracts"]
+
+
+def test_a_contract_cap_is_matched_on_the_root_of_a_rolled_symbol():
+    # The book holds ES.v.0; the limit is filed under ES.
+    envelope = {"max_symbol_position_contracts": {"ES": 10}}
+    proposed = {"symbol": "ES.v.0", "quantity": 14, "average_price": 500.0}
+    assert evaluate_risk(envelope, [], proposed)["passed"] is False
+
+
+def test_a_position_inside_the_contract_cap_passes():
+    envelope = {"max_symbol_position_contracts": {"ES": 10}}
+    proposed = {"symbol": "ES.v.0", "quantity": 8, "average_price": 500.0}
+    verdict = evaluate_risk(envelope, [], proposed)
+    assert verdict["passed"] is True
+    assert verdict["evaluated"] is True
+
+
+def test_a_short_position_is_capped_on_its_size_not_its_sign():
+    envelope = {"max_symbol_position_contracts": {"ES": 10}}
+    proposed = {"symbol": "ES", "quantity": -14, "average_price": 500.0}
+    assert evaluate_risk(envelope, [], proposed)["passed"] is False
+
+
+def test_gross_leverage_is_checked_against_the_value_of_the_book():
+    envelope = {"max_gross_leverage": 2.0}
+    book = [{"symbol": "NQ", "quantity": 1, "notional": 100_000.0}]
+    proposed = {"symbol": "ES", "quantity": 1, "notional": 150_000.0}
+    verdict = evaluate_risk(envelope, book, proposed, portfolio_value=100_000.0)
+    # 250,000 of exposure against a 100,000 book is 2.5x, over the 2.0x limit.
+    assert verdict["passed"] is False
+    assert verdict["breaches"][0]["limit"] == "max_gross_leverage"
+
+
+def test_an_offsetting_book_keeps_its_gross_leverage():
+    # Offsetting longs and shorts neutralize net exposure, not the amount of
+    # capital at risk across the book.
+    envelope = {"max_gross_leverage": 1.5, "max_net_leverage": 0.5}
+    book = [{"symbol": "LONG", "quantity": 1, "notional": 100.0}]
+    proposed = {"symbol": "SHORT", "quantity": -1, "notional": -100.0}
+
+    verdict = evaluate_risk(envelope, book, proposed, portfolio_value=100.0)
+
+    assert verdict["passed"] is False
+    assert verdict["breaches"] == [{
+        "limit": "max_gross_leverage",
+        "limit_value": 1.5,
+        "actual": 2.0,
+        "message": "Gross leverage would be 2.00x, over the limit of 1.50x",
+    }]
+    assert set(verdict["checked"]) >= {
+        "max_gross_leverage", "max_net_leverage"
+    }
+
+
+def test_net_leverage_uses_signed_exposure_for_an_offsetting_book():
+    envelope = {"max_gross_leverage": 3.0, "max_net_leverage": 0.5}
+    book = [{"symbol": "LONG", "quantity": 1, "notional": 100.0}]
+    proposed = {"symbol": "SHORT", "quantity": -1, "notional": -100.0}
+
+    verdict = evaluate_risk(envelope, book, proposed, portfolio_value=100.0)
+
+    assert verdict["passed"] is True
+    assert set(verdict["checked"]) >= {
+        "max_gross_leverage", "max_net_leverage"
+    }
+
+
+def test_net_leverage_reports_a_positive_ratio_for_negative_net_exposure():
+    envelope = {"max_net_leverage": 1.0}
+    book = [{"symbol": "SHORT", "quantity": -1, "notional": -100.0}]
+    proposed = {"symbol": "SHORT_2", "quantity": -1, "notional": -100.0}
+
+    verdict = evaluate_risk(envelope, book, proposed, portfolio_value=100.0)
+
+    assert verdict["passed"] is False
+    assert verdict["breaches"] == [{
+        "limit": "max_net_leverage",
+        "limit_value": 1.0,
+        "actual": 2.0,
+        "message": "Net leverage would be 2.00x, over the limit of 1.00x",
+    }]
+
+
+def test_leverage_is_not_checked_when_an_exposure_is_unknown():
+    # A partial sum compared against the same limit is a quietly weaker gate.
+    envelope = {"max_gross_leverage": 2.0, "max_net_leverage": 2.0}
+    book = [{"symbol": "NQ", "quantity": 1, "notional": None}]
+    proposed = {"symbol": "ES", "quantity": 1, "notional": 150_000.0}
+    verdict = evaluate_risk(envelope, book, proposed, portfolio_value=100_000.0)
+    assert verdict["evaluated"] is False
+    assert verdict["breaches"] == []
+    assert "max_gross_leverage" not in verdict["checked"]
+    assert "max_net_leverage" not in verdict["checked"]
+
+
+def test_leverage_is_not_checked_without_the_value_of_the_book():
+    envelope = {"max_gross_leverage": 2.0}
+    proposed = {"symbol": "ES", "quantity": 1, "notional": 150_000.0}
+    assert evaluate_risk(envelope, [], proposed)["evaluated"] is False
+
+
+def test_an_envelope_of_only_unrecognised_limits_is_not_a_pass():
+    # The failure this whole rewrite is about: the code used to look for keys
+    # the engine never publishes, find none, and record "passed".
+    envelope = {"some_future_limit": 3, "another": {"ES": 1}}
+    verdict = evaluate_risk(envelope, [], {"symbol": "ES", "quantity": 99})
+    assert verdict["evaluated"] is False
+    assert verdict["checked"] == []
+
+
+def test_the_verdict_names_which_limits_were_actually_compared():
+    envelope = {"max_symbol_position_contracts": {"ES": 10}, "max_gross_leverage": 5.0}
+    proposed = {"symbol": "ES", "quantity": 2, "notional": 10_000.0}
+    verdict = evaluate_risk(envelope, [], proposed, portfolio_value=1_000_000.0)
+    assert verdict["checked"] == ["max_gross_leverage", "max_symbol_position_contracts"]
 
 
 def test_the_edited_symbol_replaces_its_row_rather_than_adding_to_it():
     """Adding would double-count and report a breach on almost any edit."""
     envelope = {"max_gross_notional": 6000.0}
-    book = [{"symbol": "ES", "quantity": 10, "average_price": 500.0}]
-    proposed = {"symbol": "ES", "quantity": 1, "average_price": 500.0}
+    book = [{"symbol": "ES", "quantity": 10, "notional": 5000.0}]
+    proposed = {"symbol": "ES", "quantity": 1, "notional": 500.0}
     assert evaluate_risk(envelope, book, proposed)["passed"] is True
 
 
 def test_closing_a_position_removes_it_from_the_projected_book():
     envelope = {"max_position_count": 1}
     book = [
-        {"symbol": "ES", "quantity": 1, "average_price": 1.0},
-        {"symbol": "NQ", "quantity": 1, "average_price": 1.0},
+        {"symbol": "ES", "quantity": 1, "notional": 1.0},
+        {"symbol": "NQ", "quantity": 1, "notional": 1.0},
     ]
-    proposed = {"symbol": "NQ", "quantity": 0, "average_price": 1.0}
+    proposed = {"symbol": "NQ", "quantity": 0, "notional": 1.0}
     assert evaluate_risk(envelope, book, proposed)["passed"] is True
 
 
-def test_unknown_price_contributes_nothing_to_notional():
+def test_a_legacy_dollar_cap_is_not_checked_without_a_real_exposure():
+    # It used to be checked against quantity x entry price, which omits the
+    # contract size and so understated every futures exposure.
     envelope = {"max_gross_notional": 1.0}
-    proposed = {"symbol": "ES", "quantity": 10_000, "average_price": None}
-    assert evaluate_risk(envelope, [], proposed)["passed"] is True
+    proposed = {"symbol": "ES", "quantity": 10_000, "notional": None}
+    assert evaluate_risk(envelope, [], proposed)["evaluated"] is False
 
 
 # --- use case ----------------------------------------------------------------
@@ -159,12 +304,36 @@ class _Registry:
     def list(self, active_only=True):
         return [self._strategy] if self._strategy else []
 
+    def books_for_strategy(self, strategy_id):
+        return [self._strategy["portfolio_id"]] if self._strategy else []
+
+
+class _NeverLookupRegistry:
+    def get(self, strategy_id):
+        raise AssertionError("portfolio validation must happen before lookup")
+
+
+class _MembershipFailureRegistry(_Registry):
+    def books_for_strategy(self, strategy_id):
+        raise RuntimeError("membership storage unavailable")
+
+
+class _EmptyMembershipRegistry(_Registry):
+    def books_for_strategy(self, strategy_id):
+        return []
+
+
+class _FutureCatalog:
+    def resolve_asset_type(self, symbol):
+        return "FUTURE"
+
 
 class _Reader:
     def __init__(self, envelope=None, book=None):
         self.envelope = envelope
         self.book = book or []
         self.written = None
+        self.override_scope = None
 
     def fetch_risk_envelope(self, strategy_type, portfolio_id):
         return self.envelope
@@ -172,11 +341,27 @@ class _Reader:
     def fetch_qt_book(self, strategy_type, portfolio_id):
         return self.book
 
-    def write_qt_position(self, **kwargs):
-        self.written = kwargs
-        return {"position": {"symbol": kwargs["normalized"]["symbol"]}, "override_id": 1}
+    def fetch_summary_row(self, strategy_type, portfolio_id):
+        return None
 
-    def fetch_overrides(self, strategy_type, limit=100):
+    def write_qt_position(self, **kwargs):
+        risk_check = kwargs.pop("risk_check")
+        verdict = risk_check(
+            self.envelope,
+            self.book,
+            self.fetch_summary_row(kwargs["strategy_type"], kwargs["portfolio_id"]),
+        )
+        kwargs["verdict"] = verdict
+        kwargs["overrode_risk"] = not verdict["passed"]
+        self.written = kwargs
+        return {
+            "position": {"symbol": kwargs["normalized"]["symbol"]},
+            "override_id": 1,
+            "risk_check": verdict,
+        }
+
+    def fetch_overrides(self, strategy_type, portfolio_id, limit=100):
+        self.override_scope = (strategy_type, portfolio_id, limit)
         return [{"id": 1, "strategy_id": strategy_type}]
 
 
@@ -194,16 +379,43 @@ def test_unknown_strategy_is_not_found():
 
 def test_a_clean_edit_is_written_with_its_verdict():
     reader = _Reader()
-    result = UpsertQtPosition(_Registry(_STRATEGY), reader).execute(_payload(), user_id="7")
+    result = UpsertQtPosition(_Registry(_STRATEGY), reader, instrument_catalog=_FutureCatalog()).execute(_payload(), user_id="7")
     assert result["risk_check"]["evaluated"] is False
     assert reader.written["overrode_risk"] is False
     assert reader.written["user_id"] == "7"
 
 
+@pytest.mark.parametrize("short_quantity,net_limit,expected_net", [(-1, 0.5, None), (-3, 1.0, 2.0)])
+def test_market_priced_edits_preserve_short_exposure(short_quantity, net_limit, expected_net):
+    class MarketData:
+        def latest_prices(self, symbols):
+            return {"LONG": 10.0, "SHORT": 10.0}
+
+        def contract_multipliers(self, symbols):
+            return {"LONG": 10.0, "SHORT": 10.0}
+
+    class ValuedReader(_Reader):
+        def fetch_summary_row(self, strategy_type, portfolio_id):
+            return {"current_portfolio_value": 100.0}
+
+    reader = ValuedReader(
+        envelope={"max_gross_leverage": 1.5, "max_net_leverage": net_limit,
+                  "max_symbol_notional": {"SHORT": 50}},
+        book=[{"symbol": "LONG", "quantity": 1}],
+    )
+    result = UpsertQtPosition(_Registry(_STRATEGY), reader, MarketData(), _FutureCatalog()).execute(
+        _payload(symbol="SHORT", quantity=short_quantity), "7", acknowledge_risk=True
+    )
+    breaches = {b["limit"]: b["actual"] for b in result["risk_check"]["breaches"]}
+    assert breaches["max_gross_leverage"] == (2.0 if short_quantity == -1 else 4.0)
+    assert breaches.get("max_net_leverage") == expected_net
+    assert breaches["max_symbol_notional"] == (100.0 if short_quantity == -1 else 300.0)
+
+
 def test_a_breach_is_refused_until_it_is_acknowledged():
-    reader = _Reader(envelope={"max_symbol_notional": {"ES": 1.0}})
+    reader = _Reader(envelope={"max_symbol_position_contracts": {"ES": 1}})
     with pytest.raises(RiskAcknowledgementRequired) as excinfo:
-        UpsertQtPosition(_Registry(_STRATEGY), reader).execute(
+        UpsertQtPosition(_Registry(_STRATEGY), reader, instrument_catalog=_FutureCatalog()).execute(
             _payload(average_price=500.0), user_id="7"
         )
     assert excinfo.value.verdict["breaches"]
@@ -211,8 +423,8 @@ def test_a_breach_is_refused_until_it_is_acknowledged():
 
 
 def test_an_acknowledged_breach_is_written_and_recorded_as_an_override():
-    reader = _Reader(envelope={"max_symbol_notional": {"ES": 1.0}})
-    UpsertQtPosition(_Registry(_STRATEGY), reader).execute(
+    reader = _Reader(envelope={"max_symbol_position_contracts": {"ES": 1}})
+    UpsertQtPosition(_Registry(_STRATEGY), reader, instrument_catalog=_FutureCatalog()).execute(
         _payload(average_price=500.0), user_id="7", acknowledge_risk=True
     )
     assert reader.written["overrode_risk"] is True
@@ -221,16 +433,382 @@ def test_an_acknowledged_breach_is_written_and_recorded_as_an_override():
 
 def test_the_write_always_targets_the_qt_stream():
     reader = _Reader()
-    UpsertQtPosition(_Registry(_STRATEGY), reader).execute(_payload(), user_id="7")
+    UpsertQtPosition(_Registry(_STRATEGY), reader, instrument_catalog=_FutureCatalog()).execute(_payload(), user_id="7")
     assert reader.written["normalized"]["portfolio_type"] == "qt"
 
 
-def test_overrides_are_listed_by_the_engine_strategy_type_not_the_display_id():
+def test_overrides_are_scoped_to_the_selected_book():
     reader = _Reader()
-    rows = ListPositionOverrides(_Registry(_STRATEGY), reader).execute("trendfollowing")
+    rows = ListPositionOverrides(_Registry(_STRATEGY), reader).execute(
+        "trendfollowing", "BASE_PORTFOLIO"
+    )
     assert rows[0]["strategy_id"] == "LIVE_TREND_FOLLOWING"
+    assert reader.override_scope == (
+        "LIVE_TREND_FOLLOWING", "BASE_PORTFOLIO", 100
+    )
+
+
+def test_overrides_for_a_non_member_book_are_refused_before_reading():
+    reader = _Reader()
+
+    with pytest.raises(AssignmentValidationError) as excinfo:
+        ListPositionOverrides(_Registry(_STRATEGY), reader).execute(
+            "trendfollowing", "SOMEONE_ELSES"
+        )
+
+    assert excinfo.value.code == "not_a_member_of_book"
+    assert reader.override_scope is None
+
+
+def test_missing_override_book_is_validated_before_strategy_lookup():
+    with pytest.raises(AssignmentValidationError) as excinfo:
+        ListPositionOverrides(_NeverLookupRegistry(), _Reader()).execute(
+            "missing-strategy", None
+        )
+
+    assert excinfo.value.code == "missing_portfolio_id"
+
+
+def test_override_history_propagates_membership_read_failures():
+    reader = _Reader()
+
+    with pytest.raises(RuntimeError, match="membership storage unavailable"):
+        ListPositionOverrides(_MembershipFailureRegistry(_STRATEGY), reader).execute(
+            "trendfollowing", "BASE_PORTFOLIO"
+        )
+
+    assert reader.override_scope is None
+
+
+def test_override_history_rejects_an_explicitly_empty_membership_list():
+    reader = _Reader()
+
+    with pytest.raises(AssignmentValidationError) as excinfo:
+        ListPositionOverrides(_EmptyMembershipRegistry(_STRATEGY), reader).execute(
+            "trendfollowing", "BASE_PORTFOLIO"
+        )
+
+    assert excinfo.value.code == "not_a_member_of_book"
+    assert reader.override_scope is None
 
 
 def test_overrides_for_an_unknown_strategy_are_not_found():
     with pytest.raises(StrategyNotFound):
-        ListPositionOverrides(_Registry(None), _Reader()).execute("nope")
+        ListPositionOverrides(_Registry(None), _Reader()).execute("nope", "BOOK")
+
+
+def test_override_repository_sql_scopes_new_writes_and_history_reads():
+    source = (
+        Path(__file__).parents[1]
+        / "algolens"
+        / "infrastructure"
+        / "portfolio"
+        / "repositories.py"
+    ).read_text(encoding="utf-8")
+
+    assert "(portfolio_id, user_id, source_app, strategy_id, symbol," in source
+    assert "LEFT JOIN trading.position_override_legacy_scopes legacy" in source
+    assert "WHERE COALESCE(o.portfolio_id, legacy.portfolio_id) = %s" in source
+    assert "AND o.strategy_id = %s" in source
+
+
+class _RepositoryCursor:
+    def __init__(self, history_rows=()):
+        self.history_rows = list(history_rows)
+        self.statements = []
+        self._one = None
+        self._many = None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, traceback):
+        return False
+
+    def execute(self, sql, params=()):
+        self.statements.append((sql, params))
+        self._many = None
+        if "pg_advisory_xact_lock" in sql:
+            self._one = None
+        elif "FROM trading.qt_workflow_capabilities" in sql:
+            # This pure legacy writer case requires an explicit disabled row.
+            self._one = {"enabled": False, "version": 1}
+        elif "to_regclass('trading.strategy_book_memberships')" in sql:
+            self._one = {"memberships_present": False}
+        elif "to_regclass('trading.live_results')" in sql:
+            self._one = {"present": False}
+        elif "SELECT EXISTS" in sql and "trading.strategy_registry" in sql:
+            self._one = {"is_member": True}
+        elif "information_schema.tables" in sql:
+            self._one = None
+        elif "FROM trading.live_results" in sql:
+            self._one = None
+        elif "FROM trading.positions" in sql and "ORDER BY strategy_name, symbol" in sql:
+            self._one = None
+            self._many = []
+        elif "FROM trading.strategy_registry WHERE id" in sql:
+            self._one = {
+                "id": "trendfollowing",
+                "strategy_type": "LIVE_TREND_FOLLOWING",
+                "portfolio_id": "BOOK_A",
+                "lifecycle": "live",
+            }
+        elif "FOR UPDATE" in sql:
+            self._one = None
+        elif "SELECT DISTINCT strategy_name" in sql:
+            self._one = {"strategy_name": "engine_name"}
+        elif "INSERT INTO trading.positions" in sql:
+            self._one = {"symbol": "ES", "quantity": 3, "average_price": 500.0}
+        elif "INSERT INTO trading.position_overrides" in sql:
+            self._one = {"id": 41}
+
+    def fetchone(self):
+        return self._one
+
+    def fetchall(self):
+        if self._many is not None:
+            return self._many
+        if self.statements and "SELECT DISTINCT strategy_name" in self.statements[-1][0]:
+            return [self._one]
+        return self.history_rows
+
+
+class _RepositoryConnection:
+    def __init__(self, history_rows=()):
+        self.cursor_instance = _RepositoryCursor(history_rows)
+        self.transaction_entries = 0
+        self.closed = False
+
+    def __enter__(self):
+        self.transaction_entries += 1
+        return self
+
+    def __exit__(self, exc_type, exc, traceback):
+        return False
+
+    def cursor(self):
+        return self.cursor_instance
+
+    def close(self):
+        self.closed = True
+
+
+def test_override_repository_samples_the_utc_day_after_taking_the_book_lock(monkeypatch):
+    import algolens.infrastructure.portfolio.repositories as repositories
+
+    PostgresPortfolioRepository = repositories.PostgresPortfolioRepository
+
+    write_connection = _RepositoryConnection()
+    history_connection = _RepositoryConnection(history_rows=[{"id": 41, "symbol": "ES"}])
+    connections = iter((write_connection, history_connection))
+    repository = PostgresPortfolioRepository(connection_factory=lambda: next(connections))
+    sampled = []
+
+    def utc_day_after_lock():
+        assert any(
+            "pg_advisory_xact_lock" in sql
+            for sql, _params in write_connection.cursor_instance.statements
+        )
+        sampled.append(True)
+        return date(2099, 1, 2)
+
+    monkeypatch.setattr(
+        repositories, "current_utc_date", utc_day_after_lock, raising=False
+    )
+
+    result = repository.write_qt_position(
+        strategy_type="LIVE_TREND_FOLLOWING",
+        portfolio_id="BOOK_A",
+        normalized={
+            "strategy_id": "trendfollowing",
+            "symbol": "ES",
+            "quantity": 3,
+            "average_price": 500.0,
+            "reason": "hedging the roll",
+        },
+        user_id="7",
+        risk_check=lambda *_: {"passed": True},
+    )
+    history = repository.fetch_overrides("LIVE_TREND_FOLLOWING", "BOOK_A", limit=7)
+
+    audit_statement = next(
+        statement
+        for statement in write_connection.cursor_instance.statements
+        if "INSERT INTO trading.position_overrides" in statement[0]
+    )
+    history_statement = next(
+        statement
+        for statement in history_connection.cursor_instance.statements
+        if "FROM trading.position_overrides o" in statement[0]
+    )
+    assert result["override_id"] == 41
+    assert sampled == [True]
+    assert write_connection.transaction_entries == 1
+    assert audit_statement[1][0] == "BOOK_A"
+    assert history_statement[1] == ("BOOK_A", "LIVE_TREND_FOLLOWING", 7)
+    assert history == [{"id": 41, "symbol": "ES"}]
+
+
+def test_evaluate_risk_accepts_decimal_rows_from_the_database():
+    # psycopg2 returns NUMERIC columns as Decimal; the proposal is a float.
+    # Decimal + float raises TypeError, and this only shows up against a real
+    # database, so the unit suite has to inject it deliberately.
+    from decimal import Decimal
+
+    book = [{"symbol": "NQ", "quantity": Decimal("5"), "average_price": Decimal("18420.50")}]
+    proposed = {"symbol": "ES", "quantity": 20, "average_price": 5280.25}
+    envelope = {"max_symbol_position_contracts": {"ES": 1}}
+    verdict = evaluate_risk(envelope, book, proposed)
+    assert verdict["evaluated"] is True
+    assert verdict["passed"] is False
+    assert isinstance(verdict["breaches"][0]["actual"], float)
+
+
+def test_a_quantity_only_edit_is_risk_checked_at_the_existing_price():
+    # The UI sends no average_price to mean "keep it". The gate must price the
+    # proposal from the existing row, not treat the blank as zero notional.
+    from algolens.domain.portfolio.position_edit import with_known_price
+
+    book = [{"symbol": "ES", "quantity": 12, "average_price": 5280.25}]
+    proposed = {"symbol": "ES", "quantity": 20, "average_price": None}
+    priced = with_known_price(book, proposed)
+    assert priced["average_price"] == 5280.25
+
+    envelope = {"max_symbol_position_contracts": {"ES": 10}}
+    verdict = evaluate_risk(envelope, book, priced)
+    assert verdict["passed"] is False
+    assert verdict["breaches"][0]["limit"] == "max_symbol_position_contracts"
+
+
+def test_a_new_symbol_with_no_price_still_cannot_be_priced():
+    from algolens.domain.portfolio.position_edit import with_known_price
+
+    proposed = {"symbol": "NEW", "quantity": 5, "average_price": None}
+    assert with_known_price([], proposed) is proposed
+
+
+def test_an_explicit_price_is_never_overridden_by_the_book():
+    from algolens.domain.portfolio.position_edit import with_known_price
+
+    book = [{"symbol": "ES", "quantity": 12, "average_price": 5280.25}]
+    proposed = {"symbol": "ES", "quantity": 20, "average_price": 6000.0}
+    assert with_known_price(book, proposed)["average_price"] == 6000.0
+
+
+def test_a_null_average_price_does_not_take_down_the_detail_view():
+    from algolens.domain.portfolio.calculations import transform_positions
+
+    rows = [{"symbol": "ES", "quantity": 20, "average_price": None,
+             "daily_unrealized_pnl": 0, "daily_realized_pnl": 0}]
+    out = transform_positions(rows, 100000.0)
+    assert out[0]["symbol"] == "ES"
+    assert out[0]["priceUnknown"] is True
+
+
+def test_the_written_position_is_returned_as_numbers_not_strings():
+    # jsonify renders Decimal as a JSON string. A client parsing "quantity"
+    # as a number would silently get a string instead.
+    from algolens.infrastructure.portfolio.repositories import _plain_position
+    from decimal import Decimal
+
+    row = {"symbol": "ES", "quantity": Decimal("20"), "average_price": Decimal("5280.25")}
+    out = _plain_position(row)
+    assert isinstance(out["quantity"], float)
+    assert isinstance(out["average_price"], float)
+    assert out["average_price"] == 5280.25
+
+
+class TestBookResolution:
+    """Which book an edit lands in.
+
+    A strategy in several books has separate positions, a separate risk envelope
+    and possibly a different universe in each. Defaulting to the primary silently
+    wrote to the wrong book: a symbol existing only in another book was created
+    fresh in the primary, checked against the primary's envelope, and recorded
+    as passed.
+    """
+
+    def test_one_book_needs_no_ceremony(self):
+        from algolens.domain.portfolio.position_edit import resolve_target_book
+
+        assert resolve_target_book("carry", None, ["CONSERVATIVE"], "CONSERVATIVE") == "CONSERVATIVE"
+
+    def test_several_books_and_no_stated_book_is_refused(self):
+        from algolens.domain.portfolio.position_edit import AmbiguousBook, resolve_target_book
+
+        with pytest.raises(AmbiguousBook) as exc:
+            resolve_target_book("carry", None, ["CONSERVATIVE", "MACRO"], "CONSERVATIVE")
+        # The caller is told what to choose between rather than just refused.
+        assert sorted(exc.value.books) == ["CONSERVATIVE", "MACRO"]
+
+    def test_a_stated_book_is_honoured(self):
+        from algolens.domain.portfolio.position_edit import resolve_target_book
+
+        assert resolve_target_book("carry", "MACRO", ["CONSERVATIVE", "MACRO"], "CONSERVATIVE") == "MACRO"
+
+    def test_a_book_the_strategy_is_not_in_is_refused(self):
+        from algolens.domain.portfolio.position_edit import resolve_target_book
+
+        with pytest.raises(PositionValidationError) as exc:
+            resolve_target_book("carry", "SOMEONE_ELSES", ["CONSERVATIVE"], "CONSERVATIVE")
+        assert exc.value.code == "not_a_member_of_book"
+
+    def test_it_falls_back_to_the_primary_when_membership_is_unavailable(self):
+        # A database between migration 008 creating the table and its seed
+        # running. Refusing every edit there would be worse than using the
+        # column that has always been correct.
+        from algolens.domain.portfolio.position_edit import resolve_target_book
+
+        assert resolve_target_book("carry", None, [], "CONSERVATIVE") == "CONSERVATIVE"
+
+    def test_the_payload_accepts_and_normalises_a_book(self):
+        out = validate_position_payload(
+            {
+                "strategy_id": "carry",
+                "symbol": "es",
+                "quantity": 1,
+                "reason": "x",
+                "portfolio_id": " macro_book ",
+            }
+        )
+        assert out["portfolio_id"] == "MACRO_BOOK"
+
+    def test_an_omitted_book_stays_none_rather_than_defaulting(self):
+        out = validate_position_payload(
+            {"strategy_id": "carry", "symbol": "es", "quantity": 1, "reason": "x"}
+        )
+        assert out["portfolio_id"] is None
+
+
+class TestBookResolutionEdges:
+    """The two inputs the first version got wrong."""
+
+    def test_a_strategy_in_no_book_at_all_is_not_ambiguous_it_is_broken(self):
+        # A blank primary and no memberships. AmbiguousBook here would tell the
+        # client to choose between zero options.
+        with pytest.raises(PositionValidationError) as excinfo:
+            resolve_target_book("tf", None, [], "")
+        assert excinfo.value.code == "strategy_has_no_book"
+
+    def test_a_requested_book_matches_the_stored_spelling_without_case(self):
+        # The row says macro_book; the client, normalised, says MACRO_BOOK.
+        # The write must go to the row that exists, spelled as it exists.
+        assert resolve_target_book("tf", "MACRO_BOOK", ["CONSERVATIVE_PORTFOLIO", "macro_book"], "CONSERVATIVE_PORTFOLIO") == "macro_book"
+
+    def test_a_requested_book_that_matches_nothing_is_still_refused(self):
+        with pytest.raises(PositionValidationError) as excinfo:
+            resolve_target_book("tf", "GROWTH", ["CONSERVATIVE_PORTFOLIO"], "CONSERVATIVE_PORTFOLIO")
+        assert excinfo.value.code == "not_a_member_of_book"
+
+
+class TestEmptyEnvelope:
+    def test_an_envelope_with_no_limits_in_it_compares_nothing(self):
+        # Reachable, but it declares no limit, so nothing was compared. Saying
+        # "passed" here would report zero checks as a clean bill of health.
+        verdict = evaluate_risk({}, [], {"symbol": "ES", "quantity": 1, "average_price": 1.0})
+        assert verdict["evaluated"] is False
+        assert verdict["breaches"] == []
+
+    def test_no_envelope_at_all_is_recorded_as_not_checked(self):
+        verdict = evaluate_risk(None, [], {"symbol": "ES", "quantity": 1, "average_price": 1.0})
+        assert verdict["evaluated"] is False

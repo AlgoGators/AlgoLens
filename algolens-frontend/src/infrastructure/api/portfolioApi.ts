@@ -1,7 +1,103 @@
-import type { Strategy, PortfolioData, HistoricalDataPoint } from '../../domain/portfolio/portfolioData';
+import type { Strategy, PortfolioData, HistoricalDataPoint, HeldCorrelations, PositionStream } from '../../domain/portfolio/portfolioData';
 import type { IncubatingStrategy, IncubationPerformance } from '../../domain/portfolio/incubationData';
 import type { RiskCheck } from '../../domain/portfolio/positionEdit';
-import { API_BASE_URL, log, postWithAuth } from './httpClient';
+import { aggregateCommonCoverage } from '../../domain/portfolio/commonCoverage';
+import type {
+  AssignmentCheck,
+  PortfolioSummary,
+} from '../../domain/portfolio/portfolioAssignment';
+import { API_BASE_URL, ApiError, deleteWithAuth, fetchWithAuth, log, postWithAuth, putWithAuth } from './httpClient';
+
+export function sanitizePositionStrategyNames(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  if (value.some(name => typeof name !== 'string' || name.trim().length === 0)) {
+    return [];
+  }
+  // Engine names are opaque database keys. Validate with trim, but never
+  // normalize the value into a different key; deduplicate only exact strings.
+  return [...new Set(value as string[])];
+}
+
+type PortfolioTotalSource = Pick<Strategy, 'dataAvailable' | 'invested' | 'currentValue'>;
+
+export function aggregatePortfolioTotals(strategies: PortfolioTotalSource[]): Pick<
+  PortfolioData,
+  'totalValue' | 'totalInvested' | 'totalReturn' | 'totalReturnPercent'
+> {
+  const included = strategies.filter(
+    strategy => strategy.dataAvailable !== false && strategy.currentValue !== null,
+  );
+  const anyBasisUnknown = included.some(strategy => strategy.invested === null);
+  const totalInvested = included.reduce(
+    (sum, strategy) => sum + (strategy.invested ?? 0),
+    0,
+  );
+  const totalValue = included.reduce((sum, strategy) => sum + (strategy.currentValue ?? 0), 0);
+  const totalReturn = anyBasisUnknown ? null : totalValue - totalInvested;
+  const totalReturnPercent = totalReturn === null || totalInvested <= 0
+    ? null
+    : (totalReturn / totalInvested) * 100;
+  return { totalValue, totalInvested, totalReturn, totalReturnPercent };
+}
+
+/**
+ * A strategy the engine has published nothing for.
+ *
+ * Every measured field is null and `dataAvailable` is false. It used to be
+ * zeros, which relied on every caller remembering to check the flag -- and a
+ * zero that leaks past that check reads as a measurement ("0.00x leverage",
+ * "$0 margin posted"). A null renders as an em dash wherever it lands.
+ */
+function placeholderStrategy(summary: {
+  id: string;
+  name: string;
+  portfolio_id?: string;
+  books?: string[];
+}): Strategy {
+  return {
+    id: summary.id,
+    name: summary.name,
+    portfolio_id: summary.portfolio_id,
+    books: summary.books ?? (summary.portfolio_id ? [summary.portfolio_id] : undefined),
+    description: '',
+    dataAvailable: false,
+    invested: null,
+    currentValue: null,
+    resultSource: 'system',
+    resultDate: null,
+    return: null,
+    returnPercent: null,
+    positions: [],
+    positionStream: null,
+    positionStrategyNames: [],
+    positionDate: null,
+    positionsEditable: false,
+    positionEditUnavailableReason: 'No dated system snapshot is available.',
+    historicalData: [],
+    bestDay: null,
+    worstDay: null,
+    metrics: {
+      volatility: null, sharpeRatio: null, sortinoRatio: null,
+      downsideDeviation: null, maxDrawdown: null, winRate: null,
+      executionsToday: null,
+      avgWin: null, avgLoss: null, profitFactor: null, dailyReturn: null,
+      cumulativeReturn: null, annualizedReturn: null, grossLeverage: null,
+      netLeverage: null, portfolioLeverage: null, marginPosted: null,
+      equityToMarginRatio: null, marginCushion: null, totalNotional: null,
+      unrealizedPnL: null, realizedPnL: null, totalCommissions: null,
+      netPnL: null, cashAvailable: null, currentPortfolioValue: null,
+    },
+    executions: [],
+    executionsAvailable: false,
+    executionDate: null,
+    executionUnavailableReason: 'System result date is unavailable; fills cannot be attributed to a reporting day.',
+    finalizedPositions: [],
+    activityStream: null,
+    finalizedPositionsAvailable: false,
+    managers: [],
+    lastUpdate: '',
+  };
+}
 
 export class PortfolioApiService {
   // Debug method to test backend connectivity (call from browser console)
@@ -54,105 +150,26 @@ export class PortfolioApiService {
     log('info', '=== CONNECTIVITY TEST COMPLETE ===');
   }
 
-  private static async fetchWithAuth(url: string): Promise<Response> {
-    log('info', `fetchWithAuth called for URL: ${url}`);
 
-    // Auth now travels in an httpOnly cookie, sent automatically by the browser
-    // when `credentials: 'include'` is set. There is no token for JS to read or
-    // attach; a missing/expired cookie simply comes back as 401 (handled below).
-    log('info', `Making credentialed fetch request to: ${url}`);
-
-    try {
-      const startTime = performance.now();
-      const response = await fetch(url, {
-        credentials: 'include',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      });
-      const elapsed = (performance.now() - startTime).toFixed(2);
-
-      log('info', `Response received in ${elapsed}ms`);
-      log('info', `Response status: ${response.status} ${response.statusText}`);
-      log('info', `Response headers:`, Object.fromEntries(response.headers.entries()));
-      log('info', `Content-Type: ${response.headers.get('content-type')}`);
-
-      // Check if we got HTML instead of JSON (common proxy misconfiguration)
-      const contentType = response.headers.get('content-type') || '';
-      if (contentType.includes('text/html')) {
-        const htmlBody = await response.clone().text();
-        log('error', '=== RECEIVED HTML INSTEAD OF JSON ===');
-        log('error', 'This usually means nginx/proxy is NOT forwarding this route to Flask');
-        log('error', `URL attempted: ${url}`);
-        log('error', `HTML preview: ${htmlBody.substring(0, 200)}...`);
-        log('error', '>>> FIX: Update your nginx config to proxy /portfolio/* to Flask backend');
-        throw new Error(`Server returned HTML instead of JSON. Your nginx/proxy is not forwarding /portfolio routes to Flask. Check nginx config.`);
-      }
-
-      if (!response.ok) {
-        // Handle 401 Unauthorized or 422 JWT decode errors (e.g., expired/invalid cookie)
-        if (response.status === 401 || response.status === 422) {
-          log('warn', `Session error (${response.status}) - redirecting to login`);
-          // The cookie is httpOnly, so there is nothing for JS to clear; a full
-          // navigation re-runs AuthContext's /verify check, which will find no
-          // session and render the login view.
-          window.location.href = '/login';
-          throw new Error('Session expired or invalid. Please log in again.');
-        }
-
-        // Try to get error body for more details
-        let errorBody = '';
-        try {
-          errorBody = await response.clone().text();
-          log('error', `Error response body: ${errorBody}`);
-        } catch (e) {
-          log('warn', 'Could not read error response body');
-        }
-        throw new Error(`API request failed: ${response.status} ${response.statusText}. Body: ${errorBody}`);
-      }
-
-      return response;
-    } catch (error) {
-      log('error', '=== FETCH ERROR DETAILS ===');
-      log('error', `Error type: ${error instanceof Error ? error.constructor.name : typeof error}`);
-      log('error', `Error message: ${error instanceof Error ? error.message : String(error)}`);
-
-      if (error instanceof TypeError) {
-        log('error', 'TypeError detected - analyzing possible causes...');
-
-        // Check for specific error patterns
-        const errMsg = error.message.toLowerCase();
-
-        if (errMsg.includes('failed to fetch') || errMsg.includes('networkerror')) {
-          log('error', '>>> DIAGNOSIS: Network/CORS error');
-          log('error', 'Possible causes:');
-          log('error', '  1. Backend server not running or unreachable');
-          log('error', '  2. CORS not configured for this origin on backend');
-          log('error', '  3. Mixed content (HTTPS page calling HTTP API)');
-          log('error', '  4. Firewall/security group blocking the request');
-          log('error', '  5. DNS resolution failed for API host');
-          log('error', `  Current origin: ${window.location.origin}`);
-          log('error', `  API target: ${url}`);
-
-          throw new Error(`Network error: Cannot reach ${API_BASE_URL}. Possible CORS issue or backend not running. Check browser Network tab for details.`);
-        }
-
-        if (errMsg.includes('cors')) {
-          log('error', '>>> DIAGNOSIS: Explicit CORS error');
-          throw new Error(`CORS error: Backend at ${API_BASE_URL} is not allowing requests from ${window.location.origin}`);
-        }
-      }
-
-      throw error;
-    }
-  }
-
-  static async getStrategy(strategyId: string): Promise<Strategy> {
+  /**
+   * One strategy's detail, scoped to one book.
+   *
+   * Omitting `portfolioId` gets the primary book. The positions-only selector
+   * defaults to model/system. Dashboard aggregation uses the same explicit
+   * system stream; QT is entered only through the detail-page selector/editor.
+   */
+  static async getStrategy(
+    strategyId: string,
+    portfolioId?: string,
+    positionStream: PositionStream = 'system',
+  ): Promise<Strategy> {
     log('info', `getStrategy(${strategyId}) called`);
-    const url = `${API_BASE_URL}/portfolio/strategy/${strategyId}`;
+    const query = new URLSearchParams({ position_stream: positionStream });
+    if (portfolioId) query.set('portfolio_id', portfolioId);
+    const url = `${API_BASE_URL}/portfolio/strategy/${strategyId}?${query.toString()}`;
     log('info', `Fetching strategy from: ${url}`);
 
-    const response = await this.fetchWithAuth(url);
+    const response = await fetchWithAuth(url);
     const data = await response.json();
 
     log('info', `Strategy ${strategyId} response:`, {
@@ -164,24 +181,45 @@ export class PortfolioApiService {
       historicalDataCount: data.historicalData?.length,
     });
 
-    return data;
+    return {
+      ...data,
+      positionStrategyNames: sanitizePositionStrategyNames(data.positionStrategyNames),
+    };
   }
 
   static async getAllStrategies(): Promise<Strategy[]> {
-    const response = await this.fetchWithAuth(`${API_BASE_URL}/portfolio/strategies`);
+    const response = await fetchWithAuth(`${API_BASE_URL}/portfolio/strategies`);
     const data = await response.json();
     return data.strategies;
   }
 
+  /**
+   * Correlations between the instruments the fund currently holds.
+   *
+   * Computed by the API from futures_data.ohlcv_1d -- the same table every
+   * market price on the site comes from -- so a correlation and the price
+   * beside it cannot disagree.
+   */
+  static async getCorrelations(): Promise<HeldCorrelations> {
+    const response = await fetchWithAuth(`${API_BASE_URL}/portfolio/correlations`);
+    const data = await response.json();
+    return {
+      symbols: data.symbols ?? [],
+      matrix: data.matrix ?? [],
+      observations: data.observations ?? 0,
+      symbolsWithoutPrices: data.symbolsWithoutPrices ?? [],
+    };
+  }
+
   static async getIncubationStrategies(): Promise<IncubatingStrategy[]> {
-    const response = await this.fetchWithAuth(`${API_BASE_URL}/portfolio/incubation`);
+    const response = await fetchWithAuth(`${API_BASE_URL}/portfolio/incubation`);
     const data = await response.json();
     return data.incubating_strategies || [];
   }
 
   static async getIncubationPerformance(strategyId: string): Promise<IncubationPerformance> {
     const encodedId = encodeURIComponent(strategyId);
-    const response = await this.fetchWithAuth(`${API_BASE_URL}/portfolio/incubation/${encodedId}/performance`);
+    const response = await fetchWithAuth(`${API_BASE_URL}/portfolio/incubation/${encodedId}/performance`);
     const data = await response.json();
     return {
       positions: data.positions || [],
@@ -194,7 +232,7 @@ export class PortfolioApiService {
 
     // Fetch all strategies
     log('info', `Fetching strategies from: ${API_BASE_URL}/portfolio/strategies`);
-    const strategiesResponse = await this.fetchWithAuth(`${API_BASE_URL}/portfolio/strategies`);
+    const strategiesResponse = await fetchWithAuth(`${API_BASE_URL}/portfolio/strategies`);
 
     log('info', 'Parsing strategies response JSON...');
     const strategiesData = await strategiesResponse.json();
@@ -207,28 +245,50 @@ export class PortfolioApiService {
       log('warn', 'No strategies found in response');
     }
 
-    // Fetch detailed data for each strategy
+    // Fetch detailed data for each strategy.
+    //
+    // A missing result can coexist with a real system position snapshot. Ask for
+    // detail regardless of the summary; only a genuinely empty book gets a
+    // placeholder. Other API failures remain failures.
     log('info', 'Fetching detailed data for each strategy...');
     const strategies: Strategy[] = await Promise.all(
       strategySummaries.map(async (summary: any, index: number) => {
         log('info', `Fetching strategy ${index + 1}/${strategySummaries.length}: ${summary.id}`);
-        const strategy = await this.getStrategy(summary.id);
-        log('info', `Strategy ${summary.id} fetched successfully`);
-        return strategy;
+        try {
+          const strategy = await this.getStrategy(summary.id, summary.portfolio_id, 'system');
+          log('info', `Strategy ${summary.id} fetched successfully`);
+          return strategy;
+        } catch (error) {
+          if (error instanceof ApiError && error.code === 'no_data_for_book') {
+            return placeholderStrategy(summary);
+          }
+          throw error;
+        }
       })
     );
     log('info', `All ${strategies.length} strategies fetched`);
 
-    // Calculate portfolio totals
+    // Portfolio totals cover only the strategies the engine has actually
+    // published. The count of the rest is carried alongside so the headline can
+    // say it is partial -- a total that quietly omits a strategy is the bug
+    // this replaces.
     log('info', 'Calculating portfolio totals...');
-    const totalInvested = strategies.reduce((sum, s) => sum + s.invested, 0);
-    const totalValue = strategies.reduce((sum, s) => sum + s.currentValue, 0);
-    const totalReturn = totalValue - totalInvested;
-    const totalReturnPercent = totalInvested > 0 ? (totalReturn / totalInvested) * 100 : 0;
+    const priced = strategies.filter(s => s.dataAvailable !== false && s.currentValue !== null);
+    const strategiesAwaitingData = strategies.length - priced.length;
+    // The known bases may still be summed for disclosure, but a missing basis
+    // makes aggregate return unknowable rather than turning that basis into $0.
+    const { totalInvested, totalValue, totalReturn, totalReturnPercent } =
+      aggregatePortfolioTotals(priced);
 
     // Aggregate historical data
     log('info', 'Aggregating historical data...');
-    const historicalData = this.aggregateHistoricalData(strategies);
+    const { points: historicalData, coverage: historicalCoverage } = aggregateCommonCoverage(
+      priced.map(strategy => ({
+        id: strategy.id,
+        points: strategy.historicalData,
+        historyBreaks: strategy.historyBreaks,
+      })),
+    );
 
     const result = {
       totalValue,
@@ -237,6 +297,8 @@ export class PortfolioApiService {
       totalReturnPercent,
       strategies,
       historicalData,
+      historicalCoverage,
+      strategiesAwaitingData,
     };
 
     log('info', '=== getPortfolioData() SUCCESS ===', {
@@ -251,28 +313,6 @@ export class PortfolioApiService {
     return result;
   }
 
-  private static aggregateHistoricalData(strategies: Strategy[]): HistoricalDataPoint[] {
-    if (strategies.length === 0) return [];
-
-    // Create a map of dates to total values
-    const dateMap = new Map<string, number>();
-
-    // For each strategy, add its historical values to the corresponding dates
-    strategies.forEach(strategy => {
-      strategy.historicalData.forEach(point => {
-        const currentValue = dateMap.get(point.date) || 0;
-        dateMap.set(point.date, currentValue + point.value);
-      });
-    });
-
-    // Convert map to array and sort by date
-    const aggregated: HistoricalDataPoint[] = Array.from(dateMap.entries())
-      .map(([date, value]) => ({ date, value }))
-      .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-
-    return aggregated;
-  }
-
   /**
    * Write one position into the qt stream.
    *
@@ -283,14 +323,22 @@ export class PortfolioApiService {
    */
   static async savePosition(input: {
     strategy_id: string;
+    /** Exact engine-owned identity from the selected QT snapshot row. */
+    strategy_name: string;
     symbol: string;
-    quantity: number;
-    average_price?: number | null;
+    quantity: string | number;
+    average_price?: string | number | null;
     reason: string;
     acknowledge_risk?: boolean;
+    /**
+     * Which book. Omitting it is only safe for a strategy in exactly one; the
+     * server answers 409 ambiguous_book otherwise rather than guessing.
+     */
+    portfolio_id?: string;
   }): Promise<
     | { outcome: 'saved'; risk_check: RiskCheck }
     | { outcome: 'needs_acknowledgement'; risk_check: RiskCheck }
+    | { outcome: 'needs_book'; books: string[] }
     | { outcome: 'rejected'; message: string }
   > {
     const response = await postWithAuth(`${API_BASE_URL}/portfolio/positions`, input);
@@ -304,15 +352,224 @@ export class PortfolioApiService {
     if (response.status === 409 && data.risk_check) {
       return { outcome: 'needs_acknowledgement', risk_check: data.risk_check };
     }
+    // The third 409: the strategy is in several books and the request did not
+    // say which. Not a refusal -- the server hands back the choices so the
+    // caller can ask, rather than guess and write into the wrong universe.
+    if (response.status === 409 && data.code === 'ambiguous_book' && Array.isArray(data.books)) {
+      return { outcome: 'needs_book', books: data.books as string[] };
+    }
     return { outcome: 'rejected', message: data.error || `Request failed (${response.status})` };
   }
 
-  static async getPositionOverrides(strategyId: string): Promise<PositionOverride[]> {
+  /**
+   * Move a strategy through the incubation lifecycle.
+   *
+   * All three transitions take a reason and are recorded in
+   * trading.strategy_lifecycle_log. They existed on the API from the start with
+   * nothing calling them, so the trial workflow could only be driven with curl.
+   */
+  static async changeIncubation(
+    strategyId: string,
+    action: 'start' | 'promote' | 'retire',
+    body: { reason: string; mock_capital?: number },
+  ): Promise<{ outcome: 'ok' } | { outcome: 'rejected'; message: string }> {
+    const response = await postWithAuth(
+      `${API_BASE_URL}/portfolio/incubation/${encodeURIComponent(strategyId)}/${action}`,
+      body,
+    );
+    if (response.ok) return { outcome: 'ok' };
+    const data = await response.json().catch(() => ({}));
+    const messages: Record<string, string> = {
+      open_positions: 'Close every effective position in every book before changing this lifecycle.',
+      positions_unavailable: 'Reliable position evidence is unavailable, so this lifecycle change was blocked.',
+    };
+    return {
+      outcome: 'rejected',
+      message: messages[data.error] || 'The lifecycle change was rejected. Refresh and try again.',
+    };
+  }
+
+  static async getBooks(): Promise<Book[]> {
+    const response = await fetchWithAuth(`${API_BASE_URL}/portfolio/books`);
+    const data = await response.json();
+    return data.books || [];
+  }
+
+  static async createBook(input: {
+    portfolio_id: string;
+    name?: string;
+    description?: string;
+  }): Promise<{ outcome: 'created'; book: Book } | { outcome: 'rejected'; message: string }> {
+    const response = await postWithAuth(`${API_BASE_URL}/portfolio/books`, input);
+    const data = await response.json().catch(() => ({}));
+    if (response.ok) return { outcome: 'created', book: data };
+    return { outcome: 'rejected', message: data.error || `Request failed (${response.status})` };
+  }
+
+  static async deleteBook(
+    portfolioId: string,
+  ): Promise<{ outcome: 'deleted' } | { outcome: 'rejected'; message: string }> {
+    const response = await deleteWithAuth(
+      `${API_BASE_URL}/portfolio/books/${encodeURIComponent(portfolioId)}`,
+    );
+    if (response.ok) return { outcome: 'deleted' };
+    const data = await response.json().catch(() => ({}));
+    return { outcome: 'rejected', message: data.error || `Request failed (${response.status})` };
+  }
+
+  /**
+   * Put a strategy in a book. It keeps every book it is already in, so this
+   * takes nothing away and needs no acknowledgement.
+   */
+  static async addStrategyToBook(input: {
+    portfolio_id: string;
+    strategy_id: string;
+    reason?: string;
+  }): Promise<{ outcome: 'saved' } | { outcome: 'rejected'; message: string }> {
+    const response = await postWithAuth(
+      `${API_BASE_URL}/portfolio/books/${encodeURIComponent(input.portfolio_id)}/strategies`,
+      { strategy_id: input.strategy_id, reason: input.reason ?? '' },
+    );
+    if (response.ok) return { outcome: 'saved' };
+    const data = await response.json().catch(() => ({}));
+    return { outcome: 'rejected', message: data.error || `Request failed (${response.status})` };
+  }
+
+  /**
+   * Take a strategy out of a book. A 409 carrying assignment_check is the
+   * acknowledgeable one; last_book and a retired strategy are flat refusals.
+   */
+  static async removeStrategyFromBook(input: {
+    portfolio_id: string;
+    strategy_id: string;
+    reason: string;
+    acknowledge?: boolean;
+  }): Promise<
+    | { outcome: 'saved' }
+    | { outcome: 'needs_acknowledgement'; assignment_check: AssignmentCheck }
+    | { outcome: 'rejected'; message: string }
+  > {
+    const response = await deleteWithAuth(
+      `${API_BASE_URL}/portfolio/books/${encodeURIComponent(input.portfolio_id)}` +
+        `/strategies/${encodeURIComponent(input.strategy_id)}`,
+      { reason: input.reason, acknowledge: Boolean(input.acknowledge) },
+    );
+    const data = await response.json().catch(() => ({}));
+    if (response.ok) return { outcome: 'saved' };
+    if (response.status === 409 && data.assignment_check) {
+      return { outcome: 'needs_acknowledgement', assignment_check: data.assignment_check };
+    }
+    return { outcome: 'rejected', message: data.error || `Request failed (${response.status})` };
+  }
+
+  static async getPortfolios(): Promise<PortfolioSummary[]> {
+    const response = await fetchWithAuth(`${API_BASE_URL}/portfolio/portfolios`);
+    const data = await response.json();
+    return data.portfolios || [];
+  }
+
+  /**
+   * Move a strategy to another portfolio.
+   *
+   * A 409 carrying assignment_check is the acknowledgeable one -- the move is
+   * allowed but breaks history continuity. Every other failure is a flat
+   * refusal (a retired strategy, a bad id) with nothing to override.
+   */
+  static async reassignPortfolio(input: {
+    strategy_id: string;
+    portfolio_id: string;
+    reason: string;
+    acknowledge?: boolean;
+  }): Promise<
+    | { outcome: 'saved'; assignment_check: AssignmentCheck }
+    | { outcome: 'needs_acknowledgement'; assignment_check: AssignmentCheck }
+    | { outcome: 'rejected'; message: string }
+  > {
+    const encodedId = encodeURIComponent(input.strategy_id);
+    const response = await putWithAuth(
+      `${API_BASE_URL}/portfolio/strategies/${encodedId}/portfolio`,
+      {
+        portfolio_id: input.portfolio_id,
+        reason: input.reason,
+        acknowledge: Boolean(input.acknowledge),
+      },
+    );
+    const data = await response.json().catch(() => ({}));
+
+    if (response.ok) {
+      return { outcome: 'saved', assignment_check: data.assignment_check };
+    }
+    if (response.status === 409 && data.assignment_check) {
+      return { outcome: 'needs_acknowledgement', assignment_check: data.assignment_check };
+    }
+    return { outcome: 'rejected', message: data.error || `Request failed (${response.status})` };
+  }
+
+  static async getAssignmentHistory(strategyId: string): Promise<AssignmentRecord[]> {
     const encodedId = encodeURIComponent(strategyId);
-    const response = await this.fetchWithAuth(`${API_BASE_URL}/portfolio/overrides/${encodedId}`);
+    const response = await fetchWithAuth(
+      `${API_BASE_URL}/portfolio/strategies/${encodedId}/portfolio/history`,
+    );
+    const data = await response.json();
+    return data.assignments || [];
+  }
+
+  static async getLifecycleHistory(strategyId: string): Promise<LifecycleRecord[]> {
+    const encodedId = encodeURIComponent(strategyId);
+    const response = await fetchWithAuth(
+      `${API_BASE_URL}/portfolio/strategies/${encodedId}/lifecycle/history`,
+    );
+    const data = await response.json();
+    return data.history || [];
+  }
+
+  static async getPositionOverrides(strategyId: string, portfolioId: string): Promise<PositionOverride[]> {
+    const encodedId = encodeURIComponent(strategyId);
+    const query = `?portfolio_id=${encodeURIComponent(portfolioId)}`;
+    const response = await fetchWithAuth(`${API_BASE_URL}/portfolio/overrides/${encodedId}${query}`);
     const data = await response.json();
     return data.overrides || [];
   }
+}
+
+export interface Book {
+  portfolio_id: string;
+  name: string;
+  description: string;
+  /** false when the book exists only because a strategy sits in it. */
+  declared: boolean;
+  strategy_count: number;
+  strategies: {
+    id: string;
+    name: string;
+    strategy_type: string;
+    lifecycle: string;
+    /** true for the book strategy_registry.portfolio_id names -- what the engine reads. */
+    is_primary?: boolean;
+  }[];
+}
+
+export interface AssignmentRecord {
+  id: number;
+  strategy_id: string;
+  user_id: string | null;
+  from_portfolio_id: string | null;
+  to_portfolio_id: string | null;
+  lifecycle_at_move: string | null;
+  reason: string | null;
+  consequences: { code: string; message: string }[] | null;
+  acknowledged: boolean;
+  created_at: string;
+}
+
+export interface LifecycleRecord {
+  id: number;
+  strategy_id: string;
+  before_state: string;
+  after_state: string;
+  reason: string;
+  user_id: string | null;
+  created_at: string;
 }
 
 export type PositionOverride = {
