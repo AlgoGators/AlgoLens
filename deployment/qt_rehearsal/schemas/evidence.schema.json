@@ -1,0 +1,7 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "qt-rehearsal-evidence/v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "run_id", "postgres_version", "root_fingerprint", "database_summaries", "role_results", "test_reports"]
+}
