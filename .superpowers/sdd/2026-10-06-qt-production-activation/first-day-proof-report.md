@@ -43,13 +43,15 @@ credential use, or schema/role mutation. Worktree: `qt-prod-readiness-final`.
   changed choice, no-op, actual next-day settlement, and tamper refusal. This
   includes 16 rehashed anchor/input/financial mutations and seven rehashed
   finalization provenance/financial mutations per relevant timezone case.
-- Full non-integration backend suite: 2,251 passed before one additional
-  passing new-component test was added. Focused pure proof tests: 161 passed;
-  first-day arithmetic tests after the extra case: 17 passed.
+- Final fresh non-integration backend suite on commit `1d949df5`: **2,252
+  passed**. Focused pure proof tests: 161 passed before one additional passing
+  new-component test; the final first-day arithmetic subset has 17 passes.
 - Isolated socket-only clusters verified database/user/data-directory/null
   server address and were stopped and removed with absence asserted.
-- Exact build used for the green bridge was native `d3f5a508862bab17139ea77dfd6869887638a625`.
-  A later diagnostic build `48d4ff5` reached the same full-continuation boundary.
+- The bridge first passed on native `d3f5a508862bab17139ea77dfd6869887638a625`.
+  The final fresh rerun on diagnostic build `48d4ff5` again passed all eight
+  first-day/settlement cases; its two ordinary full-continuation cases reach
+  the same native admission failure below.
 - Rationale-bound confirmation prerequisite `3b3ad5af` was independently
   cherry-picked as `a0b3ec39`; the coordinator already owns that dependency.
 
