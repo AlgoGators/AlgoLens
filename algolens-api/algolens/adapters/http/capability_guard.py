@@ -6,12 +6,9 @@ from flask import current_app, jsonify, request
 from flask_jwt_extended import get_jwt_identity, verify_jwt_in_request
 from flask_jwt_extended.exceptions import JWTExtendedException
 
-from algolens.application.identity.use_cases import UserNotFound, VerifySession
+from algolens.application.identity.use_cases import UserNotFound
 from algolens.domain.identity.capabilities import CAPABILITIES, resolve_capabilities
-from algolens.infrastructure.config.dependencies import (
-    create_identity_dependencies,
-    load_identity_authority_rows,
-)
+from algolens.infrastructure.config.dependencies import load_identity_authority_rows
 
 
 @dataclass(frozen=True)
@@ -52,14 +49,21 @@ def resolve_user_capabilities(user) -> tuple[str, ...]:
         grants, mappings = _authority_rows(user.id)
     except Exception:
         current_app.logger.warning("Capability authority lookup unavailable; all authority denied")
+        if current_app.config.get("ALGOLENS_IS_PRODUCTION", True) is False:
+            return resolve_capabilities(user.role)
         return ()
     return resolve_capabilities(user.role, grants=grants, mappings=mappings)
 
 
 def current_user_and_capabilities():
+    # Reuse the established HTTP current-user boundary so controlled
+    # development identities and injected repositories cannot disagree with
+    # the capability guard. The local import avoids the portfolio -> guard
+    # module cycle during route registration.
+    from algolens.adapters.http import portfolio as portfolio_http
+
     subject = get_jwt_identity()
-    users, _hasher, _sessions = create_identity_dependencies()
-    user = VerifySession(users).execute(subject)
+    user = portfolio_http._current_user()
     if str(user.id) != str(subject):
         raise UserNotFound()
     return user, resolve_user_capabilities(user)
@@ -113,7 +117,7 @@ def install_capability_guard(app, *, explicitly_open_endpoints=frozenset()):
         except UserNotFound:
             return jsonify({"error": "Insufficient permissions"}), 403
         except Exception:
-            current_app.logger.exception("Capability authorization failed")
+            current_app.logger.error("Authorization lookup failed")
             return jsonify({"error": "Authorization check failed"}), 503
         if policy.kind != "capability" or policy.capability not in capabilities:
             return jsonify({"error": "Insufficient permissions"}), 403

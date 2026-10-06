@@ -50,6 +50,7 @@ class InMemoryCurrentUsers:
 
 @pytest.fixture
 def current_users(monkeypatch):
+    import algolens.adapters.http.capability_guard as capability_guard
     import algolens.adapters.http.portfolio as portfolio_http
     import algolens.adapters.http.qt_workflow as qt_http
 
@@ -61,6 +62,23 @@ def current_users(monkeypatch):
         raising=False,
     )
     monkeypatch.setattr(qt_http, 'create_identity_dependencies', lambda: (users, object(), object()))
+
+    # The installed default-deny guard is another HTTP composition boundary,
+    # so it must consume the same injected identity store as the route under
+    # test. These broad fixture grants only let legacy route tests reach their
+    # own service-level authorization assertions; capability-specific behavior
+    # is covered by test_capabilities.py and test_route_capability_policy.py.
+    def authority_rows(user_id):
+        user = users.find_by_id(user_id)
+        if user is None or user.role not in {"admin", "general_member", "exec_board"}:
+            return [], []
+        grants = [{"capability": "qt_approve", "active": True}]
+        mappings = [{"person_id": "xander_robbins", "active": True}]
+        if user.role in {"admin", "general_member"}:
+            grants.append({"capability": "qt_submit", "active": True})
+        return grants, mappings
+
+    monkeypatch.setattr(capability_guard, "_authority_rows", authority_rows)
     return users
 
 

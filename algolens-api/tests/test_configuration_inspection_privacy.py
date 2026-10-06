@@ -135,7 +135,7 @@ def test_role_lookup_failure_logs_fixed_event_and_preserves_authorization(
     client.current_users.error = RuntimeError("role-private-sentinel")
     caplog.set_level(logging.ERROR)
     failed = client.get(URL)
-    assert failed.status_code == 500
+    assert failed.status_code == 503
     assert "role-private-sentinel" not in failed.get_data(as_text=True)
     assert "role-private-sentinel" not in caplog.text
     assert "Traceback" not in caplog.text

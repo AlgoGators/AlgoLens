@@ -147,7 +147,7 @@ def test_current_user_lookup_failure_is_safe_500_without_running_handler(
 
     response = client.get("/portfolio/incubation")
 
-    assert response.status_code == 500
+    assert response.status_code == 503
     assert response.get_json() == {"error": "Authorization check failed"}
     assert "password" not in response.get_data(as_text=True)
     assert "auth.users" not in response.get_data(as_text=True)

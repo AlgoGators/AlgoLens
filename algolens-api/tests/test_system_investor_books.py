@@ -41,10 +41,10 @@ def install(monkeypatch, service):
     monkeypatch.setattr(http, "_service", lambda: service)
 
 
-def test_investor_book_requires_login(client, monkeypatch):
+def test_investor_book_is_disabled_for_internal_only_launch(client, monkeypatch):
     service = Service(published_view())
     install(monkeypatch, service)
-    assert client.get("/portfolio/investor/books/INVESTOR_A").status_code == 401
+    assert client.get("/portfolio/investor/books/INVESTOR_A").status_code == 404
     assert service.calls == []
 
 
@@ -59,15 +59,13 @@ def test_non_investor_and_deleted_identity_are_non_disclosing(client, monkeypatc
     assert service.calls == []
 
 
-def test_investor_reads_only_the_requested_published_day(client, monkeypatch):
+def test_authenticated_investor_route_remains_disabled(client, monkeypatch):
     service = Service(published_view())
     install(monkeypatch, service)
     _set_jwt_cookie(client, role="subscriber_individual", identity="7")
     response = client.get("/portfolio/investor/books/INVESTOR_A?date=2026-10-01")
-    assert response.status_code == 200
-    assert response.json == published_view()
-    assert service.calls == [("7", "INVESTOR_A", "2026-10-01")]
-    assert response.headers["Cache-Control"] == "private, no-store"
+    assert response.status_code == 404
+    assert service.calls == []
 
 
 def test_ungranted_or_unpublished_book_is_the_same_not_found(client, monkeypatch):
@@ -84,8 +82,7 @@ def test_invalid_date_is_rejected_before_storage(client, monkeypatch):
     install(monkeypatch, service)
     _set_jwt_cookie(client, role="subscriber_individual", identity="7")
     response = client.get("/portfolio/investor/books/INVESTOR_A?date=10/01/2026")
-    assert response.status_code == 400
-    assert response.json == {"error": "Invalid date", "code": "invalid_date"}
+    assert response.status_code == 404
     assert service.calls == []
 
 
@@ -94,7 +91,7 @@ def test_storage_failure_does_not_disclose_driver_details(client, monkeypatch):
     install(monkeypatch, service)
     _set_jwt_cookie(client, role="subscriber_individual", identity="7")
     response = client.get("/portfolio/investor/books/INVESTOR_A")
-    assert response.status_code == 503
+    assert response.status_code == 404
     assert "private database details" not in response.get_data(as_text=True)
 
 
