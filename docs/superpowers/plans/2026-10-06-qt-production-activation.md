@@ -173,7 +173,7 @@ npm run typecheck
 - verification: bundle admission tests, clean Release build, CTest, manifest schema/hash validation, image smoke and digest assertions
 - estimate: L
 - coordination_risk: moderate
-- status: running
+- status: complete
 
 **Owned files:**
 
