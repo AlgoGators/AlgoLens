@@ -1,7 +1,7 @@
 """Actual cookie/CSRF HTTP -> owned SQL -> bundled evaluator -> desk -> report."""
 from copy import deepcopy
 import csv
-from datetime import timedelta
+from datetime import timedelta, timezone
 from decimal import Decimal
 from hashlib import sha256
 import io
@@ -21,6 +21,7 @@ from tests.integration.test_qt_a3_read_set_postgres import a3_db
 from tests.qt_native_evaluator import native_evaluator_configuration
 from tests.integration.test_qt_a8_http_postgres import http_harness, seed_http_approvers
 from tests.qt_native_artifacts import require_native_artifact_paths
+from tests.qt_report_probe import report_probe_environment
 from uuid import uuid4
 import psycopg2
 
@@ -97,7 +98,7 @@ def observe(dsn, preview, decision, quantity):
         "observation_kind":"executed","selected_quantity_exact":quantity,"average_price_exact":"101",
         "actual_cash_cost_exact":"0.02","currency":"USD","execution_id":"synthetic-connected-fill",
         "accounting_source_id":"synthetic-connected-accounting","daily_unrealized_pnl_exact":"3",
-        "daily_realized_pnl_exact":"-1","last_update":now.isoformat().replace("+00:00","Z")}
+        "daily_realized_pnl_exact":"-1","last_update":now.astimezone(timezone.utc).isoformat().replace("+00:00","Z")}
     payload = {"schema_version":"qt-execution/v1","decision_id":decision["decision_id"],"book_id":"BOOK",
         "source_day":preview["source_day"],"fills":[fill],"results":{"position_count":1,"currency_totals":[
             {"currency":"USD","actual_cash_cost_exact":"0.02","daily_unrealized_pnl_exact":"3","daily_realized_pnl_exact":"-1"}]}}
@@ -203,7 +204,7 @@ def assert_positions_rows_match_saved(report_html, report_csv, baseline_html, ba
 def report(preview, directory):
     directory.mkdir()
     assert DELIVERY_GUARD.is_file(), 'Build the test-only delivery guard first'
-    report_environment = {**os.environ, 'LD_PRELOAD': str(DELIVERY_GUARD)}
+    report_environment = report_probe_environment(DELIVERY_GUARD)
     return subprocess.run([str(REPORT),"BOOK",preview["source_day"],"engine-one",str(directory),"ONE"],
         capture_output=True,text=True,timeout=30,env=report_environment)
 
@@ -257,18 +258,24 @@ def test_two_people_http_approval_then_native_desk_and_report(connected_db,tmp_p
     assert decision['status'] == 'pending_override'
     observe(connected_db,preview,decision,'7')
     assert desk(decision).returncode != 0
-    second, second_headers = http['clients'](202)
+    first_browser, first_headers = http['clients'](202)
+    second, second_headers = http['clients'](303)
     discovery = second.get('/portfolio/qt-books/BOOK/decision?source_day=' + preview['source_day'])
     assert discovery.status_code == 200 and discovery.json['preview'] == preview, discovery.json
     assert discovery.json['decision']['can_approve'] is True
     path = '/portfolio/qt-override-requests/' + decision['request_id'] + '/approvals'
-    first = http['browser'].post(path, headers=http['headers'],
+    self_approval = http['browser'].post(path, headers=http['headers'],
+        json={'action':'approve','idempotency_key':str(uuid4())})
+    assert self_approval.status_code == 403 and self_approval.json['error']['code'] == 'authorization_changed'
+    assert query(connected_db, 'SELECT count(*) FROM trading.qt_override_approvals') == [(0,)]
+    first = first_browser.post(path, headers=first_headers,
         json={'action':'approve','idempotency_key':str(uuid4())})
     assert first.status_code == 200 and first.json['approvals_count'] == 1, first.json
     assert desk(decision).returncode != 0
     approved = second.post(path, headers=second_headers,
         json={'action':'approve','idempotency_key':str(uuid4())})
     assert approved.status_code == 200 and approved.json['status'] == 'confirmed_decision', approved.json
+    assert query(connected_db, 'SELECT user_id FROM trading.qt_override_approvals ORDER BY user_id') == [(202,), (303,)]
     processed = desk(approved.json)
     assert processed.returncode == 0, processed.stdout + processed.stderr
     ready = second.get('/portfolio/qt-books/BOOK/decision?source_day=' + preview['source_day'])

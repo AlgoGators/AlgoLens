@@ -21,11 +21,13 @@ from algolens.infrastructure.portfolio.qt_receipt_provenance import verified_rec
 from tests.test_qt_a4_draft import DraftTransaction, BOOK, DAY
 
 
-def consumed_fixture():
+def consumed_fixture(*, rationale=None):
     marker = dict(schema_version="qt-empty-owner-choice/v2",
         model_publication_id="00000000-0000-4000-8000-000000000001",
         owner_document_digest="e" * 64, configured_owner_names=["EQUITY_MEAN_REVERSION"])
     selection = {"selection_rows": []}
+    if rationale is not None:
+        selection["rationale"] = rationale
     digest = qt_digest_v1(selection)
     head = dict(book_id=BOOK, draft_id="00000000-0000-4000-8000-000000000002",
         revision=1, draft_digest=digest, selection_payload=selection,
@@ -37,7 +39,7 @@ def consumed_fixture():
         audit_ids=[], source_keys=[], processed_at=DAY + "T12:00:00.000001Z")
     decision = dict(book_id=BOOK, source_day=DAY, decision_id=link["decision_id"],
         preview_id=link["preview_id"], draft_id=head["draft_id"], draft_revision=1,
-        draft_digest=digest, selection_digest=digest, source_digest=head["source_digest"],
+        draft_digest=digest, selection_digest=qt_digest_v1({"selection_rows": []}), source_digest=head["source_digest"],
         provenance_digest=head["provenance_digest"], model_publication_id=head["model_publication_id"],
         status="confirmed_decision", empty_owner_choice=deepcopy(marker))
     provenance = QtProvenance(head["model_publication_id"], 1, head["seed_digest"],
@@ -89,8 +91,9 @@ def services(head, provenance):
 
 
 @pytest.mark.parametrize("service_kind", ["workflow", "reader"])
-def test_processed_receipt_exposes_consumed_head_without_rewriting_confirmed_decision(service_kind):
-    head, provenance, link = consumed_fixture()
+@pytest.mark.parametrize("rationale", [None, "Retain the reviewed empty-owner choice."])
+def test_processed_receipt_exposes_consumed_head_without_rewriting_confirmed_decision(service_kind, rationale):
+    head, provenance, link = consumed_fixture(rationale=rationale)
     old = deepcopy(head)
     workflow, reader, tx = services(head, provenance)
     wire = (workflow if service_kind == "workflow" else reader).get_draft(BOOK, 101).to_wire()
@@ -104,8 +107,9 @@ def test_processed_receipt_exposes_consumed_head_without_rewriting_confirmed_dec
     assert tx.position_mutations == 0
 
 
-def test_explicit_save_uses_verified_processed_receipt_and_preserves_consumed_history():
-    head, provenance, _ = consumed_fixture()
+@pytest.mark.parametrize("rationale", [None, "Retain the reviewed empty-owner choice."])
+def test_explicit_save_uses_verified_processed_receipt_and_preserves_consumed_history(rationale):
+    head, provenance, _ = consumed_fixture(rationale=rationale)
     old = deepcopy(head)
     workflow, _, tx = services(head, provenance)
     request = dict(expected_source_digest=provenance.observed_source_digest,
@@ -123,8 +127,9 @@ def test_explicit_save_uses_verified_processed_receipt_and_preserves_consumed_hi
 @pytest.mark.parametrize("damage", ["invented_processed_decision", "failed", "pending_override",
     "missing_receipt", "newer_head", "changed_owner", "changed_source", "changed_model",
     "changed_day", "changed_seed", "changed_model_version", "changed_selection", "changed_preview"])
-def test_unproved_or_changed_receipt_never_grants_consumed_successor(damage):
-    head, provenance, link = consumed_fixture()
+@pytest.mark.parametrize("rationale", [None, "Retain the reviewed empty-owner choice."])
+def test_unproved_or_changed_receipt_never_grants_consumed_successor(damage, rationale):
+    head, provenance, link = consumed_fixture(rationale=rationale)
     decision = provenance.receipt_decisions[-1]
     if damage == "invented_processed_decision": decision["status"] = "processed"
     elif damage in {"failed", "pending_override"}: decision["status"] = damage
@@ -150,6 +155,29 @@ def test_unproved_or_changed_receipt_never_grants_consumed_successor(damage):
         idempotency_key="00000000-0000-4000-8000-000000000006")
     with pytest.raises(QtWorkflowError): workflow.save_draft(BOOK, 101, request)
     assert tx.head == old and tx.pending is None and tx.idempotency == {} and tx.position_mutations == 0
+
+
+@pytest.mark.parametrize("rehash", [False, True])
+def test_changed_rationale_cannot_borrow_the_original_processed_receipt(rehash):
+    head, provenance, _ = consumed_fixture(rationale="Retain the reviewed empty-owner choice.")
+    head["selection_payload"]["rationale"] = "An unapproved different rationale."
+    if rehash:
+        head["draft_digest"] = qt_digest_v1(head["selection_payload"])
+    workflow, reader, tx = services(head, provenance)
+    for service in (workflow, reader):
+        if rehash:
+            wire = service.get_draft(BOOK, 101).to_wire()
+            assert wire["state"] == "stale" and "successor" not in wire
+        else:
+            with pytest.raises(QtWorkflowError):
+                service.get_draft(BOOK, 101)
+    request = dict(expected_source_digest=provenance.observed_source_digest,
+        expected_provenance_digest=provenance.legacy_audit_chain_digest,
+        expected_draft_revision=1, rationale="Attempt a successor from the altered head.", selection_rows=[],
+        idempotency_key="00000000-0000-4000-8000-000000000006")
+    with pytest.raises(QtWorkflowError):
+        workflow.save_draft(BOOK, 101, request)
+    assert tx.head == head and tx.pending is None and tx.idempotency == {} and tx.position_mutations == 0
 
 
 def test_failed_receipt_is_rejected_before_entering_the_verified_successor_port():

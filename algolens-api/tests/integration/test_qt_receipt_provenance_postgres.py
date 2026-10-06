@@ -1,14 +1,11 @@
 """Actual native receipts and locked SQL support explicit subsequent QT choices."""
 from copy import deepcopy
-from datetime import date, timedelta
+from datetime import date, timedelta, timezone
 from decimal import Decimal
 from hashlib import sha256
 from uuid import uuid4
 import os
 import subprocess
-import sys
-from types import ModuleType
-from pathlib import Path
 
 from psycopg2.extras import Json
 from psycopg2 import sql
@@ -74,7 +71,7 @@ def test_actual_receipt_consumed_head_requires_explicit_successor_cas(connected_
     now = query(connected_db, "SELECT clock_timestamp()")[0][0]
     first_observation["decision_id"] = next_decision.json["decision_id"]
     first_observation["fills"][0].update(selected_quantity_exact="3", execution_id="synthetic-second-choice",
-        last_update=now.isoformat().replace('+00:00', 'Z'))
+        last_update=now.astimezone(timezone.utc).isoformat().replace('+00:00', 'Z'))
     next_observation, next_attempt = str(uuid4()), str(uuid4())
     query(connected_db, """INSERT INTO trading.qt_execution_observations
         (observation_id,decision_id,producer_id,policy_version,source_version,as_of,valid_until,content_digest,payload)
@@ -133,7 +130,7 @@ def new_key_decision(dsn):
         "selected_quantity_exact": row["quantity_exact"], "average_price_exact": "101", "actual_cash_cost_exact": "0.02",
         "currency": "USD", "execution_id": "synthetic-receipt-" + row["key"]["symbol"],
         "accounting_source_id": "synthetic-receipt-accounting", "daily_unrealized_pnl_exact": "3",
-        "daily_realized_pnl_exact": "-1", "last_update": now.isoformat().replace('+00:00', 'Z')}
+        "daily_realized_pnl_exact": "-1", "last_update": now.astimezone(timezone.utc).isoformat().replace('+00:00', 'Z')}
         for row in preview["selection_rows"]]
     payload = {"schema_version": "qt-execution/v1", "decision_id": decision["decision_id"], "book_id": "BOOK",
         "source_day": preview["source_day"], "fills": fills, "results": {"position_count": 2, "currency_totals": [{
@@ -267,17 +264,10 @@ def test_actual_linked_prior_day_desk_history_does_not_block_current_successor(c
         old = tx.read_processed_publications(prior_day)[0]
     old["audits"] = [audit for audit in source()["audits"] if audit["risk_check_result"]["decision_id"] == old["decision"]["decision_id"]]
     validate_qt_publication_chain(old)
-    # Demonstrate the original guard's actual-SQL failure in an isolated module;
-    # never replace the shared source files or the live module bindings.
-    historical_preimage = Path(__file__).resolve().parents[5] / 'docs/repairs/2026-09-22-qt-remaining-issues/qt-completion-execution/A3-RECEIPT-FIX1-PREIMAGES/qt_provenance.py'
-    before_fix = ModuleType('_qt_receipt_fix1_before')
-    monkeypatch.setitem(sys.modules, before_fix.__name__, before_fix)
-    exec(compile(historical_preimage.read_bytes(), str(historical_preimage), 'exec'), before_fix.__dict__)
-    actual = source()
-    rejected = before_fix.reconcile_qt_source('BOOK', actual['source_day'], actual['publications'], actual['source_rows'], actual['audits'],
-        observed_system_rows=actual['system_rows'], observed_saved_rows=actual['saved_rows'],
-        observed_saved_accounting=actual['saved_accounting'], processed_publications=actual['processed_publications'])
-    assert rejected.status == 'provenance_unresolved'
+    # The old implementation was an external, unversioned repair archive that
+    # is unavailable in a clean checkout; no historical RED is claimed here.
+    # Exercise current prior-day isolation and successor CAS on the proven SQL
+    # chain, without inventing archived source or skipping the live regression.
     view = http["browser"].get('/portfolio/qt-books/BOOK/draft')
     assert view.status_code == 200 and view.json["state"] == "stale", view.json
     assert view.json["selection_rows"][0]["origin"] == "verified_qt_decision"

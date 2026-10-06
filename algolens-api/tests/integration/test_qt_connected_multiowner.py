@@ -4,7 +4,7 @@ No server or delivery method is invoked. Native rendering requires the same
 preloaded no-delivery sentinel as the root connected harness.
 """
 from copy import deepcopy
-from datetime import timedelta
+from datetime import timedelta, timezone
 from decimal import Decimal
 from hashlib import sha256
 from html.parser import HTMLParser
@@ -29,6 +29,7 @@ from tests.integration.test_qt_connected_workflow import (
     assert_positions_rows_match_saved, connected_db, desk, REPORT, DELIVERY_GUARD, OBSERVATION,
 )
 from tests.qt_native_evaluator import native_evaluator_configuration
+from tests.qt_report_probe import report_probe_environment
 
 
 SECOND_PUBLICATION = "10000000-0000-4000-8000-000000000071"
@@ -268,7 +269,7 @@ def observe_multiowner(dsn, preview, decision, before):
             'accounting_source_id': 'synthetic-connected-multiowner-accounting',
             'daily_unrealized_pnl_exact': '1.25' if held else '3',
             'daily_realized_pnl_exact': '-0.5' if held else '-1',
-            'last_update': (prior[-1] if held else now).isoformat().replace('+00:00', 'Z')})
+            'last_update': (prior[-1] if held else now).astimezone(timezone.utc).isoformat().replace('+00:00', 'Z')})
     payload = {'schema_version': 'qt-execution/v1', 'decision_id': decision['decision_id'], 'book_id': 'BOOK',
         'source_day': preview['source_day'], 'fills': fills, 'results': {'position_count': 3,
         'currency_totals': [{'currency': 'USD', 'actual_cash_cost_exact': '0.04',
@@ -288,7 +289,7 @@ def report_multiowner(preview, directory):
     assert DELIVERY_GUARD.is_file()
     return subprocess.run([str(REPORT), 'BOOK', preview['source_day'], 'engine-one', str(directory),
                            'ONE', 'TWO', 'HELD'], capture_output=True, text=True, timeout=30,
-                          env={**os.environ, 'LD_PRELOAD': str(DELIVERY_GUARD)})
+                          env=report_probe_environment(DELIVERY_GUARD))
 
 
 @pytest.mark.parametrize('quantities', [
