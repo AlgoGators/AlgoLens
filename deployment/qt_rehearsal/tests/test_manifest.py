@@ -154,3 +154,23 @@ class ManifestTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class GovernedManifestTests(unittest.TestCase):
+    def test_governed_order_and_explicit_dependencies(self):
+        def entry(index, repo, path, dependencies):
+            return dict(id=f"step-{index}",repository=repo,path=path,git_sha="a"*40,sha256="b"*64,
+                        depends_on=dependencies,apply_predicate={"type":"always"},
+                        rollback_policy={"type":"forward_only","reason":"test"},expected_schema_digest="c"*64)
+        entries=[entry(0,"trade-ngin","migrations/031_live_config_overrides.sql",[]),
+                 entry(1,"algolens","algolens-api/migrations/011_live_config_authority.sql",["step-0"]),
+                 entry(2,"algolens","deployment/database/qt_runtime_role_contract.sql",["step-1"])]
+        with tempfile.TemporaryDirectory() as temp:
+            path=Path(temp)/"manifest.json"
+            def write(rows):
+                path.write_text(json.dumps(dict(schema_version="qt-rehearsal-migration-manifest/v1",profile="live-futures",target_database="qt_rehearsal_migrated",entries=rows)))
+            write(entries);self.assertEqual(len(load_manifest(path).entries),3)
+            for rows in (entries[:1],entries[:2],entries[1:],entries[::-1],
+                         [entries[0],dict(entries[1],depends_on=[]),entries[2]]):
+                write(rows)
+                with self.assertRaises(ManifestError):load_manifest(path)

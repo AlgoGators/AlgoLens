@@ -66,7 +66,7 @@ def test_bounded_failure_is_redacted(tmp_path,monkeypatch,script):
 def test_manifest_expiry_change_and_duplicate_refused(tmp_path):
     pin=native_pin(); file=tmp_path/'manifest.json'
     data={'version':1,'expires_at':(datetime.now(timezone.utc)+timedelta(hours=1)).isoformat(),'validator':pin,'scopes':[scope()]}
-    file.write_text(json.dumps(data)); config=LiveConfigConfig({'LIVE_CONFIG_MANIFEST':str(file)})
+    file.write_text(json.dumps(data)); config=LiveConfigConfig(allow_legacy_provisioning=True, environment={'LIVE_CONFIG_MANIFEST':str(file)})
     provision=config.load('test',scope()['portfolio_id'])
     data['validator']={**pin,'build':'different'}; file.write_text(json.dumps(data))
     with pytest.raises(LiveConfigError,match='changed'): config.recheck(provision)
@@ -80,7 +80,7 @@ def test_bundle_changed_after_validation_refuses_commit_gate(tmp_path):
     pin['bundle_directory']=str(directory)
     file=tmp_path/'manifest.json'
     data={'version':1,'expires_at':(datetime.now(timezone.utc)+timedelta(hours=1)).isoformat(),'validator':pin,'scopes':[scope()]}
-    file.write_text(json.dumps(data)); config=LiveConfigConfig({'LIVE_CONFIG_MANIFEST':str(file)})
+    file.write_text(json.dumps(data)); config=LiveConfigConfig(allow_legacy_provisioning=True, environment={'LIVE_CONFIG_MANIFEST':str(file)})
     provision=config.load('test',scope()['portfolio_id'])
     config.validate(provision,{},'reset_to_baseline')
     library=directory/'lib/libtrade_ngin.so'; library.write_bytes(library.read_bytes()+b'changed')

@@ -267,6 +267,16 @@ def load_manifest(path):
             raise ManifestError("expected schema digest must be exact lowercase 64-hex")
         entries.append(ManifestEntry(raw["id"], raw["repository"], raw["git_sha"], relative_path, raw["sha256"], tuple(raw["depends_on"]), predicate, dict(rollback), raw["expected_schema_digest"]))
         seen.add(raw["id"])
+    governed = (("trade-ngin", "migrations/031_live_config_overrides.sql"),
+                ("algolens", "algolens-api/migrations/011_live_config_authority.sql"),
+                ("algolens", "deployment/database/qt_runtime_role_contract.sql"))
+    positions = {(entry.repository, entry.path): index for index, entry in enumerate(entries)}
+    if any(item in positions for item in governed[:2]):
+        if not all(item in positions for item in governed) or not positions[governed[0]] < positions[governed[1]] < positions[governed[2]]:
+            raise ManifestError("governed configuration requires Trade031 then AlgoLens011 then role postlude")
+        for earlier, later in zip(governed, governed[1:]):
+            if entries[positions[earlier]].id not in entries[positions[later]].depends_on:
+                raise ManifestError("governed configuration migrations require explicit dependency edges")
     return Manifest(value["schema_version"], value["profile"], value["target_database"], tuple(entries))
 
 

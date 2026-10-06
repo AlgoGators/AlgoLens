@@ -44,7 +44,7 @@ def _safe_tree(value):
     return True
 
 
-def validate_snapshot(snapshot, portfolio_id, engine_strategy_id, *, governed=False):
+def validate_snapshot(snapshot, portfolio_id, engine_strategy_id, *, governed=False, inspection_file_source=False):
     """Validate the shared versioned, credential-free trading snapshot."""
     invalid = RuntimeControlError('runtime_configuration_unavailable', 503)
     version = snapshot.get('snapshot_version') if isinstance(snapshot, dict) else None
@@ -78,7 +78,8 @@ def validate_snapshot(snapshot, portfolio_id, engine_strategy_id, *, governed=Fa
         if strategy.get('enabled_live') is True:
             weight = strategy.get('default_allocation')
             if (not re.fullmatch(r'[A-Za-z0-9_-]{1,128}', name)
-                    or not _finite_number(weight) or not 0 < weight <= 1):
+                    or not _finite_number(weight) or weight <= 0
+                    or ((governed or not inspection_file_source) and weight > 1)):
                 raise invalid
             selected.append((name, weight))
             if version == 2:
@@ -92,7 +93,8 @@ def validate_snapshot(snapshot, portfolio_id, engine_strategy_id, *, governed=Fa
             prefix = 'LIVE_EQUITY_'
         elif not profiles or not profiles <= {'TrendFollowingStrategy', 'TrendFollowingFastStrategy', 'TrendFollowingSlowStrategy'}:
             raise invalid
-    if (not selected or abs(sum(weight for _, weight in selected) - 1) > 1e-9
+    if (not selected or not math.isfinite(sum(weight for _, weight in selected))
+            or ((governed or not inspection_file_source) and abs(sum(weight for _, weight in selected) - 1) > 1e-9)
             or prefix + '_'.join(sorted(name for name, _ in selected)) != engine_strategy_id):
         raise invalid
 

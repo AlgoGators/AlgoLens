@@ -53,10 +53,19 @@ def database(tmp_path):
           'validator':native_pin(),'scopes':[{'registry_id':'test','portfolio_id':'CONSERVATIVE_PORTFOLIO',
           'engine_strategy_id':'LIVE_TREND_FOLLOWING','config_snapshot':baseline()}]}
     manifest.write_text(json.dumps(data))
-    config=LiveConfigConfig({'LIVE_CONFIG_MANIFEST':str(manifest)})
+    config=LiveConfigConfig(allow_legacy_provisioning=True, environment={'LIVE_CONFIG_MANIFEST':str(manifest)})
     service=LiveConfigService(repo,config)
-    yield conn,service,manifest
-    conn.close()
+    try:
+        yield conn,service,manifest
+    finally:
+        # This reduced auth fixture must not leak its one-column retirement table
+        # into the later real migration009 tests.
+        conn.rollback()
+        with conn.cursor() as cur:
+            cur.execute("SELECT obj_description(oid,'pg_namespace') FROM pg_namespace WHERE nspname='auth'")
+            owner=cur.fetchone()
+            if owner and owner[0]==OWNERSHIP_MARK:cur.execute('DROP SCHEMA auth CASCADE')
+        conn.close()
 
 def body(previous=None, operation='override'):
     return {'portfolio_id':'CONSERVATIVE_PORTFOLIO','reason':'reviewed',

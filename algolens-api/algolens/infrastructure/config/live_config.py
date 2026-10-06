@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import subprocess
 import tempfile
+from .live_config_release import verify_release
 from algolens.application.live_config import LiveConfigError, native_reply
 from algolens.application.runtime_control import validate_snapshot, RuntimeControlError
 from algolens.infrastructure.portfolio.qt_evaluator_bundle import LiveConfigValidatorBundle, QtEvaluatorBundleUnavailable, verify_bundle, _LIVE_CONFIG_PROFILE
@@ -50,9 +51,10 @@ class NativeValidator:
 
 
 class LiveConfigConfig:
-    def __init__(self, environment=None, *, validator_factory=NativeValidator):
+    def __init__(self, environment=None, *, validator_factory=NativeValidator, allow_legacy_provisioning=False):
         self.environment = os.environ if environment is None else environment
         self.validator_factory = validator_factory
+        self.allow_legacy_provisioning = allow_legacy_provisioning
 
     def load(self, registry_id, portfolio_id):
         try:
@@ -64,8 +66,10 @@ class LiveConfigConfig:
             if len(raw) > 1_048_576:
                 raise ValueError()
             data = json.loads(raw, object_pairs_hook=_object, parse_constant=_constant)
-            if (not isinstance(data, dict) or set(data) != {'version','expires_at','validator','scopes'}
-                    or type(data['version']) is not int or data['version'] != 1):
+            version=data.get('version') if type(data) is dict else None
+            expected={'version','expires_at','validator','scopes'} | ({'release'} if version==2 else set())
+            if (type(data) is not dict or set(data)!=expected or type(version) is not int
+                    or version not in (1,2) or (version==1 and not self.allow_legacy_provisioning)):
                 raise ValueError()
             expiry = datetime.fromisoformat(data['expires_at'])
             if expiry.tzinfo is None or expiry <= datetime.now(timezone.utc):
@@ -74,6 +78,7 @@ class LiveConfigConfig:
             if not isinstance(pin, dict) or set(pin) != {'bundle_directory','bundle_sha256','executable_sha256','build'}:
                 raise ValueError()
             LiveConfigValidatorBundle(Path(pin['bundle_directory']),pin['bundle_sha256'],pin['executable_sha256'],pin['build'])
+            if version==2:verify_release(pin,data['release'])
             if not isinstance(data['scopes'], list) or not 0 < len(data['scopes']) <= 100:
                 raise ValueError()
             scopes = {}
@@ -88,7 +93,8 @@ class LiveConfigConfig:
             scope = scopes.get((registry_id,portfolio_id))
             if scope is None:
                 raise LiveConfigError('live_config_scope_unsupported')
-            return {'scope':scope, 'pin':pin, 'expires_at':data['expires_at']}
+            return {'scope':scope, 'pin':pin, 'expires_at':data['expires_at'],
+                    **({'release':data['release']} if version==2 else {})}
         except LiveConfigError:
             raise
         except (OSError, ValueError, TypeError, KeyError, RuntimeControlError, RecursionError):

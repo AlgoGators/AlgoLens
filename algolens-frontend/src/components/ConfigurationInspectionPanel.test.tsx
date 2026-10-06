@@ -305,3 +305,30 @@ describe('read-only published configuration panel', () => {
     expect(screen.queryByRole('table', { name: 'Supplied inputs' })).toBeNull();
   });
 });
+
+describe('small completed publication summary',()=>{
+  beforeEach(()=>{vi.restoreAllMocks();});
+  it('does not infer the settings source for historical publications',async()=>{
+    vi.spyOn(globalThis,'fetch').mockResolvedValue(reply());render(panel());openPublishedConfiguration();
+    expect(await screen.findByText('Settings source and approved version were not recorded.')).toBeTruthy();
+    expect(screen.queryByText('File settings')).toBeNull();
+  });
+  it.each(['file','approved_override'])('shows %s with bounded composite coverage',async source=>{
+    const p=JSON.parse(readFileSync('../algolens-api/tests/fixtures/configuration_inspection_v4_v5/equity_house-v5.json','utf8'));
+    // Presentation mutation only; approved source uses normalized allocations and consistent leaf values.
+    if(source==='approved_override'){
+      p.configuration_selection.source=source;p.configuration_selection.version_id='11111111-1111-4111-8111-111111111111';
+      for(const [owner,v]of Object.entries(p.supplied.effective_snapshot.strategies) as Array<[string,{default_allocation:number}]>){v.default_allocation=.5;p.supplied.fields.find((f:{path:string})=>f.path===`/strategies/${owner}/default_allocation`).value=.5;}
+    }
+    const body={api_version:1,scope:{registry_id:p.identity.registry_id,portfolio_id:p.identity.portfolio_id},read_at:'2026-10-07T00:00:00Z',status:p.status,reason:p.reason,publication:p};
+    vi.spyOn(Date,'now').mockReturnValue(Date.parse('2026-10-08T00:00:00Z'));
+    vi.spyOn(globalThis,'fetch').mockResolvedValue(new Response(JSON.stringify(body),{headers:{'Content-Type':'application/json'}}));
+    render(<ConfigurationInspectionPanel registryId={body.scope.registry_id} portfolioId={body.scope.portfolio_id} userId="u1" allowed />);openPublishedConfiguration();
+    expect(await screen.findByText(source==='file'?'File settings':'Approved configuration')).toBeTruthy();
+    const summary=screen.getByLabelText('Completed configuration summary');
+    expect(within(summary).getByText(/Full run stages and account execution costs: Not collected/)).toBeTruthy();
+    expect(summary.textContent).toContain(p.identity.run_date);expect(summary.textContent).not.toContain(p.configuration_selection.effective_sha256);
+    if(source==='approved_override')expect(summary.textContent).toContain(p.configuration_selection.version_id);
+    expect(screen.getByText('Configuration and observation details').closest('details')?.open).toBe(false);
+  });
+});

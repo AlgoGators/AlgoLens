@@ -510,11 +510,21 @@ BEGIN
   END LOOP;
   GRANT SELECT,INSERT ON trading.live_config_versions,trading.live_config_activations TO qt_algolens_api;
   GRANT SELECT ON trading.live_config_active,trading.live_config_attempt_selections TO qt_algolens_api;
+  GRANT SELECT(attempt_id,classification_version,state,lifecycle,publication_id) ON trading.live_config_attempt_safety TO qt_algolens_api;
   GRANT SELECT ON trading.live_config_versions,trading.live_config_activations,trading.live_config_active,
     trading.live_config_attempt_selections,trading.live_config_attempt_safety TO qt_system_publisher;
   GRANT INSERT ON trading.live_config_attempt_selections TO qt_system_publisher;
   GRANT INSERT(attempt_id) ON trading.live_config_attempt_safety TO qt_system_publisher;
   GRANT EXECUTE ON FUNCTION trading.lock_live_config_scope(text,text) TO qt_algolens_api,qt_system_publisher;
+  REVOKE ALL ON FUNCTION trading.initialize_live_config_attempt_v2(text),
+    trading.assert_live_config_running(text),trading.mark_live_config_unsafe(text),
+    trading.finish_live_config_attempt(text,text,text),trading.recover_live_config_attempt(text,text),
+    trading.live_config_financial_state(text,text) FROM PUBLIC,qt_algolens_api,qt_system_publisher,qt_worker;
+  GRANT EXECUTE ON FUNCTION trading.initialize_live_config_attempt_v2(text),
+    trading.assert_live_config_running(text),trading.mark_live_config_unsafe(text),
+    trading.finish_live_config_attempt(text,text,text),
+    trading.publish_system_investor_day(text,text,date,text),
+    trading.publish_system_investor_day(text,text,date,text,uuid) TO qt_system_publisher;
  END IF;
 END
 $live_config_roles$;

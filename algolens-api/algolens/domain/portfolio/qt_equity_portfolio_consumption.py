@@ -27,7 +27,7 @@ def _number(value):
     _need(type(value) in (int,float) and math.isfinite(float(value)))
 
 
-def _validate(document):
+def _validate(document, expected_owners=None):
     _shape(document,_C['root_fields'])
     _need(document['schema_version']==_C['schema_version'] and document['scope']==_C['scope']
         and document['full_run_certification'] is False and type(document['available']) is bool)
@@ -75,8 +75,8 @@ def _validate(document):
         purpose=_C['charge_purpose'][name]
         for index,charge in enumerate(charges):
             _shape(charge,_C['charge_fields']);_need(type(charge['index']) is int and charge['index']==index)
-            owner='' if purpose=='compatibility' else _C['charge_owner'][purpose]
-            _need(charge['purpose']==purpose and charge['strategy_id']==owner
+            owners={''} if purpose=='compatibility' else (expected_owners or {_C['charge_owner'][purpose]})
+            _need(charge['purpose']==purpose and charge['strategy_id'] in owners
                 and type(charge['symbol']) is str and _SYMBOL.fullmatch(charge['symbol']) is not None
                 and charge['call'] in _C['call_outcomes'])
             reads=charge['reads'];_shape(reads,allowed_reads,())
@@ -91,8 +91,8 @@ def _validate(document):
     return deepcopy(document)
 
 
-def validate_equity_portfolio_invocation(document):
+def validate_equity_portfolio_invocation(document, *, expected_owners=None):
     try:
-        return _validate(document)
+        return _validate(document, expected_owners)
     except (ValueError,TypeError,KeyError,AttributeError,OverflowError,UnicodeError,RecursionError):
         raise ValueError('invalid_equity_portfolio_consumption') from None

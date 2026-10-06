@@ -1,0 +1,979 @@
+{
+  "reason": "none",
+  "status": "available",
+  "stream": "system",
+  "profile": "live_equity_mean_reversion",
+  "identity": {
+    "run_date": "2026-10-06",
+    "capture_id": "fa047317-8857-4673-8074-5344416a2c12",
+    "registry_id": "equity_now",
+    "control_mode": "uncontrolled",
+    "portfolio_id": "TASK4_MR_NOW",
+    "publication_id": "fa047317-8857-4673-8074-5344416a2c12",
+    "producer_version": "3f921d1",
+    "config_attempt_id": "fa047317-8857-4673-8074-5344416a2c12",
+    "registry_revision": 0,
+    "engine_strategy_id": "LIVE_EQUITY_MEAN_REVERSION",
+    "runtime_attempt_id": null
+  },
+  "supplied": {
+    "fields": [
+      {
+        "path": "/backtest/lookback_years",
+        "value": 2,
+        "consumer": "no_active_profile_reader",
+        "value_type": "number",
+        "classification": "unsupported_in_profile",
+        "consumption_evidence": "not_collected"
+      },
+      {
+        "path": "/backtest/store_trade_details",
+        "value": true,
+        "consumer": "no_active_profile_reader",
+        "value_type": "boolean",
+        "classification": "unsupported_in_profile",
+        "consumption_evidence": "not_collected"
+      },
+      {
+        "path": "/benchmark_mode",
+        "value": "deferred",
+        "consumer": "configuration_identity_or_control",
+        "value_type": "string",
+        "classification": "protected_config_input",
+        "consumption_evidence": "not_collected"
+      },
+      {
+        "path": "/covariance_history_prices",
+        "value": 756,
+        "consumer": "portfolio_covariance_history",
+        "value_type": "number",
+        "classification": "editable_config_input",
+        "consumption_evidence": "not_collected"
+      },
+      {
+        "path": "/execution/commission_rate",
+        "value": 0.0005,
+        "consumer": "no_active_profile_reader",
+        "value_type": "number",
+        "classification": "unsupported_in_profile",
+        "consumption_evidence": "not_collected"
+      },
+      {
+        "path": "/execution/position_limit_backtest",
+        "value": 1000.0,
+        "consumer": "no_active_profile_reader",
+        "value_type": "number",
+        "classification": "unsupported_in_profile",
+        "consumption_evidence": "not_collected"
+      },
+      {
+        "path": "/execution/position_limit_live",
+        "value": 500.0,
+        "consumer": "base_strategy_risk_or_position_check",
+        "value_type": "number",
+        "classification": "editable_config_input",
+        "consumption_evidence": "not_collected"
+      },
+      {
+        "path": "/execution/slippage_bps",
+        "value": 1.0,
+        "consumer": "no_active_profile_reader",
+        "value_type": "number",
+        "classification": "unsupported_in_profile",
+        "consumption_evidence": "not_collected"
+      },
+      {
+        "path": "/initial_capital",
+        "value": 100000.0,
+        "consumer": "configuration_identity_or_control",
+        "value_type": "number",
+        "classification": "protected_config_input",
+        "consumption_evidence": "not_collected"
+      },
+      {
+        "path": "/live/data_staleness_tolerance_days",
+        "value": 4,
+        "consumer": "configuration_identity_or_control",
+        "value_type": "number",
+        "classification": "protected_config_input",
+        "consumption_evidence": "not_collected"
+      },
+      {
+        "path": "/live/execution_price_max_staleness_days",
+        "value": 5,
+        "consumer": "configuration_identity_or_control",
+        "value_type": "number",
+        "classification": "protected_config_input",
+        "consumption_evidence": "not_collected"
+      },
+      {
+        "path": "/live/historical_days",
+        "value": 30,
+        "consumer": "configuration_identity_or_control",
+        "value_type": "number",
+        "classification": "protected_config_input",
+        "consumption_evidence": "not_collected"
+      },
+      {
+        "path": "/live/spinoff_child_policy",
+        "value": "liquidate_at_first_close",
+        "consumer": "configuration_identity_or_control",
+        "value_type": "string",
+        "classification": "protected_config_input",
+        "consumption_evidence": "not_collected"
+      },
+      {
+        "path": "/max_drawdown",
+        "value": 0.3,
+        "consumer": "configuration_identity_or_control",
+        "value_type": "number",
+        "classification": "protected_config_input",
+        "consumption_evidence": "not_collected"
+      },
+      {
+        "path": "/max_leverage",
+        "value": 1.0,
+        "consumer": "configuration_identity_or_control",
+        "value_type": "number",
+        "classification": "protected_config_input",
+        "consumption_evidence": "not_collected"
+      },
+      {
+        "path": "/optimization/asymmetric_risk_buffer",
+        "value": 0.1,
+        "consumer": "no_active_profile_reader",
+        "value_type": "number",
+        "classification": "unsupported_in_profile",
+        "consumption_evidence": "not_collected"
+      },
+      {
+        "path": "/optimization/buffer_size_factor",
+        "value": 0.01,
+        "consumer": "no_active_profile_reader",
+        "value_type": "number",
+        "classification": "unsupported_in_profile",
+        "consumption_evidence": "not_collected"
+      },
+      {
+        "path": "/optimization/capital",
+        "value": 100000.0,
+        "consumer": "no_active_profile_reader",
+        "value_type": "number",
+        "classification": "unsupported_in_profile",
+        "consumption_evidence": "not_collected"
+      },
+      {
+        "path": "/optimization/convergence_threshold",
+        "value": 1e-06,
+        "consumer": "no_active_profile_reader",
+        "value_type": "number",
+        "classification": "unsupported_in_profile",
+        "consumption_evidence": "not_collected"
+      },
+      {
+        "path": "/optimization/cost_penalty_scalar",
+        "value": 50.0,
+        "consumer": "no_active_profile_reader",
+        "value_type": "number",
+        "classification": "unsupported_in_profile",
+        "consumption_evidence": "not_collected"
+      },
+      {
+        "path": "/optimization/max_iterations",
+        "value": 100,
+        "consumer": "no_active_profile_reader",
+        "value_type": "number",
+        "classification": "unsupported_in_profile",
+        "consumption_evidence": "not_collected"
+      },
+      {
+        "path": "/optimization/tau",
+        "value": 1.0,
+        "consumer": "no_active_profile_reader",
+        "value_type": "number",
+        "classification": "unsupported_in_profile",
+        "consumption_evidence": "not_collected"
+      },
+      {
+        "path": "/optimization/use_buffering",
+        "value": true,
+        "consumer": "no_active_profile_reader",
+        "value_type": "boolean",
+        "classification": "unsupported_in_profile",
+        "consumption_evidence": "not_collected"
+      },
+      {
+        "path": "/optimization/version",
+        "value": "1.0.0",
+        "consumer": "no_active_profile_reader",
+        "value_type": "string",
+        "classification": "unsupported_in_profile",
+        "consumption_evidence": "not_collected"
+      },
+      {
+        "path": "/portfolio_id",
+        "value": "TASK4_MR_NOW",
+        "consumer": "configuration_identity_or_control",
+        "value_type": "string",
+        "classification": "protected_config_input",
+        "consumption_evidence": "not_collected"
+      },
+      {
+        "path": "/reserve_capital_pct",
+        "value": 0.1,
+        "consumer": "configuration_identity_or_control",
+        "value_type": "number",
+        "classification": "protected_config_input",
+        "consumption_evidence": "not_collected"
+      },
+      {
+        "path": "/risk/max_drawdown",
+        "value": 0.3,
+        "consumer": "base_strategy_risk_or_position_check",
+        "value_type": "number",
+        "classification": "editable_config_input",
+        "consumption_evidence": "not_collected"
+      },
+      {
+        "path": "/risk/max_leverage",
+        "value": 1.0,
+        "consumer": "base_strategy_risk_or_position_check",
+        "value_type": "number",
+        "classification": "editable_config_input",
+        "consumption_evidence": "not_collected"
+      },
+      {
+        "path": "/risk/modules/0/_reason",
+        "value": "Carver's risk system is a futures construction and on this book three quarters of it is furniture: over the measured chain the leverage and jump terms are the sole binding minimum on 0 of 14,632 evaluations and the leverage multiplier never falls below 1.000000 at all, and the correlation term can only fire when the book holds two or more non-zero names, which is 2 of 19 dated rows. What was left was a VaR limit whose 0.25 is a documented equity-specific calibration rather than a Carver parameter. The book is still MEASURED: risk_reporting below is unchanged, so every risk column of live_results and the email still reports.",
+        "consumer": "configuration_identity_or_control",
+        "value_type": "string",
+        "classification": "protected_config_input",
+        "consumption_evidence": "not_collected"
+      },
+      {
+        "path": "/risk/modules/0/_ruled_by",
+        "value": "HD",
+        "consumer": "configuration_identity_or_control",
+        "value_type": "string",
+        "classification": "protected_config_input",
+        "consumption_evidence": "not_collected"
+      },
+      {
+        "path": "/risk/modules/0/_ruled_on",
+        "value": "2026-09-18",
+        "consumer": "configuration_identity_or_control",
+        "value_type": "string",
+        "classification": "protected_config_input",
+        "consumption_evidence": "not_collected"
+      },
+      {
+        "path": "/risk/modules/0/id",
+        "value": "no_portfolio_risk",
+        "consumer": "configuration_identity_or_control",
+        "value_type": "string",
+        "classification": "protected_config_input",
+        "consumption_evidence": "not_collected"
+      },
+      {
+        "path": "/risk/modules/0/type",
+        "value": "none",
+        "consumer": "configuration_identity_or_control",
+        "value_type": "string",
+        "classification": "protected_config_input",
+        "consumption_evidence": "not_collected"
+      },
+      {
+        "path": "/risk/risk_reporting/confidence_level",
+        "value": 0.99,
+        "consumer": "reporting_risk_manager",
+        "value_type": "number",
+        "classification": "editable_config_input",
+        "consumption_evidence": "not_collected"
+      },
+      {
+        "path": "/risk/risk_reporting/jump_risk_limit",
+        "value": 0.08,
+        "consumer": "reporting_risk_manager",
+        "value_type": "number",
+        "classification": "editable_config_input",
+        "consumption_evidence": "not_collected"
+      },
+      {
+        "path": "/risk/risk_reporting/lookback_period",
+        "value": 252,
+        "consumer": "reporting_risk_manager",
+        "value_type": "number",
+        "classification": "editable_config_input",
+        "consumption_evidence": "not_collected"
+      },
+      {
+        "path": "/risk/risk_reporting/max_correlation",
+        "value": 0.7,
+        "consumer": "reporting_risk_manager",
+        "value_type": "number",
+        "classification": "editable_config_input",
+        "consumption_evidence": "not_collected"
+      },
+      {
+        "path": "/risk/risk_reporting/max_gross_leverage",
+        "value": 1.0,
+        "consumer": "reporting_risk_manager",
+        "value_type": "number",
+        "classification": "editable_config_input",
+        "consumption_evidence": "not_collected"
+      },
+      {
+        "path": "/risk/risk_reporting/max_net_leverage",
+        "value": 1.0,
+        "consumer": "reporting_risk_manager",
+        "value_type": "number",
+        "classification": "editable_config_input",
+        "consumption_evidence": "not_collected"
+      },
+      {
+        "path": "/risk/risk_reporting/type",
+        "value": "carver",
+        "consumer": "configuration_identity_or_control",
+        "value_type": "string",
+        "classification": "protected_config_input",
+        "consumption_evidence": "not_collected"
+      },
+      {
+        "path": "/risk/risk_reporting/var_limit",
+        "value": 0.25,
+        "consumer": "reporting_risk_manager",
+        "value_type": "number",
+        "classification": "editable_config_input",
+        "consumption_evidence": "not_collected"
+      },
+      {
+        "path": "/risk/risk_reporting/window",
+        "value": "all_bars",
+        "consumer": "configuration_identity_or_control",
+        "value_type": "string",
+        "classification": "protected_config_input",
+        "consumption_evidence": "not_collected"
+      },
+      {
+        "path": "/risk/schema",
+        "value": 2,
+        "consumer": "configuration_identity_or_control",
+        "value_type": "number",
+        "classification": "protected_config_input",
+        "consumption_evidence": "not_collected"
+      },
+      {
+        "path": "/sleeve_risk_modules",
+        "value": {},
+        "consumer": "configuration_identity_or_control",
+        "value_type": "object",
+        "classification": "protected_config_input",
+        "consumption_evidence": "not_collected"
+      },
+      {
+        "path": "/snapshot_version",
+        "value": 2,
+        "consumer": "configuration_identity_or_control",
+        "value_type": "number",
+        "classification": "protected_config_input",
+        "consumption_evidence": "not_collected"
+      },
+      {
+        "path": "/strategies/MEAN_REVERSION/_symbols_note",
+        "value": "ABEV and ABM have NO bars in equities_data.ohlcv_1d (data-owner ask DO-ABEV/ABM). The live runner's freshness guard treats a requested symbol with no bars as absent and refuses a bare live run, so the LIVE runtime config keeps the universe the 2026-09 gate proved (BKNG and DD in their place) until those bars exist; swap back here-to-runtime when they do. var_limit lives in risk.json (0.25, proven).",
+        "consumer": "configuration_identity_or_control",
+        "value_type": "string",
+        "classification": "protected_config_input",
+        "consumption_evidence": "not_collected"
+      },
+      {
+        "path": "/strategies/MEAN_REVERSION/config/allow_fractional_shares",
+        "value": false,
+        "consumer": "selected_mean_reversion_strategy",
+        "value_type": "boolean",
+        "classification": "editable_config_input",
+        "consumption_evidence": "not_collected"
+      },
+      {
+        "path": "/strategies/MEAN_REVERSION/config/entry_threshold",
+        "value": 0.5,
+        "consumer": "selected_mean_reversion_strategy",
+        "value_type": "number",
+        "classification": "editable_config_input",
+        "consumption_evidence": "not_collected"
+      },
+      {
+        "path": "/strategies/MEAN_REVERSION/config/exit_threshold",
+        "value": 0.1,
+        "consumer": "selected_mean_reversion_strategy",
+        "value_type": "number",
+        "classification": "editable_config_input",
+        "consumption_evidence": "not_collected"
+      },
+      {
+        "path": "/strategies/MEAN_REVERSION/config/lookback_period",
+        "value": 3,
+        "consumer": "selected_mean_reversion_strategy",
+        "value_type": "number",
+        "classification": "editable_config_input",
+        "consumption_evidence": "not_collected"
+      },
+      {
+        "path": "/strategies/MEAN_REVERSION/config/position_size",
+        "value": 1,
+        "consumer": "selected_mean_reversion_strategy",
+        "value_type": "number",
+        "classification": "editable_config_input",
+        "consumption_evidence": "not_collected"
+      },
+      {
+        "path": "/strategies/MEAN_REVERSION/config/risk_target",
+        "value": 0.15,
+        "consumer": "selected_mean_reversion_strategy",
+        "value_type": "number",
+        "classification": "editable_config_input",
+        "consumption_evidence": "not_collected"
+      },
+      {
+        "path": "/strategies/MEAN_REVERSION/config/stop_loss_pct",
+        "value": 0.05,
+        "consumer": "selected_mean_reversion_strategy",
+        "value_type": "number",
+        "classification": "editable_config_input",
+        "consumption_evidence": "not_collected"
+      },
+      {
+        "path": "/strategies/MEAN_REVERSION/config/use_stop_loss",
+        "value": false,
+        "consumer": "configuration_identity_or_control",
+        "value_type": "boolean",
+        "classification": "protected_config_input",
+        "consumption_evidence": "not_collected"
+      },
+      {
+        "path": "/strategies/MEAN_REVERSION/config/vol_lookback",
+        "value": 3,
+        "consumer": "selected_mean_reversion_strategy",
+        "value_type": "number",
+        "classification": "editable_config_input",
+        "consumption_evidence": "not_collected"
+      },
+      {
+        "path": "/strategies/MEAN_REVERSION/default_allocation",
+        "value": 2,
+        "consumer": "configuration_identity_or_control",
+        "value_type": "number",
+        "classification": "protected_config_input",
+        "consumption_evidence": "not_collected"
+      },
+      {
+        "path": "/strategies/MEAN_REVERSION/enabled_backtest",
+        "value": true,
+        "consumer": "configuration_identity_or_control",
+        "value_type": "boolean",
+        "classification": "protected_config_input",
+        "consumption_evidence": "not_collected"
+      },
+      {
+        "path": "/strategies/MEAN_REVERSION/enabled_live",
+        "value": true,
+        "consumer": "configuration_identity_or_control",
+        "value_type": "boolean",
+        "classification": "protected_config_input",
+        "consumption_evidence": "not_collected"
+      },
+      {
+        "path": "/strategies/MEAN_REVERSION/symbols",
+        "value": [
+          "SYN_T4"
+        ],
+        "consumer": "configuration_identity_or_control",
+        "value_type": "array",
+        "classification": "protected_config_input",
+        "consumption_evidence": "not_collected"
+      },
+      {
+        "path": "/strategies/MEAN_REVERSION/type",
+        "value": "MeanReversionStrategy",
+        "consumer": "configuration_identity_or_control",
+        "value_type": "string",
+        "classification": "protected_config_input",
+        "consumption_evidence": "not_collected"
+      },
+      {
+        "path": "/strategy_defaults/carver_buffer_floor",
+        "value": 0.5,
+        "consumer": "configuration_identity_or_control",
+        "value_type": "number",
+        "classification": "protected_config_input",
+        "consumption_evidence": "not_collected"
+      },
+      {
+        "path": "/strategy_defaults/carver_buffer_position_factor",
+        "value": 0.0,
+        "consumer": "configuration_identity_or_control",
+        "value_type": "number",
+        "classification": "protected_config_input",
+        "consumption_evidence": "not_collected"
+      },
+      {
+        "path": "/strategy_defaults/fdm",
+        "value": [
+          [
+            1,
+            1.0
+          ],
+          [
+            2,
+            1.03
+          ],
+          [
+            3,
+            1.08
+          ],
+          [
+            4,
+            1.13
+          ],
+          [
+            5,
+            1.19
+          ],
+          [
+            6,
+            1.26
+          ]
+        ],
+        "consumer": "no_active_profile_reader",
+        "value_type": "array",
+        "classification": "unsupported_in_profile",
+        "consumption_evidence": "not_collected"
+      },
+      {
+        "path": "/strategy_defaults/max_strategy_allocation",
+        "value": 1.0,
+        "consumer": "configuration_identity_or_control",
+        "value_type": "number",
+        "classification": "protected_config_input",
+        "consumption_evidence": "not_collected"
+      },
+      {
+        "path": "/strategy_defaults/min_strategy_allocation",
+        "value": 0.1,
+        "consumer": "configuration_identity_or_control",
+        "value_type": "number",
+        "classification": "protected_config_input",
+        "consumption_evidence": "not_collected"
+      },
+      {
+        "path": "/use_optimization",
+        "value": false,
+        "consumer": "configuration_identity_or_control",
+        "value_type": "boolean",
+        "classification": "protected_config_input",
+        "consumption_evidence": "not_collected"
+      }
+    ],
+    "profile": "live_equity",
+    "coverage": "complete_runtime_snapshot_v2",
+    "authority": "inspection_only",
+    "effective_snapshot": {
+      "live": {
+        "historical_days": 30,
+        "spinoff_child_policy": "liquidate_at_first_close",
+        "data_staleness_tolerance_days": 4,
+        "execution_price_max_staleness_days": 5
+      },
+      "risk": {
+        "schema": 2,
+        "modules": [
+          {
+            "id": "no_portfolio_risk",
+            "type": "none",
+            "_reason": "Carver's risk system is a futures construction and on this book three quarters of it is furniture: over the measured chain the leverage and jump terms are the sole binding minimum on 0 of 14,632 evaluations and the leverage multiplier never falls below 1.000000 at all, and the correlation term can only fire when the book holds two or more non-zero names, which is 2 of 19 dated rows. What was left was a VaR limit whose 0.25 is a documented equity-specific calibration rather than a Carver parameter. The book is still MEASURED: risk_reporting below is unchanged, so every risk column of live_results and the email still reports.",
+            "_ruled_by": "HD",
+            "_ruled_on": "2026-09-18"
+          }
+        ],
+        "max_drawdown": 0.3,
+        "max_leverage": 1.0,
+        "risk_reporting": {
+          "type": "carver",
+          "window": "all_bars",
+          "var_limit": 0.25,
+          "jump_risk_limit": 0.08,
+          "lookback_period": 252,
+          "max_correlation": 0.7,
+          "confidence_level": 0.99,
+          "max_net_leverage": 1.0,
+          "max_gross_leverage": 1.0
+        }
+      },
+      "backtest": {
+        "lookback_years": 2,
+        "store_trade_details": true
+      },
+      "execution": {
+        "slippage_bps": 1.0,
+        "commission_rate": 0.0005,
+        "position_limit_live": 500.0,
+        "position_limit_backtest": 1000.0
+      },
+      "strategies": {
+        "MEAN_REVERSION": {
+          "type": "MeanReversionStrategy",
+          "config": {
+            "risk_target": 0.15,
+            "vol_lookback": 3,
+            "position_size": 1,
+            "stop_loss_pct": 0.05,
+            "use_stop_loss": false,
+            "exit_threshold": 0.1,
+            "entry_threshold": 0.5,
+            "lookback_period": 3,
+            "allow_fractional_shares": false
+          },
+          "symbols": [
+            "SYN_T4"
+          ],
+          "enabled_live": true,
+          "_symbols_note": "ABEV and ABM have NO bars in equities_data.ohlcv_1d (data-owner ask DO-ABEV/ABM). The live runner's freshness guard treats a requested symbol with no bars as absent and refuses a bare live run, so the LIVE runtime config keeps the universe the 2026-09 gate proved (BKNG and DD in their place) until those bars exist; swap back here-to-runtime when they do. var_limit lives in risk.json (0.25, proven).",
+          "enabled_backtest": true,
+          "default_allocation": 2
+        }
+      },
+      "max_drawdown": 0.3,
+      "max_leverage": 1.0,
+      "optimization": {
+        "tau": 1.0,
+        "capital": 100000.0,
+        "version": "1.0.0",
+        "use_buffering": true,
+        "max_iterations": 100,
+        "buffer_size_factor": 0.01,
+        "cost_penalty_scalar": 50.0,
+        "convergence_threshold": 1e-06,
+        "asymmetric_risk_buffer": 0.1
+      },
+      "portfolio_id": "TASK4_MR_NOW",
+      "benchmark_mode": "deferred",
+      "initial_capital": 100000.0,
+      "snapshot_version": 2,
+      "use_optimization": false,
+      "strategy_defaults": {
+        "fdm": [
+          [
+            1,
+            1.0
+          ],
+          [
+            2,
+            1.03
+          ],
+          [
+            3,
+            1.08
+          ],
+          [
+            4,
+            1.13
+          ],
+          [
+            5,
+            1.19
+          ],
+          [
+            6,
+            1.26
+          ]
+        ],
+        "carver_buffer_floor": 0.5,
+        "max_strategy_allocation": 1.0,
+        "min_strategy_allocation": 0.1,
+        "carver_buffer_position_factor": 0.0
+      },
+      "reserve_capital_pct": 0.1,
+      "sleeve_risk_modules": {},
+      "covariance_history_prices": 756
+    },
+    "projection_version": 2,
+    "consumption_evidence": "not_collected"
+  },
+  "authority": "inspection_only",
+  "captured_at": "2026-10-06T21:34:10.502452Z",
+  "equity_run_consumption": {
+    "scope": "full_run",
+    "stages": {
+      "eod": {
+        "reads": {
+          "path": "system_finalization",
+          "initial_capital_exact": "100000",
+          "previous_equity_exact": "100000",
+          "previous_total_pnl_exact": "0",
+          "previous_total_realized_pnl_exact": "0",
+          "previous_total_transaction_costs_exact": "0"
+        },
+        "outcome": "returned_ok",
+        "symbols": {},
+        "executions": [],
+        "skip_reason": null
+      },
+      "prior": {
+        "reads": {
+          "mode": "system_reference",
+          "source_day": "2026-10-05"
+        },
+        "outcome": "returned_ok",
+        "symbols": {},
+        "executions": [],
+        "skip_reason": null
+      },
+      "setup": {
+        "reads": {
+          "max_drawdown": 0.3,
+          "max_leverage": 1.0,
+          "reserve_capital": 10000.0,
+          "use_optimization": false,
+          "capital_allocation": 100000.0,
+          "use_risk_management": false,
+          "allow_fractional_positions": false
+        },
+        "outcome": "returned_ok",
+        "symbols": {},
+        "executions": [],
+        "skip_reason": null
+      },
+      "primary": {
+        "reads": {
+          "strategy_invocation": {
+            "scope": "strategy_invocation",
+            "profile": "mean_reversion",
+            "symbols": {
+              "SYN_T4": {
+                "reads": {
+                  "risk_target": 0.15,
+                  "vol_lookback": 3,
+                  "position_size": 1.0,
+                  "position_limit": 500.0,
+                  "entry_threshold": 0.5,
+                  "lookback_period": 3,
+                  "capital_allocation": 100000.0,
+                  "maximum_price_history": 6,
+                  "position_limit_present": true,
+                  "allow_fractional_shares": false,
+                  "maximum_volatility_history": 6
+                },
+                "observed_state": {
+                  "short_allowed": false,
+                  "fractional_eligible": false
+                }
+              }
+            },
+            "available": true,
+            "schema_version": "qt-equity-strategy-consumption/v1",
+            "full_run_certification": false
+          },
+          "portfolio_invocation": {
+            "scope": "portfolio_invocation",
+            "passes": [
+              {
+                "risk": {
+                  "call": "not_reached",
+                  "skip": "none",
+                  "reads": {}
+                },
+                "index": 0,
+                "reads": {
+                  "use_optimization": false,
+                  "use_risk_management": false
+                },
+                "risk_helper": "not_reached",
+                "optimization_helper": "not_reached"
+              }
+            ],
+            "outcome": "returned_ok",
+            "available": true,
+            "schema_version": "qt-equity-portfolio-consumption/v1",
+            "strategy_charges": [],
+            "unavailable_reason": null,
+            "compatibility_charges": [
+              {
+                "call": "returned_ok",
+                "index": 0,
+                "reads": {
+                  "min_adv": 100.0,
+                  "quantity": 277.0,
+                  "tick_size": 0.01,
+                  "point_value": 100.0,
+                  "input_source": "internally_tracked",
+                  "effective_adv": 100000.0,
+                  "retrieved_adv": 0.0,
+                  "max_impact_bps": 100.0,
+                  "selected_k_bps": 40.0,
+                  "reference_price": 100.0,
+                  "max_spread_ticks": 10.0,
+                  "min_spread_ticks": 1.0,
+                  "asset_lookup_path": "fallback",
+                  "max_participation": 0.1,
+                  "min_participation": 0.0,
+                  "baseline_spread_ticks": 2.0,
+                  "spread_cost_multiplier": 0.5,
+                  "explicit_fee_per_contract": 1.5,
+                  "volatility_calculation_reached": false,
+                  "effective_volatility_multiplier": 1.0,
+                  "retrieved_volatility_multiplier": 1.0
+                },
+                "symbol": "SYN_T4",
+                "purpose": "compatibility",
+                "strategy_id": ""
+              }
+            ],
+            "full_run_certification": false,
+            "skip_execution_generation": false
+          }
+        },
+        "outcome": "returned_ok",
+        "symbols": {},
+        "executions": [],
+        "skip_reason": null
+      },
+      "execution": {
+        "reads": {
+          "execution_price_max_staleness_days": 5
+        },
+        "outcome": "returned_ok",
+        "symbols": {},
+        "executions": [
+          {
+            "index": 0,
+            "reads": {
+              "min_adv": 100.0,
+              "quantity": 277.0,
+              "tick_size": 0.01,
+              "asset_type": "EQUITY",
+              "point_value": 1.0,
+              "input_source": "internally_tracked",
+              "effective_adv": 1000000.0,
+              "retrieved_adv": 1000000.0,
+              "max_impact_bps": 100.0,
+              "selected_k_bps": 20.0,
+              "reference_price": 90.0,
+              "max_spread_ticks": 8.0,
+              "min_spread_ticks": 1.5,
+              "tick_constrained": false,
+              "asset_lookup_path": "exact_symbol",
+              "max_participation": 0.1,
+              "min_participation": 0.0,
+              "volatility_lambda": 0.15,
+              "max_commission_pct": 0.01,
+              "commission_per_unit": 0.005,
+              "apply_regulatory_fees": false,
+              "baseline_spread_ticks": 3.0,
+              "commissions_fees_exact": "1.385",
+              "max_total_implicit_bps": 150.0,
+              "spread_cost_multiplier": 0.5,
+              "min_commission_per_order": 1.0,
+              "volatility_max_multiplier": 1.5,
+              "volatility_min_multiplier": 0.8,
+              "implicit_price_impact_exact": "0.0224958",
+              "slippage_market_impact_exact": "6.23133578",
+              "total_transaction_costs_exact": "7.61633578",
+              "volatility_calculation_reached": true,
+              "effective_volatility_multiplier": 1.3,
+              "retrieved_volatility_multiplier": 1.3
+            },
+            "symbol": "SYN_T4",
+            "strategy_id": "LIVE_EQUITY_MEAN_REVERSION",
+            "execution_id": "EXEC_SYN_T4_1791244800000_0",
+            "portfolio_id": "TASK4_MR_NOW",
+            "strategy_name": "EQUITY_MEAN_REVERSION"
+          }
+        ],
+        "skip_reason": null
+      },
+      "preparation": {
+        "reads": {},
+        "outcome": "returned_ok",
+        "symbols": {},
+        "executions": [],
+        "skip_reason": null
+      },
+      "cost_history": {
+        "reads": {},
+        "outcome": "returned_ok",
+        "symbols": {
+          "SYN_T4": {
+            "adv_lookback_days": 20,
+            "previous_close_source": "stored_previous_close",
+            "log_return_lookback_days": 20,
+            "previous_close_forwarded": 100.0
+          }
+        },
+        "executions": [],
+        "skip_reason": null
+      },
+      "market_input": {
+        "reads": {
+          "end_day": "2026-10-05",
+          "frequency": "DAILY",
+          "start_day": "2026-09-06",
+          "asset_type": "EQUITY",
+          "historical_days": 30,
+          "data_staleness_tolerance_days": 4
+        },
+        "outcome": "returned_ok",
+        "symbols": {},
+        "executions": [],
+        "skip_reason": null
+      },
+      "result_assembly": {
+        "reads": {
+          "currency": "USD",
+          "total_realized_pnl_exact": "0",
+          "total_unrealized_pnl_exact": "0",
+          "current_portfolio_value_exact": "99992.38366422",
+          "total_transaction_costs_exact": "7.61633578"
+        },
+        "outcome": "returned_ok",
+        "symbols": {},
+        "executions": [],
+        "skip_reason": null
+      },
+      "corporate_actions": {
+        "reads": {
+          "path": "system_history",
+          "effective_event_count": 0,
+          "spinoff_child_policy_effective": "liquidate_at_first_close",
+          "spinoff_child_policy_requested": "liquidate_at_first_close"
+        },
+        "outcome": "returned_ok",
+        "symbols": {},
+        "executions": [],
+        "skip_reason": null
+      }
+    },
+    "profile": "mean_reversion",
+    "run_key": {
+      "date": "2026-10-06",
+      "strategy_id": "LIVE_EQUITY_MEAN_REVERSION",
+      "portfolio_id": "TASK4_MR_NOW",
+      "strategy_name": "EQUITY_MEAN_REVERSION"
+    },
+    "complete": true,
+    "available": true,
+    "schema_version": "qt-equity-run-consumption/v1",
+    "catalog_version": "qt-equity-main08b15c-run/v1",
+    "unavailable_reason": null
+  },
+  "configuration_selection": {
+    "source": "file",
+    "version_id": null,
+    "base_sha256": "100229c476a08882e5b2f52e6e46a8805decb439e8145475b1f7f0bb8a7137d7",
+    "effective_sha256": "100229c476a08882e5b2f52e6e46a8805decb439e8145475b1f7f0bb8a7137d7"
+  },
+  "publication_recorded_at": "2026-10-06T21:34:10.520253Z",
+  "source_to_storage_owners": {
+    "MEAN_REVERSION": "EQUITY_MEAN_REVERSION"
+  },
+  "publication_schema_version": 5
+}

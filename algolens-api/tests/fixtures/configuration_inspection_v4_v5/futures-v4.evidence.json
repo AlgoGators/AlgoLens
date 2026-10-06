@@ -1,0 +1,387 @@
+{
+  "selection": {
+    "attempt_id": "52e22b97-a1b9-433a-b1c7-27dcfe9d60d3",
+    "portfolio_id": "BOOK",
+    "engine_strategy_id": "LIVE_TREND",
+    "run_date": "2026-09-22",
+    "engine_build": "bb34bc9",
+    "selection": {
+      "scope": {
+        "registry_id": "trend",
+        "portfolio_id": "BOOK",
+        "investor_book_id": null,
+        "registry_revision": 0,
+        "engine_strategy_id": "LIVE_TREND"
+      },
+      "schema": "live-config-selection/v1",
+      "source": "approved_override",
+      "version_id": "f2568e5a-6eb4-42d2-92f3-6eb1d64f30ed",
+      "base_sha256": "ad5a3cc466b7be99b306a1af03a3f97f0b8230c6910a0e7f237544e560bf9fe6",
+      "engine_build": "bb34bc9",
+      "effective_sha256": "4cb77e788915afe80d65b9516dd25775ad8bd7bd8ee5874320221b413038d0c5"
+    },
+    "config_snapshot": {
+      "live": {
+        "historical_days": 300
+      },
+      "risk": {
+        "schema": 2,
+        "modules": [
+          {
+            "id": "carver",
+            "type": "carver",
+            "var_limit": 0.25,
+            "lookback_unit": "dates",
+            "min_gate_dates": 21,
+            "jump_risk_limit": 0.05,
+            "lookback_period": 252,
+            "max_correlation": 0.85,
+            "confidence_level": 0.99,
+            "max_net_leverage": 2.0,
+            "max_gross_leverage": 4.0,
+            "missing_symbol_policy": "ignore",
+            "_missing_symbol_policy_reason": "fixture"
+          }
+        ],
+        "max_drawdown": 0.3,
+        "max_leverage": 2.0,
+        "risk_reporting": {
+          "type": "carver",
+          "window": "all_bars",
+          "var_limit": 0.25,
+          "jump_risk_limit": 0.05,
+          "lookback_period": 252,
+          "max_correlation": 0.85,
+          "confidence_level": 0.99,
+          "max_net_leverage": 2.0,
+          "max_gross_leverage": 4.0
+        }
+      },
+      "backtest": {
+        "lookback_years": 2,
+        "store_trade_details": true
+      },
+      "execution": {
+        "slippage_bps": 1.0,
+        "commission_rate": 0.0005,
+        "position_limit_live": 500.0,
+        "position_limit_backtest": 1000.0
+      },
+      "strategies": {
+        "TREND": {
+          "type": "TrendFollowingStrategy",
+          "enabled_live": true,
+          "default_allocation": 1.0
+        }
+      },
+      "max_drawdown": 0.3,
+      "max_leverage": 2.0,
+      "optimization": {
+        "tau": 1.0,
+        "capital": 500000.0,
+        "version": "1.0.0",
+        "use_buffering": true,
+        "max_iterations": 100,
+        "buffer_size_factor": 0.05,
+        "cost_penalty_scalar": 12.75,
+        "convergence_threshold": 1e-06,
+        "asymmetric_risk_buffer": 0.1
+      },
+      "portfolio_id": "BOOK",
+      "benchmark_mode": "live",
+      "initial_capital": 500000.0,
+      "snapshot_version": 2,
+      "use_optimization": false,
+      "strategy_defaults": {
+        "fdm": [
+          [
+            1,
+            1.0
+          ],
+          [
+            2,
+            1.03
+          ],
+          [
+            3,
+            1.08
+          ],
+          [
+            4,
+            1.13
+          ],
+          [
+            5,
+            1.19
+          ],
+          [
+            6,
+            1.26
+          ]
+        ],
+        "carver_buffer_floor": 0.5,
+        "max_strategy_allocation": 1.0,
+        "min_strategy_allocation": 0.1,
+        "carver_buffer_position_factor": 0.0
+      },
+      "reserve_capital_pct": 0.1,
+      "sleeve_risk_modules": {},
+      "covariance_history_prices": 756
+    },
+    "admitted_at": "2026-10-06 17:26:46.404509-04:00"
+  },
+  "safety": {
+    "attempt_id": "52e22b97-a1b9-433a-b1c7-27dcfe9d60d3",
+    "state": "published",
+    "pre_write_evidence": null,
+    "recovery_evidence": null,
+    "updated_at": "2026-10-06 17:26:46.438128-04:00",
+    "lifecycle": "published",
+    "publication_id": "52e22b97-a1b9-433a-b1c7-27dcfe9d60d3",
+    "classification_version": 2
+  },
+  "runtime_attempt": {
+    "id": "52e22b97-a1b9-433a-b1c7-27dcfe9d60d3",
+    "intent_id": 1,
+    "registry_revision": 0,
+    "config_snapshot": {
+      "live": {
+        "historical_days": 300
+      },
+      "risk": {
+        "schema": 2,
+        "modules": [
+          {
+            "id": "carver",
+            "type": "carver",
+            "var_limit": 0.25,
+            "lookback_unit": "dates",
+            "min_gate_dates": 21,
+            "jump_risk_limit": 0.05,
+            "lookback_period": 252,
+            "max_correlation": 0.85,
+            "confidence_level": 0.99,
+            "max_net_leverage": 2.0,
+            "max_gross_leverage": 4.0,
+            "missing_symbol_policy": "ignore",
+            "_missing_symbol_policy_reason": "fixture"
+          }
+        ],
+        "max_drawdown": 0.3,
+        "max_leverage": 2.0,
+        "risk_reporting": {
+          "type": "carver",
+          "window": "all_bars",
+          "var_limit": 0.25,
+          "jump_risk_limit": 0.05,
+          "lookback_period": 252,
+          "max_correlation": 0.85,
+          "confidence_level": 0.99,
+          "max_net_leverage": 2.0,
+          "max_gross_leverage": 4.0
+        }
+      },
+      "backtest": {
+        "lookback_years": 2,
+        "store_trade_details": true
+      },
+      "execution": {
+        "slippage_bps": 1.0,
+        "commission_rate": 0.0005,
+        "position_limit_live": 500.0,
+        "position_limit_backtest": 1000.0
+      },
+      "strategies": {
+        "TREND": {
+          "type": "TrendFollowingStrategy",
+          "enabled_live": true,
+          "default_allocation": 1.0
+        }
+      },
+      "max_drawdown": 0.3,
+      "max_leverage": 2.0,
+      "optimization": {
+        "tau": 1.0,
+        "capital": 500000.0,
+        "version": "1.0.0",
+        "use_buffering": true,
+        "max_iterations": 100,
+        "buffer_size_factor": 0.05,
+        "cost_penalty_scalar": 12.75,
+        "convergence_threshold": 1e-06,
+        "asymmetric_risk_buffer": 0.1
+      },
+      "portfolio_id": "BOOK",
+      "benchmark_mode": "live",
+      "initial_capital": 500000.0,
+      "snapshot_version": 2,
+      "use_optimization": false,
+      "strategy_defaults": {
+        "fdm": [
+          [
+            1,
+            1.0
+          ],
+          [
+            2,
+            1.03
+          ],
+          [
+            3,
+            1.08
+          ],
+          [
+            4,
+            1.13
+          ],
+          [
+            5,
+            1.19
+          ],
+          [
+            6,
+            1.26
+          ]
+        ],
+        "carver_buffer_floor": 0.5,
+        "max_strategy_allocation": 1.0,
+        "min_strategy_allocation": 0.1,
+        "carver_buffer_position_factor": 0.0
+      },
+      "reserve_capital_pct": 0.1,
+      "sleeve_risk_modules": {},
+      "covariance_history_prices": 756
+    },
+    "run_date": "2026-09-22",
+    "producer_version": "bb34bc9",
+    "status": "applied",
+    "started_at": "2026-10-06 17:26:46.402349-04:00",
+    "finished_at": "2026-10-06 17:26:46.415851-04:00",
+    "publication_id": "52e22b97-a1b9-433a-b1c7-27dcfe9d60d3",
+    "outcome": "published",
+    "failure_code": null
+  },
+  "runtime_intent": {
+    "id": 1,
+    "registry_id": "trend",
+    "portfolio_id": "BOOK",
+    "engine_strategy_id": "LIVE_TREND",
+    "action": "run",
+    "registry_revision": 0,
+    "config_snapshot": {
+      "live": {
+        "historical_days": 300
+      },
+      "risk": {
+        "schema": 2,
+        "modules": [
+          {
+            "id": "carver",
+            "type": "carver",
+            "var_limit": 0.25,
+            "lookback_unit": "dates",
+            "min_gate_dates": 21,
+            "jump_risk_limit": 0.05,
+            "lookback_period": 252,
+            "max_correlation": 0.85,
+            "confidence_level": 0.99,
+            "max_net_leverage": 2.0,
+            "max_gross_leverage": 4.0,
+            "missing_symbol_policy": "ignore",
+            "_missing_symbol_policy_reason": "fixture"
+          }
+        ],
+        "max_drawdown": 0.3,
+        "max_leverage": 2.0,
+        "risk_reporting": {
+          "type": "carver",
+          "window": "all_bars",
+          "var_limit": 0.25,
+          "jump_risk_limit": 0.05,
+          "lookback_period": 252,
+          "max_correlation": 0.85,
+          "confidence_level": 0.99,
+          "max_net_leverage": 2.0,
+          "max_gross_leverage": 4.0
+        }
+      },
+      "backtest": {
+        "lookback_years": 2,
+        "store_trade_details": true
+      },
+      "execution": {
+        "slippage_bps": 1.0,
+        "commission_rate": 0.0005,
+        "position_limit_live": 500.0,
+        "position_limit_backtest": 1000.0
+      },
+      "strategies": {
+        "TREND": {
+          "type": "TrendFollowingStrategy",
+          "enabled_live": true,
+          "default_allocation": 1.0
+        }
+      },
+      "max_drawdown": 0.3,
+      "max_leverage": 2.0,
+      "optimization": {
+        "tau": 1.0,
+        "capital": 500000.0,
+        "version": "1.0.0",
+        "use_buffering": true,
+        "max_iterations": 100,
+        "buffer_size_factor": 0.05,
+        "cost_penalty_scalar": 12.75,
+        "convergence_threshold": 1e-06,
+        "asymmetric_risk_buffer": 0.1
+      },
+      "portfolio_id": "BOOK",
+      "benchmark_mode": "live",
+      "initial_capital": 500000.0,
+      "snapshot_version": 2,
+      "use_optimization": false,
+      "strategy_defaults": {
+        "fdm": [
+          [
+            1,
+            1.0
+          ],
+          [
+            2,
+            1.03
+          ],
+          [
+            3,
+            1.08
+          ],
+          [
+            4,
+            1.13
+          ],
+          [
+            5,
+            1.19
+          ],
+          [
+            6,
+            1.26
+          ]
+        ],
+        "carver_buffer_floor": 0.5,
+        "max_strategy_allocation": 1.0,
+        "min_strategy_allocation": 0.1,
+        "carver_buffer_position_factor": 0.0
+      },
+      "reserve_capital_pct": 0.1,
+      "sleeve_risk_modules": {},
+      "covariance_history_prices": 756
+    },
+    "status": "approved",
+    "requested_by": "exec-submit",
+    "request_reason": "run",
+    "requested_at": "2026-10-06 17:26:46.379548-04:00",
+    "approved_by": "exec-approve",
+    "approval_reason": "run",
+    "approved_at": "2026-10-06 17:26:46.379548-04:00"
+  }
+}

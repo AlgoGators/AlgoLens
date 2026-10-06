@@ -24,7 +24,7 @@ _FIXED_BUNDLE_DIRECTORY = Path("/app/qt-evaluator-bundle")
 _FIXED_RUNTIME_CONFIG = Path("/app/runtime-control/manifest.json")
 _ARTIFACT_KINDS = {
     "libtrade_ngin.so": "engine",
-    "live_equity_mean_reversion": "system_publisher",
+    "live_equity_mr": "system_publisher",
     "live_portfolio": "system_publisher",
     "live_portfolio_conservative": "system_publisher",
     "qt_desk_prepare_sources": "desk_tool",

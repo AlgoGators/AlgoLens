@@ -115,7 +115,13 @@ def execute(options):
         return {"database": options.database, "archive_sha256": options.archive_sha256, "outcome": "restored"}
     if options.command == "apply-manifest":
         manifest = load_manifest(options.manifest)
-        return {"migration_results": cluster.apply_manifest(manifest, _repositories(options.repo))}
+        result = {"migration_results": cluster.apply_manifest(manifest, _repositories(options.repo))}
+        if any(entry.repository == "trade-ngin" and entry.path == "migrations/031_live_config_overrides.sql" for entry in manifest.entries):
+            contract = Path(__file__).parent / "contracts/qt-live-futures-roles.v2.json"
+            result["role_results"] = cluster.verify_role_contract(load_role_contract(contract))
+            if not all(row["passed"] for row in result["role_results"]):
+                raise SafetyError("governed configuration role contract failed")
+        return result
     if options.command == "verify-roles":
         return {"role_results": cluster.verify_role_contract(load_role_contract(options.contract))}
     if options.command == "cleanup":

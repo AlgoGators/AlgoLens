@@ -88,6 +88,19 @@ class PostgresConfigurationInspectionReader:
                         outcome = ("unavailable", exc.reason, selected_book)
                     else:
                         identity = publication["identity"]
+                        if publication["publication_schema_version"] in (4,5):
+                            cur.execute("""
+                                SELECT a.attempt_id,a.portfolio_id,a.engine_strategy_id,a.run_date,
+                                       a.engine_build,a.selection,a.config_snapshot,
+                                       s.classification_version,s.state,s.lifecycle,s.publication_id AS sealed_publication_id
+                                FROM trading.live_config_attempt_selections a
+                                JOIN trading.live_config_attempt_safety s USING(attempt_id)
+                                WHERE a.attempt_id=%s
+                            """, (identity["config_attempt_id"],))
+                            if not self._config_attempt_matches(cur.fetchone(),publication):
+                                outcome=("unavailable","invalid_publication",selected_book)
+                                conn.commit()
+                                return outcome
                         if identity["control_mode"] == "controlled":
                             cur.execute("""
                                 SELECT a.id AS attempt_id, a.registry_revision AS attempt_revision,
@@ -138,3 +151,25 @@ class PostgresConfigurationInspectionReader:
             and attempt["intent_portfolio_id"] == identity["portfolio_id"]
             and attempt["intent_action"] == "run"
         )
+
+    @staticmethod
+    def _config_attempt_matches(attempt, publication):
+        if attempt is None:return False
+        identity=publication['identity'];selection=publication['configuration_selection']
+        frozen=attempt['selection']
+        if type(frozen) is not dict or set(frozen)!={'scope','schema','source','version_id','base_sha256','engine_build','effective_sha256'}:return False
+        return (attempt['attempt_id']==identity['config_attempt_id']
+            and attempt['portfolio_id']==identity['portfolio_id']
+            and attempt['engine_strategy_id']==identity['engine_strategy_id']
+            and attempt['run_date'].isoformat()==identity['run_date']
+            and attempt['engine_build']==identity['producer_version']
+            and attempt['classification_version']==2
+            and attempt['state']=='published' and attempt['lifecycle']=='published'
+            and attempt['sealed_publication_id']==identity['publication_id']
+            and frozen.get('scope')=={'registry_id':identity['registry_id'],
+                'registry_revision':identity['registry_revision'],'investor_book_id':None,
+                'portfolio_id':identity['portfolio_id'],'engine_strategy_id':identity['engine_strategy_id']}
+            and type(frozen) is dict and frozen.get('schema')=='live-config-selection/v1'
+            and all(frozen.get(key)==value for key,value in selection.items())
+            and frozen.get('engine_build')==identity['producer_version']
+            and attempt['config_snapshot']==publication['supplied']['effective_snapshot'])
