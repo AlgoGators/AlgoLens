@@ -20,6 +20,14 @@ from algolens.adapters.http.runtime_control import runtime_control_bp
 from algolens.adapters.http.configuration_inspection import configuration_inspection_bp
 from algolens.adapters.http.investor_books import investor_books_bp
 from algolens.infrastructure.db.postgres import get_db_connection
+from algolens.infrastructure.config.production_readiness import (
+    ReadinessResult,
+    ReadinessSnapshotCache,
+    evaluator_isolation_probe,
+    evaluate_readiness,
+    load_runtime_contract,
+    runtime_configuration_file_probe,
+)
 from extensions import limiter
 
 ENV_PATH = Path(__file__).resolve().parents[3] / ".env"
@@ -31,11 +39,14 @@ def create_app():
     env = os.getenv("FLASK_ENV", "production")
     debug = os.getenv("FLASK_DEBUG", "False").lower() == "true"
     is_production = env == "production"
+    production_contract = load_runtime_contract() if is_production else None
+    readiness_cache = ReadinessSnapshotCache(5.0)
 
     app = Flask(__name__)
     app.config["ALGOLENS_ENV"] = env
     app.config["ALGOLENS_DEBUG"] = debug
     app.config["ALGOLENS_IS_PRODUCTION"] = is_production
+    app.config["PRODUCTION_RUNTIME_CONTRACT"] = production_contract
 
     app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1)
 
@@ -223,33 +234,63 @@ def create_app():
 
     @app.route("/health", methods=["GET"])
     def health_check():
-        app.logger.info("[HEALTH] Health check called")
+        return {"status": "ok", "checks": {"process": "ok"}}, 200
 
-        health_status = {"status": "ok", "checks": {}}
-
+    @app.route("/ready", methods=["GET"])
+    def readiness_check():
         try:
-            app.logger.info("[HEALTH] Testing database connection...")
-            conn = get_db_connection()
-            with conn.cursor() as cursor:
-                cursor.execute("SELECT 1")
-            conn.close()
-            health_status["checks"]["database"] = "ok"
-            app.logger.info("[HEALTH] Database connection successful")
-        except Exception as exc:
-            health_status["checks"]["database"] = (
-                "error" if is_production else f"error: {str(exc)}"
+            checker = app.config.get("PRODUCTION_READINESS_CHECKER")
+            if checker is not None:
+                result = checker()
+            elif production_contract is None:
+                result = ReadinessResult(
+                    {"configuration": "error"},
+                    ("production_runtime_not_configured",),
+                    {"schema": "algolens-readiness-evidence/v1", "status": "not_ready"},
+                )
+            else:
+                result = readiness_cache.get(
+                    lambda: evaluate_readiness(
+                        production_contract,
+                        connection_factory=get_db_connection,
+                        schema_probe=app.config.get("QT_SCHEMA_READINESS_PROBE"),
+                        role_probe=app.config.get("QT_ROLE_READINESS_PROBE"),
+                        runtime_configuration_probe=runtime_configuration_file_probe,
+                        evaluator_probe=app.config.get(
+                            "QT_EVALUATOR_READINESS_PROBE", evaluator_isolation_probe
+                        ),
+                        capability_probe=app.config.get("QT_CAPABILITY_READINESS_PROBE"),
+                        worker_probe=app.config.get("QT_WORKER_READINESS_PROBE"),
+                    )
+                )
+        except Exception:
+            app.logger.error("Production readiness check failed")
+            result = ReadinessResult(
+                {"configuration": "error"},
+                ("production_readiness_failed",),
+                {"schema": "algolens-readiness-evidence/v1", "status": "not_ready"},
             )
-            health_status["status"] = "degraded"
-            app.logger.error(
-                "[HEALTH] Database connection failed: %s", str(exc), exc_info=True
-            )
+        return (
+            result.public_payload(),
+            200 if result.ready else 503,
+            {"Cache-Control": "no-store"},
+        )
 
-        if not is_production:
-            health_status["environment"] = env
-            health_status["debug"] = debug
-            health_status["cors_origins"] = os.getenv("CORS_ORIGINS", "*")
-
-        app.logger.info("[HEALTH] Health check result: %s", health_status)
-        return health_status, 200 if health_status["status"] == "ok" else 503
+    # T1 owns the default-deny route guard.  Install it only after every
+    # blueprint and application route is registered so its route inventory is
+    # complete.  This lane can still be tested before T1 is integrated; in
+    # that state the capability readiness probe remains fail-closed.
+    try:
+        from algolens.adapters.http.capability_guard import install_capability_guard
+    except ModuleNotFoundError as error:
+        if error.name != "algolens.adapters.http.capability_guard":
+            raise
+        app.config["CAPABILITY_GUARD_INSTALLED"] = False
+    else:
+        install_capability_guard(
+            app,
+            explicitly_open_endpoints={"version", "health_check", "readiness_check"},
+        )
+        app.config["CAPABILITY_GUARD_INSTALLED"] = True
 
     return app

@@ -1,0 +1,30 @@
+{
+  "schema": "release-artifacts/v1",
+  "source": {"git_sha_full": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "git_sha_short": "bbbbbbbbbbbb", "dirty": false},
+  "build": {
+    "build_type": "Release",
+    "compiler": {"id": "fixture", "version": "1"},
+    "cxx_standard": "20",
+    "toolchain_image_digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "cmake_inputs": ["CMAKE_BUILD_TYPE=Release"]
+  },
+  "image": {"digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"},
+  "evaluator": {
+    "evaluator_build": "bbbbbbbbbbbb",
+    "evaluator_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    "evaluator_bundle_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+    "bundle_manifest_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "install_path": "qt-evaluator-bundle"
+  },
+  "artifacts": [
+    {"name": "libtrade_ngin.so", "kind": "engine", "install_path": "bin/Release/libtrade_ngin.so", "size": 101, "sha256": "1111111111111111111111111111111111111111111111111111111111111111"},
+    {"name": "live_equity_mean_reversion", "kind": "system_publisher", "install_path": "bin/Release/live_equity_mean_reversion", "size": 102, "sha256": "2222222222222222222222222222222222222222222222222222222222222222"},
+    {"name": "live_portfolio", "kind": "system_publisher", "install_path": "bin/Release/live_portfolio", "size": 103, "sha256": "3333333333333333333333333333333333333333333333333333333333333333"},
+    {"name": "live_portfolio_conservative", "kind": "system_publisher", "install_path": "bin/Release/live_portfolio_conservative", "size": 104, "sha256": "4444444444444444444444444444444444444444444444444444444444444444"},
+    {"name": "qt_desk_prepare_sources", "kind": "desk_tool", "install_path": "bin/Release/qt_desk_prepare_sources", "size": 105, "sha256": "5555555555555555555555555555555555555555555555555555555555555555"},
+    {"name": "qt_desk_run", "kind": "desk_tool", "install_path": "bin/Release/qt_desk_run", "size": 106, "sha256": "6666666666666666666666666666666666666666666666666666666666666666"},
+    {"name": "qt_evaluator", "kind": "evaluator", "install_path": "bin/Release/qt_evaluator", "size": 107, "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"}
+  ],
+  "integration": {"pending_artifacts": ["qt_desk_worker"]},
+  "manifest_sha256": "92f1d6e2e89ff8f3ac37c2d2e87e66973657e6ab3d594b92e558869c7d42caaa"
+}

@@ -27,48 +27,124 @@ Preserve old service/assets for rollback; do not remove them.
 1. New explicit authorization replacing the production read-only boundary,
    approved maintenance window, recoverable backup/restore evidence, named
    operator and rollback owner. The no-email prohibition remains in force.
-2. Complete the coordinated migration012/application rollout plan separately.
-   Verify schema with the existing read-only checker and review SQL evidence;
-   a workflow boolean is an attestation, not an automated database audit.
+2. Complete the coordinated, hash-pinned migration/application rollout plan
+   separately. Production readiness must independently match the final database
+   identity/schema manifest; a workflow boolean remains an authorization
+   attestation, not a substitute for that machine check.
 3. Verify actual Nginx routes, Compose project/container labels, loopback ports,
    runtime env file and frontend cutover. Install/test the reviewed `/version`
    Nginx route separately. The helper does not edit Nginx or disable services.
 4. Configure a protected GitHub `production` environment with required reviewers
    and deployment branch rules. Local tests do NOT verify those controls.
 5. Set `ALGOLENS_COMPOSE_PROJECT`, `ALGOLENS_RUNTIME_ENV_FILE` (absolute server
-   path; do not expose its values), and `ALGOLENS_PUBLIC_ORIGIN`. Never copy
+   path; do not expose its values), and `ALGOLENS_PUBLIC_ORIGIN`. Also provision
+   absolute operator-controlled paths for `ALGOLENS_EVALUATOR_BUNDLE_DIR`,
+   `ALGOLENS_RELEASE_ARTIFACT_MANIFEST`, `ALGOLENS_DATABASE_IDENTITY_MANIFEST`,
+   `ALGOLENS_RUNTIME_MANIFEST_FILE`, and `ALGOLENS_RELEASE_EVIDENCE_DIR`. The
+   release helper computes the runtime manifest's exact SHA-256 and passes it as
+   `QT_RUNTIME_CONFIG_SHA256`; the backend rejects any different mounted bytes.
+   Never copy
    database secrets into frontend env. Configure `EC2_HOST`, `EC2_USER` and
    `EC2_SSH_KEY` secrets and `ALGOLENS_SSH_KNOWN_HOSTS` from an independently
    verified server host public key. The prepared SSH step rejects unknown or
    changed keys; do not populate trust with an unverified network scan.
 6. Retain current image IDs/digests, frontend artifacts, Compose settings,
    previous source SHA and Nginx config. Confirm rollback compatibility with
-   migration012; never automatically reverse an audit-data migration.
+   the approved migration manifest; never automatically reverse audit data.
+
+## Staged dependency boundary
+
+This branch contains checked-in `dependency-placeholder` fixtures only. They
+version and test consumer interfaces but can never return ready. Candidate
+acceptance requires all four final inputs:
+
+1. T1 `qt-capabilities/v1`: resolved digest and a runtime probe proving the
+   internal capability boundary is installed.
+2. T2 `release-artifacts/v1`: the concrete T2 schema from commit `d3468cd`,
+   including exact source/build/image/evaluator identity, all eight artifacts,
+   a canonical manifest self-hash, and `integration.pending_artifacts=[]`.
+   T5 owns the deterministic no-side-effect evaluator request and validates and
+   hashes the actual response; that handshake is not an invented T2 field.
+3. T3 `algolens-database-identity/v1`: exact `new_algo_data` server address,
+   data directory, limited API role, schema digest/probe implementation, and
+   the sole supported lifecycle-live book with matching evaluator pins.
+4. T4 `qt-worker-service/v1`: resolved digest and a runtime probe proving the
+   separate worker service is installed and healthy.
+
+The Flask configuration keys `QT_SCHEMA_READINESS_PROBE`,
+`QT_ROLE_READINESS_PROBE`,
+`QT_CAPABILITY_READINESS_PROBE`, and `QT_WORKER_READINESS_PROBE` are deliberate
+integration points. The schema and role callbacks accept the active read-only
+cursor and return the expected 64-hex schema and least-privilege role-contract
+digests respectively. The built-in role check also rejects PostgreSQL roles
+with superuser, create-role, create-database, replication, or bypass-RLS flags.
+Capability/worker callbacks accept their
+resolved dependency entry and return exactly `True` only after verifying that
+runtime. Their absence, an unresolved manifest, an unexpected live book, or any
+identity mismatch returns HTTP 503 from `/ready`. `/health` is process-only
+liveness and is not a release gate. Deep readiness probes are serialized and
+cached for at most five seconds per backend process; readiness responses always
+use `Cache-Control: no-store`.
+
+The staged CLI intentionally supplies none of those four callbacks, so it
+cannot return ready merely because a placeholder was replaced. During T6, wire
+the reviewed T1/T3/T4 probe implementations into both the Flask keys and the
+CLI call before candidate acceptance; the T5 signatures and refusal tests must
+remain unchanged. `app_factory.py` installs T1's `install_capability_guard`
+only after all blueprints plus `/version`, `/health`, and `/ready` are present;
+those three endpoints are the only explicit application-level open routes.
+
+The checked-in host Nginx configuration does not currently expose backend
+`/ready`. Add and independently review an exact no-cache proxy route during the
+coordinator-owned integration/cutover. Until loopback and public `/ready` both
+return the fixed ready payload, the release helper fails without success
+evidence.
 
 ## Prepared workflow behavior
 
 Manual-only, serialized dispatch requires four operational attestations. It
 checks the latest completed main push CI run for the requested exact40hex SHA,
 fetches/checks out that SHA in a clean checkout, then verifies HEAD again.
-It builds both images before recreating either, updates backend5000 and
-frontend3000, waits for container health, and compares public and loopback
-API `/version` and frontend `/release.json` with the expected SHA.
-Version checks do not query the database. The backend's separate healthcheck
-performs its existing read-only database check.
+It builds both images before recreating either, records their content-addressed
+image IDs, and runs the backend candidate container's read-only production
+preflight before replacing either serving container. It then updates
+backend5000 and frontend3000, runs the same preflight inside the installed
+backend, requires its canonical evidence to equal the candidate evidence,
+waits for `/ready`, proves each running image ID equals the built ID, and
+compares public and loopback API `/version`, frontend `/release.json`, and
+readiness.
+
+Readiness opens the database transaction read-only; checks exact database
+name/server/data-directory/current-role identity; rejects privileged role
+flags; compares the T3 role and schema digests; independently checks the exact
+live registry and policy sets so an unsupported live book cannot disappear in
+a join; requires the sole expected lifecycle-live book; compares its evaluator
+pins with T2; verifies the mounted runtime-config bytes; and launches the
+deterministic evaluator handshake through the sealed bundle. Public payloads
+contain only a fixed set of check statuses.
 
 No `git pull main`, host backend pip install, legacy5001 restart, automatic
 migration or mail call. Builds still depend on base-image/dependency registries;
 an exact source SHA is not bit-for-bit build reproducibility or digest promotion.
 
-Build failure does not update containers. Update/identity failure fails the
-workflow: no success claim or automatic database rollback. Use the approved
-maintenance rollback plan. Multi-container startup is not an atomic transaction.
+Build or candidate-preflight failure does not update containers. An update or
+identity failure fails the workflow without a success claim or automatic
+database rollback. Multi-container startup is not atomic. Success writes one
+mode-restricted `algolens-release-evidence/v1` record named by the full SHA.
+Its self-hash binds source SHA, built/running image IDs, trade-ngin/evaluator
+identities, schema/database/role identity, manifest/runtime-config hashes,
+dependency digests, supported books, the evaluator response hash, exact public
+and loopback endpoint payload hashes, the candidate/installed readiness
+evidence digests, and UTC time. The file is created without overwrite at mode
+0600 and both file and directory metadata are synced. It excludes passwords, DSNs,
+environment contents, and the data directory path.
 
 ## Offline evidence
 
 `python deployment/test_release.py` fakes all external commands. It checks
-approval gates, dirty/mismatched source, legacy frontend refusal, the serving
-Compose-pair update and installed-identity mismatch. It is **not** an SSH,
+approval gates, contract/path refusal, dirty/mismatched source, legacy frontend
+refusal, candidate-preflight ordering, the serving-pair update, installed-image
+mismatch, endpoints, and evidence hashing. It is **not** an SSH,
 Docker-image, GitHub-policy, Nginx or production-deployment certification.
 
 The CI-query action is pinned to a full reviewed

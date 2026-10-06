@@ -15,7 +15,7 @@ on:
         type: boolean
         default: false
       schema_verified:
-        description: Migration 012 and compatible schema independently verified
+        description: Exact hash-pinned migration manifest and database identity independently verified
         required: true
         type: boolean
         default: false
@@ -75,6 +75,11 @@ jobs:
           COMPOSE_PROJECT: ${{ vars.ALGOLENS_COMPOSE_PROJECT }}
           RUNTIME_ENV_FILE: ${{ vars.ALGOLENS_RUNTIME_ENV_FILE }}
           PUBLIC_ORIGIN: ${{ vars.ALGOLENS_PUBLIC_ORIGIN }}
+          EVALUATOR_BUNDLE_DIR: ${{ vars.ALGOLENS_EVALUATOR_BUNDLE_DIR }}
+          RELEASE_ARTIFACT_MANIFEST: ${{ vars.ALGOLENS_RELEASE_ARTIFACT_MANIFEST }}
+          DATABASE_IDENTITY_MANIFEST: ${{ vars.ALGOLENS_DATABASE_IDENTITY_MANIFEST }}
+          RELEASE_EVIDENCE_DIR: ${{ vars.ALGOLENS_RELEASE_EVIDENCE_DIR }}
+          RUNTIME_MANIFEST: ${{ vars.ALGOLENS_RUNTIME_MANIFEST_FILE }}
         run: |
             set -euo pipefail
             : "${SSH_HOST:?Verified SSH host required}"
@@ -89,8 +94,10 @@ jobs:
             trap 'rm -f -- "$key_file" "$hosts_file"' EXIT
             printf '%s\n' "$SSH_PRIVATE_KEY" > "$key_file"
             printf '%s\n' "$SSH_KNOWN_HOSTS" > "$hosts_file"
-            printf -v remote_command 'env RELEASE_SHA=%q COMPOSE_PROJECT=%q RUNTIME_ENV_FILE=%q PUBLIC_ORIGIN=%q bash -se' \
-              "$RELEASE_SHA" "$COMPOSE_PROJECT" "$RUNTIME_ENV_FILE" "$PUBLIC_ORIGIN"
+            printf -v remote_command 'env RELEASE_SHA=%q COMPOSE_PROJECT=%q RUNTIME_ENV_FILE=%q PUBLIC_ORIGIN=%q EVALUATOR_BUNDLE_DIR=%q RELEASE_ARTIFACT_MANIFEST=%q DATABASE_IDENTITY_MANIFEST=%q RELEASE_EVIDENCE_DIR=%q RUNTIME_MANIFEST=%q bash -se' \
+              "$RELEASE_SHA" "$COMPOSE_PROJECT" "$RUNTIME_ENV_FILE" "$PUBLIC_ORIGIN" \
+              "$EVALUATOR_BUNDLE_DIR" "$RELEASE_ARTIFACT_MANIFEST" \
+              "$DATABASE_IDENTITY_MANIFEST" "$RELEASE_EVIDENCE_DIR" "$RUNTIME_MANIFEST"
             ssh -i "$key_file" -o BatchMode=yes -o IdentitiesOnly=yes \
               -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$hosts_file" \
               -o ConnectTimeout=15 -o ServerAliveInterval=30 -o ServerAliveCountMax=3 \
@@ -101,13 +108,24 @@ jobs:
             test -n "$COMPOSE_PROJECT"
             test -n "$RUNTIME_ENV_FILE"
             test -n "$PUBLIC_ORIGIN"
+            test -n "$EVALUATOR_BUNDLE_DIR"
+            test -n "$RELEASE_ARTIFACT_MANIFEST"
+            test -n "$DATABASE_IDENTITY_MANIFEST"
+            test -n "$RELEASE_EVIDENCE_DIR"
+            test -n "$RUNTIME_MANIFEST"
             test -z "$(git status --porcelain --untracked-files=normal)"
             git fetch origin "$RELEASE_SHA"
             git checkout --detach "$RELEASE_SHA"
             test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
             python3 deployment/release.py --sha "$RELEASE_SHA" \
               --project "$COMPOSE_PROJECT" --env-file "$RUNTIME_ENV_FILE" \
-              --origin "$PUBLIC_ORIGIN" --rollout-approved --schema-verified \
+              --origin "$PUBLIC_ORIGIN" \
+              --evaluator-bundle-dir "$EVALUATOR_BUNDLE_DIR" \
+              --release-artifact-manifest "$RELEASE_ARTIFACT_MANIFEST" \
+              --database-identity-manifest "$DATABASE_IDENTITY_MANIFEST" \
+              --runtime-config-manifest "$RUNTIME_MANIFEST" \
+              --evidence-dir "$RELEASE_EVIDENCE_DIR" \
+              --rollout-approved --schema-verified \
               --backup-verified --maintenance-approved
             RELEASE
             REMOTE

@@ -7,6 +7,7 @@ information masking, and the JWT/CORS fail-closed-in-production guards.
 import os
 import subprocess
 import sys
+import types
 
 BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -57,13 +58,72 @@ def test_login_is_rate_limited(client, monkeypatch):
     assert 429 in statuses, f"expected a 429 after the limit; got {statuses}"
 
 
-# --- health endpoint masking -------------------------------------------------
+# --- liveness/readiness separation -------------------------------------------
 
 
-def test_health_exposes_detail_in_development(client):
-    # In development the health payload includes diagnostic fields...
-    body = client.get("/health").get_json()
-    assert "environment" in body and "cors_origins" in body
+def test_liveness_never_depends_on_database_or_exposes_configuration(client, monkeypatch):
+    import algolens.infrastructure.config.app_factory as app_factory
+
+    monkeypatch.setattr(app_factory, "get_db_connection", lambda: (_ for _ in ()).throw(RuntimeError("secret")))
+    response = client.get("/health")
+    assert response.status_code == 200
+    assert response.get_json() == {"status": "ok", "checks": {"process": "ok"}}
+
+
+def test_readiness_is_separate_and_public_payload_is_fixed(client):
+    import app as app_module
+
+    class NotReady:
+        ready = False
+        def public_payload(self):
+            return {"status": "not_ready", "checks": {"database": "error"}}
+
+    app_module.app.config["PRODUCTION_READINESS_CHECKER"] = lambda: NotReady()
+    try:
+        response = client.get("/ready")
+    finally:
+        app_module.app.config.pop("PRODUCTION_READINESS_CHECKER", None)
+    assert response.status_code == 503
+    assert response.get_json() == {"status": "not_ready", "checks": {"database": "error"}}
+    assert response.headers["Cache-Control"] == "no-store"
+
+
+def test_readiness_checker_exception_is_a_fixed_not_ready_response(client):
+    import app as app_module
+
+    def fail():
+        raise RuntimeError("private readiness detail")
+
+    app_module.app.config["PRODUCTION_READINESS_CHECKER"] = fail
+    try:
+        response = client.get("/ready")
+    finally:
+        app_module.app.config.pop("PRODUCTION_READINESS_CHECKER", None)
+    assert response.status_code == 503
+    assert response.get_json() == {
+        "status": "not_ready",
+        "checks": {"configuration": "error"},
+    }
+
+
+def test_capability_guard_integration_hook_runs_after_all_routes(monkeypatch):
+    import algolens.infrastructure.config.app_factory as app_factory
+
+    observed = {}
+    guard = types.ModuleType("algolens.adapters.http.capability_guard")
+
+    def install_capability_guard(app, *, explicitly_open_endpoints):
+        observed["endpoints"] = frozenset(app.view_functions)
+        observed["open"] = frozenset(explicitly_open_endpoints)
+
+    guard.install_capability_guard = install_capability_guard
+    monkeypatch.setitem(sys.modules, guard.__name__, guard)
+
+    app = app_factory.create_app()
+
+    assert app.config["CAPABILITY_GUARD_INSTALLED"] is True
+    assert {"version", "health_check", "readiness_check"} <= observed["endpoints"]
+    assert observed["open"] == {"version", "health_check", "readiness_check"}
 
 
 # --- fail-closed guards (evaluated at import time, so run in subprocesses) ----
@@ -80,8 +140,26 @@ def _import_app(env):
     )
 
 
+def _production_contract_env():
+    fixtures = os.path.join(BACKEND_DIR, "tests", "fixtures", "production_readiness")
+    return {
+        "FLASK_ENV": "production",
+        "FLASK_DEBUG": "false",
+        "DEV_MODE": "0",
+        "APP_RELEASE_SHA": "a" * 40,
+        "QT_EMAIL_DELIVERY_ENABLED": "false",
+        "DB_NAME": "new_algo_data",
+        "DB_USER": "algolens_api_runtime",
+        "QT_EVALUATOR_BUNDLE_DIR": "/app/qt-evaluator-bundle",
+        "QT_RUNTIME_CONFIG_MANIFEST": "/app/runtime-control/manifest.json",
+        "QT_RUNTIME_CONFIG_SHA256": "0" * 64,
+        "QT_RELEASE_ARTIFACT_MANIFEST": os.path.join(fixtures, "release-artifacts.v1.placeholder.json"),
+        "QT_DATABASE_IDENTITY_MANIFEST": os.path.join(fixtures, "database-identity.v1.placeholder.json"),
+    }
+
+
 def test_jwt_secret_fail_closed_in_production():
-    env = dict(os.environ)
+    env = {**os.environ, **_production_contract_env()}
     env.pop("JWT_SECRET_KEY", None)
     env["FLASK_ENV"] = "production"
     env["CORS_ORIGINS"] = "https://algolens.example.com"  # so CORS passes first
@@ -91,7 +169,7 @@ def test_jwt_secret_fail_closed_in_production():
 
 
 def test_cors_fail_closed_in_production():
-    env = dict(os.environ)
+    env = {**os.environ, **_production_contract_env()}
     env["FLASK_ENV"] = "production"
     env["JWT_SECRET_KEY"] = "some-real-secret"
     env["CORS_ORIGINS"] = ""  # empty -> must fail closed
@@ -101,9 +179,8 @@ def test_cors_fail_closed_in_production():
 
 
 def test_production_boots_with_valid_config():
-    # Sanity: with both secrets set, import succeeds (no DB needed at import time).
-    env = dict(os.environ)
-    env["FLASK_ENV"] = "production"
+    # Placeholders may boot for candidate inspection but /ready remains fail-closed.
+    env = {**os.environ, **_production_contract_env()}
     env["JWT_SECRET_KEY"] = "some-real-secret"
     env["CORS_ORIGINS"] = "https://algolens.example.com"
     result = _import_app(env)

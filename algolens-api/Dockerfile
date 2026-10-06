@@ -2,8 +2,11 @@ FROM python:3.14-slim
 
 WORKDIR /app
 
-# Install curl for healthcheck
-RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
+# curl serves the readiness healthcheck. util-linux provides the exact
+# /usr/bin/unshare isolation primitive required by the sealed evaluator path.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends curl util-linux \
+    && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements first for better caching
 COPY requirements.txt .
