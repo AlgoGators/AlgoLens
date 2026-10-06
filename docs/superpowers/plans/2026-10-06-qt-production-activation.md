@@ -211,7 +211,7 @@ PYTHONDONTWRITEBYTECODE=1 python3 -B -m unittest -v test_qt_evaluator_bundle.py 
 - verification: unit tests for refusal/cleanup plus a full scratch run using the bundled PostgreSQL 16 toolchain
 - estimate: L
 - coordination_risk: high
-- status: running
+- status: complete
 
 **Owned files:**
 
