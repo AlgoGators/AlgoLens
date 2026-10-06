@@ -71,6 +71,13 @@ class QtWorkflowService:
             raise QtWorkflowError("authorization_changed")
 
     @staticmethod
+    def _approval_account_eligible(accounts, actor_id):
+        if not accounts or not any(row.get("id") == actor_id
+                                   and row.get("role") in {"admin", "general_member", "exec_board"}
+                                   for row in accounts):
+            raise QtWorkflowError("authorization_changed")
+
+    @staticmethod
     def _book_owners(facts, engine, book):
         members = {(row["strategy_id"], row["portfolio_id"]) for row in facts["memberships"]}
         return [row for row in facts["registry"] if row["strategy_type"] == engine
@@ -665,7 +672,7 @@ class QtWorkflowService:
         users = sorted({actor_id, submitter, *(row[1] for row in discovered)})
         with self.repository.transaction(book_id, actor_id) as tx:
             accounts = tx.lock_authorities(users)
-            self._account_eligible(accounts, actor_id)
+            self._approval_account_eligible(accounts, actor_id)
             registry_ids = tx.registry_ids_for_book()
             registries = tx.lock_registries(registry_ids)
             registry_kind = registry_asset_class(registries)

@@ -4,7 +4,7 @@ from dataclasses import asdict, dataclass
 
 from algolens.domain.portfolio.qt_workflow_errors import QtWorkflowError
 
-CANONICAL_APPROVERS = frozenset({"eric_shwartz", "john_riley", "xander_robbins", "hemdutt_rao", "dominick_dupuoy"})
+CANONICAL_APPROVERS = frozenset({"john_riley", "xander_robbins", "hemdutt_rao", "dominick_dupuoy"})
 
 
 @dataclass(frozen=True)
@@ -21,7 +21,7 @@ def resolve_approved_person(actor_id: int, tx) -> QtApprovedPerson:
     account, grants, mappings = authority["account"], authority["grants"], authority["mappings"]
     capability = tx.capability()
     if (type(actor_id) is not int or actor_id <= 0 or account.get("id") != actor_id
-            or account.get("role") not in {"admin", "general_member"}
+            or account.get("role") not in {"admin", "general_member", "exec_board"}
             or capability.get("enabled") is not True
             or type(capability.get("version")) is not int or capability["version"] <= 0):
         raise QtWorkflowError("authorization_changed")

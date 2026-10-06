@@ -92,6 +92,19 @@ def test_approval_single_attempt_and_typed_conflict(client):
     assert service.approve_override.call_args.args[1] == 101
 
 
+def test_exec_board_can_approve_but_cannot_open_submitter_workspace(client):
+    browser, csrf, service, reads, _, account = client
+    account.role = 'exec_board'
+    response = browser.post('/portfolio/qt-override-requests/00000000-0000-4000-8000-000000000061/approvals',
+        json={'action': 'approve', 'idempotency_key': '00000000-0000-4000-8000-000000000063'},
+        headers={'X-CSRF-TOKEN': csrf})
+    assert response.status_code == 200
+    service.approve_override.assert_called_once()
+    denied = browser.get('/portfolio/qt-books/BOOK/proposal')
+    assert denied.status_code == 403
+    reads.get_proposal.assert_not_called()
+
+
 def test_storage_failure_is_safe_503(client):
     browser, _, _, reads, _, _ = client
     reads.get_proposal.side_effect = RuntimeError('sensitive connection detail')

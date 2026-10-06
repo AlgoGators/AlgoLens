@@ -58,6 +58,7 @@ describe('actual action-adjusted MODEL publication to HTTP and inspection', () =
     }));
     render(<ConfigurationInspectionPanel registryId={manifest.request.registry_id}
       portfolioId={manifest.request.portfolio_id} userId="synthetic-capture-reader" role="general_member" />);
+    fireEvent.click(screen.getByRole('button', { name: /Published configuration/ }));
     const region = await screen.findByRole('region', { name: 'Equity settings recorded for this run' });
     fireEvent.click(within(region).getByRole('button', { name: /Show corporate actions observations/ }));
     expect(within(region).getByText('These actions were recorded in the proved prior and next MODEL seed. This MODEL run did not reapply them.')).toBeTruthy();
@@ -74,6 +75,7 @@ describe('actual action-adjusted MODEL publication to HTTP and inspection', () =
     }));
     render(<ConfigurationInspectionPanel registryId={manifest.request.registry_id}
       portfolioId={manifest.request.portfolio_id} userId="synthetic-capture-reader" role="general_member" />);
+    fireEvent.click(screen.getByRole('button', { name: /Published configuration/ }));
     expect(await screen.findByText('Published configuration could not be loaded.')).toBeTruthy();
     expect(screen.queryByRole('region', { name: 'Equity settings recorded for this run' })).toBeNull();
   });

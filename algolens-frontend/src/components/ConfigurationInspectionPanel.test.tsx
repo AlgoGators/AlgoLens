@@ -33,15 +33,32 @@ const reply = (book = 'BOOK', status: 'available' | 'unavailable' = 'available')
 }), { headers: { 'Content-Type': 'application/json' } });
 const panel = (book = 'BOOK', userId = 'u1', role = 'general_member') =>
   <ConfigurationInspectionPanel registryId="trend" portfolioId={book} userId={userId} role={role} />;
+const openPublishedConfiguration = () =>
+  fireEvent.click(screen.getByRole('button', { name: /Published configuration/ }));
 
 describe('read-only published configuration panel', () => {
   beforeEach(() => { vi.restoreAllMocks(); });
+
+  it('starts collapsed and opens the published configuration from its disclosure control', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(reply());
+    render(panel());
+
+    const disclosure = screen.getByRole('button', { name: /Published configuration/ });
+    expect(disclosure.getAttribute('aria-expanded')).toBe('false');
+    expect(screen.queryByRole('button', { name: 'Refresh published configuration' })).toBeNull();
+
+    fireEvent.click(disclosure);
+
+    expect(disclosure.getAttribute('aria-expanded')).toBe('true');
+    expect(await screen.findByText('synthetic.test-1')).toBeTruthy();
+  });
 
   it.each(['available', 'unavailable'])('binds the synthetic equity %s response through the real HTTP parser and panel', async status => {
     const bytes = readFileSync(`../contracts/equity-inspection-v3-synthetic-${status}.json`, 'utf8');
     const sample = JSON.parse(bytes);
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(bytes, { headers: { 'Content-Type': 'application/json' } }));
     render(<ConfigurationInspectionPanel registryId={sample.scope.registry_id} portfolioId={sample.scope.portfolio_id} userId="u1" role="general_member" />);
+    openPublishedConfiguration();
     const region = await screen.findByRole('region', { name: 'Equity settings recorded for this run' });
     expect(within(region).getByText(`Read coverage: ${status === 'available' ? 'complete' : 'unavailable'}`)).toBeTruthy();
     expect(within(region).getAllByRole('heading', { level: 4 })).toHaveLength(10);
@@ -53,6 +70,7 @@ describe('read-only published configuration panel', () => {
       headers: { 'Content-Type': 'application/json' },
     }));
     render(panel());
+    openPublishedConfiguration();
     expect(await screen.findByText('local-test')).toBeTruthy();
     expect(screen.getByRole('heading', { name: 'Settings actually used' })).toBeTruthy();
   });
@@ -73,6 +91,7 @@ describe('read-only published configuration panel', () => {
   ) => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(capturedV2(stem, 'generated'));
     render(panel());
+    openPublishedConfiguration();
     expect(await screen.findByText('local-test')).toBeTruthy();
     const used = screen.getByRole('region', { name: 'Settings actually used' });
     expect(within(used).getByText(`Coverage: ${status}; reason: ${reason}`)).toBeTruthy();
@@ -110,6 +129,7 @@ describe('read-only published configuration panel', () => {
   ] as const)('refuses captured synthetic negative %s without stale evidence', async (stem, message) => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(capturedV2(stem, 'synthetic-negative-mutation'));
     render(panel());
+    openPublishedConfiguration();
     expect(await screen.findByText(message)).toBeTruthy();
     expect(screen.queryByRole('region', { name: 'Settings actually used' })).toBeNull();
     expect(screen.queryByText('local-test')).toBeNull();
@@ -120,6 +140,7 @@ describe('read-only published configuration panel', () => {
       .mockImplementationOnce(async () => capturedV2('publish_required_complete-5bcf79c0c445', 'generated'))
       .mockImplementationOnce(async () => capturedV2('mutation-mismatched-attempt', 'synthetic-negative-mutation'));
     const view = render(panel());
+    openPublishedConfiguration();
     await screen.findByRole('region', { name: 'Settings actually used' });
     fireEvent.click(screen.getByRole('button', { name: /Show setup observations/ }));
     expect(screen.getByRole('button', { name: /Observation #0: setup.selector/ })).toBeTruthy();
@@ -139,6 +160,7 @@ describe('read-only published configuration panel', () => {
       .mockImplementationOnce(() => new Promise<Response>(resolve => { release = resolve; }))
       .mockImplementationOnce(async () => capturedV2('publish_required_complete-5bcf79c0c445', 'generated'));
     const view = render(panel());
+    openPublishedConfiguration();
     await screen.findByRole('region', { name: 'Settings actually used' });
     fireEvent.click(screen.getByRole('button', { name: /Show setup observations/ }));
     expect(screen.getByRole('button', { name: /Observation #0: setup.selector/ })).toBeTruthy();
@@ -146,6 +168,7 @@ describe('read-only published configuration panel', () => {
     expect(screen.queryByRole('region', { name: 'Settings actually used' })).toBeNull();
     view.rerender(panel('BOOK', 'u2'));
     release?.(capturedV2('publish_required_complete-5bcf79c0c445', 'generated'));
+    openPublishedConfiguration();
     await screen.findByRole('region', { name: 'Settings actually used' });
     expect(screen.queryByRole('button', { name: /Observation #0: setup.selector/ })).toBeNull();
     expect(screen.getByRole('button', { name: /Show setup observations/ }).getAttribute('aria-expanded')).toBe('false');
@@ -160,6 +183,7 @@ describe('read-only published configuration panel', () => {
       return new Promise<Response>(resolve => { release = resolve; });
     });
     const view = render(panel());
+    openPublishedConfiguration();
     expect(screen.getByText(/Loading published configuration/)).toBeTruthy();
     view.unmount();
     expect(requestSignal?.aborted).toBe(true);
@@ -172,6 +196,7 @@ describe('read-only published configuration panel', () => {
       headers: { 'Content-Type': 'application/json' },
     }));
     render(panel());
+    openPublishedConfiguration();
     expect(await screen.findByText('local-test')).toBeTruthy();
     expect(screen.getByRole('table', { name: 'Supplied inputs' }).querySelectorAll('tbody tr')).toHaveLength(57);
     expect(screen.getByText(/#1 TREND/)).toBeTruthy();
@@ -183,6 +208,7 @@ describe('read-only published configuration panel', () => {
   it('shows publication context, all supplied states, distinct stages and no mutation controls', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(reply());
     render(panel());
+    openPublishedConfiguration();
     expect(await screen.findByText('synthetic.test-1')).toBeTruthy();
     expect(screen.getByText(/Run date: 2026-09-22/)).toBeTruthy();
     expect(screen.getByText(/Controlled publication/)).toBeTruthy();
@@ -201,6 +227,7 @@ describe('read-only published configuration panel', () => {
   it('offers keyboard-focusable named scrolling regions with intact table headers', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(reply());
     render(panel());
+    openPublishedConfiguration();
     await screen.findByText('synthetic.test-1');
     const names = ['Supplied inputs', 'Factory-resolved trend inputs', 'Constructor-normalized trend inputs'];
     for (const name of names) {
@@ -218,6 +245,7 @@ describe('read-only published configuration panel', () => {
     vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-09-23T15:00:00Z'));
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(reply());
     render(panel());
+    openPublishedConfiguration();
     expect(await screen.findByText(/Observation age: 1 day\./)).toBeTruthy();
   });
 
@@ -228,13 +256,16 @@ describe('read-only published configuration panel', () => {
       .mockImplementationOnce(() => new Promise<Response>(resolve => { release = resolve; }))
       .mockResolvedValueOnce(reply('BOOK'));
     const view = render(panel());
+    openPublishedConfiguration();
     await screen.findByText('synthetic.test-1');
     view.rerender(panel('OTHER'));
     expect(screen.queryByText('synthetic.test-1')).toBeNull();
-    expect(screen.getByText(/Registry: trend; book: OTHER/)).toBeTruthy();
+    expect(screen.getByText('Registry: trend')).toBeTruthy();
+    expect(screen.getByText('Book: OTHER')).toBeTruthy();
     view.rerender(panel('BOOK', 'u2'));
     expect(screen.queryByText('synthetic.test-1')).toBeNull();
     release?.(reply('OTHER'));
+    openPublishedConfiguration();
     await screen.findByText('synthetic.test-1');
     expect(fetchMock).toHaveBeenCalledTimes(3);
   });
@@ -245,6 +276,7 @@ describe('read-only published configuration panel', () => {
       .mockResolvedValueOnce(reply('BOOK', 'unavailable'))
       .mockResolvedValueOnce(new Response('PRIVATE-SECRET', { status: 503 }));
     const view = render(panel());
+    openPublishedConfiguration();
     await screen.findByText('synthetic.test-1');
     fireEvent.click(screen.getByRole('button', { name: 'Refresh published configuration' }));
     expect(screen.queryByText('synthetic.test-1')).toBeNull();
@@ -266,6 +298,7 @@ describe('read-only published configuration panel', () => {
       reason: 'capture_failed', publication: unavailableCapture,
     }), { headers: { 'Content-Type': 'application/json' } }));
     render(panel());
+    openPublishedConfiguration();
     expect(await screen.findByText(/Configuration capture was unavailable/)).toBeTruthy();
     expect(screen.getByText('synthetic.test-1')).toBeTruthy();
     expect(screen.getByText(/Run date: 2026-09-22/)).toBeTruthy();

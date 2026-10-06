@@ -45,7 +45,7 @@ def _read_service():
     return create_qt_decision_read_service(evaluator_bundle_directory=configured if configured else None)
 
 
-def current_actor():
+def current_actor(allowed_roles=frozenset({'admin', 'general_member'})):
     subject = get_jwt_identity()
     if type(subject) is not str or not subject.isascii() or not subject.isdecimal() or subject.startswith('0'):
         raise QtWorkflowError('authorization_changed')
@@ -54,7 +54,7 @@ def current_actor():
         account = VerifySession(users).execute(subject)
     except UserNotFound:
         raise QtWorkflowError('authorization_changed') from None
-    if str(account.id) != subject or account.role not in {'admin', 'general_member'}:
+    if str(account.id) != subject or account.role not in allowed_roles:
         raise QtWorkflowError('authorization_changed')
     return int(subject)
 
@@ -85,18 +85,24 @@ def _id(value):
         raise QtWorkflowError('invalid_qt_payload') from None
 
 
-def _boundary(fn):
-    @wraps(fn)
-    @jwt_required()
-    def wrapped(*args, **kwargs):
-        try:
-            return jsonify(fn(current_actor(), *args, **kwargs).to_wire())
-        except QtWorkflowError as exc:
-            return jsonify(exc.to_wire(book_id=kwargs.get('book_id'), preview_id=kwargs.get('preview_id'))), exc.http_status
-        except Exception:
-            exc = QtWorkflowError('workflow_unavailable')
-            return jsonify(exc.to_wire(book_id=kwargs.get('book_id'), preview_id=kwargs.get('preview_id'))), 503
-    return wrapped
+def _boundary_for_roles(allowed_roles):
+    def decorate(fn):
+        @wraps(fn)
+        @jwt_required()
+        def wrapped(*args, **kwargs):
+            try:
+                return jsonify(fn(current_actor(allowed_roles), *args, **kwargs).to_wire())
+            except QtWorkflowError as exc:
+                return jsonify(exc.to_wire(book_id=kwargs.get('book_id'), preview_id=kwargs.get('preview_id'))), exc.http_status
+            except Exception:
+                exc = QtWorkflowError('workflow_unavailable')
+                return jsonify(exc.to_wire(book_id=kwargs.get('book_id'), preview_id=kwargs.get('preview_id'))), 503
+        return wrapped
+    return decorate
+
+
+_boundary = _boundary_for_roles(frozenset({'admin', 'general_member'}))
+_approval_boundary = _boundary_for_roles(frozenset({'admin', 'general_member', 'exec_board'}))
 
 
 @qt_workflow_bp.get('/qt-books/<book_id>/proposal')
@@ -130,19 +136,19 @@ def confirm(actor, preview_id):
 
 
 @qt_workflow_bp.post('/qt-override-requests/<request_id>/approvals')
-@_boundary
+@_approval_boundary
 def approve(actor, request_id):
     return _workflow_service().approve_override(_id(request_id), actor, _body(QtApproveRequest))
 
 
 @qt_workflow_bp.get('/qt-decisions/<decision_id>')
-@_boundary
+@_approval_boundary
 def decision(actor, decision_id):
     return _read_service().get_decision(_id(decision_id), actor)
 
 
 @qt_workflow_bp.get('/qt-books/<book_id>/decision')
-@_boundary
+@_approval_boundary
 def book_decision(actor, book_id):
     if set(request.args) - {'source_day'} or len(request.args.getlist('source_day')) > 1:
         raise QtWorkflowError('invalid_qt_payload')

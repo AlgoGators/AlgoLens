@@ -1044,7 +1044,8 @@ describe('published configuration follows the selected registry and book', () =>
       throw new ApiError('x', 404, 'no_data_for_book', 'none yet');
     };
     render(<StrategyDetail strategy={primary()} onBack={() => {}} />);
-    await screen.findByText(/Registry: trendfollowing; book: CONSERVATIVE_PORTFOLIO/);
+    await screen.findByText('Registry: trendfollowing');
+    await screen.findByText('Book: CONSERVATIVE_PORTFOLIO');
     fireEvent.change(topBox(), { target: { value: 'AGGRESSIVE_PORTFOLIO' } });
     await screen.findByText(/Nothing published for Trend Following in/);
     expect(screen.queryByRole('region', { name: 'Published configuration' })).toBeNull();
@@ -1059,10 +1060,12 @@ describe('published configuration follows the selected registry and book', () =>
       throw new ApiError('x', 503);
     };
     render(<StrategyDetail strategy={primary()} onBack={() => {}} />);
+    fireEvent.click(await screen.findByRole('button', { name: /Published configuration/ }));
     await screen.findByText(/No published configuration for this book/);
     fireEvent.change(topBox(), { target: { value: 'AGGRESSIVE_PORTFOLIO' } });
     await screen.findByRole('alert');
-    expect(screen.getByText(/Registry: trendfollowing; book: CONSERVATIVE_PORTFOLIO/)).toBeTruthy();
+    expect(screen.getByText('Registry: trendfollowing')).toBeTruthy();
+    expect(screen.getByText('Book: CONSERVATIVE_PORTFOLIO')).toBeTruthy();
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     expect(fetchMock.mock.calls[1][0]).toMatch(/configuration\?portfolio_id=CONSERVATIVE_PORTFOLIO$/);
   });
@@ -1079,10 +1082,11 @@ describe('published configuration follows the selected registry and book', () =>
     await waitFor(() => expect(screen.getByTestId('positions').textContent)
       .toBe('CONSERVATIVE_PORTFOLIO:C-POS'));
     fireEvent.change(topBox(), { target: { value: 'AGGRESSIVE_PORTFOLIO' } });
-    await waitFor(() => expect(screen.getByText(/Registry: trendfollowing; book: AGGRESSIVE_PORTFOLIO/)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText('Book: AGGRESSIVE_PORTFOLIO')).toBeTruthy());
     view.rerender(<StrategyDetail strategy={strategy({ id: 'newregistry', tag: 'N' })} onBack={() => {}} />);
-    expect(screen.queryByText(/Registry: newregistry; book: AGGRESSIVE_PORTFOLIO/)).toBeNull();
-    await screen.findByText(/Registry: newregistry; book: CONSERVATIVE_PORTFOLIO/);
+    expect(screen.queryByText('Registry: newregistry')).toBeNull();
+    await screen.findByText('Registry: newregistry');
+    await screen.findByText('Book: CONSERVATIVE_PORTFOLIO');
     expect(fetchMock.mock.calls.map(call => String(call[0])).some(url =>
       url.includes('/newregistry/configuration?portfolio_id=AGGRESSIVE_PORTFOLIO'))).toBe(false);
   });

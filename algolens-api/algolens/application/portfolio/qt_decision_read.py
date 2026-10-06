@@ -68,11 +68,18 @@ class QtDecisionReadService:
 
     @staticmethod
     def _access(tx, accounts, facts, registry_ids, actor, *, require_desk_grant=True):
-        QtWorkflowService._account_eligible(accounts, actor)
         authority = tx.approval_authority(actor)
-        if require_desk_grant and not any(row.get('capability') in {'qt_submit', 'qt_approve'} and row.get('active') is True
-                   and row.get('user_id') == actor for row in authority['grants']):
-            raise QtWorkflowError('authorization_changed')
+        active_grants = {row.get('capability') for row in authority['grants']
+            if row.get('active') is True and row.get('user_id') == actor}
+        if require_desk_grant:
+            if 'qt_submit' in active_grants:
+                QtWorkflowService._account_eligible(accounts, actor)
+            elif 'qt_approve' in active_grants:
+                QtWorkflowService._approval_account_eligible(accounts, actor)
+            else:
+                raise QtWorkflowError('authorization_changed')
+        else:
+            QtWorkflowService._account_eligible(accounts, actor)
         if tuple(sorted(row['id'] for row in facts['registry'])) != registry_ids:
             raise QtWorkflowError('authorization_changed')
         members = {(row['strategy_id'], row['portfolio_id']) for row in facts['memberships']}

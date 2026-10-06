@@ -17,7 +17,7 @@ it.each(['submit', 'retry'] as const)('preserves uncertain approval intent befor
   const approval = { actor_id: '101', book_id: intent.book_id,
     request_id: fixtures.confirm_pending.request_id!, idempotency_key: intent.idempotency_key };
   const fetch = vi.fn().mockResolvedValue(json({ ...fixtures.confirm_pending,
-    approvals: [{ person_id: 'eric_shwartz', display_label: 'Eric Shwartz', user_id: '101',
+    approvals: [{ person_id: 'hemdutt_rao', display_label: 'Hemdutt Rao', user_id: '101',
       approved_at: '2026-09-25T16:00:00Z' }], approvals_count: 1, can_approve: false,
     read_set_digest: 'e'.repeat(64) }));
   vi.stubGlobal('fetch', fetch);
@@ -110,8 +110,8 @@ it.each(['submit', 'retry'] as const)('preserves known approval recovery after s
   const previous = operation === 'submit' ? QtRecovery.submitApproval(sessionStorage, approval, () => current) :
     QtRecovery.retryApproval(sessionStorage, '101', intent.book_id, () => current);
   current = false;
-  resolve(json({ ...fixtures.confirm_pending, approvals: [{ person_id: 'eric_shwartz',
-    display_label: 'Eric Shwartz', user_id: '101', approved_at: '2026-09-25T16:00:00Z' }],
+  resolve(json({ ...fixtures.confirm_pending, approvals: [{ person_id: 'hemdutt_rao',
+    display_label: 'Hemdutt Rao', user_id: '101', approved_at: '2026-09-25T16:00:00Z' }],
     approvals_count: 1, can_approve: false }));
   await previous;
   expect(QtRecovery.loadApproval(sessionStorage, '101', intent.book_id)).toEqual(stored);
@@ -217,8 +217,8 @@ it('does not replace a pending approval retry key with another key', async () =>
 });
 
 it('releases an acknowledged R1 approval slot so a later R2 in the same book can post', async () => {
-  const recorded = { ...fixtures.confirm_pending, approvals: [{ person_id: 'eric_shwartz',
-    display_label: 'Eric Shwartz', user_id: '101', approved_at: '2026-09-25T16:00:00Z' }],
+  const recorded = { ...fixtures.confirm_pending, approvals: [{ person_id: 'hemdutt_rao',
+    display_label: 'Hemdutt Rao', user_id: '101', approved_at: '2026-09-25T16:00:00Z' }],
     approvals_count: 1, can_approve: false };
   const later = { ...recorded, request_id: '50000000-0000-4000-8000-000000000099',
     decision_id: '40000000-0000-4000-8000-000000000099' };

@@ -25,6 +25,8 @@ const detail = (strategy = equity, isLoading = false, error: string | null = nul
   <IncubationDetail strategy={strategy} performance={{ equity_curve: [], positions: [
     { date: '2026-09-25', symbol: 'AAPL', quantity: 1.25, entry_price: 200 },
   ] }} isLoading={isLoading} error={error} onBack={() => {}} onLifecycleChanged={() => {}} />;
+const openConfiguration = (panel: HTMLElement) =>
+  fireEvent.click(within(panel).getByRole('button', { name: /Published configuration/ }));
 
 describe('issue84 incubation configuration identity', () => {
   beforeEach(() => {
@@ -37,8 +39,10 @@ describe('issue84 incubation configuration identity', () => {
     const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(reply());
     render(detail());
     const panel = await screen.findByRole('region', { name: 'Published configuration' });
+    openConfiguration(panel);
     expect(await within(panel).findByText('No published configuration for this book.')).toBeTruthy();
-    expect(within(panel).getByText('Registry: inc_meanrev; book: EQUITY_MR_PORTFOLIO')).toBeTruthy();
+    expect(within(panel).getByText('Registry: inc_meanrev')).toBeTruthy();
+    expect(within(panel).getByText('Book: EQUITY_MR_PORTFOLIO')).toBeTruthy();
     expect(screen.getByText('AAPL')).toBeTruthy();
     expect(screen.getByText('1.25')).toBeTruthy();
     expect(fetch).toHaveBeenCalledTimes(1);
@@ -53,6 +57,7 @@ describe('issue84 incubation configuration identity', () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(reply('EQUITY_MR_PORTFOLIO', 'unsupported_publication'));
     render(detail());
     const panel = await screen.findByRole('region', { name: 'Published configuration' });
+    openConfiguration(panel);
     expect(await within(panel).findByText('This publication version is unavailable.')).toBeTruthy();
     expect(within(panel).queryByRole('table', { name: 'Supplied inputs' })).toBeNull();
     expect(within(panel).queryByRole('region', { name: 'Settings actually used' })).toBeNull();
@@ -63,6 +68,7 @@ describe('issue84 incubation configuration identity', () => {
     const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(reply('BASE_PORTFOLIO'));
     render(detail());
     const panel = await screen.findByRole('region', { name: 'Published configuration' });
+    openConfiguration(panel);
     expect(await within(panel).findByRole('alert')).toHaveProperty('textContent', 'Published configuration could not be loaded.');
     expect(within(panel).queryByText(/BASE_PORTFOLIO/)).toBeNull();
     expect(within(panel).queryByText('No published configuration for this book.')).toBeNull();
@@ -75,6 +81,7 @@ describe('issue84 incubation configuration identity', () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(reply());
     render(detail(equity, loading, error));
     const panel = await screen.findByRole('region', { name: 'Published configuration' });
+    openConfiguration(panel);
     expect(await within(panel).findByText('No published configuration for this book.')).toBeTruthy();
   });
 
@@ -88,10 +95,12 @@ describe('issue84 incubation configuration identity', () => {
       })
       .mockResolvedValueOnce(reply('SECOND_EQUITY_BOOK', 'unsupported_publication'));
     const view = render(detail());
-    expect(screen.getByText('Registry: inc_meanrev; book: EQUITY_MR_PORTFOLIO')).toBeTruthy();
+    expect(screen.getByText('Registry: inc_meanrev')).toBeTruthy();
+    expect(screen.getByText('Book: EQUITY_MR_PORTFOLIO')).toBeTruthy();
     view.rerender(detail({ ...equity, portfolio_id: 'SECOND_EQUITY_BOOK' }));
-    expect(screen.queryByText('Registry: inc_meanrev; book: EQUITY_MR_PORTFOLIO')).toBeNull();
+    expect(screen.queryByText('Book: EQUITY_MR_PORTFOLIO')).toBeNull();
     expect(previousSignal?.aborted).toBe(true);
+    openConfiguration(await screen.findByRole('region', { name: 'Published configuration' }));
     expect(await screen.findByText('This publication version is unavailable.')).toBeTruthy();
     await act(async () => { release?.(reply()); });
     expect(screen.queryByText('No published configuration for this book.')).toBeNull();
@@ -102,6 +111,7 @@ describe('issue84 incubation configuration identity', () => {
   it('drops configuration immediately when the internal role is lost', async () => {
     const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(reply());
     const view = render(detail());
+    openConfiguration(await screen.findByRole('region', { name: 'Published configuration' }));
     await screen.findByText('No published configuration for this book.');
     role = 'subscriber_individual';
     view.rerender(detail());

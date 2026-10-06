@@ -16,12 +16,12 @@ def approval_request():
 
 
 def pending(dsn):
-    query(dsn, """INSERT INTO auth.users(id,role) VALUES (202,'general_member'),(303,'general_member')
+    query(dsn, """INSERT INTO auth.users(id,role) VALUES (202,'exec_board'),(303,'general_member')
         ON CONFLICT(id) DO UPDATE SET role=excluded.role;
         INSERT INTO trading.qt_action_grants(user_id,capability,active,version)
           VALUES(101,'qt_approve',true,1),(202,'qt_approve',true,1),(303,'qt_approve',true,1);
         INSERT INTO trading.qt_approver_allowlist(person_id,display_label,user_id,active,mapping_version)
-          VALUES('eric_shwartz','eric shwartz',101,true,1),('john_riley','john riley',202,true,1),
+          VALUES('john_riley','john riley',101,true,1),('hemdutt_rao','hemdutt rao',202,true,1),
                 ('xander_robbins','xander robbins',303,false,1);""")
     service, preview, confirm = prepared(dsn, case="allowed_breach")
     decision = service.confirm_preview(preview["preview_id"], 101, confirm).to_wire()
@@ -123,9 +123,9 @@ def test_actual_duplicate_person_or_account_mapping_is_physically_rejected(previ
     service, decision = pending(preview_db)
     with pytest.raises(psycopg2.IntegrityError):
         query(preview_db, "INSERT INTO trading.qt_approver_allowlist VALUES "
-              "('eric_shwartz','eric shwartz',303,true,1,clock_timestamp())")
+              "('hemdutt_rao','hemdutt rao',303,true,1,clock_timestamp())")
     with pytest.raises(psycopg2.IntegrityError):
         query(preview_db, "INSERT INTO trading.qt_approver_allowlist VALUES "
-              "('hemdutt_rao','hemdutt rao',101,true,1,clock_timestamp())")
+              "('xander_robbins','xander robbins',101,true,1,clock_timestamp())")
     assert_pending(preview_db, 0)
     assert service.approve_override(decision["request_id"], 101, approval_request()).to_wire()["approvals_count"] == 1

@@ -8,14 +8,16 @@ from algolens.infrastructure.portfolio import qt_decision_read_repository as sto
 from tests.test_qt_a4_draft import DraftRepository, _ready_provenance, key
 
 
-def setup_reader(monkeypatch, tmp_path, capability='qt_approve'):
+def setup_reader(monkeypatch, tmp_path, capability='qt_approve', role='general_member'):
     from algolens.application.portfolio import qt_decision_read as module
     assert hasattr(module, 'QtDecisionReadService'), 'A8 read-only workflow service is missing'
     repository = DraftRepository()
     tx = repository.tx
     tx.book_id = 'BOOK'
-    tx.approval_authority = lambda actor: {'account': {'id': actor, 'role': 'general_member'},
-        'grants': [{'user_id': actor, 'capability': capability, 'active': True, 'version': 1}], 'mappings': []}
+    tx.approval_authority = lambda actor: {'account': {'id': actor, 'role': role},
+        'grants': [{'user_id': actor, 'capability': capability, 'active': True, 'version': 1}],
+        'mappings': ([{'user_id': actor, 'person_id': 'hemdutt_rao', 'active': True, 'mapping_version': 1}]
+                     if role == 'exec_board' and capability == 'qt_approve' else [])}
     facts = tx.read_current_facts()
     facts['capability'].update(version=1)
     tx.capability = lambda: facts['capability']
@@ -34,6 +36,14 @@ def setup_reader(monkeypatch, tmp_path, capability='qt_approve'):
     tx._require_mutable = lambda: None
     service = create_qt_decision_read_service(repository, evaluator_bundle_directory=tmp_path)
     return service, tx, facts
+
+
+def test_exec_board_with_approval_grant_can_read_without_submit_access(monkeypatch, tmp_path):
+    service, _, _ = setup_reader(monkeypatch, tmp_path, role='exec_board')
+    result = service.get_proposal('BOOK', 101).to_wire()
+    assert result['action_grants'] == {
+        'can_save_draft': False, 'can_confirm': False, 'can_approve': True,
+    }
 
 
 def test_approve_only_can_read_actual_model_seed_and_immutable_saved_qt(monkeypatch, tmp_path):
@@ -177,7 +187,7 @@ def test_changed_approval_discovery_requires_new_authority_snapshot(monkeypatch)
     from algolens.application.portfolio import qt_decision_read as module
     service, _, _, _, context = decision_reader(monkeypatch)
     changed = {**context, 'approvals': [{'approval_id': '00000000-0000-4000-8000-000000000001',
-        'user_id': 303, 'person_id': 'eric_shwartz', 'mapping_version': 1, 'grant_version': 1}]}
+        'user_id': 303, 'person_id': 'hemdutt_rao', 'mapping_version': 1, 'grant_version': 1}]}
     monkeypatch.setattr(storage, '_context', lambda *a: changed)
     with pytest.raises(QtWorkflowError) as exc: service.get_decision('00000000-0000-4000-8000-000000000081', 202)
     assert exc.value.code == 'authorization_changed'

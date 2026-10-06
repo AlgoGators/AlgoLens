@@ -82,7 +82,7 @@ const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const diagnosticPattern = /^-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?$/;
 const accountPattern = /^(?:0|[1-9][0-9]*)$/;
 const utcStamp = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|\+00:00)$/;
-const approverIds = new Set(['eric_shwartz', 'john_riley', 'xander_robbins', 'hemdutt_rao', 'dominick_dupuoy']);
+const approverIds = new Set(['john_riley', 'xander_robbins', 'hemdutt_rao', 'dominick_dupuoy']);
 
 function fail(): never { throw new Error('invalid_qt_payload'); }
 function object(value: unknown, fields: readonly string[]): Record<string, unknown> {

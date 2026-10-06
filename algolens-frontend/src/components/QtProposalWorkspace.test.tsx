@@ -36,12 +36,48 @@ beforeEach(() => {
 afterEach(() => { sessionStorage.clear(); });
 
 describe('QT proposal workspace', () => {
+  it('auto-saves the current choice during evaluation and only then offers position confirmation', async () => {
+    const legacy: any = structuredClone(fixtures.draft_saved);
+    legacy.state = 'absent';
+    legacy.draft_id = null;
+    legacy.draft_revision = 0;
+    legacy.draft_digest = null;
+    legacy.rationale = null;
+    api.getDraft.mockResolvedValue(decodeQtDraft(legacy));
+    const savedRaw = structuredClone(fixtures.draft_saved);
+    savedRaw.rationale = 'Reduce concentration before the event window.';
+    const saved = decodeQtDraft(savedRaw);
+    const preview = decodeQtPreview(structuredClone(fixtures.preview_clean));
+    api.saveDraft.mockResolvedValue(saved);
+    api.createPreview.mockResolvedValue(preview);
+    api.confirmPreview.mockResolvedValue(processed());
+    render(<QtProposalWorkspace {...props} onPublished={vi.fn()} />);
+
+    expect(screen.queryByRole('button', { name: 'Save draft' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Confirm positions' })).toBeNull();
+    await userEvent.setup().type(await screen.findByRole('textbox', {
+      name: 'Why should this position change be made?',
+    }), '  Reduce concentration before the event window.  ');
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Evaluate selections' }));
+
+    expect(api.saveDraft).toHaveBeenCalledWith(props.bookId, expect.objectContaining({
+      rationale: 'Reduce concentration before the event window.',
+    }));
+    expect(api.createPreview).toHaveBeenCalledWith(expect.objectContaining({
+      draft_revision: 1,
+      draft_digest: saved.draft_digest,
+    }));
+    const confirm = await screen.findByRole('button', { name: 'Confirm positions' });
+    await userEvent.setup().click(confirm);
+    expect(api.confirmPreview).toHaveBeenCalledTimes(1);
+  });
+
   it.each(['read_set_digest', 'selected_book_digest', 'preview_id', 'decision_id'] as const)(
     'keeps the original local approval key when acknowledged %s evidence mismatches', async field => {
       const scoped = proposal(); scoped.action_grants.can_approve = true; api.getProposal.mockResolvedValue(scoped);
       const local = decodeQtDecision({ ...fixtures.confirm_pending, can_approve: true });
       const acknowledged = decodeQtDecision({ ...local, can_approve: false, approvals_count: 1,
-        approvals: [{ person_id: 'eric_shwartz', display_label: 'Eric Shwartz', user_id: '101',
+        approvals: [{ person_id: 'hemdutt_rao', display_label: 'Hemdutt Rao', user_id: '101',
           approved_at: '2026-09-25T16:00:00Z' }] });
       const wrong = { ...acknowledged, [field]: field.endsWith('digest') ? 'e'.repeat(64) :
         '90000000-0000-4000-8000-000000000099' };
@@ -49,8 +85,8 @@ describe('QT proposal workspace', () => {
       api.approveOverride.mockResolvedValueOnce(wrong).mockResolvedValue(acknowledged);
       render(<QtProposalWorkspace {...props} onPublished={vi.fn()} />);
       const user = userEvent.setup();
-      await user.click(await screen.findByRole('button', { name: 'Evaluate my selection' }));
-      await user.click(await screen.findByRole('button', { name: 'Confirm and request two approvals' }));
+      await user.click(await screen.findByRole('button', { name: 'Evaluate selections' }));
+      await user.click(await screen.findByRole('button', { name: 'Confirm positions and request approvals' }));
       await user.click(await screen.findByRole('button', { name: 'Approve override' }));
       await screen.findByText(/outcome is uncertain/);
       const original = QtRecovery.loadApproval(sessionStorage, '101', props.bookId)!;
@@ -63,7 +99,7 @@ describe('QT proposal workspace', () => {
       expect(api.approveOverride).toHaveBeenCalledTimes(2);
       expect(api.approveOverride.mock.calls[1]).toEqual([local.request_id,
         { action: 'approve', idempotency_key: original.idempotency_key }]);
-      expect(await screen.findByText(/Eric Shwartz approved/)).toBeTruthy();
+      expect(await screen.findByText(/Hemdutt Rao approved/)).toBeTruthy();
     });
 
   it.each(['missing', 'unavailable', 'not_required', 'grant_missing', 'decision_denied'] as const)(
@@ -139,7 +175,7 @@ describe('QT proposal workspace', () => {
     api.getBookDecision.mockResolvedValue({ schema_version: 'qt-workflow/v1', book_id: props.bookId,
       source_day: props.sourceDay, decision: newer, preview: breach() });
     api.approveOverride.mockResolvedValue(decodeQtDecision({ ...fixtures.confirm_pending, can_approve: false,
-      approvals_count: 1, approvals: [{ person_id: 'eric_shwartz', display_label: 'Eric Shwartz', user_id: '101',
+      approvals_count: 1, approvals: [{ person_id: 'hemdutt_rao', display_label: 'Hemdutt Rao', user_id: '101',
         approved_at: '2026-09-25T16:00:00Z' }] }));
     render(<QtProposalWorkspace {...props} onPublished={vi.fn()} />);
     await screen.findByRole('region', { name: 'Immutable QT decision review' });
@@ -164,11 +200,11 @@ describe('QT proposal workspace', () => {
       idempotency_key: '33333333-3333-4333-8333-333333333333' };
     QtRecovery.stageApproval(sessionStorage, active);
     await act(async () => late.resolve(decodeQtDecision({ ...review, can_approve: false, approvals_count: 1,
-      approvals: [{ person_id: 'eric_shwartz', display_label: 'Eric Shwartz', user_id: '101',
+      approvals: [{ person_id: 'hemdutt_rao', display_label: 'Hemdutt Rao', user_id: '101',
         approved_at: '2026-09-25T16:00:00Z' }] })));
     expect(QtRecovery.loadApproval(sessionStorage, '202', props.bookId)).toEqual(active);
     expect(QtRecovery.loadApproval(sessionStorage, '101', props.bookId)).toBeNull();
-    expect(screen.queryByText(/Eric Shwartz approved/)).toBeNull();
+    expect(screen.queryByText(/Hemdutt Rao approved/)).toBeNull();
   });
 
   it('keeps mismatched discovered approval uncertain, locks actual editor inputs and explicitly retries the same key', async () => {
@@ -177,7 +213,7 @@ describe('QT proposal workspace', () => {
     api.getBookDecision.mockResolvedValue({ schema_version: 'qt-workflow/v1', book_id: props.bookId,
       source_day: props.sourceDay, decision: review, preview: breach() });
     const acknowledged = decodeQtDecision({ ...review, can_approve: false, approvals_count: 1,
-      approvals: [{ person_id: 'eric_shwartz', display_label: 'Eric Shwartz', user_id: '101',
+      approvals: [{ person_id: 'hemdutt_rao', display_label: 'Hemdutt Rao', user_id: '101',
         approved_at: '2026-09-25T16:00:00Z' }] });
     api.approveOverride.mockResolvedValueOnce({ ...acknowledged, read_set_digest: 'e'.repeat(64) }).mockResolvedValue(acknowledged);
     render(<QtProposalWorkspace {...props} onPublished={vi.fn()} />);
@@ -191,7 +227,7 @@ describe('QT proposal workspace', () => {
     await userEvent.setup().click(screen.getByRole('button', { name: 'Retry approval' }));
     await waitFor(() => expect(QtRecovery.loadApproval(sessionStorage, '101', props.bookId)).toBeNull());
     expect(api.approveOverride.mock.calls[1][1].idempotency_key).toBe(original.idempotency_key);
-    expect(await screen.findByText(/Eric Shwartz approved/)).toBeTruthy();
+    expect(await screen.findByText(/Hemdutt Rao approved/)).toBeTruthy();
   });
 
   it('lets a new distinct approver discover and approve immutable 5/1 evidence without actor-local confirmation', async () => {
@@ -199,7 +235,7 @@ describe('QT proposal workspace', () => {
     scoped.action_grants.can_confirm = false; scoped.action_grants.can_approve = true;
     api.getProposal.mockResolvedValue(scoped);
     const review = decodeQtDecision({ ...fixtures.confirm_pending, can_approve: true, approvals_count: 1,
-      approvals: [{ person_id: 'eric_shwartz', display_label: 'Eric Shwartz', user_id: '101',
+      approvals: [{ person_id: 'hemdutt_rao', display_label: 'Hemdutt Rao', user_id: '101',
         approved_at: '2026-09-25T16:00:00Z' }] });
     api.getBookDecision.mockResolvedValue({ schema_version: 'qt-workflow/v1', book_id: props.bookId,
       source_day: props.sourceDay, decision: review, preview: breach() });
@@ -322,7 +358,7 @@ describe('QT proposal workspace', () => {
     expect(within(second).getByText('2')).toBeTruthy();
     expect((within(second).getByRole('textbox') as HTMLInputElement).value).toBe('1');
     expect(within(second).getByText('-1')).toBeTruthy();
-    await userEvent.setup().click(screen.getByRole('button', { name: 'Evaluate my selection' }));
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Evaluate selections' }));
     expect(api.createPreview).toHaveBeenCalledWith(expect.objectContaining({ draft_id: draft().draft_id,
       draft_revision: 1, draft_digest: draft().draft_digest }));
     expect(await screen.findByText(/Proposed optimizer impact/)).toBeTruthy();
@@ -334,26 +370,26 @@ describe('QT proposal workspace', () => {
     api.createPreview.mockResolvedValue(clean());
     render(<QtProposalWorkspace {...props} onPublished={vi.fn()} />);
     expect(screen.queryByRole('region', { name: 'Proposed post-change risk' })).toBeNull();
-    expect(screen.queryByRole('button', { name: 'Confirm these quantities' })).toBeNull();
-    await userEvent.setup().click(await screen.findByRole('button', { name: 'Evaluate my selection' }));
+    expect(screen.queryByRole('button', { name: 'Confirm positions' })).toBeNull();
+    await userEvent.setup().click(await screen.findByRole('button', { name: 'Evaluate selections' }));
     const risk = await screen.findByRole('region', { name: 'Proposed post-change risk' });
     expect(within(risk).getByText(/calculated by the server evaluator for proposed selected-book digest/i).textContent)
       .toContain(clean().selected_book_digest);
     expect(within(risk).getByText(/synthetic_exposure_ratio: 0.12345678901234566 ratio/)).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Confirm these quantities' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Confirm positions' })).toBeTruthy();
   });
 
   it('drops stale evaluated risk when the saved rationale changes', async () => {
     api.createPreview.mockResolvedValue(clean());
     render(<QtProposalWorkspace {...props} onPublished={vi.fn()} />);
-    await userEvent.setup().click(await screen.findByRole('button', { name: 'Evaluate my selection' }));
+    await userEvent.setup().click(await screen.findByRole('button', { name: 'Evaluate selections' }));
     await screen.findByRole('region', { name: 'Proposed post-change risk' });
     const rationale = screen.getByRole('textbox', { name: 'Why should this position change be made?' });
     await userEvent.setup().clear(rationale);
     await userEvent.setup().type(rationale, 'Updated reason after reviewing the proposed risk.');
     expect(screen.queryByRole('region', { name: 'Proposed post-change risk' })).toBeNull();
-    expect(screen.queryByRole('button', { name: 'Confirm these quantities' })).toBeNull();
-    expect(screen.getByRole('button', { name: 'Save draft' })).toHaveProperty('disabled', false);
+    expect(screen.queryByRole('button', { name: 'Confirm positions' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Evaluate selections' })).toHaveProperty('disabled', false);
   });
 
   it('attributes the request, requires a rationale, and sends its trimmed value without a claimed actor', async () => {
@@ -368,14 +404,14 @@ describe('QT proposal workspace', () => {
     expect(within(card).getByText('John Riley (john@example.com)')).toBeTruthy();
     expect(within(card).getByText(/2 of 2 editable positions differ from MODEL/)).toBeTruthy();
     const rationale = within(card).getByRole('textbox', { name: 'Why should this position change be made?' });
-    const save = screen.getByRole('button', { name: 'Save draft' });
-    expect(save).toHaveProperty('disabled', true);
+    const evaluate = screen.getByRole('button', { name: 'Evaluate selections' });
+    expect(evaluate).toHaveProperty('disabled', true);
     await userEvent.setup().type(rationale, '  Reduce concentration before the event window.  ');
-    expect(save).toHaveProperty('disabled', false);
-    await userEvent.setup().click(save);
-    expect(api.saveDraft).toHaveBeenCalledWith(props.bookId, expect.objectContaining({
+    expect(evaluate).toHaveProperty('disabled', false);
+    await userEvent.setup().click(evaluate);
+    await waitFor(() => expect(api.saveDraft).toHaveBeenCalledWith(props.bookId, expect.objectContaining({
       rationale: 'Reduce concentration before the event window.',
-    }));
+    })));
     expect(api.saveDraft.mock.calls[0][1]).not.toHaveProperty('actorId');
     expect(api.saveDraft.mock.calls[0][1]).not.toHaveProperty('actorLabel');
   });
@@ -385,6 +421,7 @@ describe('QT proposal workspace', () => {
     updated.draft_revision = 2; updated.draft_digest = 'd'.repeat(64);
     updated.selection_rows[0].quantity_exact = '2.5'; updated.selection_rows[1].quantity_exact = '0';
     api.saveDraft.mockResolvedValue(decodeQtDraft(updated));
+    api.createPreview.mockRejectedValue(new Error('synthetic evaluation unavailable'));
     render(<QtProposalWorkspace {...props} onPublished={vi.fn()} />);
     const first = await screen.findByRole('textbox', { name: /Chosen quantity for synthetic-alpha/ });
     const second = screen.getByRole('textbox', { name: /Chosen quantity for synthetic-beta/ });
@@ -393,16 +430,16 @@ describe('QT proposal workspace', () => {
     const rationale = screen.getByRole('textbox', { name: 'Why should this position change be made?' });
     await userEvent.setup().clear(rationale);
     await userEvent.setup().type(rationale, 'Reduce gross exposure.');
-    await userEvent.setup().click(screen.getByRole('button', { name: 'Save draft' }));
-    expect(api.saveDraft).toHaveBeenCalledWith(props.bookId, expect.objectContaining({
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Evaluate selections' }));
+    await waitFor(() => expect(api.saveDraft).toHaveBeenCalledWith(props.bookId, expect.objectContaining({
       rationale: 'Reduce gross exposure.',
       selection_rows: expect.arrayContaining([
         { key: fixtures.draft_saved.selection_rows[0].key, quantity_exact: '2.5' },
         { key: fixtures.draft_saved.selection_rows[1].key, quantity_exact: '0' },
       ]),
-    }));
+    })));
     expect(await screen.findByText(/Draft revision 2/)).toBeTruthy();
-    expect(api.createPreview).not.toHaveBeenCalled();
+    expect(api.createPreview).toHaveBeenCalledTimes(1);
   });
 
   it('requires explicit known-breach confirmation and never calls report success for pending override', async () => {
@@ -410,8 +447,8 @@ describe('QT proposal workspace', () => {
     api.confirmPreview.mockResolvedValue(decodeQtDecision(structuredClone(fixtures.confirm_pending)));
     const onPublished = vi.fn();
     render(<QtProposalWorkspace {...props} onPublished={onPublished} />);
-    await userEvent.setup().click(await screen.findByRole('button', { name: 'Evaluate my selection' }));
-    await userEvent.setup().click(await screen.findByRole('button', { name: 'Confirm and request two approvals' }));
+    await userEvent.setup().click(await screen.findByRole('button', { name: 'Evaluate selections' }));
+    await userEvent.setup().click(await screen.findByRole('button', { name: 'Confirm positions and request approvals' }));
     expect(await screen.findByText('Waiting for two approvals')).toBeTruthy();
     expect(api.confirmPreview).toHaveBeenCalledWith(breach().preview_id, expect.objectContaining({
       action: 'confirm_selected_book', acknowledge_warnings: true,
@@ -427,8 +464,8 @@ describe('QT proposal workspace', () => {
     const onPublished = vi.fn();
     render(<QtProposalWorkspace {...props} onPublished={onPublished} />);
     const user = userEvent.setup();
-    await user.click(await screen.findByRole('button', { name: 'Evaluate my selection' }));
-    await user.click(await screen.findByRole('button', { name: 'Confirm these quantities' }));
+    await user.click(await screen.findByRole('button', { name: 'Evaluate selections' }));
+    await user.click(await screen.findByRole('button', { name: 'Confirm positions' }));
     expect(onPublished).not.toHaveBeenCalled();
     await user.click(await screen.findByRole('button', { name: 'Refresh decision status' }));
     expect(await screen.findByText('Report ready')).toBeTruthy();
@@ -446,8 +483,8 @@ describe('QT proposal workspace', () => {
     const onPublished = vi.fn();
     render(<QtProposalWorkspace {...props} onPublished={onPublished} />);
     const user = userEvent.setup();
-    await user.click(await screen.findByRole('button', { name: 'Evaluate my selection' }));
-    await user.click(await screen.findByRole('button', { name: 'Confirm these quantities' }));
+    await user.click(await screen.findByRole('button', { name: 'Evaluate selections' }));
+    await user.click(await screen.findByRole('button', { name: 'Confirm positions' }));
     await user.click(await screen.findByRole('button', { name: 'Refresh decision status' }));
     expect(await screen.findByText(/Report projection unavailable/)).toBeTruthy();
     expect(onPublished).not.toHaveBeenCalled();
@@ -459,8 +496,8 @@ describe('QT proposal workspace', () => {
     const onPublished = vi.fn();
     render(<QtProposalWorkspace {...props} onPublished={onPublished} />);
     const user = userEvent.setup();
-    await user.click(await screen.findByRole('button', { name: 'Evaluate my selection' }));
-    await user.click(await screen.findByRole('button', { name: 'Confirm these quantities' }));
+    await user.click(await screen.findByRole('button', { name: 'Evaluate selections' }));
+    await user.click(await screen.findByRole('button', { name: 'Confirm positions' }));
     await user.click(await screen.findByRole('button', { name: 'Refresh decision status' }));
     expect(onPublished).not.toHaveBeenCalled();
     expect(screen.queryByText('Report ready')).toBeNull();
@@ -471,13 +508,13 @@ describe('QT proposal workspace', () => {
     unavailable.confirmable = false; unavailable.unavailable_reasons = ['risk_evidence_unavailable'];
     api.createPreview.mockResolvedValue(unavailable);
     render(<QtProposalWorkspace {...props} onPublished={vi.fn()} />);
-    await userEvent.setup().click(await screen.findByRole('button', { name: 'Evaluate my selection' }));
+    await userEvent.setup().click(await screen.findByRole('button', { name: 'Evaluate selections' }));
     expect(await screen.findByText(/Unavailable: risk_evidence_unavailable/)).toBeTruthy();
     fireEvent.change(screen.getByRole('textbox', { name: /Chosen quantity for synthetic-alpha/ }),
       { target: { value: '2.5' } });
     expect((screen.getByRole('textbox', { name: /Chosen quantity for synthetic-alpha/ }) as HTMLInputElement).value).toBe('2.5');
-    expect(screen.getByRole('button', { name: 'Save draft' })).toHaveProperty('disabled', false);
-    expect(screen.queryByRole('button', { name: 'Confirm these quantities' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Evaluate selections' })).toHaveProperty('disabled', false);
+    expect(screen.queryByRole('button', { name: 'Confirm positions' })).toBeNull();
     expect(screen.queryByText(/Unavailable: risk_evidence_unavailable/)).toBeNull();
   });
 
@@ -488,7 +525,7 @@ describe('QT proposal workspace', () => {
     render(<QtProposalWorkspace {...props} onPublished={vi.fn()} />);
     const input = await screen.findByRole('textbox', { name: /Chosen quantity for synthetic-alpha/ });
     expect(input).toHaveProperty('disabled', true);
-    expect(screen.getByRole('button', { name: 'Save draft' })).toHaveProperty('disabled', true);
+    expect(screen.getByRole('button', { name: 'Evaluate selections' })).toHaveProperty('disabled', true);
   });
 
   it('resolves a definite stale confirmation so a refreshed preview can be confirmed', async () => {
@@ -499,13 +536,13 @@ describe('QT proposal workspace', () => {
     });
     render(<QtProposalWorkspace {...props} onPublished={vi.fn()} />);
     const user = userEvent.setup();
-    await user.click(await screen.findByRole('button', { name: 'Evaluate my selection' }));
-    await user.click(await screen.findByRole('button', { name: 'Confirm these quantities' }));
+    await user.click(await screen.findByRole('button', { name: 'Evaluate selections' }));
+    await user.click(await screen.findByRole('button', { name: 'Confirm positions' }));
     expect(await screen.findByRole('alert')).toHaveProperty('textContent', expect.stringContaining('preview_stale'));
     expect(QtRecovery.loadConfirmation(sessionStorage, props.actorId, props.bookId)).toBeNull();
     await user.click(screen.getByRole('button', { name: 'Refresh QT source' }));
-    await user.click(await screen.findByRole('button', { name: 'Evaluate my selection' }));
-    await user.click(await screen.findByRole('button', { name: 'Confirm these quantities' }));
+    await user.click(await screen.findByRole('button', { name: 'Evaluate selections' }));
+    await user.click(await screen.findByRole('button', { name: 'Confirm positions' }));
     expect(api.confirmPreview).toHaveBeenCalledTimes(2);
     expect(api.confirmPreview.mock.calls[1][0]).toBe(nextPreview.preview_id);
   });
@@ -527,8 +564,8 @@ describe('QT proposal workspace', () => {
     api.confirmPreview.mockResolvedValue({ ...pending(), book_id: bookB, preview_id: previewB.preview_id });
     render(<QtProposalWorkspace {...props} bookId={bookB} onPublished={vi.fn()} />);
     const user = userEvent.setup();
-    await user.click(await screen.findByRole('button', { name: 'Evaluate my selection' }));
-    await user.click(await screen.findByRole('button', { name: 'Confirm these quantities' }));
+    await user.click(await screen.findByRole('button', { name: 'Evaluate selections' }));
+    await user.click(await screen.findByRole('button', { name: 'Confirm positions' }));
     expect(api.confirmPreview).toHaveBeenCalledTimes(1);
     expect(QtRecovery.loadConfirmation(sessionStorage, props.actorId, props.bookId)?.preview_id).toBe(clean().preview_id);
     expect(QtRecovery.loadConfirmation(sessionStorage, props.actorId, bookB)?.preview_id).toBe(previewB.preview_id);
@@ -539,8 +576,8 @@ describe('QT proposal workspace', () => {
     api.confirmPreview.mockRejectedValue(new QtMutationUncertainError());
     render(<QtProposalWorkspace {...props} onPublished={vi.fn()} />);
     const user = userEvent.setup();
-    await user.click(await screen.findByRole('button', { name: 'Evaluate my selection' }));
-    await user.click(await screen.findByRole('button', { name: 'Confirm these quantities' }));
+    await user.click(await screen.findByRole('button', { name: 'Evaluate selections' }));
+    await user.click(await screen.findByRole('button', { name: 'Confirm positions' }));
     const input = screen.getByRole('textbox', { name: /Chosen quantity for synthetic-alpha/ }) as HTMLInputElement;
     expect(input).toHaveProperty('disabled', true);
     fireEvent.change(input, { target: { value: '2.5' } });
@@ -556,29 +593,46 @@ describe('QT proposal workspace', () => {
     api.confirmPreview.mockRejectedValue(new QtApiError(409, 'preview_consumed'));
     render(<QtProposalWorkspace {...props} onPublished={vi.fn()} />);
     const user = userEvent.setup();
-    await user.click(await screen.findByRole('button', { name: 'Evaluate my selection' }));
-    await user.click(await screen.findByRole('button', { name: 'Confirm these quantities' }));
+    await user.click(await screen.findByRole('button', { name: 'Evaluate selections' }));
+    await user.click(await screen.findByRole('button', { name: 'Confirm positions' }));
     expect(await screen.findByRole('alert')).toHaveProperty('textContent', expect.stringContaining('preview_consumed'));
     expect(QtRecovery.loadConfirmation(sessionStorage, props.actorId, props.bookId)?.preview_id).toBe(clean().preview_id);
     expect(screen.getByRole('button', { name: 'Recover confirmation' })).toHaveProperty('disabled', false);
     expect(api.confirmPreview).toHaveBeenCalledTimes(1);
   });
 
-  it('clears only an acknowledged processed decision before starting another proposal in the same book', async () => {
+  it('clears definite processed recovery without unlocking the submitted decision', async () => {
     api.createPreview.mockResolvedValue(clean()); api.confirmPreview.mockResolvedValue(processed());
     const onPublished = vi.fn();
     render(<QtProposalWorkspace {...props} onPublished={onPublished} />);
     const user = userEvent.setup();
-    await user.click(await screen.findByRole('button', { name: 'Evaluate my selection' }));
-    await user.click(await screen.findByRole('button', { name: 'Confirm these quantities' }));
+    await user.click(await screen.findByRole('button', { name: 'Evaluate selections' }));
+    await user.click(await screen.findByRole('button', { name: 'Confirm positions' }));
     expect(await screen.findByText('Report ready')).toBeTruthy();
-    expect(QtRecovery.loadConfirmation(sessionStorage, props.actorId, props.bookId)).not.toBeNull();
-    await user.click(screen.getByRole('button', { name: 'Acknowledge resolved confirmation' }));
     expect(QtRecovery.loadConfirmation(sessionStorage, props.actorId, props.bookId)).toBeNull();
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Save draft' })).toHaveProperty('disabled', false));
-    expect(screen.getByRole('textbox', { name: /Chosen quantity for synthetic-alpha/ })).toHaveProperty('disabled', false);
+    expect(screen.queryByRole('button', { name: 'Recover confirmation' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Acknowledge resolved confirmation' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Evaluate selections' })).toHaveProperty('disabled', true);
+    expect(screen.getByRole('textbox', { name: /Chosen quantity for synthetic-alpha/ })).toHaveProperty('disabled', true);
     expect(api.confirmPreview).toHaveBeenCalledTimes(1);
     expect(onPublished).toHaveBeenCalledTimes(1);
+  });
+
+  it('clears a recovered terminal intent when the server already has the immutable decision', async () => {
+    QtRecovery.stageConfirmation(sessionStorage, { actor_id: props.actorId, book_id: props.bookId,
+      preview_id: clean().preview_id, expected_digest: clean().payload_digest,
+      idempotency_key: '22222222-2222-4222-8222-222222222222', acknowledge_warnings: false });
+    api.getBookDecision.mockResolvedValue({ schema_version: 'qt-workflow/v1', book_id: props.bookId,
+      source_day: props.sourceDay, decision: processed(), preview: clean() });
+    api.confirmPreview.mockResolvedValue(processed());
+    render(<QtProposalWorkspace {...props} onPublished={vi.fn()} />);
+
+    await userEvent.setup().click(await screen.findByRole('button', { name: 'Recover confirmation' }));
+
+    await waitFor(() => expect(QtRecovery.loadConfirmation(sessionStorage, props.actorId, props.bookId)).toBeNull());
+    expect(screen.queryByRole('button', { name: 'Recover confirmation' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Evaluate selections' })).toHaveProperty('disabled', false);
+    expect(screen.getByRole('region', { name: 'Immutable QT decision review' })).toBeTruthy();
   });
 
   it('does not post on mount with a recovery record; an explicit action replays its original key', async () => {
@@ -613,18 +667,18 @@ describe('QT proposal workspace', () => {
     api.getProposal.mockResolvedValue(eligibleProposal);
     const eligible = decodeQtDecision({ ...structuredClone(fixtures.confirm_pending), can_approve: true });
     const one = decodeQtDecision({ ...structuredClone(fixtures.confirm_pending), approvals: [{
-      person_id: 'eric_shwartz', display_label: 'Eric Shwartz', user_id: '202', approved_at: '2026-09-25T16:00:00Z',
+      person_id: 'hemdutt_rao', display_label: 'Hemdutt Rao', user_id: '202', approved_at: '2026-09-25T16:00:00Z',
     }], approvals_count: 1, can_approve: false });
     api.createPreview.mockResolvedValue(breach()); api.confirmPreview.mockResolvedValue(eligible);
     api.approveOverride.mockResolvedValue(one);
     const onPublished = vi.fn();
     render(<QtProposalWorkspace {...props} onPublished={onPublished} />);
     const user = userEvent.setup();
-    await user.click(await screen.findByRole('button', { name: 'Evaluate my selection' }));
-    await user.click(await screen.findByRole('button', { name: 'Confirm and request two approvals' }));
+    await user.click(await screen.findByRole('button', { name: 'Evaluate selections' }));
+    await user.click(await screen.findByRole('button', { name: 'Confirm positions and request approvals' }));
     await user.click(await screen.findByRole('button', { name: 'Approve override' }));
     expect(await screen.findByText(/1 of 2 approvals recorded by the server/)).toBeTruthy();
-    expect(screen.getByText(/Eric Shwartz approved/)).toBeTruthy();
+    expect(screen.getByText(/Hemdutt Rao approved/)).toBeTruthy();
     expect(screen.getByText('Waiting for two approvals')).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Approve override' })).toBeNull();
     expect(api.approveOverride).toHaveBeenCalledTimes(1);
@@ -636,15 +690,15 @@ describe('QT proposal workspace', () => {
     api.getProposal.mockResolvedValue(eligibleProposal);
     const eligible = decodeQtDecision({ ...structuredClone(fixtures.confirm_pending), can_approve: true });
     const recorded = decodeQtDecision({ ...structuredClone(fixtures.confirm_pending), approvals: [{
-      person_id: 'eric_shwartz', display_label: 'Eric Shwartz', user_id: props.actorId,
+      person_id: 'hemdutt_rao', display_label: 'Hemdutt Rao', user_id: props.actorId,
       approved_at: '2026-09-25T16:00:00Z',
     }], approvals_count: 1, can_approve: false });
     api.createPreview.mockResolvedValue(breach()); api.confirmPreview.mockResolvedValue(eligible);
     api.approveOverride.mockResolvedValue(recorded);
     render(<QtProposalWorkspace {...props} onPublished={vi.fn()} />);
     const user = userEvent.setup();
-    await user.click(await screen.findByRole('button', { name: 'Evaluate my selection' }));
-    await user.click(await screen.findByRole('button', { name: 'Confirm and request two approvals' }));
+    await user.click(await screen.findByRole('button', { name: 'Evaluate selections' }));
+    await user.click(await screen.findByRole('button', { name: 'Confirm positions and request approvals' }));
     await user.click(await screen.findByRole('button', { name: 'Approve override' }));
     expect(await screen.findByText(/1 of 2 approvals recorded by the server/)).toBeTruthy();
     expect(QtRecovery.loadApproval(sessionStorage, props.actorId, props.bookId)).toBeNull();
@@ -671,16 +725,16 @@ describe('QT proposal workspace', () => {
     const waiting = deferred<ReturnType<typeof pending>>(); api.approveOverride.mockReturnValue(waiting.promise);
     const view = render(<QtProposalWorkspace {...props} onPublished={vi.fn()} />);
     const user = userEvent.setup();
-    await user.click(await screen.findByRole('button', { name: 'Evaluate my selection' }));
-    await user.click(await screen.findByRole('button', { name: 'Confirm and request two approvals' }));
+    await user.click(await screen.findByRole('button', { name: 'Evaluate selections' }));
+    await user.click(await screen.findByRole('button', { name: 'Confirm positions and request approvals' }));
     await user.click(await screen.findByRole('button', { name: 'Approve override' }));
     view.rerender(<QtProposalWorkspace {...props} actorId="202" onPublished={vi.fn()} />);
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Retry approval' })).toBeNull());
     const bIntent = { actor_id: '202', book_id: props.bookId, preview_id: clean().preview_id,
       expected_digest: clean().payload_digest, idempotency_key: '22222222-2222-4222-8222-222222222222', acknowledge_warnings: false };
     QtRecovery.stageConfirmation(sessionStorage, bIntent);
-    const recordedA = decodeQtDecision({ ...fixtures.confirm_pending, approvals: [{ person_id: 'eric_shwartz',
-      display_label: 'Eric Shwartz', user_id: props.actorId, approved_at: '2026-09-25T16:00:00Z' }], approvals_count: 1 });
+    const recordedA = decodeQtDecision({ ...fixtures.confirm_pending, approvals: [{ person_id: 'hemdutt_rao',
+      display_label: 'Hemdutt Rao', user_id: props.actorId, approved_at: '2026-09-25T16:00:00Z' }], approvals_count: 1 });
     await act(async () => { waiting.resolve(recordedA); });
     expect(storedIntents().find(value => value.actor_id === '202')).toEqual(bIntent);
     expect(storedIntents().some(value => value.actor_id === props.actorId)).toBe(false);
@@ -692,8 +746,8 @@ describe('QT proposal workspace', () => {
     const waiting = deferred<ReturnType<typeof pending>>(); api.confirmPreview.mockReturnValue(waiting.promise);
     const view = render(<QtProposalWorkspace {...props} onPublished={vi.fn()} />);
     const user = userEvent.setup();
-    await user.click(await screen.findByRole('button', { name: 'Evaluate my selection' }));
-    await user.click(await screen.findByRole('button', { name: 'Confirm these quantities' }));
+    await user.click(await screen.findByRole('button', { name: 'Evaluate selections' }));
+    await user.click(await screen.findByRole('button', { name: 'Confirm positions' }));
     view.rerender(<QtProposalWorkspace {...props} actorId="202" onPublished={vi.fn()} />);
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Recover confirmation' })).toBeNull());
     const bIntent = { actor_id: '202', book_id: props.bookId, preview_id: clean().preview_id,
@@ -712,16 +766,16 @@ describe('QT proposal workspace', () => {
     const waiting = deferred<ReturnType<typeof pending>>(); api.approveOverride.mockReturnValue(waiting.promise);
     const view = render(<QtProposalWorkspace {...props} onPublished={vi.fn()} />);
     const user = userEvent.setup();
-    await user.click(await screen.findByRole('button', { name: 'Evaluate my selection' }));
-    await user.click(await screen.findByRole('button', { name: 'Confirm and request two approvals' }));
+    await user.click(await screen.findByRole('button', { name: 'Evaluate selections' }));
+    await user.click(await screen.findByRole('button', { name: 'Confirm positions and request approvals' }));
     await user.click(await screen.findByRole('button', { name: 'Approve override' }));
     const original = QtRecovery.loadApproval(sessionStorage, props.actorId, props.bookId);
     view.unmount();
     const other = { actor_id: props.actorId, book_id: 'other-book', preview_id: clean().preview_id,
       expected_digest: clean().payload_digest, idempotency_key: '22222222-2222-4222-8222-222222222222', acknowledge_warnings: false };
     QtRecovery.stageConfirmation(sessionStorage, other);
-    const recorded = decodeQtDecision({ ...fixtures.confirm_pending, approvals: [{ person_id: 'eric_shwartz',
-      display_label: 'Eric Shwartz', user_id: props.actorId, approved_at: '2026-09-25T16:00:00Z' }], approvals_count: 1 });
+    const recorded = decodeQtDecision({ ...fixtures.confirm_pending, approvals: [{ person_id: 'hemdutt_rao',
+      display_label: 'Hemdutt Rao', user_id: props.actorId, approved_at: '2026-09-25T16:00:00Z' }], approvals_count: 1 });
     await act(async () => { waiting.resolve(recorded); });
     expect(QtRecovery.loadApproval(sessionStorage, props.actorId, props.bookId)).toEqual(original);
     expect(QtRecovery.loadConfirmation(sessionStorage, props.actorId, 'other-book')).toEqual(other);
@@ -732,7 +786,7 @@ describe('QT proposal workspace', () => {
     render(<QtProposalWorkspace {...props} onPublished={vi.fn()} />);
     const input = await screen.findByRole('textbox', { name: /Chosen quantity for synthetic-alpha/ });
     expect(input).toHaveProperty('disabled', true);
-    expect(screen.getByRole('button', { name: 'Save draft' })).toHaveProperty('disabled', true);
+    expect(screen.getByRole('button', { name: 'Evaluate selections' })).toHaveProperty('disabled', true);
     waiting.resolve(draft());
     await waitFor(() => expect(input).toHaveProperty('disabled', false));
   });
@@ -740,31 +794,31 @@ describe('QT proposal workspace', () => {
   it('ignores an old preview after an edit and prevents a duplicate write click', async () => {
     const waiting = deferred<ReturnType<typeof clean>>(); api.createPreview.mockReturnValue(waiting.promise);
     render(<QtProposalWorkspace {...props} onPublished={vi.fn()} />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Evaluate my selection' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Evaluate my selection' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Evaluate selections' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Evaluate selections' }));
     expect(api.createPreview).toHaveBeenCalledTimes(1);
     fireEvent.change(screen.getByRole('textbox', { name: /Chosen quantity for synthetic-alpha/ }), { target: { value: '2.5' } });
     waiting.resolve(clean());
-    await waitFor(() => expect(screen.queryByRole('button', { name: 'Confirm these quantities' })).toBeNull());
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Confirm positions' })).toBeNull());
   });
 
   it('ignores a preview response from a prior book after the selected context switches', async () => {
     const waiting = deferred<ReturnType<typeof clean>>(); api.createPreview.mockReturnValue(waiting.promise);
     const onPublished = vi.fn();
     const view = render(<QtProposalWorkspace {...props} onPublished={onPublished} />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Evaluate my selection' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Evaluate selections' }));
     view.rerender(<QtProposalWorkspace {...props} bookId="different-book" onPublished={onPublished} />);
     waiting.resolve(clean());
     await screen.findByText('QT proposal for different-book');
-    expect(screen.queryByRole('button', { name: 'Confirm these quantities' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Confirm positions' })).toBeNull();
     expect(onPublished).not.toHaveBeenCalled();
   });
 
   it('stops mutation actions on server grant revocation', async () => {
     api.createPreview.mockRejectedValue(new QtApiError(403, 'authorization_changed'));
     render(<QtProposalWorkspace {...props} onPublished={vi.fn()} />);
-    await userEvent.setup().click(await screen.findByRole('button', { name: 'Evaluate my selection' }));
+    await userEvent.setup().click(await screen.findByRole('button', { name: 'Evaluate selections' }));
     expect(await screen.findByRole('alert')).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Save draft' })).toHaveProperty('disabled', true);
+    expect(screen.getByRole('button', { name: 'Evaluate selections' })).toHaveProperty('disabled', true);
   });
 });

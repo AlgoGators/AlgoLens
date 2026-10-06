@@ -30,7 +30,7 @@ beforeEach(() => {
 });
 
 describe('verified empty QT selection', () => {
-  it('starts a new draft only after explicitly saving a verified processed predecessor', async () => {
+  it('starts and evaluates a new draft from a verified processed predecessor in one explicit step', async () => {
     const previous = { ...saved(), state: 'consumed', successor: {
       decision_id: '10000000-0000-4000-8000-000000000001',
       attempt_id: '20000000-0000-4000-8000-000000000001',
@@ -44,17 +44,15 @@ describe('verified empty QT selection', () => {
     const onPublished = vi.fn();
     render(<QtProposalWorkspace {...props} onPublished={onPublished} />);
     await screen.findByText('Draft revision 1 (consumed)');
-    expect(screen.getByRole('region', { name: 'Verified empty selection' }).textContent).toContain('Save to start a new choice');
+    expect(screen.getByRole('region', { name: 'Verified empty selection' }).textContent).toContain('Evaluate to start a new choice');
     expect(api.saveDraft).not.toHaveBeenCalled();
-    expect(screen.getByRole('button', { name: 'Evaluate my selection' }).hasAttribute('disabled')).toBe(true);
-    await userEvent.setup().click(screen.getByRole('button', { name: 'Save draft' }));
+    const evaluate = screen.getByRole('button', { name: 'Evaluate selections' });
+    expect(evaluate.hasAttribute('disabled')).toBe(false);
+    await userEvent.setup().click(evaluate);
     await waitFor(() => expect(api.saveDraft).toHaveBeenCalledTimes(1));
     expect(api.saveDraft.mock.calls[0][1]).toMatchObject({ expected_draft_revision: previous.draft_revision,
       expected_source_digest: proposal().source_digest, expected_provenance_digest: proposal().provenance_digest,
       selection_rows: [] });
-    const evaluate = screen.getByRole('button', { name: 'Evaluate my selection' });
-    await waitFor(() => expect(evaluate.hasAttribute('disabled')).toBe(false));
-    await userEvent.setup().click(evaluate);
     await waitFor(() => expect(api.createPreview).toHaveBeenCalledTimes(1));
     expect(api.createPreview.mock.calls[0][0]).toMatchObject({ draft_id: next.draft_id,
       draft_revision: next.draft_revision, draft_digest: next.draft_digest });
@@ -62,24 +60,20 @@ describe('verified empty QT selection', () => {
     expect(onPublished).not.toHaveBeenCalled();
   });
 
-  it('explicitly saves exact empty rows and evaluates that saved draft without implying publication', async () => {
+  it('explicitly evaluates exact empty rows after saving them without implying publication', async () => {
     api.saveDraft.mockResolvedValue(decodeQtDraft(saved()));
     api.createPreview.mockRejectedValue(new Error('synthetic evaluation unavailable'));
     const onPublished = vi.fn();
     render(<QtProposalWorkspace {...props} onPublished={onPublished} />);
-    const save = await screen.findByRole('button', { name: 'Save draft' });
-    await waitFor(() => expect(save.hasAttribute('disabled')).toBe(false));
+    const evaluate = await screen.findByRole('button', { name: 'Evaluate selections' });
+    await waitFor(() => expect(evaluate.hasAttribute('disabled')).toBe(false));
     expect(screen.getByRole('region', { name: 'Verified empty selection' }).textContent).toContain('EQUITY_MEAN_REVERSION');
     expect(screen.getByRole('textbox', { name: 'Why should this position change be made?' })).toBeTruthy();
     expect(within(screen.getByRole('table', { name: 'QT component quantities' })).queryByRole('textbox')).toBeNull();
-    expect(screen.getByRole('button', { name: 'Evaluate my selection' }).hasAttribute('disabled')).toBe(true);
-    await userEvent.setup().click(save);
+    await userEvent.setup().click(evaluate);
     await waitFor(() => expect(api.saveDraft).toHaveBeenCalledTimes(1));
     expect(api.saveDraft.mock.calls[0][1]).toMatchObject({ selection_rows: [], expected_draft_revision: 0,
       expected_source_digest: proposal().source_digest, expected_provenance_digest: proposal().provenance_digest });
-    const evaluate = screen.getByRole('button', { name: 'Evaluate my selection' });
-    await waitFor(() => expect(evaluate.hasAttribute('disabled')).toBe(false));
-    await userEvent.setup().click(evaluate);
     await waitFor(() => expect(api.createPreview).toHaveBeenCalledTimes(1));
     expect(api.createPreview.mock.calls[0][0]).toMatchObject({ draft_id: saved().draft_id,
       draft_revision: saved().draft_revision, draft_digest: saved().draft_digest });
@@ -93,8 +87,8 @@ describe('verified empty QT selection', () => {
     api.getProposal.mockResolvedValue(decodeQtProposal(p)); api.getDraft.mockResolvedValue(decodeQtDraft(d));
     render(<QtProposalWorkspace {...props} onPublished={vi.fn()} />);
     await screen.findByText('Draft revision 1 (saved)');
-    expect(screen.getByRole('button', { name: 'Save draft' }).hasAttribute('disabled')).toBe(true);
-    expect(screen.getByRole('button', { name: 'Evaluate my selection' }).hasAttribute('disabled')).toBe(true);
+    expect(screen.getByRole('button', { name: 'Evaluate selections' }).hasAttribute('disabled')).toBe(true);
+    expect(screen.queryByRole('button', { name: 'Save draft' })).toBeNull();
     expect(screen.queryByRole('region', { name: 'Verified empty selection' })).toBeNull();
   });
 
@@ -102,9 +96,9 @@ describe('verified empty QT selection', () => {
     const d = saved(); d.empty_owner.owner_document_digest = 'f'.repeat(64);
     api.getDraft.mockResolvedValue(decodeQtDraft(d));
     render(<QtProposalWorkspace {...props} onPublished={vi.fn()} />);
-    await screen.findByRole('button', { name: 'Save draft' });
-    expect(screen.getByRole('button', { name: 'Save draft' }).hasAttribute('disabled')).toBe(true);
-    expect(screen.getByRole('button', { name: 'Evaluate my selection' }).hasAttribute('disabled')).toBe(true);
+    const evaluate = await screen.findByRole('button', { name: 'Evaluate selections' });
+    expect(evaluate.hasAttribute('disabled')).toBe(true);
+    expect(screen.queryByRole('button', { name: 'Save draft' })).toBeNull();
     expect(api.saveDraft).not.toHaveBeenCalled();
   });
 });

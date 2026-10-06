@@ -189,7 +189,7 @@ def test_confirmed_override_keeps_request_id_and_two_distinct_approvals():
     approved["status"] = "confirmed_decision"
     approved["approvals"] = [
         {"person_id": "john_riley", "display_label": "John Riley", "user_id": "101", "approved_at": "2026-09-25T12:00:00Z"},
-        {"person_id": "eric_shwartz", "display_label": "Eric Shwartz", "user_id": "102", "approved_at": "2026-09-25T12:01:00Z"},
+        {"person_id": "hemdutt_rao", "display_label": "Hemdutt Rao", "user_id": "102", "approved_at": "2026-09-25T12:01:00Z"},
     ]
     approved["approvals_count"] = 2
     approved["report_blocked_reasons"] = ["receipt_pending"]

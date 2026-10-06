@@ -15,30 +15,48 @@ def person(user_id, person_id):
     return {"person_id": person_id, "user_id": user_id, "mapping_version": 1, "grant_version": 1}
 
 
-def authority(user_id, person_id):
-    return {"account": {"id": user_id, "role": "general_member"},
+def authority(user_id, person_id, role="general_member"):
+    return {"account": {"id": user_id, "role": role},
             "grants": [{"user_id": user_id, "capability": "qt_approve", "active": True, "version": 1}],
             "mappings": [{"user_id": user_id, "person_id": person_id, "active": True, "mapping_version": 1}]}
 
 
+def test_exec_board_hemdutt_with_explicit_grant_is_a_current_approver():
+    from algolens.infrastructure.portfolio.qt_authorization import resolve_approved_person
+    current = authority(101, "hemdutt_rao", role="exec_board")
+    tx = SimpleNamespace(approval_authority=lambda user: current,
+                         capability=lambda: {"enabled": True, "version": 1})
+    assert asdict(resolve_approved_person(101, tx)) == person(101, "hemdutt_rao")
+
+
+def test_retired_approver_identity_cannot_count():
+    from algolens.infrastructure.portfolio.qt_authorization import resolve_approved_person
+    current = authority(101, "eric_shwartz")
+    tx = SimpleNamespace(approval_authority=lambda user: current,
+                         capability=lambda: {"enabled": True, "version": 1})
+    with pytest.raises(QtWorkflowError) as error:
+        resolve_approved_person(101, tx)
+    assert error.value.code == "approval_identity_unmapped"
+
+
 def test_current_mapping_and_explicit_distinct_quorum():
     from algolens.infrastructure.portfolio.qt_authorization import resolve_approved_person, two_person_quorum
-    authorities = {101: authority(101, "eric_shwartz"), 202: authority(202, "john_riley")}
+    authorities = {101: authority(101, "hemdutt_rao", role="exec_board"), 202: authority(202, "john_riley")}
     tx = SimpleNamespace(approval_authority=lambda user: authorities[user],
                          capability=lambda: {"enabled": True, "version": 1})
     first = resolve_approved_person(101, tx)
     second = resolve_approved_person(202, tx)
-    assert asdict(first) == person(101, "eric_shwartz")
+    assert asdict(first) == person(101, "hemdutt_rao")
     assert not two_person_quorum([]) and not two_person_quorum([first, first])
     assert two_person_quorum([first, second])
-    assert not two_person_quorum([first, person(202, "eric_shwartz")])
+    assert not two_person_quorum([first, person(202, "hemdutt_rao")])
     assert not two_person_quorum([first, person(101, "john_riley")])
 
 
 @pytest.mark.parametrize("mutation", ["role", "grant", "mapping", "ambiguous", "unknown", "version", "capability"])
 def test_missing_revoked_ambiguous_identity_cannot_count(mutation):
     from algolens.infrastructure.portfolio.qt_authorization import resolve_approved_person
-    current = authority(101, "eric_shwartz")
+    current = authority(101, "hemdutt_rao", role="exec_board")
     cap = {"enabled": True, "version": 1}
     if mutation == "role": current["account"]["role"] = "guest"
     elif mutation == "grant": current["grants"][0]["active"] = False
@@ -57,7 +75,7 @@ def approval_fixture(monkeypatch):
     tx.decision = deepcopy(tx.decisions[0])
     tx.override = deepcopy(tx.requests[0])
     tx.approvals = []
-    tx.authorities = {101: authority(101, "eric_shwartz"), 202: authority(202, "john_riley"),
+    tx.authorities = {101: authority(101, "john_riley"), 202: authority(202, "hemdutt_rao", role="exec_board"),
                       303: authority(303, "xander_robbins")}
     @contextmanager
     def transaction(book_id, actor_id):

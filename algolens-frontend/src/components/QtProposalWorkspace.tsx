@@ -179,30 +179,37 @@ export function QtProposalWorkspace({ actorId, actorLabel, bookId, sourceDay, on
     const identity = `${context}:${decision.decision_id}`;
     if (!published.current.has(identity)) { published.current.add(identity); onPublished(); }
   }
-  function applyDecision(decision: QtDecision) {
+  function applyDecision(decision: QtDecision): boolean {
     const currentState = stateRef.current;
-    if (decision.book_id !== bookId) return;
+    if (decision.book_id !== bookId) return false;
     const discovered = reviewRef.current;
     if (discovered?.scope === activeReviewScope.current && discovered.value?.decision?.decision_id === decision.decision_id &&
         discovered.value.preview && qtDecisionMatchesPreview(decision, discovered.value.preview) &&
         discovered.value.decision.request_id === decision.request_id) {
       setReview({ ...discovered, value: { ...discovered.value, decision } });
       notifyPublished(decision);
-      return;
+      return true;
     }
     if (currentState.preview?.preview_id === decision.preview_id) {
       const accepted = send({ type: 'decision_loaded', context, generation: currentState.generation, decision });
       if (accepted.decision !== decision) {
         setMessage('Decision evidence does not match the current QT preview. Refresh QT source.');
-        return;
+        return false;
       }
     } else {
       const record = QtRecovery.loadConfirmation(sessionStorage, actorId, bookId);
-      if (record?.preview_id !== decision.preview_id) return;
+      if (record?.preview_id !== decision.preview_id) return false;
       setRecoveredDecision(decision);
-      return;
+      return false;
     }
     notifyPublished(decision);
+    return true;
+  }
+  function settleResolvedConfirmation(decision: QtDecision, verified: boolean) {
+    if (!verified || decision.status !== 'confirmed_decision' ||
+        !['processed', 'failed'].includes(decision.receipt?.status ?? '')) return;
+    QtRecovery.clearConfirmation(sessionStorage, actorId, bookId);
+    setHasConfirmationRecovery(!!QtRecovery.loadConfirmation(sessionStorage, actorId, bookId));
   }
 
   const visible = state.context === context ? state : makeQtState(context);
@@ -243,10 +250,8 @@ export function QtProposalWorkspace({ actorId, actorLabel, bookId, sourceDay, on
   const sourceReady = proposal?.workflow_state === 'ready' && proposal.capability.available && !revoked;
   const editorAllowsEdit = reduceQtState(visible,
     { type: 'edited', context, selection: visible.selection }) !== visible;
-  const canSave = !!sourceReady && !!draft && !!proposal.action_grants.can_save_draft && validSelection && validRationale &&
+  const canEvaluate = !!sourceReady && !!draft && !!proposal?.action_grants.can_save_draft && validSelection && validRationale &&
     visible.phase === 'editing' && !busy && !decisionExists;
-  const canEvaluate = !!sourceReady && !!proposal?.action_grants.can_save_draft && validSelection && savedSelection &&
-    rationaleMatchesSaved && visible.phase === 'editing' && !busy && !decisionExists;
   const canConfirm = !hasConfirmationRecovery && !busy && !revoked && canConfirmQt(visible);
 
   function edit(identity: string, value: string) {
@@ -264,36 +269,35 @@ export function QtProposalWorkspace({ actorId, actorLabel, bookId, sourceDay, on
     }
     setMessage('');
   }
-  function save() {
-    if (!canSave || !proposal) return;
+  function evaluate() {
+    if (!canEvaluate || !draft || !proposal?.source_digest || !proposal.provenance_digest) return;
     let rows: ReturnType<typeof selectionRows>;
     try { rows = selectionRows(chosenRows, stateRef.current.selection); }
     catch { setMessage('Enter a valid exact quantity for every editable component. Futures require whole contracts.'); return; }
     void runOneWrite(async stillCurrent => {
       const submittedRationale = rationaleTrimmed;
-      const started = send({ type: 'save_started', context, generation: stateRef.current.generation });
-      const generation = started.generation;
+      let evaluationDraft = draft;
+      let generation = stateRef.current.generation;
       try {
-        const saved = await QtPreviewApi.saveDraft(bookId, {
-          expected_source_digest: proposal.source_digest!, expected_provenance_digest: proposal.provenance_digest!,
-          expected_draft_revision: draft?.draft_revision ?? 0, idempotency_key: crypto.randomUUID(), selection_rows: rows,
-          rationale: submittedRationale,
-        });
-        if (stillCurrent()) {
+        if (!savedSelection || !rationaleMatchesSaved) {
+          const started = send({ type: 'save_started', context, generation });
+          generation = started.generation;
+          const saved = await QtPreviewApi.saveDraft(bookId, {
+            expected_source_digest: proposal.source_digest!, expected_provenance_digest: proposal.provenance_digest!,
+            expected_draft_revision: draft.draft_revision, idempotency_key: crypto.randomUUID(), selection_rows: rows,
+            rationale: submittedRationale,
+          });
+          if (!stillCurrent()) return;
           const accepted = send({ type: 'draft_saved', context, generation, draft: saved });
-          if (accepted.draft === saved) setSavedRationale(submittedRationale);
+          if (accepted.draft !== saved) throw new Error('saved_draft_rejected');
+          setSavedRationale(submittedRationale);
+          evaluationDraft = saved;
         }
-      } catch (error) { showFailure(error, stillCurrent, generation); }
-    });
-  }
-  function evaluate() {
-    if (!canEvaluate || !draft || !proposal?.source_digest || !proposal.provenance_digest || !draft.draft_id || !draft.draft_digest) return;
-    void runOneWrite(async stillCurrent => {
-      const started = send({ type: 'evaluation_started', context, generation: stateRef.current.generation });
-      const generation = started.generation;
-      try {
-        const preview = await QtPreviewApi.createPreview({ book_id: bookId, draft_id: draft.draft_id!,
-          draft_revision: draft.draft_revision, draft_digest: draft.draft_digest!,
+        if (!evaluationDraft.draft_id || !evaluationDraft.draft_digest) throw new Error('saved_draft_incomplete');
+        const started = send({ type: 'evaluation_started', context, generation: stateRef.current.generation });
+        generation = started.generation;
+        const preview = await QtPreviewApi.createPreview({ book_id: bookId, draft_id: evaluationDraft.draft_id,
+          draft_revision: evaluationDraft.draft_revision, draft_digest: evaluationDraft.draft_digest,
           expected_source_digest: proposal.source_digest!, expected_provenance_digest: proposal.provenance_digest!,
           idempotency_key: crypto.randomUUID() });
         if (stillCurrent()) send({ type: 'preview_loaded', context, generation, preview });
@@ -313,7 +317,10 @@ export function QtProposalWorkspace({ actorId, actorLabel, bookId, sourceDay, on
         if (!stillCurrent()) return;
         setHasConfirmationRecovery(true);
         const accepted = send({ type: 'decision_loaded', context, generation, decision });
-        if (accepted.decision === decision) notifyPublished(decision);
+        if (accepted.decision === decision) {
+          notifyPublished(decision);
+          settleResolvedConfirmation(decision, true);
+        }
         else setMessage('Decision evidence does not match the current QT preview. Refresh QT source.');
       } catch (error) {
         let failure = error;
@@ -335,7 +342,7 @@ export function QtProposalWorkspace({ actorId, actorLabel, bookId, sourceDay, on
     void runOneWrite(async stillCurrent => {
       try {
         const decision = await QtRecovery.recoverConfirmation(sessionStorage, actorId, bookId, stillCurrent);
-        if (stillCurrent() && decision) applyDecision(decision);
+        if (stillCurrent() && decision) settleResolvedConfirmation(decision, applyDecision(decision));
       } catch (error) {
         let failure = error;
         if (stillCurrent() && error instanceof QtApiError && error.status === 409 &&
@@ -464,7 +471,6 @@ export function QtProposalWorkspace({ actorId, actorLabel, bookId, sourceDay, on
   const focusedOwnerNote = !editorNotice ? focusLockedNote(chosenRows, focusStrategyName) : null;
   const sourceTone: QtTone = sourceReady ? 'success' : 'warning';
   const draftTone: QtTone = !draft ? 'neutral' : draft.state === 'saved' ? 'success' : draft.state === 'consumed' ? 'neutral' : 'warning';
-  const savePrimary = !savedSelection;
   const hasRecoveryAction = hasConfirmationRecovery || hasApprovalRecovery;
 
   return <section id="qt-proposal-workspace" tabIndex={-1} aria-label="QT proposal workspace" className={embedded ? ui.panelEmbedded : ui.panel}>
@@ -482,8 +488,8 @@ export function QtProposalWorkspace({ actorId, actorLabel, bookId, sourceDay, on
     {message && <p role="alert" className={ui.callout('danger')}>{message}</p>}
     {!proposal && !message && <p role="status" className={`${ui.body} ${ui.muted}`}>Loading QT source</p>}
     {verifiedEmptySelection && <section aria-label="Verified empty selection" className={`space-y-2 ${ui.callout('info')}`}>
-      <p>No positions for {proposal?.empty_owner?.configured_owner_names[0]}. Save this empty choice, then evaluate and confirm it.</p>
-      {draft?.state === 'consumed' && <p>Your previous choice was processed. Save to start a new choice; the previous decision remains in the audit history.</p>}
+      <p>No positions for {proposal?.empty_owner?.configured_owner_names[0]}. Evaluate this empty choice, then confirm it.</p>
+      {draft?.state === 'consumed' && <p>Your previous choice was processed. Evaluate to start a new choice; the previous decision remains in the audit history.</p>}
     </section>}
     {proposal && <section aria-label="Position change request" className={ui.card}>
       <h4 className={ui.cardTitle}>Change details</h4>
@@ -502,9 +508,9 @@ export function QtProposalWorkspace({ actorId, actorLabel, bookId, sourceDay, on
       </label>
       <div className="flex flex-wrap justify-between gap-2">
         <p className={validRationale ? ui.note : ui.callout('warning')}>
-          {rationaleBytes === 0 ? 'A rationale is required before this draft can be saved.' :
+          {rationaleBytes === 0 ? 'A rationale is required before evaluation.' :
             rationaleBytes > 1000 ? 'Rationale must be 1000 UTF-8 bytes or fewer.' :
-              'This rationale is stored with the draft as audit evidence.'}
+              'Your reason is saved as audit evidence when you evaluate.'}
         </p>
         <p className={ui.note}>{rationaleBytes}/1000 bytes</p>
       </div>
@@ -520,22 +526,29 @@ export function QtProposalWorkspace({ actorId, actorLabel, bookId, sourceDay, on
       <QtSelectionTable sourceRows={sourceRows} chosenRows={chosenRows} previousQtRows={proposal.saved_qt_rows} selection={visible.selection}
         onEdit={edit} locked={tableLocked} />
       <div className="space-y-3">
+        <div className="space-y-1">
+          <p className={ui.subTitle}>Step 1 of 2 · Evaluate selections</p>
+          <p className={ui.note}>Saves your exact quantities and reason, then shows the projected risk and cost impact.</p>
+        </div>
         <div className={ui.buttonRow}>
-          <button type="button" className={savePrimary ? ui.btnPrimary : ui.btnSecondary} onClick={save} disabled={!canSave}>Save draft</button>
-          <button type="button" className={savePrimary ? ui.btnSecondary : ui.btnPrimary} onClick={evaluate} disabled={!canEvaluate}>Evaluate my selection</button>
+          <button type="button" className={ui.btnPrimary} onClick={evaluate} disabled={!canEvaluate}>Evaluate selections</button>
         </div>
         {!sourceReady && <p className={ui.callout('warning')}>QT actions are unavailable until current source and grants are ready.</p>}
-        {!validSelection && <p className={ui.callout('warning')}>Enter valid exact quantities before saving.</p>}
-        {!validRationale && <p className={ui.note}>Add a valid rationale before saving.</p>}
-        {!savedSelection && <p className={ui.note}>Save the current selection before evaluation.</p>}
-        {savedSelection && !rationaleMatchesSaved && <p className={ui.note}>Save this rationale before evaluation.</p>}
+        {!validSelection && <p className={ui.callout('warning')}>Enter valid exact quantities before evaluation.</p>}
+        {!validRationale && <p className={ui.note}>Add a valid rationale before evaluation.</p>}
       </div>
     </section>}
     {visible.preview && <QtPreviewEvidence preview={visible.preview} />}
-    {visible.preview && !decision && <div className={ui.buttonRow}><button type="button"
-      className={visible.preview.requires_override ? ui.btnWarning : ui.btnPrimary} onClick={confirm} disabled={!canConfirm}>
-      {visible.preview.requires_override ? 'Confirm and request two approvals' : 'Confirm these quantities'}
-    </button></div>}
+    {visible.preview && !decision && <section aria-label="Confirm positions" className={ui.card}>
+      <div className="space-y-1">
+        <h4 className={ui.cardTitle}>Step 2 of 2 · Confirm positions</h4>
+        <p className={ui.note}>Review the evaluated impact above. Confirmation locks these exact quantities.</p>
+      </div>
+      <div className={ui.buttonRow}><button type="button"
+        className={visible.preview.requires_override ? ui.btnWarning : ui.btnPrimary} onClick={confirm} disabled={!canConfirm}>
+        {visible.preview.requires_override ? 'Confirm positions and request approvals' : 'Confirm positions'}
+      </button></div>
+    </section>}
     {hasRecoveryAction && <div className={ui.buttonRow}>
       {hasConfirmationRecovery && <button type="button" className={ui.btnWarning} disabled={busy || revoked} onClick={recover}>Recover confirmation</button>}
       {hasConfirmationRecovery && decision?.status === 'confirmed_decision' &&

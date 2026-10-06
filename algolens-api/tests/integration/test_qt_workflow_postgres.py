@@ -92,7 +92,7 @@ def test_migration_starts_without_human_grants_or_mappings(qt_db):
 def test_two_people_cannot_map_to_one_account(qt_db):
     _execute(qt_db, """INSERT INTO trading.qt_approver_allowlist
         (person_id, display_label, user_id, active, mapping_version)
-        VALUES ('eric_shwartz', 'eric shwartz', 101, true, 1)""")
+        VALUES ('hemdutt_rao', 'hemdutt rao', 101, true, 1)""")
     with pytest.raises(UniqueViolation):
         _execute(qt_db, """INSERT INTO trading.qt_approver_allowlist
             (person_id, display_label, user_id, active, mapping_version)

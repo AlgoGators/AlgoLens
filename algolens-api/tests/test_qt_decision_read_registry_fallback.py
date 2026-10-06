@@ -123,7 +123,7 @@ def test_read_decision_pending_override_threads_the_per_key_registry_fallback(mo
 
     # A stub person, so self.authorization.resolve(actor_id, tx) succeeds
     # without a real authorization adapter reaching a database.
-    person = SimpleNamespace(person_id="eric_shwartz", user_id=202, mapping_version=1, grant_version=1)
+    person = SimpleNamespace(person_id="hemdutt_rao", user_id=202, mapping_version=1, grant_version=1)
     service.authorization = SimpleNamespace(resolve=lambda actor_id, tx: person)
 
     calls = []

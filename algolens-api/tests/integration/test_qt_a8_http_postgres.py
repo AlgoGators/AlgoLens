@@ -22,12 +22,12 @@ from tests.integration.test_qt_a3_read_set_postgres import a3_db
 
 
 def seed_http_approvers(dsn):
-    query(dsn, """INSERT INTO auth.users(id,role) VALUES(202,'general_member')
+    query(dsn, """INSERT INTO auth.users(id,role) VALUES(202,'exec_board')
         ON CONFLICT(id) DO UPDATE SET role=excluded.role;
         INSERT INTO trading.qt_action_grants(user_id,capability,active,version)
           VALUES(101,'qt_approve',true,1),(202,'qt_approve',true,1);
         INSERT INTO trading.qt_approver_allowlist(person_id,display_label,user_id,active,mapping_version)
-          VALUES('eric_shwartz','eric shwartz',101,true,1),('john_riley','john riley',202,true,1);""")
+          VALUES('john_riley','john riley',101,true,1),('hemdutt_rao','hemdutt rao',202,true,1);""")
 
 
 def http_harness(dsn, service, monkeypatch):

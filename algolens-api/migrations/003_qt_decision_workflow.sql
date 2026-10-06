@@ -28,7 +28,6 @@ CREATE TABLE IF NOT EXISTS trading.qt_approver_allowlist (
     mapping_version bigint NOT NULL CHECK (mapping_version > 0),
     updated_at timestamptz NOT NULL DEFAULT now(),
     CONSTRAINT qt_approver_identity CHECK (
-        (person_id = 'eric_shwartz' AND display_label = 'eric shwartz') OR
         (person_id = 'john_riley' AND display_label = 'john riley') OR
         (person_id = 'xander_robbins' AND display_label = 'xander robbins') OR
         (person_id = 'hemdutt_rao' AND display_label = 'hemdutt rao') OR

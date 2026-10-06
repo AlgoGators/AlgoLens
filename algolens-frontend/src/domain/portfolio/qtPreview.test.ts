@@ -14,6 +14,14 @@ const proposal = () => decodeQtProposal(copy(fixtures.proposal_ready));
 const context = qtContextKey('101', 'synthetic-book-A', '2026-09-25');
 
 describe('QT v1 wire values', () => {
+  it('rejects the retired approver identity', () => {
+    const decision = copy(fixtures.confirm_pending) as any;
+    decision.approvals = [{ person_id: 'eric_shwartz', display_label: 'Eric Shwartz', user_id: '101',
+      approved_at: '2026-09-25T16:00:00Z' }];
+    decision.approvals_count = 1;
+    expect(() => decodeQtDecision(decision)).toThrow();
+  });
+
   it.each(['breach', 'clean'] as const)('does not admit a local %s confirmation contradicting the paired override semantics', mode => {
     let state = makeQtState(context);
     state = reduceQtState(state, { type: 'proposal_loaded', context, generation: 0, proposal: proposal() });
@@ -21,7 +29,7 @@ describe('QT v1 wire values', () => {
     state = reduceQtState(state, { type: 'evaluation_started', context, generation: 0 });
     const preview = decodeQtPreview(copy(mode === 'breach' ? fixtures.preview_breach : fixtures.preview_clean));
     state = reduceQtState(state, { type: 'preview_loaded', context, generation: 1, preview });
-    const approvals = [{ person_id: 'eric_shwartz', display_label: 'Eric Shwartz', user_id: '101',
+    const approvals = [{ person_id: 'hemdutt_rao', display_label: 'Hemdutt Rao', user_id: '101',
       approved_at: '2026-09-25T16:00:00Z' }, { person_id: 'john_riley', display_label: 'John Riley', user_id: '202',
       approved_at: '2026-09-25T16:01:00Z' }];
     const raw = mode === 'breach' ? { ...copy(fixtures.confirm_pending), status: 'confirmed_decision',
@@ -46,7 +54,7 @@ describe('QT v1 wire values', () => {
   });
 
   it('rejects a clean confirmed pair with an invented override request while admitting an actual distinct-person breach quorum', () => {
-    const approvals = [{ person_id: 'eric_shwartz', display_label: 'Eric Shwartz', user_id: '101',
+    const approvals = [{ person_id: 'hemdutt_rao', display_label: 'Hemdutt Rao', user_id: '101',
       approved_at: '2026-09-25T16:00:00Z' }, { person_id: 'john_riley', display_label: 'John Riley', user_id: '202',
       approved_at: '2026-09-25T16:01:00Z' }];
     const decision = { ...copy(fixtures.decision_pending), request_id: fixtures.confirm_pending.request_id,

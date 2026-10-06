@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { ChevronDown, FileCheck2 } from 'lucide-react';
 import { isInternalRole } from '../domain/identity/user';
 import type { InspectionField, InspectionResponse, TrendStage } from '../domain/portfolio/configurationInspection';
 import { UnsupportedNumericRepresentationError } from '../domain/portfolio/configurationInspection';
@@ -136,7 +137,7 @@ function Observation({ response }: { response: InspectionResponse }) {
 
 function ScopedPanel({ registryId, portfolioId }: Pick<Props, 'registryId' | 'portfolioId'>) {
   const { theme } = useTheme();
-  const [expanded, setExpanded] = useState(true);
+  const [expanded, setExpanded] = useState(false);
   const [refresh, setRefresh] = useState(0);
   const [view, setView] = useState<View>({ kind: 'loading' });
   useEffect(() => {
@@ -153,19 +154,47 @@ function ScopedPanel({ registryId, portfolioId }: Pick<Props, 'registryId' | 'po
     return () => { current = false; controller.abort(); };
   }, [registryId, portfolioId, refresh]);
   const color = theme === 'dark'
-    ? 'border-gray-700 bg-gray-900 text-gray-200'
-    : 'border-gray-200 bg-gray-50 text-gray-800';
-  return <section aria-label="Published configuration" className={`my-6 min-w-0 rounded-lg border p-4 ${color}`}>
+    ? 'border-gray-700 bg-gray-900 text-gray-200 shadow-black/20'
+    : 'border-gray-200 bg-white text-gray-800 shadow-gray-200/70';
+  const muted = theme === 'dark' ? 'text-gray-400' : 'text-gray-500';
+  const hover = theme === 'dark' ? 'hover:bg-gray-800/70' : 'hover:bg-gray-50';
+  const badge = theme === 'dark'
+    ? 'border-gray-700 bg-gray-800 text-gray-300'
+    : 'border-gray-200 bg-gray-50 text-gray-600';
+  return <section aria-label="Published configuration"
+    className={`my-6 min-w-0 overflow-hidden rounded-xl border shadow-sm ${color}`}>
     <button type="button" aria-expanded={expanded} aria-controls="published-configuration-body"
-      onClick={() => setExpanded(value => !value)} className="text-left font-semibold">
-      Published configuration {expanded ? '▾' : '▸'}
+      onClick={() => setExpanded(value => !value)}
+      className={`group flex w-full items-start justify-between gap-4 px-4 py-4 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 ${hover}`}>
+      <span className="flex min-w-0 items-start gap-3">
+        <span className={`mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border ${badge}`}>
+          <FileCheck2 aria-hidden="true" className="h-4 w-4" />
+        </span>
+        <span className="min-w-0">
+          <span className="flex items-center gap-1.5 font-semibold">
+            Published configuration
+            <ChevronDown aria-hidden="true"
+              className={`h-4 w-4 shrink-0 transition-transform duration-200 ${expanded ? 'rotate-180' : ''}`} />
+          </span>
+          <span className={`mt-0.5 block text-xs font-normal ${muted}`}>
+            Engine-recorded settings for this book
+          </span>
+          <span className="mt-2 flex flex-wrap gap-1.5 text-xs font-normal">
+            <span className={`rounded-full border px-2 py-0.5 ${badge}`}>Registry: {registryId}</span>
+            <span className={`max-w-full truncate rounded-full border px-2 py-0.5 ${badge}`}>Book: {portfolioId}</span>
+          </span>
+        </span>
+      </span>
+      <span className={`mt-1 shrink-0 rounded-full border px-2 py-0.5 text-[11px] font-medium uppercase tracking-wide ${badge}`}>
+        Read only
+      </span>
     </button>
-    <p className="text-xs break-all mt-1">Registry: {registryId}; book: {portfolioId}</p>
-    {expanded && <div id="published-configuration-body" className="mt-3">
+    {expanded && <div id="published-configuration-body"
+      className={`border-t px-4 pb-4 pt-4 ${theme === 'dark' ? 'border-gray-700' : 'border-gray-200'}`}>
       <button type="button" onClick={() => {
         setView({ kind: 'loading' });
         setRefresh(value => value + 1);
-      }} className="rounded border border-gray-400 px-2 py-1 text-xs mb-3">
+      }} className={`mb-4 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${badge} ${hover}`}>
         Refresh published configuration
       </button>
       {view.kind === 'loading' && <p role="status">Loading published configuration…</p>}
