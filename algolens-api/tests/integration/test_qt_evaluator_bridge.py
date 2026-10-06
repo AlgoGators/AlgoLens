@@ -1,20 +1,15 @@
-"""Actual offline artifact transport; later A5 tests add evidence admission."""
-from hashlib import sha256
-import json
-from pathlib import Path
+"""Actual isolated Release bundle transport; A5 tests add evidence admission."""
 
 from algolens.infrastructure.portfolio.qt_evaluator_process import QtEvaluatorProcess
-from tests.qt_native_artifacts import require_native_artifact_paths
+from tests.qt_native_evaluator import native_evaluator_configuration, native_evaluator_requests
 
 
 def test_real_compiled_evaluator_through_isolated_bounded_process():
-    paths = require_native_artifact_paths()
-    binary = paths.artifact("qt_evaluator")
-    assert binary.is_file(), "Build the actual reviewed evaluator before this gate"
-    fixture = paths.source_dir / "tests/contracts/qt-eval-v1.json"
-    request = json.loads(fixture.read_text())["selected_book"]
-    process = QtEvaluatorProcess(binary, sha256(binary.read_bytes()).hexdigest(),
-                                 request["evaluator_build"])
+    request = native_evaluator_requests()["selected_book"]
+    # A Release executable depends on libtrade_ngin.so via $ORIGIN. Sealing
+    # only that executable into a memfd loses its runtime closure; the staged
+    # bundle seals and pins the loader, engine and dependency bytes as well.
+    process = QtEvaluatorProcess(**native_evaluator_configuration())
     response = process.run(request)
     assert response["completeness"] == "complete"
     assert [row["quantity_exact"] for row in response["evaluated_book"]] == ["5", "1"]
