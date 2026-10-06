@@ -10,31 +10,66 @@ class PostgresUserRepository:
         self.connection_factory = connection_factory or get_db_connection
 
     def find_by_email(self, email):
-        query = "SELECT * FROM auth.users WHERE email = %s"
-        row = self.execute_query(query, (email,), fetch_one=True)
+        query = """
+            SELECT u.*
+            FROM auth.users u
+            WHERE lower(btrim(u.email)) = lower(btrim(%s))
+              AND NOT EXISTS (
+                  SELECT 1 FROM auth.account_retirements r
+                  WHERE r.user_id = u.id
+              )
+              AND 1 = (
+                  SELECT count(*) FROM auth.users candidate
+                  WHERE lower(btrim(candidate.email)) = lower(btrim(%s))
+                    AND NOT EXISTS (
+                        SELECT 1 FROM auth.account_retirements r
+                        WHERE r.user_id = candidate.id
+                    )
+              )
+        """
+        row = self.execute_query(query, (email, email), fetch_one=True)
         return user_from_row(row) if row else None
 
     def find_by_id(self, user_id):
-        query = "SELECT * FROM auth.users WHERE id = %s"
+        query = """
+            SELECT u.* FROM auth.users u
+            WHERE u.id = %s
+              AND NOT EXISTS (
+                  SELECT 1 FROM auth.account_retirements r
+                  WHERE r.user_id = u.id
+              )
+        """
         row = self.execute_query(query, (user_id,), fetch_one=True)
         return user_from_row(row) if row else None
 
     def complete_registration(self, email, password_hash, first_name, last_name):
         update_query = """
-            UPDATE auth.users
+            WITH candidates AS (
+                SELECT u.id
+                FROM auth.users u
+                WHERE lower(btrim(u.email)) = lower(btrim(%s))
+                  AND NOT EXISTS (
+                      SELECT 1 FROM auth.account_retirements r
+                      WHERE r.user_id = u.id
+                  )
+            ), eligible AS (
+                SELECT min(id) AS id FROM candidates HAVING count(*) = 1
+            )
+            UPDATE auth.users u
             SET password_hash = %s, first_name = %s, last_name = %s
-            WHERE email = %s
-            RETURNING id, email, first_name, last_name, role
+            FROM eligible e
+            WHERE u.id = e.id
+            RETURNING u.id, u.email, u.first_name, u.last_name, u.role
         """
 
         conn = self.connection_factory()
         try:
             with conn.cursor() as cursor:
                 cursor.execute(
-                    update_query, (password_hash, first_name, last_name, email)
+                    update_query, (email, password_hash, first_name, last_name)
                 )
                 updated_user = cursor.fetchone()
                 conn.commit()
-            return user_from_row(updated_user)
+            return user_from_row(updated_user) if updated_user else None
         finally:
             conn.close()

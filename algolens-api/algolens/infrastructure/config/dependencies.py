@@ -50,6 +50,14 @@ def create_identity_dependencies(
 def load_identity_authority_rows(user_id, execute_query_func=None):
     """Read current QT grants/mappings at the HTTP composition boundary."""
     query = execute_query_func or execute_query
+    retirements = query(
+        "SELECT user_id FROM auth.account_retirements WHERE user_id = %s",
+        (user_id,),
+    )
+    if not isinstance(retirements, (list, tuple)):
+        raise RuntimeError("invalid_retirement_rows")
+    if retirements:
+        return [], []
     grants = query(
         "SELECT capability, active FROM trading.qt_action_grants WHERE user_id = %s",
         (user_id,),
