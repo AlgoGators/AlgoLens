@@ -220,9 +220,9 @@ export function AlphaAttribution({ equityByStream, historyBreaks, theme }: Props
                             borderRadius: '8px',
                             color: dark ? '#fff' : '#000',
                         }}
-                        formatter={(value: number, name: string) => [
-                            money(value),
-                            STREAM_STYLE[name]?.label ?? name,
+                        formatter={(value, name) => [
+                            money(Number(value ?? 0)),
+                            STREAM_STYLE[String(name)]?.label ?? name,
                         ]}
                         labelFormatter={(label) =>
                             formatBarDate(String(label), {

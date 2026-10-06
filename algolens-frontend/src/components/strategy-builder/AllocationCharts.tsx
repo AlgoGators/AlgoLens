@@ -41,7 +41,7 @@ export function AllocationCharts({ metrics, theme }: AllocationChartsProps) {
               cx="50%"
               cy="50%"
               outerRadius={70}
-              label={({ symbol, percentage }) => `${symbol} ${percentage.toFixed(0)}%`}
+              label={({ payload }) => `${payload.symbol} ${payload.percentage.toFixed(0)}%`}
               labelLine={false}
             >
               {metrics.assetAllocation.slice(0, 5).map((entry, index) => (
@@ -56,7 +56,7 @@ export function AllocationCharts({ metrics, theme }: AllocationChartsProps) {
                 fontWeight: '600',
                 color: theme === 'dark' ? '#fff' : '#000'
               }}
-              formatter={(value: number) => [`$${(value / 1000).toFixed(0)}k`]}
+              formatter={(value) => [`$${(Number(value ?? 0) / 1000).toFixed(0)}k`]}
             />
           </PieChart>
         </ResponsiveContainer>
@@ -82,7 +82,7 @@ export function AllocationCharts({ metrics, theme }: AllocationChartsProps) {
               cx="50%"
               cy="50%"
               outerRadius={70}
-              label={({ percentage }) => `${percentage.toFixed(0)}%`}
+              label={({ payload }) => `${payload.percentage.toFixed(0)}%`}
               labelLine={false}
             >
               {metrics.strategyAllocation.map((entry, index) => (
@@ -97,7 +97,7 @@ export function AllocationCharts({ metrics, theme }: AllocationChartsProps) {
                 fontWeight: '600',
                 color: theme === 'dark' ? '#fff' : '#000'
               }}
-              formatter={(value: number) => [`$${(value / 1000).toFixed(0)}k`]}
+              formatter={(value) => [`$${(Number(value ?? 0) / 1000).toFixed(0)}k`]}
             />
           </PieChart>
         </ResponsiveContainer>

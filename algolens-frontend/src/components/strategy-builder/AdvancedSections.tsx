@@ -164,7 +164,7 @@ export function AdvancedSections({ metrics, theme, expanded, onToggle }: Advance
                 }}
                 itemStyle={{ color: theme === 'dark' ? '#fff' : '#000' }}
                 labelStyle={{ color: theme === 'dark' ? '#fff' : '#000' }}
-                formatter={(value: number) => [`$${value.toLocaleString()}`, 'P&L']}
+                formatter={(value) => [`$${Number(value ?? 0).toLocaleString()}`, 'P&L']}
               />
               <Bar dataKey="pnl">
                 {metrics.symbolPnL.map((entry, index) => (

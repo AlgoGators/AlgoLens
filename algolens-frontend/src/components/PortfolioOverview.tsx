@@ -136,7 +136,7 @@ export function PortfolioOverview({ data, onBuilderClick, onOpenStrategy }: Port
                 fontWeight: '600',
                 padding: '12px'
               }}
-              formatter={(value: number) => [`$${value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, 'Fund Value']}
+              formatter={(value) => [`$${Number(value ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, 'Fund Value']}
               labelFormatter={(label) => formatBarDate(String(label))}
             />
             <Line

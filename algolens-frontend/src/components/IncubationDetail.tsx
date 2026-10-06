@@ -239,8 +239,8 @@ export function IncubationDetail({
                     boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)',
                     color: theme === 'dark' ? '#fff' : '#000',
                   }}
-                  formatter={(value: number) => [
-                    `$${value.toLocaleString('en-US', {
+                  formatter={(value) => [
+                    `$${Number(value ?? 0).toLocaleString('en-US', {
                       minimumFractionDigits: 2,
                     })}`,
                     'Mock Equity',
