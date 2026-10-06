@@ -545,7 +545,9 @@ class QtWorkflowService:
                     or provenance.observed_source_digest != preview["source_digest"]
                     or provenance.legacy_audit_chain_digest != preview["provenance_digest"]):
                 raise QtWorkflowError("preview_stale")
-            if qt_digest_v1({"selection_rows": payload["selection_rows"]}) != head["draft_digest"]:
+            # The immutable draft binds the rationale as well as its rows.
+            # Substitute preview rows without dropping any saved draft fields.
+            if qt_digest_v1({**head["selection_payload"], "selection_rows": payload["selection_rows"]}) != head["draft_digest"]:
                 raise QtWorkflowError("preview_mismatch")
             saved_rows = self._stored_rows(head)
             base, immutable = self._base_rows(tx, source, provenance, registry_kind)

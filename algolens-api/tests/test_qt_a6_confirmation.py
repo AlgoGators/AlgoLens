@@ -18,10 +18,14 @@ from tests.test_qt_a4_draft import _ready_provenance
 from algolens.infrastructure.portfolio.qt_workflow_repository import QtTransaction
 
 
-def confirmation_fixture(monkeypatch, *, breach=False):
+def confirmation_fixture(monkeypatch, *, breach=False, rationale=None):
     service, repository, _ = preview_fixture(monkeypatch)
     tx = repository.tx
     original_facts = tx.read_current_facts()
+    if rationale is not None:
+        tx.head["selection_payload"]["rationale"] = rationale
+        tx.head["draft_digest"] = qt_digest_v1(tx.head["selection_payload"])
+        original_facts["draft"]["digest"] = tx.head["draft_digest"]
     vectors = json.loads((Path(__file__).resolve().parents[2] / "contracts/qt-read-set-v1.json").read_text())
     complete = next(row["payload"] for row in vectors["cases"] if row["name"] == "complete_available")
     overrides = {name: deepcopy(complete[name]) for name in ("risk_limits", "portfolio_inputs", "external_sources", "evaluator")}
@@ -88,6 +92,34 @@ def test_confirm_atomic_decision_and_optional_single_request(monkeypatch, breach
     assert tx.decisions[0]["workflow_capability_version"] == 1
     if breach: assert tx.requests[0]["eligibility_version"] == 7
     assert tx.position_mutations == 0
+
+
+@pytest.mark.parametrize("breach", [False, True])
+def test_confirmation_accepts_the_complete_rationale_bound_draft(monkeypatch, breach):
+    service, tx, _, preview_id, request = confirmation_fixture(
+        monkeypatch, breach=breach, rationale="Reduce concentration after review.")
+    response = service.confirm_preview(preview_id, 101, request).to_wire()
+    assert response["status"] == ("pending_override" if breach else "confirmed_decision")
+    assert len(tx.decisions) == 1 and len(tx.requests) == int(breach)
+    assert tx.position_mutations == 0
+
+
+@pytest.mark.parametrize("damage", ["rationale", "preview_rows"])
+def test_confirmation_rejects_changed_rationale_or_rehashed_preview_rows(monkeypatch, damage):
+    service, tx, _, preview_id, request = confirmation_fixture(
+        monkeypatch, rationale="Reduce concentration after review.")
+    if damage == "rationale":
+        tx.head["selection_payload"]["rationale"] = "A different rationale."
+    else:
+        payload = deepcopy(tx.preview["payload"])
+        payload["selection_rows"][0]["average_price_exact"] = "101"
+        payload["payload_digest"] = qt_digest_v1({
+            key: value for key, value in payload.items() if key != "payload_digest"})
+        tx.preview["payload"] = payload
+        tx.preview["payload_digest"] = request["expected_digest"] = payload["payload_digest"]
+    with pytest.raises(QtWorkflowError):
+        service.confirm_preview(preview_id, 101, request)
+    assert not tx.decisions and not tx.requests and tx.position_mutations == 0
 
 
 def test_response_loss_replays_before_source_freshness_but_after_current_role(monkeypatch):
