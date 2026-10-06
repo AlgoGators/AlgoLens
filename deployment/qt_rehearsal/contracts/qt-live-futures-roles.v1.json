@@ -1,0 +1,121 @@
+{
+  "schema_version": "qt-rehearsal-role-contract/v1",
+  "database": "qt_rehearsal_migrated",
+  "roles": [
+    {"domain": "schema_owner", "name": "qt_schema_owner"},
+    {"domain": "migrator", "name": "qt_migrator"},
+    {"domain": "algolens_api", "name": "qt_algolens_api"},
+    {"domain": "system_publisher", "name": "qt_system_publisher"},
+    {"domain": "qt_worker", "name": "qt_worker"}
+  ],
+  "probes": [
+    {
+      "id": "owner-no-data-source",
+      "role_domain": "schema_owner",
+      "sql": "SELECT 1 FROM futures_data.ohlcv_1d WHERE false",
+      "expect": "denied"
+    },
+    {
+      "id": "migrator-owner-ddl",
+      "role_domain": "migrator",
+      "sql": "SET LOCAL ROLE qt_schema_owner; CREATE TABLE trading.__qt_role_probe(id integer)",
+      "expect": "allowed"
+    },
+    {
+      "id": "migrator-no-implicit-data",
+      "role_domain": "migrator",
+      "sql": "SELECT 1 FROM auth.users WHERE false",
+      "expect": "denied"
+    },
+    {
+      "id": "api-auth-read",
+      "role_domain": "algolens_api",
+      "sql": "SELECT id,role FROM auth.users WHERE false",
+      "expect": "allowed"
+    },
+    {
+      "id": "api-registry-lock",
+      "role_domain": "algolens_api",
+      "sql": "SELECT id FROM trading.strategy_registry WHERE false FOR UPDATE",
+      "expect": "allowed"
+    },
+    {
+      "id": "api-workflow-insert-plan",
+      "role_domain": "algolens_api",
+      "sql": "EXPLAIN (COSTS OFF) INSERT INTO trading.qt_idempotency(actor_id,book_id,operation,scope_id,idempotency_key,request_digest,response_payload) SELECT 1,'probe','save_draft','probe','00000000-0000-4000-8000-000000000001'::uuid,'probe','{}'::jsonb WHERE false",
+      "expect": "allowed"
+    },
+    {
+      "id": "api-no-financial-write",
+      "role_domain": "algolens_api",
+      "sql": "EXPLAIN (COSTS OFF) UPDATE trading.positions SET quantity=quantity WHERE false",
+      "expect": "denied"
+    },
+    {
+      "id": "api-no-dispatch-execute",
+      "role_domain": "algolens_api",
+      "sql": "EXPLAIN (COSTS OFF) SELECT * FROM trading.claim_qt_desk_dispatch('00000000-0000-4000-8000-000000000001'::uuid,interval '1 second')",
+      "expect": "denied"
+    },
+    {
+      "id": "publisher-market-read",
+      "role_domain": "system_publisher",
+      "sql": "SELECT 1 FROM futures_data.ohlcv_1d WHERE false",
+      "expect": "allowed"
+    },
+    {
+      "id": "publisher-run-input-plan",
+      "role_domain": "system_publisher",
+      "sql": "EXPLAIN (COSTS OFF) INSERT INTO trading.run_inputs(portfolio_id,strategy_id,date,trade_ngin_sha,config_snapshot,universe,data_window,engine_flags) SELECT 'CONSERVATIVE_PORTFOLIO','LIVE_TREND_FOLLOWING',date '2000-01-01','probe','{}'::jsonb,'[]'::jsonb,'{}'::jsonb,'{}'::jsonb WHERE false",
+      "expect": "allowed"
+    },
+    {
+      "id": "publisher-trading-days",
+      "role_domain": "system_publisher",
+      "sql": "SELECT trading.get_trading_days('LIVE_TREND_FOLLOWING'::varchar,date '2000-01-01')",
+      "expect": "allowed"
+    },
+    {
+      "id": "publisher-no-worker-write",
+      "role_domain": "system_publisher",
+      "sql": "EXPLAIN (COSTS OFF) INSERT INTO trading.qt_desk_receipts DEFAULT VALUES",
+      "expect": "denied"
+    },
+    {
+      "id": "worker-auth-lock",
+      "role_domain": "qt_worker",
+      "sql": "SELECT id FROM auth.users WHERE false FOR UPDATE",
+      "expect": "allowed"
+    },
+    {
+      "id": "worker-dispatch-execute-plan",
+      "role_domain": "qt_worker",
+      "sql": "EXPLAIN (COSTS OFF) SELECT * FROM trading.claim_qt_desk_dispatch('00000000-0000-4000-8000-000000000001'::uuid,interval '1 second')",
+      "expect": "allowed"
+    },
+    {
+      "id": "worker-runtime-fence-execute-plan",
+      "role_domain": "qt_worker",
+      "sql": "EXPLAIN (COSTS OFF) SELECT * FROM trading.lock_runtime_scope('LIVE_TREND_FOLLOWING','CONSERVATIVE_PORTFOLIO',true)",
+      "expect": "allowed"
+    },
+    {
+      "id": "worker-receipt-insert-plan",
+      "role_domain": "qt_worker",
+      "sql": "EXPLAIN (COSTS OFF) INSERT INTO trading.qt_desk_receipts(decision_id,attempt_id,status,report_eligibility_status,report_reason_codes) SELECT '00000000-0000-4000-8000-000000000001'::uuid,'00000000-0000-4000-8000-000000000002'::uuid,'pending','unavailable','[]'::jsonb WHERE false",
+      "expect": "allowed"
+    },
+    {
+      "id": "worker-no-system-write",
+      "role_domain": "qt_worker",
+      "sql": "EXPLAIN (COSTS OFF) INSERT INTO trading.run_inputs DEFAULT VALUES",
+      "expect": "denied"
+    },
+    {
+      "id": "worker-no-authority-write",
+      "role_domain": "qt_worker",
+      "sql": "INSERT INTO trading.qt_action_grants(user_id,capability,active,version) VALUES (-1,'qt_approve',true,1)",
+      "expect": "denied"
+    }
+  ]
+}
