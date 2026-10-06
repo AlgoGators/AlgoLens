@@ -68,4 +68,3 @@ def sample():
     return {'schema_version':CONTRACT['document_schema_version'],'catalog_version':CONTRACT['catalog_version'],
         'scope':'full_run','profile':'mean_reversion','run_key':deepcopy(KEY),'available':True,'complete':True,
         'unavailable_reason':None,'stages':stages}
-

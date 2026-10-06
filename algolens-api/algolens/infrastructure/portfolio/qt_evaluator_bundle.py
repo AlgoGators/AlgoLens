@@ -357,7 +357,3 @@ class QtEvaluatorBundle:
         finally:
             for descriptor in descriptors.values():
                 os.close(descriptor)
-
-
-
-

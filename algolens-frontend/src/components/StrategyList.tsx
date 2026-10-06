@@ -151,12 +151,12 @@ export function StrategyList({ strategies, onSelectStrategy }: StrategyListProps
                 <div className={`h-2 rounded-full overflow-hidden ${
                   theme === 'dark' ? 'bg-gray-800' : 'bg-gray-200'
                 }`}>
-                  <div 
+                  <div
                     className={`h-full transition-all ${
                       isPositive ? 'bg-orange-500' : 'bg-red-500'
                     }`}
-                    style={{ 
-                      width: `${Math.min(Math.abs(strategy.returnPercent ?? 0) * 2, 100)}%` 
+                    style={{
+                      width: `${Math.min(Math.abs(strategy.returnPercent ?? 0) * 2, 100)}%`
                     }}
                   ></div>
                 </div>
