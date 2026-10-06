@@ -86,9 +86,16 @@ def _same_json(left, right):
 def _actual_changed_paths(baseline, effective, changes):
     """Reconcile native output with assignments; native still owns policy and hashes."""
     visited, changed = set(), []
+    # ConfigLoader::extract_config copies these risk limits into AppConfig;
+    # build_runtime_trading_snapshot emits both representations. These are
+    # derived output fields, never assignments or reported changed_paths.
+    mirrors = {'/max_drawdown': '/risk/max_drawdown', '/max_leverage': '/risk/max_leverage'}
 
     def walk(before, after, path):
-        if path in changes:
+        if path in mirrors and mirrors[path] in changes:
+            if not _same_json(after, changes[mirrors[path]]):
+                raise ValueError()
+        elif path in changes:
             if not _same_json(after, changes[path]):
                 raise ValueError()
             visited.add(path)
@@ -106,6 +113,8 @@ def _actual_changed_paths(baseline, effective, changes):
             raise ValueError()
 
     if not isinstance(changes, dict) or any(not isinstance(path, str) or not path.startswith('/') for path in changes):
+        raise ValueError()
+    if changes.keys() & mirrors.keys():
         raise ValueError()
     walk(baseline, effective, '')
     if visited != set(changes):

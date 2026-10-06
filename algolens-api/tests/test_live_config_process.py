@@ -213,3 +213,66 @@ def test_native_reply_reset_refuses_override_evidence(mutation):
     else: changes = {'/optimization/tau': 1.0}
     with pytest.raises(LiveConfigError, match='validator_unavailable'):
         native_reply(result, current, changes, 'reset_to_baseline')
+
+
+@pytest.mark.parametrize('changes,expected,drawdown,leverage', [
+    ({'/risk/max_drawdown': .25}, ['/risk/max_drawdown'], .25, 2.0),
+    ({'/risk/max_leverage': 1.75}, ['/risk/max_leverage'], .3, 1.75),
+    ({'/risk/max_drawdown': .25, '/risk/max_leverage': 1.75},
+     ['/risk/max_drawdown', '/risk/max_leverage'], .25, 1.75),
+    ({'/risk/max_drawdown': .25, '/risk/max_leverage': 2.0,
+      '/execution/position_limit_live': 500.0}, ['/risk/max_drawdown'], .25, 2.0),
+    ({'/risk/max_drawdown': .3, '/risk/max_leverage': 1.75}, ['/risk/max_leverage'], .3, 1.75),
+])
+def test_native_to_api_accepts_exact_derived_risk_mirrors(changes, expected, drawdown, leverage):
+    result = NativeValidator(native_pin()).validate(scope(), changes, 'override')
+    assert result['changed_paths'] == expected
+    assert result['effective_snapshot']['max_drawdown'] == result['effective_snapshot']['risk']['max_drawdown'] == drawdown
+    assert result['effective_snapshot']['max_leverage'] == result['effective_snapshot']['risk']['max_leverage'] == leverage
+
+
+@pytest.fixture(scope='module')
+def native_risk_mirror_reply():
+    # Keep the real producer separate so negative consumer tests cannot pass merely
+    # because the consumer rejects the valid native reply before the mutation.
+    from tests.qt_native_artifacts import require_native_artifact_paths
+    changes = {'/risk/max_drawdown': .25, '/risk/max_leverage': 1.75}
+    process = subprocess.run([str(require_native_artifact_paths().artifact('live_config_validate'))],
+        input=json.dumps({'schema': 'live-config-validation/v1',
+                          'base_snapshot': scope()['config_snapshot'], 'changes': changes}),
+        capture_output=True, text=True, timeout=15)
+    assert process.returncode == 0, process.stdout
+    result = json.loads(process.stdout)
+    assert result['changed_paths'] == ['/risk/max_drawdown', '/risk/max_leverage']
+    return result
+
+
+@pytest.mark.parametrize('field', ['max_drawdown', 'max_leverage'])
+@pytest.mark.parametrize('mutation', ['wrong_mirror', 'baseline_mirror', 'unrelated_edit',
+    'reported_mirror', 'requested_mirror', 'omitted_risk_assignment'])
+def test_native_reply_rejects_inconsistent_risk_mirrors(native_risk_mirror_reply, field, mutation):
+    result = copy.deepcopy(native_risk_mirror_reply)
+    changes = {'/risk/max_drawdown': .25, '/risk/max_leverage': 1.75}
+    if mutation == 'wrong_mirror': result['effective_snapshot'][field] = .5
+    elif mutation == 'baseline_mirror': result['effective_snapshot'][field] = scope()['config_snapshot'][field]
+    elif mutation == 'unrelated_edit': result['effective_snapshot']['optimization']['cost_penalty_scalar'] = 12.75
+    elif mutation == 'reported_mirror': result['changed_paths'] = sorted(result['changed_paths'] + ['/' + field])
+    elif mutation == 'requested_mirror':
+        changes['/' + field] = changes['/risk/' + field]
+        result['changed_paths'] = sorted(changes)
+    elif mutation == 'omitted_risk_assignment':
+        del changes['/risk/' + field]
+        result['changed_paths'].remove('/risk/' + field)
+    with pytest.raises(LiveConfigError, match='validator_unavailable') as refused:
+        native_reply(result, scope(), changes, 'override')
+    assert refused.value.status == 503
+
+
+@pytest.mark.parametrize('changes', [
+    {'/max_drawdown': .25}, {'/max_leverage': 1.75},
+    {'/risk/max_drawdown': .25, '/max_drawdown': .25},
+    {'/risk/max_drawdown': .3, '/risk/max_leverage': 2.0},
+])
+def test_native_risk_mirrors_remain_protected_and_all_noop_refuses(changes):
+    with pytest.raises(LiveConfigError, match='validator_unavailable'):
+        NativeValidator(native_pin()).validate(scope(), changes, 'override')
