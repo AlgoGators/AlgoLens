@@ -5,6 +5,7 @@ import signal
 import tempfile
 import time
 import unittest
+from unittest.mock import patch
 
 from deployment.qt_rehearsal.cluster import RehearsalCluster
 from deployment.qt_rehearsal.harness import SafetyError, load_role_contract
@@ -84,20 +85,22 @@ CREATE TABLE trading.strategy_lifecycle_log(id bigint PRIMARY KEY);
 CREATE TABLE trading.positions(
  strategy_id text,portfolio_id text,portfolio_type text NOT NULL,quantity numeric NOT NULL DEFAULT 0
 );
-CREATE TABLE trading.risk_limits(strategy_id text,portfolio_id text,limits jsonb);
+CREATE TABLE trading.risk_limits(id serial PRIMARY KEY,strategy_id text,portfolio_id text,limits jsonb);
 CREATE TABLE trading.live_results(
- strategy_id text,portfolio_id text,portfolio_type text NOT NULL,date timestamptz DEFAULT now()
+ id serial PRIMARY KEY,strategy_id text,portfolio_id text,portfolio_type text NOT NULL,date timestamptz DEFAULT now()
 );
 CREATE TABLE trading.equity_curve(
- strategy_id text,portfolio_id text,portfolio_type text NOT NULL
+ id serial PRIMARY KEY,strategy_id text,portfolio_id text,portfolio_type text NOT NULL
 );
 CREATE TABLE trading.executions(
  strategy_id text,portfolio_id text,portfolio_type text NOT NULL
 );
 CREATE TABLE trading.signals(
- strategy_id text,portfolio_id text,portfolio_type text NOT NULL
+ id serial PRIMARY KEY,strategy_id varchar(50) NOT NULL,symbol varchar(20) NOT NULL,
+ signal_value numeric NOT NULL,timestamp timestamptz NOT NULL,
+ created_at timestamptz DEFAULT CURRENT_TIMESTAMP,portfolio_id varchar(100),strategy_name varchar(100)
 );
-CREATE TABLE trading.live_run_metadata(strategy_id text,portfolio_id text);
+CREATE TABLE trading.live_run_metadata(id serial PRIMARY KEY,strategy_id text,portfolio_id text);
 CREATE TABLE trading.run_inputs(
  portfolio_id text,strategy_id text,date date,trade_ngin_sha text,
  config_snapshot jsonb,universe jsonb,data_window jsonb,engine_flags jsonb,
@@ -146,7 +149,9 @@ CREATE TABLE trading.desk_run_results(id uuid PRIMARY KEY);
 CREATE TABLE trading.qt_desk_market_sources(id uuid PRIMARY KEY);
 CREATE TABLE trading.qt_desk_finalizations(id uuid PRIMARY KEY);
 CREATE TABLE trading.qt_first_day_anchors(id uuid PRIMARY KEY);
-CREATE TABLE trading.qt_desk_dispatch_jobs(decision_id uuid PRIMARY KEY);
+CREATE TABLE trading.qt_desk_dispatch_jobs(
+ decision_id uuid PRIMARY KEY,state text,first_seen_at timestamptz,lease_expires_at timestamptz
+);
 CREATE TABLE trading.qt_desk_dispatch_attempts(event_id bigserial PRIMARY KEY);
 CREATE FUNCTION trading.enqueue_qt_desk_dispatch(uuid,uuid,uuid,uuid,uuid) RETURNS void
  LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,trading AS $$ BEGIN END $$;
@@ -257,6 +262,65 @@ INSERT INTO trading.run_inputs(
             + ";\nROLLBACK;\n"
         )
         return self.cluster._psql(database, script, check=False)
+
+    def test_real_shape_signals_are_publisher_only_and_serial_inserts_work(self):
+        """Fails if legacy signals need a nonexistent stream or serial grants are omitted."""
+        self._apply_fixture()
+        try:
+            self.cluster.apply_sql("qt_rehearsal_migrated", self.FORWARD.read_text(encoding="utf-8"))
+        except SafetyError as error:
+            self.fail(getattr(error.__cause__, "stderr", str(error)))
+        signal_insert = (
+            "INSERT INTO trading.signals(strategy_id,portfolio_id,symbol,signal_value,timestamp) "
+            "VALUES('LIVE_TREND_FOLLOWING','CONSERVATIVE_PORTFOLIO','ES',1,now())"
+        )
+        allowed = self._as_role("qt_system_publisher", signal_insert)
+        self.assertEqual(allowed.returncode, 0, allowed.stderr)
+        for role in ("qt_algolens_api", "qt_worker"):
+            denied = self._as_role(role, signal_insert)
+            self.assertNotEqual(denied.returncode, 0)
+            self.assertIn("42501", denied.stderr)
+            self.assertIn("42501", self._as_role(role, "SELECT nextval('trading.signals_id_seq')").stderr)
+        for role, stream in (("qt_system_publisher", "system"), ("qt_worker", "qt")):
+            for table in ("live_results", "equity_curve"):
+                inserted = self._as_role(role, f"INSERT INTO trading.{table}(portfolio_type) VALUES('{stream}')")
+                self.assertEqual(inserted.returncode, 0, inserted.stderr)
+        for table in ("risk_limits", "live_run_metadata"):
+            inserted = self._as_role("qt_system_publisher", f"INSERT INTO trading.{table} DEFAULT VALUES")
+            self.assertEqual(inserted.returncode, 0, inserted.stderr)
+
+    def test_runtime_catalog_digest_matches_admin_without_broad_grants(self):
+        """Fails when information_schema privilege filtering changes readiness attestation."""
+        self._apply_fixture()
+        self.cluster.apply_sql("qt_rehearsal_migrated", self.FORWARD.read_text(encoding="utf-8"))
+        expected = self.cluster.schema_digest("qt_rehearsal_migrated")
+        run = self.cluster._run
+
+        def runtime_catalog(args, **kwargs):
+            # Keep the real identity guard as admin; execute both real catalog
+            # queries under precisely the runtime role whose visibility matters.
+            if "--command" in args and "WITH catalog(kind, identity, definition)" in args[-1]:
+                args = [*args[:-1], "SET ROLE qt_algolens_api;\n" + args[-1]]
+            return run(args, **kwargs)
+
+        with patch.object(self.cluster, "_run", side_effect=runtime_catalog):
+            actual = self.cluster.schema_digest("qt_rehearsal_migrated")
+        self.assertEqual(actual, expected)
+
+    def test_readiness_can_read_only_dispatch_health_columns(self):
+        """Fails when readiness cannot inspect the queue or gains queue write authority."""
+        self._apply_fixture()
+        self.cluster.apply_sql("qt_rehearsal_migrated", self.FORWARD.read_text(encoding="utf-8"))
+        read = self._as_role("qt_algolens_api", "SELECT state,first_seen_at,lease_expires_at FROM trading.qt_desk_dispatch_jobs")
+        self.assertEqual(read.returncode, 0, read.stderr)
+        for sql in (
+            "SELECT decision_id FROM trading.qt_desk_dispatch_jobs",
+            "UPDATE trading.qt_desk_dispatch_jobs SET state='done'",
+            "INSERT INTO trading.qt_desk_dispatch_jobs DEFAULT VALUES",
+        ):
+            denied = self._as_role("qt_algolens_api", sql)
+            self.assertNotEqual(denied.returncode, 0)
+            self.assertIn("42501", denied.stderr)
 
     def test_postlude_is_idempotent_and_enforces_runtime_isolation(self):
         """Catches broad grants, unguarded locks, unsafe definers, and cross-stream writes."""

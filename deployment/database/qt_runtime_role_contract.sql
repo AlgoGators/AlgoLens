@@ -194,6 +194,10 @@ GRANT SELECT ON
   trading.qt_desk_market_sources,trading.qt_desk_finalizations,trading.qt_first_day_anchors
 TO qt_algolens_api;
 
+-- Readiness needs queue health, not decision identities or mutation authority.
+GRANT SELECT(state,first_seen_at,lease_expires_at)
+ ON trading.qt_desk_dispatch_jobs TO qt_algolens_api;
+
 GRANT INSERT(draft_id,book_id,source_day,revision,model_publication_id,model_publication_version,
  seed_digest,source_digest,provenance_digest,draft_digest,selection_payload,created_by,updated_by)
  ON trading.qt_drafts TO qt_algolens_api;
@@ -271,7 +275,14 @@ DECLARE
 BEGIN
   FOR item IN SELECT * FROM (VALUES
     ('qt_algolens_api','trading','runtime_intents','id'),
-    ('qt_worker','trading','position_overrides','id')
+    ('qt_worker','trading','position_overrides','id'),
+    ('qt_system_publisher','trading','live_results','id'),
+    ('qt_system_publisher','trading','equity_curve','id'),
+    ('qt_system_publisher','trading','live_run_metadata','id'),
+    ('qt_system_publisher','trading','risk_limits','id'),
+    ('qt_system_publisher','trading','signals','id'),
+    ('qt_worker','trading','live_results','id'),
+    ('qt_worker','trading','equity_curve','id')
   ) AS values(role_name,schema_name,table_name,column_name)
   LOOP
     sequence_name:=pg_get_serial_sequence(
@@ -314,16 +325,22 @@ BEGIN
     LOOP
       EXECUTE format('DROP POLICY %I ON trading.%I',policy_name,relation_name);
     END LOOP;
-    publisher_predicate:=CASE WHEN relation_name='positions'
+    -- Signals are a legacy, System-only table: no portfolio_type exists and
+    -- the native writer rejects signals for non-System results. Do not invent
+    -- a QT stream here or grant a worker policy on the publisher-only table.
+    publisher_predicate:=CASE WHEN relation_name='signals' THEN 'true'
+      WHEN relation_name='positions'
       THEN 'portfolio_type IN (''system'',''qt_proposal'')'
       ELSE 'portfolio_type=''system''' END;
     EXECUTE format('CREATE POLICY qt_role_read_all ON trading.%I FOR SELECT TO qt_algolens_api,qt_system_publisher,qt_worker USING (true)',relation_name);
     EXECUTE format('CREATE POLICY qt_role_publisher_insert ON trading.%I FOR INSERT TO qt_system_publisher WITH CHECK (%s)',relation_name,publisher_predicate);
     EXECUTE format('CREATE POLICY qt_role_publisher_update ON trading.%I FOR UPDATE TO qt_system_publisher USING (%s) WITH CHECK (%s)',relation_name,publisher_predicate,publisher_predicate);
     EXECUTE format('CREATE POLICY qt_role_publisher_delete ON trading.%I FOR DELETE TO qt_system_publisher USING (%s)',relation_name,publisher_predicate);
-    EXECUTE format('CREATE POLICY qt_role_worker_insert ON trading.%I FOR INSERT TO qt_worker WITH CHECK (portfolio_type=''qt'')',relation_name);
-    EXECUTE format('CREATE POLICY qt_role_worker_update ON trading.%I FOR UPDATE TO qt_worker USING (portfolio_type=''qt'') WITH CHECK (portfolio_type=''qt'')',relation_name);
-    EXECUTE format('CREATE POLICY qt_role_worker_delete ON trading.%I FOR DELETE TO qt_worker USING (portfolio_type=''qt'')',relation_name);
+    IF relation_name<>'signals' THEN
+      EXECUTE format('CREATE POLICY qt_role_worker_insert ON trading.%I FOR INSERT TO qt_worker WITH CHECK (portfolio_type=''qt'')',relation_name);
+      EXECUTE format('CREATE POLICY qt_role_worker_update ON trading.%I FOR UPDATE TO qt_worker USING (portfolio_type=''qt'') WITH CHECK (portfolio_type=''qt'')',relation_name);
+      EXECUTE format('CREATE POLICY qt_role_worker_delete ON trading.%I FOR DELETE TO qt_worker USING (portfolio_type=''qt'')',relation_name);
+    END IF;
   END LOOP;
 END
 $qt_rls$;

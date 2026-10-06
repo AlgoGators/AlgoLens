@@ -279,10 +279,16 @@ $qt_identity$;
     def schema_digest(self, database):
         query = r"""
 WITH catalog(kind, identity, definition) AS (
-  SELECT 'column', table_schema||'.'||table_name||'.'||column_name,
-         data_type||'|'||is_nullable||'|'||coalesce(column_default,'')
-    FROM information_schema.columns
-   WHERE table_schema NOT IN ('pg_catalog','information_schema')
+  SELECT 'column', n.nspname||'.'||c.relname||'.'||a.attname,
+         format_type(a.atttypid,a.atttypmod)||'|'||
+         CASE WHEN a.attnotnull THEN 'NO' ELSE 'YES' END||'|'||
+         coalesce(pg_get_expr(d.adbin,d.adrelid),'')
+    FROM pg_attribute a JOIN pg_class c ON c.oid=a.attrelid
+    JOIN pg_namespace n ON n.oid=c.relnamespace
+    LEFT JOIN pg_attrdef d ON d.adrelid=a.attrelid AND d.adnum=a.attnum
+   WHERE a.attnum>0 AND NOT a.attisdropped AND c.relkind IN ('r','p','v','f')
+     AND n.nspname NOT IN ('pg_catalog','information_schema')
+     AND n.nspname !~ '^pg_toast'
   UNION ALL
   SELECT 'constraint', n.nspname||'.'||c.relname||'.'||x.conname,
          pg_get_constraintdef(x.oid, true)
