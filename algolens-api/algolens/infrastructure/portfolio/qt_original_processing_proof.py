@@ -122,11 +122,17 @@ def _fill_results(observation, after, source, executions, selection_rows):
     _need(type(source['previous_positions']) is list and len(source['previous_positions']) <= 4096
           and type(executions) is list and len(executions) <= 4096)
     previous = {}
+    first_day = source['schema_version'] == 'qt-futures-accounting-input-first-day/v1'
     for row in source['previous_positions']:
-        _need(type(row) is dict and set(row) == {'key', 'quantity_exact', 'average_price_exact'})
+        fields = {'key', 'quantity_exact', 'average_price_exact'}
+        if first_day:
+            fields |= {'daily_realized_pnl_exact', 'daily_unrealized_pnl_exact'}
+        _need(type(row) is dict and set(row) == fields)
         key = QtKey.from_wire(row['key'])
-        _need(key.portfolio_id == observation['book_id'] and key.date == source['previous_day']
-              and key.date < observation['source_day'] and key.portfolio_type == 'qt')
+        _need(key.portfolio_id == observation['book_id'] and
+              key.date == source['opening_day' if first_day else 'previous_day'] and
+              (key.date == observation['source_day'] if first_day else key.date < observation['source_day'])
+              and key.portfolio_type == 'qt')
         current = QtKey.from_wire({**row['key'], 'date': observation['source_day']})
         _need(current not in previous)
         _exact(row['quantity_exact'])
@@ -218,6 +224,9 @@ def _prove(accounting):
     _need(str(publication['publication_id']) == str(decision['model_publication_id'])
           and publication['portfolio_id'] == book and str(publication['source_day']) == day)
     _archived_bindings(snapshot, publication, decision, preview, book, day)
+    if inputs['payload']['schema_version'] == 'qt-futures-accounting-input-first-day/v1':
+        from algolens.infrastructure.portfolio.qt_first_day_proof import verify_first_day_input
+        verify_first_day_input(accounting, decision, payload['selection_rows'])
 
     _need(str(accounting['decision_id']) == str(inputs['decision_id']) == identity
           and accounting['portfolio_id'] == book and str(accounting['date']) == day)
