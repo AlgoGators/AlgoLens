@@ -53,6 +53,9 @@ def create_app(*, rehearsal_root=None):
     app.config["ALGOLENS_DEBUG"] = debug
     app.config["ALGOLENS_IS_PRODUCTION"] = is_production
     app.config["PRODUCTION_RUNTIME_CONTRACT"] = production_contract
+    if rehearsal_root is not None:
+        from algolens.infrastructure.db.rehearsal import RehearsalDatabase
+        app.extensions['qt_rehearsal_database'] = RehearsalDatabase(rehearsal_root)
 
     app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1)
 

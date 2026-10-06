@@ -171,20 +171,11 @@ class RuntimeContract:
 
 
 def _rehearsal_root(value) -> Path:
+    from algolens.infrastructure.db.rehearsal import validate_rehearsal_root
     try:
-        root = Path(value)
-    except TypeError:
+        return validate_rehearsal_root(value)
+    except ValueError:
         _configuration_error()
-    if (
-        not root.is_absolute()
-        or root.parent != Path("/dev/shm")
-        or re.fullmatch(r"algolens-qt-rehearsal\.[A-Za-z0-9_-]{6,64}", root.name) is None
-        or (root.exists() and (root.is_symlink() or root.resolve() != root.absolute()))
-        or (root.exists() and (root.stat().st_uid != os.getuid()
-                              or root.stat().st_mode & 0o777 != 0o700))
-    ):
-        _configuration_error()
-    return root
 
 
 def load_runtime_contract(
@@ -490,6 +481,13 @@ WITH expected(email, role, capability, person_id) AS (VALUES
   ('raohemdutt@ufl.edu','exec_board','qt_approve','hemdutt_rao'),
   ('robbins.a@ufl.edu','general_member','qt_approve','xander_robbins'),
   ('dominickdupuy@ufl.edu','exec_board','qt_approve','dominick_dupuy')
+), resolved AS (
+  SELECT e.email, e.role, e.capability, e.person_id,
+         min(u.id) AS user_id, count(u.id) AS identity_count,
+         bool_and(u.role::text=e.role) AS role_matches
+    FROM expected e LEFT JOIN auth.users u ON lower(btrim(u.email))=e.email
+      AND NOT EXISTS (SELECT 1 FROM auth.account_retirements r WHERE r.user_id=u.id)
+   GROUP BY e.email,e.role,e.capability,e.person_id
 )
 SELECT to_regclass('trading.qt_action_grants') IS NOT NULL
    AND to_regclass('trading.qt_approver_allowlist') IS NOT NULL
@@ -501,31 +499,27 @@ SELECT to_regclass('trading.qt_action_grants') IS NOT NULL
           AND tgname='qt_approvals_no_submitter' AND tgenabled <> 'D'
    ) AS capability_tables_ready,
    NOT EXISTS (
-     SELECT 1 FROM expected e WHERE (
-       SELECT count(*) FROM auth.users u WHERE lower(btrim(u.email))=e.email
-         AND u.role::text=e.role
-         AND NOT EXISTS (SELECT 1 FROM auth.account_retirements r WHERE r.user_id=u.id)
-     ) <> 1
+     SELECT 1 FROM resolved WHERE identity_count<>1 OR role_matches IS DISTINCT FROM true
    )
    AND (SELECT count(*) FROM trading.qt_action_grants WHERE active) = 4
    AND NOT EXISTS (
-     SELECT 1 FROM trading.qt_action_grants g JOIN auth.users u ON u.id=g.user_id
-      WHERE g.active AND NOT EXISTS (
-        SELECT 1 FROM expected e WHERE e.email=lower(btrim(u.email)) AND e.capability=g.capability
+     SELECT 1 FROM resolved e WHERE NOT EXISTS (
+        SELECT 1 FROM trading.qt_action_grants g
+         WHERE g.active AND g.user_id=e.user_id AND g.capability=e.capability
       )
    )
    AND (SELECT count(*) FROM trading.qt_approver_allowlist WHERE active) = 3
    AND NOT EXISTS (
-     SELECT 1 FROM trading.qt_approver_allowlist a JOIN auth.users u ON u.id=a.user_id
-      WHERE a.active AND NOT EXISTS (
-        SELECT 1 FROM expected e WHERE e.email=lower(btrim(u.email)) AND e.person_id=a.person_id
+     SELECT 1 FROM resolved e WHERE e.person_id IS NOT NULL AND NOT EXISTS (
+        SELECT 1 FROM trading.qt_approver_allowlist a
+         WHERE a.active AND a.user_id=e.user_id AND a.person_id=e.person_id
       )
    )
    AND (SELECT count(*) FROM auth.account_retirements r
         JOIN auth.users retired ON retired.id=r.user_id
-        JOIN auth.users replacement ON replacement.id=r.replacement_user_id
+        JOIN resolved replacement ON replacement.user_id=r.replacement_user_id
        WHERE lower(btrim(retired.email))='domdd305@gmail.com'
-         AND lower(btrim(replacement.email))='dominickdupuy@ufl.edu') = 1
+         AND replacement.email='dominickdupuy@ufl.edu') = 1
        AS launch_authority_ready
 """
 
@@ -1048,18 +1042,5 @@ def evaluate_runtime_readiness(
 
 def _rehearsal_connection(contract):
     """Never inherit a service, password file, or network address for rehearsal."""
-    import psycopg2
-    from psycopg2.extras import RealDictCursor
-
-    root = _rehearsal_root(contract.rehearsal_root)
-    socket = root / "socket"
-    if (not root.is_dir() or not socket.is_dir() or socket.is_symlink()
-            or socket.stat().st_uid != os.getuid()
-            or socket.stat().st_mode & 0o777 != 0o700):
-        raise ProductionConfigurationError("production_configuration_invalid")
-    return psycopg2.connect(
-        host=str(socket), hostaddr="", port=5432, dbname="qt_rehearsal_migrated",
-        user="qt_algolens_api", password="", passfile="/dev/null", service="",
-        sslmode="disable", options="", connect_timeout=5,
-        cursor_factory=RealDictCursor,
-    )
+    from algolens.infrastructure.db.rehearsal import RehearsalDatabase
+    return RehearsalDatabase(contract.rehearsal_root).connect()

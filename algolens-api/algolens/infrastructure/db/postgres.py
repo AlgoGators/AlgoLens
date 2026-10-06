@@ -6,6 +6,7 @@ from pathlib import Path
 import socket
 
 from dotenv import load_dotenv
+from flask import current_app, has_app_context
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
@@ -26,12 +27,17 @@ REQUIRED_DATABASE_ENVIRONMENT_VARIABLES = (
 
 def missing_database_environment_variables():
     """Return required database settings that are absent from the environment."""
+    if _rehearsal_database() is not None:
+        return ()
     return tuple(
         name for name in REQUIRED_DATABASE_ENVIRONMENT_VARIABLES if not os.getenv(name)
     )
 
 
 def get_db_connection():
+    rehearsal = _rehearsal_database()
+    if rehearsal is not None:
+        return rehearsal.connect()
     host = os.getenv("DB_HOST")
     port = os.getenv("DB_PORT", "5432")
     user = os.getenv("DB_USER")
@@ -71,6 +77,18 @@ def get_db_connection():
     except psycopg2.OperationalError:
         logger.error("Database connection failed")
         raise
+
+
+def _rehearsal_database():
+    if has_app_context():
+        database = current_app.extensions.get('qt_rehearsal_database')
+        if database is not None:
+            return database
+        if current_app.config.get('ALGOLENS_ENV') == 'rehearsal':
+            raise ValueError('rehearsal_connection_context_required')
+    if os.getenv('FLASK_ENV') == 'rehearsal':
+        raise ValueError('rehearsal_connection_context_required')
+    return None
 
 
 def execute_query(query, params=None, fetch_one=False):
