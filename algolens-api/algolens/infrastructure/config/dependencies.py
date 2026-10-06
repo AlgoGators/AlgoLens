@@ -105,10 +105,28 @@ def create_dev_auth_config():
 
 def create_runtime_control_service(connection_factory=None, environment=None):
     """Compose runtime policy and persistence without opening a connection."""
+    from algolens.infrastructure.config.live_config import LiveConfigConfig
+    from algolens.infrastructure.portfolio.live_config import PostgresLiveConfigRepository
+    from algolens.application.live_config import LiveConfigError
+    from algolens.application.runtime_control import RuntimeControlError
+    live = PostgresLiveConfigRepository(connection_factory)
+    config = LiveConfigConfig(environment)
+    def selected(registry_id, book, *, cursor=None):
+        try:
+            return live.selected_scope(registry_id,book,config,cursor=cursor)
+        except LiveConfigError:
+            raise RuntimeControlError('runtime_configuration_unavailable',503) from None
+    runtime = RuntimeControlConfig(environment, selected_scope_loader=selected)
     return RuntimeControlService(
-        PostgresRuntimeControlRepository(connection_factory=connection_factory),
-        RuntimeControlConfig(environment),
-    )
+        PostgresRuntimeControlRepository(connection_factory=connection_factory, scope_loader=selected), runtime)
+
+
+def create_live_config_service(connection_factory=None, environment=None):
+    from algolens.application.live_config import LiveConfigService
+    from algolens.infrastructure.config.live_config import LiveConfigConfig
+    from algolens.infrastructure.portfolio.live_config import PostgresLiveConfigRepository
+    return LiveConfigService(PostgresLiveConfigRepository(connection_factory), LiveConfigConfig(environment))
+
 
 
 def create_configuration_inspection_service(connection_factory=None):

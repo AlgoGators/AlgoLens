@@ -10,9 +10,9 @@ from algolens.infrastructure.config.runtime_control import RuntimeControlConfig
 
 def snapshot():
     return {
-        'snapshot_version': 1, 'portfolio_id': 'TEST_BOOK', 'initial_capital': 1000,
+        'snapshot_version': 2, 'use_optimization': True, 'covariance_history_prices': 756, 'sleeve_risk_modules': {}, 'portfolio_id': 'TEST_BOOK', 'initial_capital': 1000,
         'reserve_capital_pct': .1, 'benchmark_mode': 'live', 'execution': {},
-        'optimization': {}, 'risk': {}, 'max_drawdown': .4, 'max_leverage': 4,
+        'optimization': {}, 'risk': {'schema':2}, 'max_drawdown': .4, 'max_leverage': 4,
         'backtest': {}, 'live': {}, 'strategy_defaults': {},
         'strategies': {'TEST': {'enabled_live': True, 'default_allocation': 1,
                                 'type': 'TrendFollowingStrategy', 'config': {}}},

@@ -1,0 +1,280 @@
+{
+  "schema_version": "qt-rehearsal-role-contract/v1",
+  "database": "qt_rehearsal_migrated",
+  "roles": [
+    {
+      "domain": "schema_owner",
+      "name": "qt_schema_owner"
+    },
+    {
+      "domain": "migrator",
+      "name": "qt_migrator"
+    },
+    {
+      "domain": "algolens_api",
+      "name": "qt_algolens_api"
+    },
+    {
+      "domain": "system_publisher",
+      "name": "qt_system_publisher"
+    },
+    {
+      "domain": "qt_worker",
+      "name": "qt_worker"
+    }
+  ],
+  "probes": [
+    {
+      "id": "owner-no-data-source",
+      "role_domain": "schema_owner",
+      "sql": "SELECT 1 FROM futures_data.ohlcv_1d WHERE false",
+      "expect": "denied"
+    },
+    {
+      "id": "migrator-owner-ddl",
+      "role_domain": "migrator",
+      "sql": "SET LOCAL ROLE qt_schema_owner; CREATE TABLE trading.__qt_role_probe(id integer)",
+      "expect": "allowed"
+    },
+    {
+      "id": "migrator-no-implicit-data",
+      "role_domain": "migrator",
+      "sql": "SELECT 1 FROM auth.users WHERE false",
+      "expect": "denied"
+    },
+    {
+      "id": "api-auth-read",
+      "role_domain": "algolens_api",
+      "sql": "SELECT id,role FROM auth.users WHERE false",
+      "expect": "allowed"
+    },
+    {
+      "id": "api-registry-lock",
+      "role_domain": "algolens_api",
+      "sql": "SELECT id FROM trading.strategy_registry WHERE false FOR UPDATE",
+      "expect": "allowed"
+    },
+    {
+      "id": "api-workflow-insert-plan",
+      "role_domain": "algolens_api",
+      "sql": "EXPLAIN (COSTS OFF) INSERT INTO trading.qt_idempotency(actor_id,book_id,operation,scope_id,idempotency_key,request_digest,response_payload) SELECT 1,'probe','save_draft','probe','00000000-0000-4000-8000-000000000001'::uuid,'probe','{}'::jsonb WHERE false",
+      "expect": "allowed"
+    },
+    {
+      "id": "api-no-financial-write",
+      "role_domain": "algolens_api",
+      "sql": "EXPLAIN (COSTS OFF) UPDATE trading.positions SET quantity=quantity WHERE false",
+      "expect": "denied"
+    },
+    {
+      "id": "api-no-dispatch-execute",
+      "role_domain": "algolens_api",
+      "sql": "EXPLAIN (COSTS OFF) SELECT * FROM trading.claim_qt_desk_dispatch('00000000-0000-4000-8000-000000000001'::uuid,interval '1 second')",
+      "expect": "denied"
+    },
+    {
+      "id": "publisher-market-read",
+      "role_domain": "system_publisher",
+      "sql": "SELECT 1 FROM futures_data.ohlcv_1d WHERE false",
+      "expect": "allowed"
+    },
+    {
+      "id": "publisher-run-input-plan",
+      "role_domain": "system_publisher",
+      "sql": "EXPLAIN (COSTS OFF) INSERT INTO trading.run_inputs(portfolio_id,strategy_id,date,trade_ngin_sha,config_snapshot,universe,data_window,engine_flags) SELECT 'CONSERVATIVE_PORTFOLIO','LIVE_TREND_FOLLOWING',date '2000-01-01','probe','{}'::jsonb,'[]'::jsonb,'{}'::jsonb,'{}'::jsonb WHERE false",
+      "expect": "allowed"
+    },
+    {
+      "id": "publisher-trading-days",
+      "role_domain": "system_publisher",
+      "sql": "SELECT trading.get_trading_days('LIVE_TREND_FOLLOWING'::varchar,date '2000-01-01')",
+      "expect": "allowed"
+    },
+    {
+      "id": "publisher-no-worker-write",
+      "role_domain": "system_publisher",
+      "sql": "EXPLAIN (COSTS OFF) INSERT INTO trading.qt_desk_receipts DEFAULT VALUES",
+      "expect": "denied"
+    },
+    {
+      "id": "worker-auth-lock",
+      "role_domain": "qt_worker",
+      "sql": "SELECT id FROM auth.users WHERE false FOR UPDATE",
+      "expect": "allowed"
+    },
+    {
+      "id": "worker-dispatch-execute-plan",
+      "role_domain": "qt_worker",
+      "sql": "EXPLAIN (COSTS OFF) SELECT * FROM trading.claim_qt_desk_dispatch('00000000-0000-4000-8000-000000000001'::uuid,interval '1 second')",
+      "expect": "allowed"
+    },
+    {
+      "id": "worker-runtime-fence-execute-plan",
+      "role_domain": "qt_worker",
+      "sql": "EXPLAIN (COSTS OFF) SELECT * FROM trading.lock_runtime_scope('LIVE_TREND_FOLLOWING','CONSERVATIVE_PORTFOLIO',true)",
+      "expect": "allowed"
+    },
+    {
+      "id": "worker-receipt-insert-plan",
+      "role_domain": "qt_worker",
+      "sql": "EXPLAIN (COSTS OFF) INSERT INTO trading.qt_desk_receipts(decision_id,attempt_id,status,report_eligibility_status,report_reason_codes) SELECT '00000000-0000-4000-8000-000000000001'::uuid,'00000000-0000-4000-8000-000000000002'::uuid,'pending','unavailable','[]'::jsonb WHERE false",
+      "expect": "allowed"
+    },
+    {
+      "id": "worker-no-system-write",
+      "role_domain": "qt_worker",
+      "sql": "EXPLAIN (COSTS OFF) INSERT INTO trading.run_inputs DEFAULT VALUES",
+      "expect": "denied"
+    },
+    {
+      "id": "worker-no-authority-write",
+      "role_domain": "qt_worker",
+      "sql": "INSERT INTO trading.qt_action_grants(user_id,capability,active,version) VALUES (-1,'qt_approve',true,1)",
+      "expect": "denied"
+    },
+    {
+      "id": "api-config-candidate-insert",
+      "role_domain": "algolens_api",
+      "sql": "EXPLAIN INSERT INTO trading.live_config_versions(submission_authority) SELECT NULL::jsonb WHERE false",
+      "expect": "allowed"
+    },
+    {
+      "id": "api-config-activation-insert",
+      "role_domain": "algolens_api",
+      "sql": "EXPLAIN INSERT INTO trading.live_config_activations DEFAULT VALUES",
+      "expect": "allowed"
+    },
+    {
+      "id": "api-config-pointer-no-update",
+      "role_domain": "algolens_api",
+      "sql": "UPDATE trading.live_config_active SET version_id=version_id WHERE false",
+      "expect": "denied"
+    },
+    {
+      "id": "api-config-no-safety",
+      "role_domain": "algolens_api",
+      "sql": "INSERT INTO trading.live_config_attempt_safety(attempt_id) SELECT NULL WHERE false",
+      "expect": "denied"
+    },
+    {
+      "id": "publisher-config-read",
+      "role_domain": "system_publisher",
+      "sql": "SELECT version_id FROM trading.live_config_active WHERE false",
+      "expect": "allowed"
+    },
+    {
+      "id": "publisher-config-admission-insert",
+      "role_domain": "system_publisher",
+      "sql": "EXPLAIN INSERT INTO trading.live_config_attempt_selections DEFAULT VALUES",
+      "expect": "allowed"
+    },
+    {
+      "id": "publisher-config-safety-insert",
+      "role_domain": "system_publisher",
+      "sql": "INSERT INTO trading.live_config_attempt_safety(attempt_id) SELECT NULL WHERE false",
+      "expect": "allowed"
+    },
+    {
+      "id": "publisher-config-no-activation",
+      "role_domain": "system_publisher",
+      "sql": "EXPLAIN INSERT INTO trading.live_config_activations DEFAULT VALUES",
+      "expect": "denied"
+    },
+    {
+      "id": "publisher-config-no-recovery",
+      "role_domain": "system_publisher",
+      "sql": "UPDATE trading.live_config_attempt_safety SET state='recovered' WHERE false",
+      "expect": "denied"
+    },
+    {
+      "id": "worker-config-no-candidate",
+      "role_domain": "qt_worker",
+      "sql": "SELECT version_id FROM trading.live_config_versions WHERE false",
+      "expect": "denied"
+    },
+    {
+      "id": "api-config-published-classification-read",
+      "role_domain": "algolens_api",
+      "sql": "SELECT attempt_id,classification_version,state,lifecycle,publication_id FROM trading.live_config_attempt_safety WHERE false",
+      "expect": "allowed"
+    },
+    {
+      "id": "api-config-no-financial-proof-read",
+      "role_domain": "algolens_api",
+      "sql": "SELECT pre_write_evidence FROM trading.live_config_attempt_safety WHERE false",
+      "expect": "denied"
+    },
+    {
+      "id": "publisher-config-function-initialize",
+      "role_domain": "system_publisher",
+      "sql": "SELECT trading.initialize_live_config_attempt_v2(NULL::text) WHERE false",
+      "expect": "allowed"
+    },
+    {
+      "id": "publisher-config-function-assert",
+      "role_domain": "system_publisher",
+      "sql": "SELECT trading.assert_live_config_running(NULL::text) WHERE false",
+      "expect": "allowed"
+    },
+    {
+      "id": "publisher-config-function-unsafe",
+      "role_domain": "system_publisher",
+      "sql": "SELECT trading.mark_live_config_unsafe(NULL::text) WHERE false",
+      "expect": "allowed"
+    },
+    {
+      "id": "publisher-config-function-finish",
+      "role_domain": "system_publisher",
+      "sql": "SELECT trading.finish_live_config_attempt(NULL::text,NULL::text,NULL::text) WHERE false",
+      "expect": "allowed"
+    },
+    {
+      "id": "publisher-config-function-investor4",
+      "role_domain": "system_publisher",
+      "sql": "SELECT trading.publish_system_investor_day(NULL::text,NULL::text,NULL::date,NULL::text) WHERE false",
+      "expect": "allowed"
+    },
+    {
+      "id": "publisher-config-function-investor5",
+      "role_domain": "system_publisher",
+      "sql": "SELECT trading.publish_system_investor_day(NULL::text,NULL::text,NULL::date,NULL::text,NULL::uuid) WHERE false",
+      "expect": "allowed"
+    },
+    {
+      "id": "algolens_api-no-recover-live-config-attempt",
+      "role_domain": "algolens_api",
+      "sql": "SELECT trading.recover_live_config_attempt(NULL::text,NULL::text) WHERE false",
+      "expect": "denied"
+    },
+    {
+      "id": "algolens_api-no-live-config-financial-state",
+      "role_domain": "algolens_api",
+      "sql": "SELECT trading.live_config_financial_state(NULL::text,NULL::text) WHERE false",
+      "expect": "denied"
+    },
+    {
+      "id": "system_publisher-no-recover-live-config-attempt",
+      "role_domain": "system_publisher",
+      "sql": "SELECT trading.recover_live_config_attempt(NULL::text,NULL::text) WHERE false",
+      "expect": "denied"
+    },
+    {
+      "id": "system_publisher-no-live-config-financial-state",
+      "role_domain": "system_publisher",
+      "sql": "SELECT trading.live_config_financial_state(NULL::text,NULL::text) WHERE false",
+      "expect": "denied"
+    },
+    {
+      "id": "qt_worker-no-recover-live-config-attempt",
+      "role_domain": "qt_worker",
+      "sql": "SELECT trading.recover_live_config_attempt(NULL::text,NULL::text) WHERE false",
+      "expect": "denied"
+    },
+    {
+      "id": "qt_worker-no-live-config-financial-state",
+      "role_domain": "qt_worker",
+      "sql": "SELECT trading.live_config_financial_state(NULL::text,NULL::text) WHERE false",
+      "expect": "denied"
+    }
+  ]
+}

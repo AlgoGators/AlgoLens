@@ -22,7 +22,7 @@ function closed(value: unknown, allowed: readonly string[], required = allowed):
 const entered = (call: unknown) => call !== 'not_reached';
 const keys = (row: Row) => Object.keys(row);
 export function validateEquityPortfolioConsumption(value: unknown,
-  nonIntegers?: ReadonlySet<string>, pointer = ''): asserts value is EquityPortfolioConsumption {
+  nonIntegers?: ReadonlySet<string>, pointer = '', expectedOwners: ReadonlySet<string> = new Set(['LIVE_EQUITY_MEAN_REVERSION'])): asserts value is EquityPortfolioConsumption {
   const integer = (v: unknown, path: string, maximum: number) => need(typeof v === 'number' &&
     Number.isSafeInteger(v) && v >= 0 && v <= maximum && !nonIntegers?.has(`${pointer}${path}`));
   const call = (v: unknown) => need(contract.call_outcomes.includes(v as string));
@@ -71,7 +71,7 @@ export function validateEquityPortfolioConsumption(value: unknown,
     for (const [index, charge] of charges.entries()) {
       closed(charge, contract.charge_fields); integer(charge.index, `/${name}/${index}/index`, contract.charge_limit - 1);
       need(charge.index === index && charge.purpose === purpose);
-      need(charge.strategy_id === (purpose === 'per_strategy' ? 'LIVE_EQUITY_MEAN_REVERSION' : ''));
+      need(purpose === 'per_strategy' ? expectedOwners.has(charge.strategy_id as string) : charge.strategy_id === '');
       need(typeof charge.symbol === 'string' && /^[A-Za-z0-9_.\/-]{1,64}$/.test(charge.symbol)); call(charge.call);
       closed(charge.reads, [...contract.charge_reads_number, ...contract.charge_reads_boolean, ...keys(contract.charge_reads_enums)], []);
       for (const [key, observed] of Object.entries(charge.reads)) {

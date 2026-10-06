@@ -12,6 +12,9 @@ ROOT_KEYS=frozenset({'publication_schema_version','profile','authority','stream'
 def _parse(raw, scope, now):
     legacy._require(type(raw) is str and len(raw.encode('utf-8'))<=legacy.MAX_DOCUMENT_BYTES)
     value=json.loads(raw,object_pairs_hook=legacy._pairs,parse_constant=legacy._reject_constant)
+    if type(value) is dict and type(value.get('publication_schema_version')) is int and value['publication_schema_version'] in (4,5):
+        from .governed_configuration_inspection import validate_publication
+        return validate_publication(value,scope,now)
     if type(value) is not dict or type(value.get('publication_schema_version')) is not int or value['publication_schema_version']!=3:
         return legacy.parse_publication(raw,scope,now)
     legacy._keys(value,ROOT_KEYS)

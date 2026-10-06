@@ -1,3 +1,4 @@
+import { validateGovernedPublication, type SuppliedV2, type ConfigurationSelection, type MultiConsumption } from './governedConfigurationInspection';
 /** Closed inspection protocol. This catalog validates observations; it never computes defaults. */
 import { validateConsumptionV2, type ConsumptionV2 } from './consumptionInspection';
 import { validateEquityRunConsumption, type EquityRunConsumption } from './equityRunConsumption';
@@ -24,10 +25,11 @@ export type SelectedTrend = {
   }>;
 };
 type PublicationBase = {
+  configuration_selection?: ConfigurationSelection;
   profile: string; authority: string; stream: string;
   identity: { registry_id: string; registry_revision: number; engine_strategy_id: string;
     portfolio_id: string; run_date: string; capture_id: string; publication_id: string;
-    runtime_attempt_id: string | null; producer_version: string; control_mode: string };
+    config_attempt_id?: string; runtime_attempt_id: string | null; producer_version: string; control_mode: string };
   captured_at: string; publication_recorded_at: string; status: string; reason: string;
 };
 type FuturesPublication = PublicationBase & {
@@ -36,7 +38,8 @@ type FuturesPublication = PublicationBase & {
   { publication_schema_version: 1; consumption: { status: 'not_collected' } } |
   { publication_schema_version: 2; consumption: ConsumptionV2 }
 );
-export type Publication = FuturesPublication | (PublicationBase & {
+type GovernedPublication = PublicationBase & { publication_schema_version:4|5; supplied:SuppliedV2; selected_trend?:SelectedTrend; consumption?:ConsumptionV2; equity_run_consumption?:EquityRunConsumption; equity_multi_consumption?:MultiConsumption; configuration_selection:ConfigurationSelection };
+export type Publication = FuturesPublication | GovernedPublication | (PublicationBase & {
   publication_schema_version: 3; equity_run_consumption: EquityRunConsumption;
   supplied?: never; selected_trend?: never; consumption?: never;
 });
@@ -354,8 +357,8 @@ export function parseConfigurationInspection(raw: string, registryId: string, po
   const candidateVersion = candidate !== null && typeof candidate === 'object' && !Array.isArray(candidate)
     ? (candidate as RecordValue).publication_schema_version : null;
   for (const pointer of lexical.unsafeIntegerTokens) {
-    const permittedChild = (candidateVersion === 2 && pointer.startsWith('/publication/consumption/')) ||
-      (candidateVersion === 3 && pointer.startsWith('/publication/equity_run_consumption/'));
+    const permittedChild = ((candidateVersion === 2 || candidateVersion === 4) && pointer.startsWith('/publication/consumption/')) ||
+      ((candidateVersion === 3 || candidateVersion === 5) && pointer.startsWith('/publication/equity_run_consumption/'));
     if (!permittedChild) {
       throw new UnsupportedNumericRepresentationError();
     }
@@ -371,16 +374,21 @@ export function parseConfigurationInspection(raw: string, registryId: string, po
     check(unavailableReasons.has(result.reason as string));
     return result as unknown as InspectionResponse;
   }
-  const pub = keys(result.publication, candidateVersion === 3
+  const governed = candidateVersion === 4 || candidateVersion === 5;
+  const candidateRow = object(result.publication);
+  const pub = keys(result.publication, governed
+    ? ['publication_schema_version','profile','authority','stream','identity','captured_at','publication_recorded_at','status','reason','supplied','configuration_selection','source_to_storage_owners',
+      ...(candidateVersion === 4 ? ['selected_trend','consumption'] : [candidateRow.profile === 'live_equity_multi_sleeve' ? 'equity_multi_consumption' : 'equity_run_consumption'])]
+    : candidateVersion === 3
     ? ['publication_schema_version', 'profile', 'authority', 'stream', 'identity', 'captured_at',
        'publication_recorded_at', 'status', 'reason', 'equity_run_consumption']
     : ['publication_schema_version', 'profile', 'authority', 'stream',
     'identity', 'captured_at', 'publication_recorded_at', 'status', 'reason', 'supplied',
     'selected_trend', 'consumption']);
   check(lexical.publicationBytes !== null && lexical.publicationBytes <= 2 * 1024 * 1024);
-  check((pub.publication_schema_version === 1 || pub.publication_schema_version === 2 || pub.publication_schema_version === 3) &&
+  check((pub.publication_schema_version === 1 || pub.publication_schema_version === 2 || pub.publication_schema_version === 3 || governed) &&
     !lexical.nonIntegerTokens.has('/publication/publication_schema_version') &&
-    pub.profile === (pub.publication_schema_version === 3 ? 'live_equity_mean_reversion' : PROFILE) &&
+    (candidateVersion === 5 ? ['live_equity_mean_reversion','live_equity_multi_sleeve'].includes(pub.profile as string) : pub.profile === (pub.publication_schema_version === 3 ? 'live_equity_mean_reversion' : PROFILE)) &&
     pub.authority === 'inspection_only' && pub.stream === 'system');
   // The scanner only deferred child tokens; no v2 value is admitted until this succeeds.
   if (pub.publication_schema_version === 2) {
@@ -389,8 +397,8 @@ export function parseConfigurationInspection(raw: string, registryId: string, po
   }
   const identity = keys(pub.identity, ['registry_id', 'registry_revision', 'engine_strategy_id',
     'portfolio_id', 'run_date', 'capture_id', 'publication_id', 'runtime_attempt_id',
-    'producer_version', 'control_mode']);
-  check(typeof identity.registry_id === 'string' && id.test(identity.registry_id));
+    'producer_version', 'control_mode', ...(governed ? ['config_attempt_id'] : [])]);
+  check(typeof identity.registry_id === 'string' && (id.test(identity.registry_id) || (governed && identity.registry_id === '' && identity.registry_revision === 0 && identity.control_mode === 'uncontrolled')));
   check(typeof identity.engine_strategy_id === 'string' && id.test(identity.engine_strategy_id));
   check(typeof identity.portfolio_id === 'string' && id.test(identity.portfolio_id));
   check(identity.registry_id === registryId && identity.portfolio_id === portfolioId);
@@ -412,6 +420,11 @@ export function parseConfigurationInspection(raw: string, registryId: string, po
   const recorded = timestamp(pub.publication_recorded_at);
   check(compareUtc(captured, recorded) <= 0 && compareUtc(recorded, readAt) <= 0 &&
     compareUtc(`${runDate}T00:00:00Z`, recorded) <= 0);
+  if (governed) {
+    check(pub.status === result.status && pub.reason === result.reason);
+    try { validateGovernedPublication(pub, lexical.nonIntegerTokens, validateStage); } catch { fail(); }
+    return result as unknown as InspectionResponse;
+  }
   if (pub.publication_schema_version === 3) {
     check(identity.engine_strategy_id === 'LIVE_EQUITY_MEAN_REVERSION');
     try {

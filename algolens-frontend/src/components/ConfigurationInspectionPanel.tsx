@@ -96,7 +96,21 @@ function Observation({ response }: { response: InspectionResponse }) {
     : ageMinutes < 1440 ? counted(Math.floor(ageMinutes / 60), 'hour')
       : counted(Math.floor(ageMinutes / 1440), 'day');
   const selected = publication.selected_trend;
+  const source = publication.configuration_selection;
+  const composite = 'equity_multi_consumption' in publication ? publication.equity_multi_consumption : undefined;
   return <div className="space-y-5">
+    <div className="text-sm space-y-1" aria-label="Completed configuration summary">
+      <p>Completed run: <time dateTime={identity.run_date}>{identity.run_date}</time></p>
+      <p>{!source ? 'Settings source and approved version were not recorded.' : source.source === 'file' ? 'File settings' : 'Approved configuration'}</p>
+      {source?.version_id && <p>Approved version: <span className="font-mono">{source.version_id}</span></p>}
+      {composite ? <>
+        <p>{composite.coverage.primary === 'observed' ? 'Primary strategy and portfolio observations collected.' : 'Primary invocation skipped: non-trading day.'}</p>
+        <p>Full run stages and account execution costs: Not collected. This does not mean unused or failed.</p>
+      </> : <p>{publication.publication_schema_version === 1 ? 'Runtime observations: Not collected.' : 'Recorded runtime observations are available in the details, including any skipped or unavailable stages.'}</p>}
+      <p>This summary describes the completed publication, not current active settings or an in-flight run.</p>
+    </div>
+    <details><summary className="cursor-pointer font-medium">Configuration and observation details</summary>
+    <div className="space-y-5 mt-3">
     <div className="text-sm space-y-1">
       <p>Run date: {identity.run_date}</p>
       <p>Captured: <time dateTime={publication.captured_at}>{publication.captured_at}</time> UTC</p>
@@ -107,12 +121,13 @@ function Observation({ response }: { response: InspectionResponse }) {
       <p>{identity.control_mode === 'controlled' ? 'Controlled publication' : 'Uncontrolled publication'}</p>
       {publication.publication_schema_version === 1 &&
         <p>Consumption not collected. Supplied inputs and selected trend stages do not prove a value was read during the run.</p>}
-      <p>Read only. No activation or full effective configuration is claimed.</p>
+      <p>Read only. Supplied settings do not by themselves prove runtime use.</p>
     </div>
     {response.status === 'unavailable' &&
       <p role="status">{reasonLabels[response.reason] ?? 'No published configuration is available.'}</p>}
-    {response.status === 'available' && publication.supplied && selected && <>
-    <FieldTable fields={publication.supplied.fields} />
+    {response.status === 'available' && (publication.publication_schema_version === 1 || publication.publication_schema_version === 2) && publication.supplied && selected &&
+      <FieldTable fields={publication.supplied.fields} />}
+    {response.status === 'available' && selected && <>
     <div>
       <h3 className="text-base font-semibold">Selected trend stages</h3>
       <p className="text-xs">Shared resolver with the same inputs, followed by constructor normalization. Other runtime transformations are not shown.</p>
@@ -127,10 +142,25 @@ function Observation({ response }: { response: InspectionResponse }) {
       </div>)}
     </div>
     </>}
-    {publication.publication_schema_version === 2 &&
+    {(publication.publication_schema_version === 2 || publication.publication_schema_version === 4) && publication.consumption &&
       <ConsumptionInspection key={publication.identity.publication_id} consumption={publication.consumption} />}
-    {publication.publication_schema_version === 3 &&
+    {(publication.publication_schema_version === 3 || publication.publication_schema_version === 5) && publication.equity_run_consumption &&
       <EquityRunConsumptionInspection key={publication.identity.publication_id} consumption={publication.equity_run_consumption} />}
+    {(publication.publication_schema_version === 4 || publication.publication_schema_version === 5) && <>
+      <h3 className="font-semibold">Supplied settings</h3>
+      <p className="text-xs">Complete recorded settings. Consumption evidence for supplied values is not collected; use the observations above to inspect actual reads.</p>
+      <div role="region" aria-label="Supplied settings" tabIndex={0} className="overflow-x-auto">
+      <table className="text-xs text-left"><thead><tr><th>Setting</th><th>Value</th><th>Classification</th><th>Consumer</th></tr></thead>
+        <tbody>{publication.supplied.fields.map(field => <tr key={field.path}>
+          <th className="p-2 font-mono break-all">{field.path}</th><td className="p-2 break-all">{showValue(field.value)}</td>
+          <td className="p-2">{field.classification}</td><td className="p-2">{field.consumer}</td>
+        </tr>)}</tbody></table>
+      </div>
+      <p className="break-all">Baseline hash: {source?.base_sha256}</p>
+      <p className="break-all">Effective hash: {source?.effective_sha256}</p>
+      {composite && <details><summary>Primary invocation observations</summary><pre className="overflow-auto text-xs">{JSON.stringify(composite, null, 2)}</pre></details>}
+    </>}
+    </div></details>
   </div>;
 }
 

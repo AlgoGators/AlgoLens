@@ -24,7 +24,7 @@ _FIXED_BUNDLE_DIRECTORY = Path("/app/qt-evaluator-bundle")
 _FIXED_RUNTIME_CONFIG = Path("/app/runtime-control/manifest.json")
 _ARTIFACT_KINDS = {
     "libtrade_ngin.so": "engine",
-    "live_equity_mean_reversion": "system_publisher",
+    "live_equity_mr": "system_publisher",
     "live_portfolio": "system_publisher",
     "live_portfolio_conservative": "system_publisher",
     "qt_desk_prepare_sources": "desk_tool",
@@ -501,7 +501,8 @@ SELECT to_regclass('trading.qt_action_grants') IS NOT NULL
    NOT EXISTS (
      SELECT 1 FROM resolved WHERE identity_count<>1 OR role_matches IS DISTINCT FROM true
    )
-   AND (SELECT count(*) FROM trading.qt_action_grants WHERE active) = 4
+   AND (SELECT count(*) FROM trading.qt_action_grants
+         WHERE active AND capability IN ('qt_submit','qt_approve')) = 4
    AND NOT EXISTS (
      SELECT 1 FROM resolved e WHERE NOT EXISTS (
         SELECT 1 FROM trading.qt_action_grants g

@@ -17,6 +17,7 @@ from algolens.adapters.http.auth import auth_bp
 from algolens.adapters.http.portfolio import portfolio_bp
 from algolens.adapters.http.qt_workflow import qt_workflow_bp
 from algolens.adapters.http.runtime_control import runtime_control_bp
+from algolens.adapters.http.live_config import live_config_bp
 from algolens.adapters.http.configuration_inspection import configuration_inspection_bp
 from algolens.adapters.http.investor_books import investor_books_bp
 from algolens.infrastructure.db.postgres import get_db_connection
@@ -123,6 +124,8 @@ def create_app(*, rehearsal_root=None):
             request.path,
             request.remote_addr,
         )
+        if (request.endpoint or "").startswith("live_config."):
+            return None
         data = request.get_json(silent=True)
         if isinstance(data, dict):
             safe_data = {
@@ -228,6 +231,7 @@ def create_app(*, rehearsal_root=None):
     app.register_blueprint(qt_workflow_bp, url_prefix="/portfolio")
     app.config['QT_EVALUATOR_BUNDLE_DIR'] = os.getenv('QT_EVALUATOR_BUNDLE_DIR') or None
     app.register_blueprint(runtime_control_bp, url_prefix="/portfolio")
+    app.register_blueprint(live_config_bp, url_prefix="/portfolio")
     app.register_blueprint(configuration_inspection_bp, url_prefix="/portfolio")
     app.register_blueprint(investor_books_bp, url_prefix="/portfolio")
 

@@ -28,6 +28,17 @@ REVOKE ALL ON ALL TABLES IN SCHEMA auth,trading FROM qt_algolens_api,qt_system_p
 REVOKE ALL ON ALL SEQUENCES IN SCHEMA auth,trading FROM qt_algolens_api,qt_system_publisher,qt_worker;
 REVOKE ALL ON ALL FUNCTIONS IN SCHEMA auth,trading FROM qt_algolens_api,qt_system_publisher,qt_worker;
 REVOKE ALL ON futures_data.ohlcv_1d,metadata.contract_metadata FROM qt_algolens_api,qt_system_publisher,qt_worker;
+-- Table-level REVOKE does not remove column-level grants.
+DO $live_config_rollback_columns$
+DECLARE col record;
+BEGIN
+ FOR col IN SELECT table_name,column_name FROM information_schema.columns
+ WHERE table_schema='trading' AND table_name IN ('live_config_versions','live_config_activations',
+   'live_config_active','live_config_attempt_selections','live_config_attempt_safety') LOOP
+  EXECUTE format('REVOKE ALL (%I) ON trading.%I FROM qt_algolens_api,qt_system_publisher,qt_worker',col.column_name,col.table_name);
+ END LOOP;
+END
+$live_config_rollback_columns$;
 REVOKE qt_schema_owner FROM qt_migrator;
 
 DO $qt_rollback_policies$

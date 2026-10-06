@@ -1,4 +1,5 @@
 import subprocess
+import os
 import json
 from pathlib import Path
 import signal
@@ -580,6 +581,44 @@ INSERT INTO trading.run_inputs(
             check=False,
         )
         self.assertNotEqual(immutable_retirement.returncode, 0)
+
+    def test_live_config_extension_roles_and_rollback(self):
+        source = os.environ.get('TRADE_NGIN_TEST_SOURCE_DIR')
+        if not source:
+            self.skipTest('TRADE_NGIN_TEST_SOURCE_DIR required for governed config extension')
+        self._apply_fixture()
+        database = 'qt_rehearsal_migrated'
+        self.cluster.apply_sql(database, (Path(source)/'migrations/031_live_config_overrides.sql').read_text())
+        with self.assertRaises(SafetyError):
+            self.cluster.apply_sql(database, self.FORWARD.read_text())
+        self.cluster.apply_sql(database, (self.REPOSITORY/'algolens-api/migrations/011_live_config_authority.sql').read_text())
+        self.cluster.apply_sql(database, self.FORWARD.read_text())
+        probes = self.cluster.verify_role_contract(load_role_contract(
+            self.REPOSITORY/'deployment/qt_rehearsal/contracts/qt-live-futures-roles.v2.json'))
+        self.assertTrue(all(row['passed'] for row in probes), json.dumps(probes))
+        # Narrow API lock and immutable candidate/activation writes are permitted.
+        self.assertEqual(self._as_role('qt_algolens_api',
+            "SELECT trading.lock_live_config_scope('LIVE_TREND_FOLLOWING','CONSERVATIVE_PORTFOLIO')").returncode, 0)
+        for role,query in (
+            ('qt_system_publisher', 'INSERT INTO trading.live_config_activations DEFAULT VALUES'),
+            ('qt_worker', 'SELECT * FROM trading.live_config_versions'),
+            ('qt_algolens_api', 'INSERT INTO trading.live_config_attempt_selections DEFAULT VALUES'),
+            ('qt_algolens_api', 'UPDATE trading.live_config_active SET version_id=version_id'),
+            ('qt_system_publisher', "UPDATE trading.live_config_attempt_safety SET state='recovered'"),
+        ):
+            self.assertIn('42501', self._as_role(role,query).stderr)
+        self.assertEqual(self.cluster.query_scalar(database,
+            "SELECT has_column_privilege('qt_algolens_api','trading.live_config_versions','submission_authority','INSERT');"), 't')
+        self.cluster.apply_sql(database,
+            'GRANT INSERT(approved_by) ON trading.live_config_activations TO qt_system_publisher;')
+        self.cluster.apply_sql(database,self.FORWARD.read_text())
+        self.assertEqual(self.cluster.query_scalar(database,
+            "SELECT has_column_privilege('qt_system_publisher','trading.live_config_activations','approved_by','INSERT');"),'f')
+        self.cluster.apply_sql(database,self.ROLLBACK.read_text())
+        self.assertEqual(self.cluster.query_scalar(database,
+            "SELECT has_column_privilege('qt_system_publisher','trading.live_config_attempt_safety','attempt_id','INSERT');"),'f')
+        self.assertEqual(self.cluster.query_scalar(database,
+            "SELECT has_column_privilege('qt_algolens_api','trading.live_config_versions','submission_authority','INSERT');"),'f')
 
 
 if __name__ == "__main__":

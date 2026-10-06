@@ -61,7 +61,7 @@ function typed(value: unknown, spec: Spec, context?: Lexical): void {
   if (spec.enum) { need(spec.enum.includes(value)); return; }
   if (spec.ref) {
     if (spec.ref === 'qt-equity-portfolio-consumption/v1') validateEquityPortfolioConsumption(value, context?.nonIntegers, context?.pointer);
-    else { need(spec.ref === 'qt-equity-strategy-consumption/v1'); strategy(value, context); }
+    else { need(spec.ref === 'qt-equity-strategy-consumption/v1'); validateEquityStrategyInvocation(value, context); }
     return;
   }
   if (spec.type === 'number') { need(typeof value === 'number' && Number.isFinite(value)); return; }
@@ -110,7 +110,7 @@ function costHistoryConditions(values: ObjectValue): void {
     readSet(values, conditions.stored_previous_close); need((values.previous_close_forwarded as number) > 0);
   }
 }
-function strategy(value: unknown, context?: Lexical): void {
+export function validateEquityStrategyInvocation(value: unknown, context?: Lexical): void {
   closed(value, ['schema_version', 'available', 'profile', 'scope', 'full_run_certification', 'symbols']);
   need(value.schema_version === 'qt-equity-strategy-consumption/v1' && value.available === true &&
     value.profile === 'mean_reversion' && value.scope === 'strategy_invocation' && value.full_run_certification === false);

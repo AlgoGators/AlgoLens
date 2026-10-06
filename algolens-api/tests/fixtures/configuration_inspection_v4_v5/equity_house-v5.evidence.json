@@ -1,0 +1,471 @@
+{
+  "selection": {
+    "attempt_id": "1fac96e0-cde2-4d5e-a5cb-7d91e34c5299",
+    "portfolio_id": "INVESTOR_P2_A",
+    "engine_strategy_id": "LIVE_EQUITY_ALPHA_BETA",
+    "run_date": "2026-08-12",
+    "engine_build": "bb34bc9",
+    "selection": {
+      "scope": {
+        "registry_id": "task4-composite",
+        "portfolio_id": "INVESTOR_P2_A",
+        "investor_book_id": null,
+        "registry_revision": 0,
+        "engine_strategy_id": "LIVE_EQUITY_ALPHA_BETA"
+      },
+      "schema": "live-config-selection/v1",
+      "source": "file",
+      "version_id": null,
+      "base_sha256": "9e4d2655dc561015d6617daafaeb243a749a9444e049adcd5d345d3fd3f18ea8",
+      "engine_build": "bb34bc9",
+      "effective_sha256": "9e4d2655dc561015d6617daafaeb243a749a9444e049adcd5d345d3fd3f18ea8"
+    },
+    "config_snapshot": {
+      "live": {
+        "historical_days": 300,
+        "spinoff_child_policy": "liquidate_at_first_close",
+        "data_staleness_tolerance_days": 4,
+        "execution_price_max_staleness_days": 5
+      },
+      "risk": {
+        "schema": 2,
+        "modules": [
+          {
+            "id": "none",
+            "type": "none",
+            "_reason": "synthetic issue 121/124 completion gate",
+            "_ruled_by": "codex",
+            "_ruled_on": "2026-07-09"
+          }
+        ],
+        "_ruled_by": "codex",
+        "_ruled_on": "2026-07-09",
+        "max_drawdown": 0.9,
+        "max_leverage": 10.0,
+        "risk_reporting": {
+          "type": "carver",
+          "window": "all_bars",
+          "var_limit": 0.15,
+          "jump_risk_limit": 0.1,
+          "lookback_period": 252,
+          "max_correlation": 0.7,
+          "confidence_level": 0.99,
+          "max_net_leverage": 10.0,
+          "max_gross_leverage": 10.0
+        }
+      },
+      "backtest": {
+        "lookback_years": 2,
+        "store_trade_details": true
+      },
+      "execution": {
+        "slippage_bps": 1.0,
+        "commission_rate": 0.0005,
+        "position_limit_live": 500.0,
+        "position_limit_backtest": 1000.0
+      },
+      "strategies": {
+        "BETA": {
+          "type": "MeanReversionStrategy",
+          "config": {
+            "risk_target": 0.1,
+            "vol_lookback": 3,
+            "position_size": 1.0,
+            "use_stop_loss": false,
+            "exit_threshold": 2.0,
+            "entry_threshold": 0.5,
+            "lookback_period": 3,
+            "allow_fractional_shares": false
+          },
+          "symbols": [
+            "SYN"
+          ],
+          "enabled_live": true,
+          "default_allocation": 2.0
+        },
+        "ALPHA": {
+          "type": "MeanReversionStrategy",
+          "config": {
+            "risk_target": 0.1,
+            "vol_lookback": 3,
+            "position_size": 1.0,
+            "use_stop_loss": false,
+            "exit_threshold": 0.1,
+            "entry_threshold": 0.5,
+            "lookback_period": 3,
+            "allow_fractional_shares": false
+          },
+          "symbols": [
+            "SYN"
+          ],
+          "enabled_live": true,
+          "default_allocation": 2.0
+        }
+      },
+      "max_drawdown": 0.9,
+      "max_leverage": 10.0,
+      "optimization": {
+        "tau": 1.0,
+        "capital": 100000.0,
+        "version": "1.0.0",
+        "use_buffering": true,
+        "max_iterations": 100,
+        "buffer_size_factor": 0.05,
+        "cost_penalty_scalar": 50.0,
+        "convergence_threshold": 1e-06,
+        "asymmetric_risk_buffer": 0.1
+      },
+      "portfolio_id": "INVESTOR_P2_A",
+      "benchmark_mode": "deferred",
+      "initial_capital": 100000.0,
+      "snapshot_version": 2,
+      "use_optimization": false,
+      "strategy_defaults": {
+        "fdm": [
+          [
+            1,
+            1.0
+          ],
+          [
+            2,
+            1.03
+          ],
+          [
+            3,
+            1.08
+          ],
+          [
+            4,
+            1.13
+          ],
+          [
+            5,
+            1.19
+          ],
+          [
+            6,
+            1.26
+          ]
+        ],
+        "carver_buffer_floor": 0.5,
+        "max_strategy_allocation": 1.0,
+        "min_strategy_allocation": 0.1,
+        "carver_buffer_position_factor": 0.0
+      },
+      "reserve_capital_pct": 0.1,
+      "sleeve_risk_modules": {},
+      "covariance_history_prices": 756
+    },
+    "admitted_at": "2026-10-06 17:25:45.017980-04:00"
+  },
+  "safety": {
+    "attempt_id": "1fac96e0-cde2-4d5e-a5cb-7d91e34c5299",
+    "state": "published",
+    "pre_write_evidence": null,
+    "recovery_evidence": null,
+    "updated_at": "2026-10-06 17:25:45.070190-04:00",
+    "lifecycle": "published",
+    "publication_id": "1fac96e0-cde2-4d5e-a5cb-7d91e34c5299",
+    "classification_version": 2
+  },
+  "runtime_attempt": {
+    "id": "1fac96e0-cde2-4d5e-a5cb-7d91e34c5299",
+    "intent_id": 1,
+    "registry_revision": 0,
+    "config_snapshot": {
+      "live": {
+        "historical_days": 300,
+        "spinoff_child_policy": "liquidate_at_first_close",
+        "data_staleness_tolerance_days": 4,
+        "execution_price_max_staleness_days": 5
+      },
+      "risk": {
+        "schema": 2,
+        "modules": [
+          {
+            "id": "none",
+            "type": "none",
+            "_reason": "synthetic issue 121/124 completion gate",
+            "_ruled_by": "codex",
+            "_ruled_on": "2026-07-09"
+          }
+        ],
+        "_ruled_by": "codex",
+        "_ruled_on": "2026-07-09",
+        "max_drawdown": 0.9,
+        "max_leverage": 10.0,
+        "risk_reporting": {
+          "type": "carver",
+          "window": "all_bars",
+          "var_limit": 0.15,
+          "jump_risk_limit": 0.1,
+          "lookback_period": 252,
+          "max_correlation": 0.7,
+          "confidence_level": 0.99,
+          "max_net_leverage": 10.0,
+          "max_gross_leverage": 10.0
+        }
+      },
+      "backtest": {
+        "lookback_years": 2,
+        "store_trade_details": true
+      },
+      "execution": {
+        "slippage_bps": 1.0,
+        "commission_rate": 0.0005,
+        "position_limit_live": 500.0,
+        "position_limit_backtest": 1000.0
+      },
+      "strategies": {
+        "BETA": {
+          "type": "MeanReversionStrategy",
+          "config": {
+            "risk_target": 0.1,
+            "vol_lookback": 3,
+            "position_size": 1.0,
+            "use_stop_loss": false,
+            "exit_threshold": 2.0,
+            "entry_threshold": 0.5,
+            "lookback_period": 3,
+            "allow_fractional_shares": false
+          },
+          "symbols": [
+            "SYN"
+          ],
+          "enabled_live": true,
+          "default_allocation": 2.0
+        },
+        "ALPHA": {
+          "type": "MeanReversionStrategy",
+          "config": {
+            "risk_target": 0.1,
+            "vol_lookback": 3,
+            "position_size": 1.0,
+            "use_stop_loss": false,
+            "exit_threshold": 0.1,
+            "entry_threshold": 0.5,
+            "lookback_period": 3,
+            "allow_fractional_shares": false
+          },
+          "symbols": [
+            "SYN"
+          ],
+          "enabled_live": true,
+          "default_allocation": 2.0
+        }
+      },
+      "max_drawdown": 0.9,
+      "max_leverage": 10.0,
+      "optimization": {
+        "tau": 1.0,
+        "capital": 100000.0,
+        "version": "1.0.0",
+        "use_buffering": true,
+        "max_iterations": 100,
+        "buffer_size_factor": 0.05,
+        "cost_penalty_scalar": 50.0,
+        "convergence_threshold": 1e-06,
+        "asymmetric_risk_buffer": 0.1
+      },
+      "portfolio_id": "INVESTOR_P2_A",
+      "benchmark_mode": "deferred",
+      "initial_capital": 100000.0,
+      "snapshot_version": 2,
+      "use_optimization": false,
+      "strategy_defaults": {
+        "fdm": [
+          [
+            1,
+            1.0
+          ],
+          [
+            2,
+            1.03
+          ],
+          [
+            3,
+            1.08
+          ],
+          [
+            4,
+            1.13
+          ],
+          [
+            5,
+            1.19
+          ],
+          [
+            6,
+            1.26
+          ]
+        ],
+        "carver_buffer_floor": 0.5,
+        "max_strategy_allocation": 1.0,
+        "min_strategy_allocation": 0.1,
+        "carver_buffer_position_factor": 0.0
+      },
+      "reserve_capital_pct": 0.1,
+      "sleeve_risk_modules": {},
+      "covariance_history_prices": 756
+    },
+    "run_date": "2026-08-12",
+    "producer_version": "bb34bc9",
+    "status": "applied",
+    "started_at": "2026-10-06 17:25:45.015911-04:00",
+    "finished_at": "2026-10-06 17:25:45.034204-04:00",
+    "publication_id": "1fac96e0-cde2-4d5e-a5cb-7d91e34c5299",
+    "outcome": "published",
+    "failure_code": null
+  },
+  "runtime_intent": {
+    "id": 1,
+    "registry_id": "task4-composite",
+    "portfolio_id": "INVESTOR_P2_A",
+    "engine_strategy_id": "LIVE_EQUITY_ALPHA_BETA",
+    "action": "run",
+    "registry_revision": 0,
+    "config_snapshot": {
+      "live": {
+        "historical_days": 300,
+        "spinoff_child_policy": "liquidate_at_first_close",
+        "data_staleness_tolerance_days": 4,
+        "execution_price_max_staleness_days": 5
+      },
+      "risk": {
+        "schema": 2,
+        "modules": [
+          {
+            "id": "none",
+            "type": "none",
+            "_reason": "synthetic issue 121/124 completion gate",
+            "_ruled_by": "codex",
+            "_ruled_on": "2026-07-09"
+          }
+        ],
+        "_ruled_by": "codex",
+        "_ruled_on": "2026-07-09",
+        "max_drawdown": 0.9,
+        "max_leverage": 10.0,
+        "risk_reporting": {
+          "type": "carver",
+          "window": "all_bars",
+          "var_limit": 0.15,
+          "jump_risk_limit": 0.1,
+          "lookback_period": 252,
+          "max_correlation": 0.7,
+          "confidence_level": 0.99,
+          "max_net_leverage": 10.0,
+          "max_gross_leverage": 10.0
+        }
+      },
+      "backtest": {
+        "lookback_years": 2,
+        "store_trade_details": true
+      },
+      "execution": {
+        "slippage_bps": 1.0,
+        "commission_rate": 0.0005,
+        "position_limit_live": 500.0,
+        "position_limit_backtest": 1000.0
+      },
+      "strategies": {
+        "BETA": {
+          "type": "MeanReversionStrategy",
+          "config": {
+            "risk_target": 0.1,
+            "vol_lookback": 3,
+            "position_size": 1.0,
+            "use_stop_loss": false,
+            "exit_threshold": 2.0,
+            "entry_threshold": 0.5,
+            "lookback_period": 3,
+            "allow_fractional_shares": false
+          },
+          "symbols": [
+            "SYN"
+          ],
+          "enabled_live": true,
+          "default_allocation": 2.0
+        },
+        "ALPHA": {
+          "type": "MeanReversionStrategy",
+          "config": {
+            "risk_target": 0.1,
+            "vol_lookback": 3,
+            "position_size": 1.0,
+            "use_stop_loss": false,
+            "exit_threshold": 0.1,
+            "entry_threshold": 0.5,
+            "lookback_period": 3,
+            "allow_fractional_shares": false
+          },
+          "symbols": [
+            "SYN"
+          ],
+          "enabled_live": true,
+          "default_allocation": 2.0
+        }
+      },
+      "max_drawdown": 0.9,
+      "max_leverage": 10.0,
+      "optimization": {
+        "tau": 1.0,
+        "capital": 100000.0,
+        "version": "1.0.0",
+        "use_buffering": true,
+        "max_iterations": 100,
+        "buffer_size_factor": 0.05,
+        "cost_penalty_scalar": 50.0,
+        "convergence_threshold": 1e-06,
+        "asymmetric_risk_buffer": 0.1
+      },
+      "portfolio_id": "INVESTOR_P2_A",
+      "benchmark_mode": "deferred",
+      "initial_capital": 100000.0,
+      "snapshot_version": 2,
+      "use_optimization": false,
+      "strategy_defaults": {
+        "fdm": [
+          [
+            1,
+            1.0
+          ],
+          [
+            2,
+            1.03
+          ],
+          [
+            3,
+            1.08
+          ],
+          [
+            4,
+            1.13
+          ],
+          [
+            5,
+            1.19
+          ],
+          [
+            6,
+            1.26
+          ]
+        ],
+        "carver_buffer_floor": 0.5,
+        "max_strategy_allocation": 1.0,
+        "min_strategy_allocation": 0.1,
+        "carver_buffer_position_factor": 0.0
+      },
+      "reserve_capital_pct": 0.1,
+      "sleeve_risk_modules": {},
+      "covariance_history_prices": 756
+    },
+    "status": "approved",
+    "requested_by": "fixture-submit",
+    "request_reason": "run",
+    "requested_at": "2026-10-06 17:25:44.917300-04:00",
+    "approved_by": "fixture-approve",
+    "approval_reason": "run",
+    "approved_at": "2026-10-06 17:25:44.917300-04:00"
+  }
+}

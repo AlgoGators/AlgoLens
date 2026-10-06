@@ -45,7 +45,8 @@ def _attempt(row):
 
 
 class PostgresRuntimeControlRepository:
-    def __init__(self, connection_factory=None):
+    def __init__(self, connection_factory=None, *, scope_loader=None):
+        self.scope_loader = scope_loader
         self.connection_factory = connection_factory or get_db_connection
 
     @contextmanager
@@ -84,6 +85,7 @@ class PostgresRuntimeControlRepository:
                 or registry['strategy_type'] != scope['engine_strategy_id']
                 or registry['portfolio_id'] != scope['portfolio_id']):
             raise RuntimeControlError('runtime_scope_unsupported')
+        validate_snapshot(scope['config_snapshot'],scope['portfolio_id'],scope['engine_strategy_id'],governed=True)
         # A run publishes the MODEL (system stream): live or incubating, and active (the engine's
         # publishes_model rule and migration 025). The QT desk stays live-only (qt_workflow).
         if ((action == 'run' and (registry['lifecycle'] not in ('live', 'incubating')
@@ -95,6 +97,8 @@ class PostgresRuntimeControlRepository:
         with self._transaction() as cur:
             registry = self._registry(cur, strategy_id, lock=True)
             acquire_qt_book_locks(cur, scope['portfolio_id'])
+            if self.scope_loader is not None:
+                scope = self.scope_loader(strategy_id, scope['portfolio_id'], cursor=cur)
             self._check(registry, scope, action)
             cur.execute('''INSERT INTO trading.runtime_intents
                 (registry_id,portfolio_id,engine_strategy_id,action,registry_revision,
@@ -112,8 +116,9 @@ class PostgresRuntimeControlRepository:
             pending = cur.fetchone()
             if pending is None:
                 raise RuntimeControlError('runtime_request_not_found', 404)
-            scope = scope_loader(strategy_id, pending['portfolio_id'])
-            acquire_qt_book_locks(cur, scope['portfolio_id'])
+            acquire_qt_book_locks(cur, pending['portfolio_id'])
+            scope = (self.scope_loader(strategy_id, pending['portfolio_id'], cursor=cur)
+                     if self.scope_loader is not None else scope_loader(strategy_id, pending['portfolio_id']))
             # All supported approval writers take this registry lock first.
             if (pending['status'] != 'pending'
                     or pending['registry_revision'] != registry['runtime_revision']

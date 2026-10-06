@@ -87,7 +87,7 @@ def resolved_manifests(tmp_path):
     }
     kinds = {
         "libtrade_ngin.so": "engine",
-        "live_equity_mean_reversion": "system_publisher",
+        "live_equity_mr": "system_publisher",
         "live_portfolio": "system_publisher",
         "live_portfolio_conservative": "system_publisher",
         "qt_desk_prepare_sources": "desk_tool",

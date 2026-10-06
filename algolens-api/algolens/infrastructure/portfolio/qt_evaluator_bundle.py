@@ -19,6 +19,19 @@ _NAME = re.compile(r'[A-Za-z0-9_.+-]{1,160}\Z')
 _DIGEST = re.compile(r'[0-9a-f]{64}\Z')
 _MAX_FILE = 512 * 1024 * 1024
 _MAX_TOTAL = 1024 * 1024 * 1024
+@dataclass(frozen=True)
+class _BundleProfile:
+    manifest: str
+    schema: str
+    wire_schema: str
+    build_key: str
+    executable: str
+
+_QT_PROFILE = _BundleProfile('qt_evaluator_manifest.json', 'qt-evaluator-bundle/v1',
+                             'qt-eval/v1', 'evaluator_build', 'qt_evaluator')
+_LIVE_CONFIG_PROFILE = _BundleProfile('live_config_validator_manifest.json',
+    'live-config-validator-bundle/v1', 'live-config-validation/v1', 'validator_build', 'live_config_validate')
+
 _MANIFEST = 'qt_evaluator_manifest.json'
 _ABI = {'platform': 'linux', 'machine': 'x86_64', 'elf_class': 'ELF64', 'cxx_standard': '20'}
 
@@ -132,11 +145,11 @@ def _metadata(metadata):
             raise ValueError('invalid_bundle_metadata')
 
 
-def _closure(rows):
+def _closure(rows, profile=_QT_PROFILE):
     names = {row['name']: row for row in rows}
     if len(names) != len(rows) or not 4 <= len(rows) <= 256:
         raise ValueError('ambiguous_bundle_artifacts')
-    required = {'executable': 'qt_evaluator', 'engine': 'libtrade_ngin.so',
+    required = {'executable': profile.executable, 'engine': 'libtrade_ngin.so',
                 'loader': 'ld-linux-x86-64.so.2'}
     for role, name in required.items():
         if [row['name'] for row in rows if row['role'] == role] != [name]:
@@ -172,28 +185,28 @@ def _closure(rows):
         raise ValueError('disconnected_bundle_artifact')
 
 
-def verify_bundle(directory, expected_bundle_sha256):
+def verify_bundle(directory, expected_bundle_sha256, *, _profile=_QT_PROFILE):
     directory = Path(directory)
     if directory.is_symlink() or not directory.is_dir() or directory.resolve() != directory.absolute():
         raise ValueError('invalid_bundle_directory')
-    path = directory / _MANIFEST
+    path = directory / _profile.manifest
     if path.is_symlink() or not path.is_file():
         raise ValueError('invalid_bundle_manifest')
     manifest = _json(path)
     if (not isinstance(manifest, dict) or set(manifest) !=
-            {'schema', 'wire_schema', 'evaluator_build', 'compiler', 'abi', 'artifacts', 'bundle_sha256'}
-            or manifest['schema'] != 'qt-evaluator-bundle/v1' or manifest['wire_schema'] != 'qt-eval/v1'
+            {'schema', 'wire_schema', _profile.build_key, 'compiler', 'abi', 'artifacts', 'bundle_sha256'}
+            or manifest['schema'] != _profile.schema or manifest['wire_schema'] != _profile.wire_schema
             or not isinstance(expected_bundle_sha256, str) or not _DIGEST.fullmatch(expected_bundle_sha256)):
         raise ValueError('invalid_bundle_manifest')
     unsigned = {key: value for key, value in manifest.items() if key != 'bundle_sha256'}
     if manifest['bundle_sha256'] != expected_bundle_sha256 or sha256(_canonical(unsigned)).hexdigest() != expected_bundle_sha256:
         raise ValueError('bundle_digest_mismatch')
-    _metadata({key: manifest[key] for key in ['evaluator_build', 'compiler', 'abi']})
+    _metadata({'evaluator_build': manifest[_profile.build_key], 'compiler': manifest['compiler'], 'abi': manifest['abi']})
     rows = manifest['artifacts']
     if not isinstance(rows, list):
         raise ValueError('invalid_bundle_artifacts')
     total = 0
-    expected_files = {_MANIFEST}
+    expected_files = {_profile.manifest}
     for row in rows:
         if (not isinstance(row, dict) or set(row) != {'name', 'role', 'path', 'size', 'sha256', 'elf'}
                 or type(row['size']) is not int or not 0 < row['size'] <= _MAX_FILE
@@ -213,7 +226,7 @@ def verify_bundle(directory, expected_bundle_sha256):
         if sha256(data).hexdigest() != row['sha256'] or read_elf(data) != row['elf']:
             raise ValueError('bundle_artifact_changed')
         expected_files.add(row['path'])
-    _closure(rows)
+    _closure(rows, _profile)
     actual_files = set()
     for path in directory.rglob('*'):
         if path.is_symlink():
@@ -272,6 +285,8 @@ class QtEvaluatorBundle:
     expected_executable_sha256: str
     expected_build: str
 
+    _profile = _QT_PROFILE
+
     def __post_init__(self):
         if (not isinstance(self.directory, Path) or not self.directory.is_absolute()
                 or any(not isinstance(value, str) or not _DIGEST.fullmatch(value)
@@ -284,9 +299,9 @@ class QtEvaluatorBundle:
     def snapshot(self):
         """Hash the copied bytes, never reopen a verified deployment file at spawn."""
         try:
-            manifest = verify_bundle(self.directory, self.expected_bundle_sha256)
+            manifest = verify_bundle(self.directory, self.expected_bundle_sha256, _profile=self._profile)
             executable = next(row for row in manifest['artifacts'] if row['role'] == 'executable')
-            if (manifest['evaluator_build'] != self.expected_build or
+            if (manifest[self._profile.build_key] != self.expected_build or
                     executable['sha256'] != self.expected_executable_sha256):
                 raise ValueError('bundle_identity_mismatch')
             with tempfile.TemporaryDirectory(prefix='qt-evaluator-bundle-') as temporary:
@@ -307,10 +322,10 @@ class QtEvaluatorBundle:
                     path.parent.mkdir(mode=0o700, exist_ok=True)
                     path.write_bytes(data)
                     path.chmod(0o500 if row['role'] in {'executable', 'loader'} else 0o400)
-                (directory / _MANIFEST).write_bytes(_canonical(manifest) + b'\n')
+                (directory / self._profile.manifest).write_bytes(_canonical(manifest) + b'\n')
                 # Complete closure and copied metadata are checked before the
                 # snapshot is exposed to a launcher or any child is created.
-                verify_bundle(directory, self.expected_bundle_sha256)
+                verify_bundle(directory, self.expected_bundle_sha256, _profile=self._profile)
                 yield QtBundleSnapshot(directory, manifest)
         except (OSError, ValueError, TypeError, KeyError, UnicodeError, struct.error, RecursionError):
             raise QtEvaluatorBundleUnavailable('evaluator_bundle_unavailable') from None
@@ -357,3 +372,8 @@ class QtEvaluatorBundle:
         finally:
             for descriptor in descriptors.values():
                 os.close(descriptor)
+
+
+class LiveConfigValidatorBundle(QtEvaluatorBundle):
+    """Fixed server-side live configuration profile; no evaluator protocol fallback."""
+    _profile = _LIVE_CONFIG_PROFILE

@@ -122,6 +122,58 @@ class ReadinessRuntimeTests(unittest.TestCase):
     def authority_ready(self):
         return self.sql(_CAPABILITY_READINESS_SQL)[0]['launch_authority_ready']
 
+    def add_configuration_grants(self):
+        # Match the grant key and capability vocabulary after migration 011.
+        # Duplicate grant rows must be rejected by PostgreSQL, not invented by
+        # the readiness fixture to exercise an impossible production state.
+        self.sql("""
+            ALTER TABLE trading.qt_action_grants ADD PRIMARY KEY (user_id, capability);
+            ALTER TABLE trading.qt_action_grants ADD CHECK
+              (capability IN ('qt_submit','qt_approve','config_submit','config_approve'));
+            INSERT INTO trading.qt_action_grants VALUES
+              (303,'config_submit',true),(202,'config_approve',true);
+        """)
+
+    def test_configuration_grants_coexist_with_exact_qt_authority(self):
+        self.assertTrue(self.authority_ready())
+        self.add_configuration_grants()
+        self.assertTrue(self.authority_ready())
+
+    def test_configuration_grants_do_not_hide_invalid_qt_authority(self):
+        self.add_configuration_grants()
+        self.assertTrue(self.authority_ready())
+        mutations = [
+            "DELETE FROM trading.qt_action_grants WHERE user_id=202 AND capability='qt_approve'",
+            "INSERT INTO trading.qt_action_grants VALUES(202,'qt_submit',true)",
+            # An alias can have its own unique grant key, but must not replace
+            # the canonical user's grant or evade exact identity resolution.
+            "INSERT INTO auth.users VALUES(606,' RAOHEMDUTT@UFL.EDU ','exec_board',NULL); "
+            "UPDATE trading.qt_action_grants SET user_id=606 "
+            "WHERE user_id=202 AND capability='qt_approve'",
+            "UPDATE auth.users SET role='admin' WHERE id=202",
+            "DELETE FROM trading.qt_approver_allowlist WHERE user_id=202",
+            "INSERT INTO auth.account_retirements VALUES(202,303)",
+        ]
+        for mutation in mutations:
+            with self.subTest(mutation=mutation):
+                self.sql('BEGIN')
+                try:
+                    self.sql(mutation)
+                    self.assertFalse(self.authority_ready())
+                finally:
+                    self.sql('ROLLBACK')
+                self.assertTrue(self.authority_ready())
+
+    def test_duplicate_qt_grant_with_configuration_grants_is_rejected_by_schema(self):
+        self.add_configuration_grants()
+        self.sql('BEGIN')
+        try:
+            with self.assertRaises(psycopg2.errors.UniqueViolation):
+                self.sql("INSERT INTO trading.qt_action_grants VALUES(202,'qt_approve',true)")
+        finally:
+            self.sql('ROLLBACK')
+        self.assertTrue(self.authority_ready())
+
     def test_duplicate_unretired_email_with_different_role_is_not_ready(self):
         self.assertTrue(self.authority_ready())
         self.sql("INSERT INTO auth.users VALUES(606,' JOHN.RILEY@UFL.EDU ','exec_board',NULL)")

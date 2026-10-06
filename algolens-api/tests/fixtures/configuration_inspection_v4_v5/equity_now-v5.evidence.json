@@ -1,0 +1,156 @@
+{
+  "selection": {
+    "attempt_id": "fa047317-8857-4673-8074-5344416a2c12",
+    "portfolio_id": "TASK4_MR_NOW",
+    "engine_strategy_id": "LIVE_EQUITY_MEAN_REVERSION",
+    "run_date": "2026-10-06",
+    "engine_build": "3f921d1",
+    "selection": {
+      "scope": {
+        "registry_id": "equity_now",
+        "portfolio_id": "TASK4_MR_NOW",
+        "investor_book_id": null,
+        "registry_revision": 0,
+        "engine_strategy_id": "LIVE_EQUITY_MEAN_REVERSION"
+      },
+      "schema": "live-config-selection/v1",
+      "source": "file",
+      "version_id": null,
+      "base_sha256": "100229c476a08882e5b2f52e6e46a8805decb439e8145475b1f7f0bb8a7137d7",
+      "engine_build": "3f921d1",
+      "effective_sha256": "100229c476a08882e5b2f52e6e46a8805decb439e8145475b1f7f0bb8a7137d7"
+    },
+    "config_snapshot": {
+      "live": {
+        "historical_days": 30,
+        "spinoff_child_policy": "liquidate_at_first_close",
+        "data_staleness_tolerance_days": 4,
+        "execution_price_max_staleness_days": 5
+      },
+      "risk": {
+        "schema": 2,
+        "modules": [
+          {
+            "id": "no_portfolio_risk",
+            "type": "none",
+            "_reason": "Carver's risk system is a futures construction and on this book three quarters of it is furniture: over the measured chain the leverage and jump terms are the sole binding minimum on 0 of 14,632 evaluations and the leverage multiplier never falls below 1.000000 at all, and the correlation term can only fire when the book holds two or more non-zero names, which is 2 of 19 dated rows. What was left was a VaR limit whose 0.25 is a documented equity-specific calibration rather than a Carver parameter. The book is still MEASURED: risk_reporting below is unchanged, so every risk column of live_results and the email still reports.",
+            "_ruled_by": "HD",
+            "_ruled_on": "2026-09-18"
+          }
+        ],
+        "max_drawdown": 0.3,
+        "max_leverage": 1.0,
+        "risk_reporting": {
+          "type": "carver",
+          "window": "all_bars",
+          "var_limit": 0.25,
+          "jump_risk_limit": 0.08,
+          "lookback_period": 252,
+          "max_correlation": 0.7,
+          "confidence_level": 0.99,
+          "max_net_leverage": 1.0,
+          "max_gross_leverage": 1.0
+        }
+      },
+      "backtest": {
+        "lookback_years": 2,
+        "store_trade_details": true
+      },
+      "execution": {
+        "slippage_bps": 1.0,
+        "commission_rate": 0.0005,
+        "position_limit_live": 500.0,
+        "position_limit_backtest": 1000.0
+      },
+      "strategies": {
+        "MEAN_REVERSION": {
+          "type": "MeanReversionStrategy",
+          "config": {
+            "risk_target": 0.15,
+            "vol_lookback": 3,
+            "position_size": 1,
+            "stop_loss_pct": 0.05,
+            "use_stop_loss": false,
+            "exit_threshold": 0.1,
+            "entry_threshold": 0.5,
+            "lookback_period": 3,
+            "allow_fractional_shares": false
+          },
+          "symbols": [
+            "SYN_T4"
+          ],
+          "enabled_live": true,
+          "_symbols_note": "ABEV and ABM have NO bars in equities_data.ohlcv_1d (data-owner ask DO-ABEV/ABM). The live runner's freshness guard treats a requested symbol with no bars as absent and refuses a bare live run, so the LIVE runtime config keeps the universe the 2026-09 gate proved (BKNG and DD in their place) until those bars exist; swap back here-to-runtime when they do. var_limit lives in risk.json (0.25, proven).",
+          "enabled_backtest": true,
+          "default_allocation": 2
+        }
+      },
+      "max_drawdown": 0.3,
+      "max_leverage": 1.0,
+      "optimization": {
+        "tau": 1.0,
+        "capital": 100000.0,
+        "version": "1.0.0",
+        "use_buffering": true,
+        "max_iterations": 100,
+        "buffer_size_factor": 0.01,
+        "cost_penalty_scalar": 50.0,
+        "convergence_threshold": 1e-06,
+        "asymmetric_risk_buffer": 0.1
+      },
+      "portfolio_id": "TASK4_MR_NOW",
+      "benchmark_mode": "deferred",
+      "initial_capital": 100000.0,
+      "snapshot_version": 2,
+      "use_optimization": false,
+      "strategy_defaults": {
+        "fdm": [
+          [
+            1,
+            1.0
+          ],
+          [
+            2,
+            1.03
+          ],
+          [
+            3,
+            1.08
+          ],
+          [
+            4,
+            1.13
+          ],
+          [
+            5,
+            1.19
+          ],
+          [
+            6,
+            1.26
+          ]
+        ],
+        "carver_buffer_floor": 0.5,
+        "max_strategy_allocation": 1.0,
+        "min_strategy_allocation": 0.1,
+        "carver_buffer_position_factor": 0.0
+      },
+      "reserve_capital_pct": 0.1,
+      "sleeve_risk_modules": {},
+      "covariance_history_prices": 756
+    },
+    "admitted_at": "2026-10-06 17:34:10.496286-04:00"
+  },
+  "safety": {
+    "attempt_id": "fa047317-8857-4673-8074-5344416a2c12",
+    "state": "published",
+    "pre_write_evidence": null,
+    "recovery_evidence": null,
+    "updated_at": "2026-10-06 17:34:10.552123-04:00",
+    "lifecycle": "published",
+    "publication_id": "fa047317-8857-4673-8074-5344416a2c12",
+    "classification_version": 2
+  },
+  "runtime_attempt": null,
+  "runtime_intent": null
+}

@@ -12,6 +12,7 @@ export interface AuthResponse {
 }
 
 export const CAPABILITIES = [
+  'edit_config', 'approve_config',
   'view_internal', 'view_qt_platform', 'edit_qt_book', 'approve_qt_override',
   'manage_incubation', 'manage_books', 'request_runtime_control',
   'approve_runtime_control', 'publish_qt_book', 'save_analysis', 'view_investor_book',
