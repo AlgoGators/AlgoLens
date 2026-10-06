@@ -26,6 +26,10 @@ def connection():
         # marked. Pre-existing unowned schemas were refused before its DROP.
         with conn.cursor() as cursor:
             cursor.execute('COMMENT ON SCHEMA trading IS %s', (OWNERSHIP_MARK,))
+            # Shared native seed fixtures insert Python dates into timestamptz
+            # daily-result columns. Seed UTC midnight, independently of the
+            # server timezone; native subprocesses retain the server default.
+            cursor.execute("SET TIME ZONE 'UTC'")
         yield conn
     finally:
         generator.close()

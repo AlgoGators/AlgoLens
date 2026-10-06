@@ -32,7 +32,9 @@ pytestmark = [pytest.mark.parametrize('desk', ['futures_mes'], indirect=True),
               pytest.mark.parametrize('accounting', ['no_input'], indirect=True)]
 
 
-def test_actual_market_capture_accounting_and_api_quantity_proof(capture):
+@pytest.mark.parametrize('host_timezone', ['UTC', 'America/New_York', 'Asia/Tokyo'])
+def test_actual_market_capture_accounting_and_api_quantity_proof(capture, monkeypatch, host_timezone):
+    monkeypatch.setenv('TZ', host_timezone)
     conn, request = capture
     result = invoke('--capture', payload=request)
     assert result.returncode == 0, result.stdout + result.stderr
