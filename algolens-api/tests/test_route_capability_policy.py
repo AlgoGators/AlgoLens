@@ -26,9 +26,10 @@ def test_actual_blueprint_route_map_has_no_unclassified_rule():
 
     app = create_app()
     assert unclassified_routes(
-        app, explicitly_open_endpoints={"version", "health_check"}
+        app,
+        explicitly_open_endpoints={"version", "health_check", "readiness_check"},
     ) == ()
-    assert len(tuple(_rule_rows(app))) == 42
+    assert len(tuple(_rule_rows(app))) == 43
 
 
 def test_declared_capability_is_enforced_from_current_server_authority(monkeypatch):
