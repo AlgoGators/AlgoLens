@@ -125,8 +125,9 @@ function Observation({ response }: { response: InspectionResponse }) {
     </div>
     {response.status === 'unavailable' &&
       <p role="status">{reasonLabels[response.reason] ?? 'No published configuration is available.'}</p>}
-    {response.status === 'available' && (publication.publication_schema_version === 1 || publication.publication_schema_version === 2) && publication.supplied && selected && <>
-    <FieldTable fields={publication.supplied.fields} />
+    {response.status === 'available' && (publication.publication_schema_version === 1 || publication.publication_schema_version === 2) && publication.supplied && selected &&
+      <FieldTable fields={publication.supplied.fields} />}
+    {response.status === 'available' && selected && <>
     <div>
       <h3 className="text-base font-semibold">Selected trend stages</h3>
       <p className="text-xs">Shared resolver with the same inputs, followed by constructor normalization. Other runtime transformations are not shown.</p>

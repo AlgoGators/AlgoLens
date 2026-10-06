@@ -70,17 +70,66 @@ def resolve_person(user_id, authority, capability):
             'grant_version': grants[0]['version'], 'mapping_version': mappings[0]['mapping_version']}
 
 
+def _same_json(left, right):
+    # JSON numbers compare numerically, but Python's True == 1 is not JSON equality.
+    if isinstance(left, dict):
+        return (isinstance(right, dict) and left.keys() == right.keys()
+                and all(_same_json(value, right[key]) for key, value in left.items()))
+    if isinstance(left, list):
+        return (isinstance(right, list) and len(left) == len(right)
+                and all(_same_json(a, b) for a, b in zip(left, right)))
+    if type(left) in (int, float):
+        return type(right) in (int, float) and left == right
+    return type(left) is type(right) and left == right
+
+
+def _actual_changed_paths(baseline, effective, changes):
+    """Reconcile native output with assignments; native still owns policy and hashes."""
+    visited, changed = set(), []
+
+    def walk(before, after, path):
+        if path in changes:
+            if not _same_json(after, changes[path]):
+                raise ValueError()
+            visited.add(path)
+            if not _same_json(before, after):
+                changed.append(path)
+        elif isinstance(before, dict) and isinstance(after, dict) and before.keys() == after.keys():
+            for key in before:
+                token = key.replace('~', '~0').replace('/', '~1')
+                walk(before[key], after[key], path + '/' + token)
+        elif isinstance(before, list) and isinstance(after, list) and len(before) == len(after):
+            for index, (a, b) in enumerate(zip(before, after)):
+                walk(a, b, path + '/' + str(index))
+        elif not _same_json(before, after):
+            # Includes unrequested changes, added/removed fields and altered array shapes.
+            raise ValueError()
+
+    if not isinstance(changes, dict) or any(not isinstance(path, str) or not path.startswith('/') for path in changes):
+        raise ValueError()
+    walk(baseline, effective, '')
+    if visited != set(changes):
+        # Nonexistent/noncanonical pointers (including malformed escapes) never match.
+        raise ValueError()
+    return sorted(changed)
+
+
 def native_reply(result, scope, changes, operation):
     schema = 'live-config-baseline-validation/v1' if operation == 'reset_to_baseline' else 'live-config-validation/v1'
     try:
         if (not isinstance(result, dict) or set(result) != {'schema', 'base_sha256', 'effective_sha256', 'effective_snapshot', 'changed_paths'}
                 or result['schema'] != schema or
                 any(not isinstance(result[k], str) or not re.fullmatch('[0-9a-f]{64}', result[k]) for k in ('base_sha256','effective_sha256'))
-                or result['changed_paths'] != sorted(changes)
+                or operation not in ('override', 'reset_to_baseline')
+                or not isinstance(result['changed_paths'], list)
+                or (operation == 'reset_to_baseline' and changes)
                 or (operation == 'reset_to_baseline' and result['base_sha256'] != result['effective_sha256'])
                 or (operation == 'override' and result['base_sha256'] == result['effective_sha256'])):
             raise ValueError()
         validate_snapshot(result['effective_snapshot'], scope['portfolio_id'], scope['engine_strategy_id'], governed=True)
+        changed = _actual_changed_paths(scope['config_snapshot'], result['effective_snapshot'], changes)
+        if result['changed_paths'] != changed or (operation == 'override' and not changed):
+            raise ValueError()
     except (ValueError, KeyError, TypeError, RuntimeControlError, RecursionError):
         raise LiveConfigError('live_config_validator_unavailable', 503) from None
     return result

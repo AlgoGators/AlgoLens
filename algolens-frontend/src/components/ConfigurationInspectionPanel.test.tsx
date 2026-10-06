@@ -332,3 +332,34 @@ describe('small completed publication summary',()=>{
     expect(screen.getByText('Configuration and observation details').closest('details')?.open).toBe(false);
   });
 });
+
+
+describe('schema 4 selected trend details', () => {
+  it('keeps both recorded trend stages inside the existing expansion with the new supplied table', async () => {
+    const bytes = readFileSync('../algolens-api/tests/fixtures/configuration_inspection_v4_v5/futures-v4.http.json', 'utf8');
+    const response = JSON.parse(bytes);
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(bytes, {
+      headers: { 'Content-Type': 'application/json' },
+    }));
+    render(<ConfigurationInspectionPanel registryId={response.scope.registry_id}
+      portfolioId={response.scope.portfolio_id} userId="u1" allowed />);
+    openPublishedConfiguration();
+    await screen.findByText('Approved configuration');
+    const disclosure = screen.getByText('Configuration and observation details');
+    const details = disclosure.closest('details')!;
+    expect(details.open).toBe(false);
+    fireEvent.click(disclosure);
+    expect(details.open).toBe(true);
+    expect(within(details).getByRole('heading', { name: 'Selected trend stages' })).toBeTruthy();
+    for (const [name, history] of [['Factory-resolved trend inputs', '0'], ['Constructor-normalized trend inputs', '2520']]) {
+      const table = within(details).getByRole('table', { name });
+      expect(within(table).getByRole('rowheader', { name: 'ema_windows' }).closest('tr')?.textContent)
+        .toContain('[[2,8],[4,16],[8,32],[16,64],[32,128],[64,256]]');
+      expect(within(table).getByRole('rowheader', { name: 'max_history_size' }).closest('tr')?.children[1].textContent)
+        .toBe(history);
+    }
+    expect(within(details).getByRole('region', { name: 'Supplied settings' })).toBeTruthy();
+    expect(screen.queryByRole('table', { name: 'Supplied inputs' })).toBeNull();
+    expect(screen.queryByRole('button', { name: /save|activate|approve|propose/i })).toBeNull();
+  });
+});

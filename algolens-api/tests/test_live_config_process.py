@@ -1,3 +1,5 @@
+import copy
+import subprocess
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from hashlib import sha256
@@ -8,7 +10,7 @@ import sys
 import pytest
 from tests.test_live_config import baseline
 from tests.live_config_native import native_pin
-from algolens.application.live_config import LiveConfigError
+from algolens.application.live_config import LiveConfigError, native_reply
 from algolens.infrastructure.config.live_config import NativeValidator,LiveConfigConfig
 from algolens.infrastructure.portfolio.qt_evaluator_bundle import (LiveConfigValidatorBundle,QtEvaluatorBundle,
     QtEvaluatorBundleUnavailable, QtBundleLaunch, verify_bundle, _LIVE_CONFIG_PROFILE, _canonical)
@@ -131,3 +133,83 @@ def test_both_fixed_profiles_reject_metadata_substitution(tmp_path,profile_name,
     else: manifest[other.build_key]=manifest.pop(profile.build_key)
     save()
     with pytest.raises(ValueError): verify_bundle(tmp_path,manifest['bundle_sha256'],_profile=profile)
+
+
+@pytest.mark.parametrize('changes,expected', [
+    ({'/optimization/tau': 2.0, '/execution/position_limit_live': 500.0}, ['/optimization/tau']),
+    ({'/optimization/tau': 2.0}, ['/optimization/tau']),
+    ({'/optimization/tau': 2, '/execution/position_limit_live': 600},
+     ['/execution/position_limit_live', '/optimization/tau']),
+    ({'/risk/modules/0/var_limit': .3, '/risk/risk_reporting/var_limit': .3},
+     ['/risk/modules/0/var_limit', '/risk/risk_reporting/var_limit']),
+    ({'/strategies/TREND_FOLLOWING/config/ema_windows': [[4, 16], [8, 32]]},
+     ['/strategies/TREND_FOLLOWING/config/ema_windows']),
+])
+def test_native_to_api_reports_only_actual_changes(changes, expected):
+    result = NativeValidator(native_pin()).validate(scope(), changes, 'override')
+    assert result['changed_paths'] == expected
+    assert result['base_sha256'] != result['effective_sha256']
+
+
+def test_native_to_api_all_noop_refuses_and_reset_has_empty_paths():
+    from tests.qt_native_artifacts import require_native_artifact_paths
+    changes = {'/optimization/tau': 1.0, '/execution/position_limit_live': 500}
+    process = subprocess.run([str(require_native_artifact_paths().artifact('live_config_validate'))],
+        input=json.dumps({'schema': 'live-config-validation/v1',
+                          'base_snapshot': scope()['config_snapshot'], 'changes': changes}),
+        capture_output=True, text=True, timeout=15)
+    assert process.returncode == 2
+    assert json.loads(process.stdout)['error']['code'] == 'live_config_noop'
+    validator = NativeValidator(native_pin())
+    with pytest.raises(LiveConfigError, match='validator_unavailable'):
+        validator.validate(scope(), changes, 'override')
+    reset = validator.validate(scope(), {}, 'reset_to_baseline')
+    assert reset['changed_paths'] == []
+    assert reset['effective_snapshot'] == scope()['config_snapshot']
+    assert reset['base_sha256'] == reset['effective_sha256']
+
+
+@pytest.mark.parametrize('mutation', [
+    'omitted', 'extra', 'duplicate', 'unsorted', 'not_list', 'non_string',
+    'malformed_path', 'unchanged_reported', 'wrong_assignment', 'unrequested_change',
+    'missing_snapshot_key', 'noop_with_distinct_hash', 'bool_as_number',
+])
+def test_native_reply_rejects_inconsistent_actual_changes(mutation):
+    current = scope()
+    changes = {'/optimization/tau': 2.0, '/execution/position_limit_live': 600.0}
+    result = NativeValidator(native_pin()).validate(current, changes, 'override')
+    if mutation == 'omitted': result['changed_paths'].pop()
+    elif mutation == 'extra': result['changed_paths'].append('/optimization/cost_penalty_scalar')
+    elif mutation == 'duplicate': result['changed_paths'].append('/optimization/tau')
+    elif mutation == 'unsorted': result['changed_paths'].reverse()
+    elif mutation == 'not_list': result['changed_paths'] = '/optimization/tau'
+    elif mutation == 'non_string': result['changed_paths'] = [None]
+    elif mutation == 'malformed_path': result['changed_paths'][0] = 'execution/position_limit_live'
+    elif mutation == 'unchanged_reported':
+        changes['/execution/position_limit_live'] = 500.0
+        result['effective_snapshot']['execution']['position_limit_live'] = 500.0
+    elif mutation == 'wrong_assignment': result['effective_snapshot']['optimization']['tau'] = 3.0
+    elif mutation == 'unrequested_change': result['effective_snapshot']['optimization']['cost_penalty_scalar'] = 12.75
+    elif mutation == 'missing_snapshot_key': del result['effective_snapshot']['strategies']['TREND_FOLLOWING']['config']['_idm_rationale']
+    elif mutation == 'noop_with_distinct_hash':
+        changes = {'/optimization/tau': 1.0}
+        result['effective_snapshot'] = copy.deepcopy(current['config_snapshot'])
+        result['changed_paths'] = []
+    elif mutation == 'bool_as_number':
+        changes['/optimization/use_buffering'] = 1
+        # A boolean true must not pass as a numerical assignment of one.
+    with pytest.raises(LiveConfigError, match='validator_unavailable') as refused:
+        native_reply(result, current, changes, 'override')
+    assert refused.value.status == 503
+
+
+@pytest.mark.parametrize('mutation', ['changed_paths', 'changed_snapshot', 'assignments'])
+def test_native_reply_reset_refuses_override_evidence(mutation):
+    current = scope()
+    result = NativeValidator(native_pin()).validate(current, {}, 'reset_to_baseline')
+    changes = {}
+    if mutation == 'changed_paths': result['changed_paths'] = ['/optimization/tau']
+    elif mutation == 'changed_snapshot': result['effective_snapshot']['optimization']['tau'] = 2.0
+    else: changes = {'/optimization/tau': 1.0}
+    with pytest.raises(LiveConfigError, match='validator_unavailable'):
+        native_reply(result, current, changes, 'reset_to_baseline')
