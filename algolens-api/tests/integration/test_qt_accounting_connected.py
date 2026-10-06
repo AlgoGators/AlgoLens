@@ -7,7 +7,6 @@ All market inputs and finalized prior-day source records remain synthetic.
 from copy import deepcopy
 from datetime import date, timedelta
 from hashlib import sha256
-import json
 import os
 from pathlib import Path
 import subprocess
@@ -21,7 +20,8 @@ from algolens.infrastructure.portfolio.qt_evaluation_inputs import canonical_qt_
 from tests.integration.test_qt_connected_workflow import connected_db, preview_db, a3_db, DESK, query
 from tests.integration.test_qt_connected_multiowner import future_connected_db
 from tests.integration.test_qt_investor_publication import grant, release, public
-from tests.integration.test_qt_preview_evaluator import FIXTURE
+from tests.qt_native_evaluator import native_evaluator_requests
+from tests.qt_native_artifacts import require_native_artifact_paths
 
 INPUT = '90000000-0000-4000-8000-000000000061'
 
@@ -32,7 +32,7 @@ def digest(payload):
 
 def accounting_schema(dsn):
     api = Path(__file__).resolve().parents[2]
-    engine = api.parent.parent / 'trade-ngin-qt'
+    engine = require_native_artifact_paths().source_dir
     # DDL contains PostgreSQL format-percent tokens, not DBAPI placeholders.
     with psycopg2.connect(dsn) as connection:
         with connection.cursor() as cursor:
@@ -135,7 +135,7 @@ def test_http_accounting_report_and_separate_release(future_connected_db, tmp_pa
         original_authority(psycopg2.extensions.make_dsn(db, options='-c timezone=UTC'), selection)
         if optimizer_enabled:
             payload = deepcopy(query(db, 'SELECT payload FROM trading.qt_evaluation_snapshots ORDER BY snapshot_id DESC LIMIT 1')[0][0])
-            template = json.loads(FIXTURE.read_text())['draft_diagnostic']
+            template = native_evaluator_requests()['draft_diagnostic']
             inputs = payload['engine_inputs']
             risk = inputs['risk_inputs']
             optimizer = {key: deepcopy(value) for key, value in template['optimizer_inputs'].items()

@@ -1,7 +1,7 @@
 """Actual compiled evaluator plus immutable governed SQL preview authority."""
 
 from copy import deepcopy
-from datetime import date, timedelta
+from datetime import date, timedelta, timezone
 from decimal import Decimal
 from hashlib import sha256
 import json
@@ -18,10 +18,9 @@ from algolens.infrastructure.portfolio.qt_evaluator_client import QtEvaluatorCli
 from algolens.infrastructure.portfolio.qt_evaluator_process import QtEvaluatorProcess
 from algolens.infrastructure.portfolio.qt_workflow_repository import QtWorkflowRepository
 from tests.integration.test_qt_a3_read_set_postgres import a3_db, PUBLICATION
-from tests.qt_native_evaluator import native_evaluator_configuration
+from tests.qt_native_evaluator import native_evaluator_configuration, native_evaluator_requests
 
 
-FIXTURE = Path(__file__).resolve().parents[4] / "trade-ngin-qt/tests/contracts/qt-eval-v1.json"
 MIGRATION = Path(__file__).resolve().parents[2] / "migrations/004_qt_governed_sources.sql"
 BUNDLE_MIGRATION = Path(__file__).resolve().parents[2] / "migrations/005_qt_evaluator_bundle.sql"
 
@@ -35,7 +34,7 @@ def query(dsn, sql, values=()):
 
 def test_actual_client_admits_selected_split_and_richer_optimizer_evidence():
     process = QtEvaluatorProcess(**native_evaluator_configuration())
-    requests = json.loads(FIXTURE.read_text())
+    requests = native_evaluator_requests()
     selected = QtEvaluatorClient(process).evaluate(requests["selected_book"])
     assert selected.available and selected.evidence["selected_costs"]["total_exact"] == "0.02"
     diagnostic = requests["draft_diagnostic"]
@@ -71,10 +70,10 @@ def preview_db(a3_db):
 
 def authority(dsn, *, case="clean", selection=None):
     day, now = query(dsn, "SELECT (clock_timestamp() AT TIME ZONE 'UTC')::date, clock_timestamp()")[0]
-    stamp = now.isoformat().replace("+00:00", "Z")
+    stamp = now.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
     key = {"portfolio_id": "BOOK", "strategy_id": "engine-one", "strategy_name": "ONE",
            "date": day.isoformat(), "symbol": "SYN", "portfolio_type": "qt_proposal"}
-    fixture = json.loads(FIXTURE.read_text())["selected_book"]
+    fixture = native_evaluator_requests()["selected_book"]
     risk = {name: value for name, value in fixture["risk_inputs"].items() if not name.startswith("expected_")}
     times = [(day - timedelta(days=21-index)).isoformat() + "T12:00:00Z" for index in range(21)]
     risk.update(valuation_time=stamp, expected_observation_times=times,
@@ -110,7 +109,7 @@ def authority(dsn, *, case="clean", selection=None):
             for row in selection if row["editable"]]
         config["max_correlation"] = "1"
         if case in {"bad_new_optimizer", "duplicate_new_optimizer_history"}:
-            template = json.loads(FIXTURE.read_text())["draft_diagnostic"]
+            template = native_evaluator_requests()["draft_diagnostic"]
             opt = {name: deepcopy(value) for name, value in template["optimizer_inputs"].items()
                    if not name.startswith("expected_")}
             editable_symbols = {row["key"]["symbol"] for row in selection if row["editable"]}
@@ -177,6 +176,15 @@ def test_actual_sql_preview_evaluates_or_blocks_explicit_source(case, preview_db
     assert query(preview_db, "SELECT count(*) FROM trading.qt_decisions") == [(0,)]
     assert query(preview_db, "SELECT count(*) FROM trading.position_overrides") == [(0,)]
     assert query(preview_db, "SELECT row_to_json(p)::text FROM trading.positions p ORDER BY symbol,portfolio_type") == before
+
+
+def test_actual_preview_from_non_utc_source_session_is_admitted(preview_db):
+    source_dsn = psycopg2.extensions.make_dsn(preview_db, options='-c timezone=America/New_York')
+    service, request = saved_draft(source_dsn)
+    authority(source_dsn)
+    preview = service.create_preview(101, request).to_wire()
+    assert preview["confirmable"], preview["unavailable_reasons"]
+    assert preview["evaluation"]["selected_costs"]["total_exact"] == "0.05"
 
 
 def test_actual_saved_pnl_and_time_changes_preview_read_set(preview_db):

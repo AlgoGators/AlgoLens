@@ -1,5 +1,4 @@
 """Approval snapshots/revisions against owned disposable PostgreSQL only."""
-from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 from threading import Event
 
@@ -9,6 +8,7 @@ import pytest
 
 from tests.integration.conftest import claim_schema, require_test_dsn
 from tests.test_runtime_control import snapshot
+from tests.qt_native_artifacts import require_native_artifact_paths
 from algolens.application.runtime_control import RuntimeControlError
 from algolens.infrastructure.portfolio.runtime_control import PostgresRuntimeControlRepository
 
@@ -17,6 +17,7 @@ pytestmark = pytest.mark.integration
 
 @pytest.fixture
 def database():
+    native_paths = require_native_artifact_paths()
     dsn = require_test_dsn()
     conn = psycopg2.connect(dsn)
     conn.autocommit = True
@@ -37,7 +38,7 @@ def database():
                       'executions', 'signals', 'live_run_metadata', 'run_inputs'):
             cursor.execute(f'CREATE TABLE trading.{table} '
                            '(strategy_id TEXT, portfolio_id TEXT, portfolio_type TEXT)')
-        migration = Path(__file__).resolve().parents[4] / 'trade-ngin-qt/migrations/013_runtime_control.sql'
+        migration = native_paths.source_dir / 'migrations/013_runtime_control.sql'
         cursor.execute(migration.read_text())
     def factory():
         return psycopg2.connect(dsn, cursor_factory=RealDictCursor,

@@ -1,21 +1,17 @@
 """Performed optimizer iterations survive the actual pinned native boundary."""
 from copy import deepcopy
 from datetime import date, timedelta
-import json
-from pathlib import Path
 
 import pytest
 
 from algolens.infrastructure.portfolio.qt_evaluator_client import QtEvaluatorClient
 from algolens.infrastructure.portfolio.qt_evaluator_process import QtEvaluatorProcess
-from tests.qt_native_evaluator import native_evaluator_configuration
-
-FIXTURE = Path(__file__).resolve().parents[4] / "trade-ngin-qt/tests/contracts/qt-eval-v1.json"
+from tests.qt_native_evaluator import native_evaluator_configuration, native_evaluator_requests
 
 
 @pytest.mark.parametrize("maximum,threshold", [(50, "1"), (1, "1e-12")])
 def test_real_executed_iteration_count_is_neither_limit_nor_terminal_increment(maximum, threshold):
-    req = json.loads(FIXTURE.read_text())["draft_diagnostic"]
+    req = native_evaluator_requests()["draft_diagnostic"]
     stamps = [(date(2026, 9, 5) + timedelta(days=index)).isoformat() + "T12:00:00Z" for index in range(21)]
     closes = [dict(instrument=dict(instrument_type="EQUITY", symbol="SYN"), timestamp=stamp,
                    close="100" if index % 2 == 0 else "110") for index, stamp in enumerate(stamps)]
@@ -42,7 +38,7 @@ def test_real_executed_iteration_count_is_neither_limit_nor_terminal_increment(m
 
 
 def test_real_disabled_optimizer_keeps_iterations_absent():
-    req = json.loads(FIXTURE.read_text())["selected_book"]
+    req = native_evaluator_requests()["selected_book"]
     process = QtEvaluatorProcess(**native_evaluator_configuration())
     assert process.run(req)["optimizer"]["actual_iterations"] is None
     assert QtEvaluatorClient(process).evaluate(req).evidence["optimizer"]["trace"] == []
