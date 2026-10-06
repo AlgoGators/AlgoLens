@@ -46,6 +46,9 @@ def test_native_fixture_then_api_fixture():
 
 
 def test_api_native_bridge_refuses_existing_unowned_schema():
+    # Resolve optional native artifacts before removing our ownership marker:
+    # a module-level skip must not leave the next fixture an unowned schema.
+    generator = selected_connection()
     with closing(psycopg2.connect(require_test_dsn())) as control:
         control.autocommit = True
         with control.cursor() as cursor:
@@ -54,7 +57,6 @@ def test_api_native_bridge_refuses_existing_unowned_schema():
             cursor.execute("INSERT INTO trading.owned_regression_sentinel VALUES('preserve me')")
             created_oid = schema_oid(cursor)
             cursor.execute('COMMENT ON SCHEMA trading IS NULL')
-        generator = selected_connection()
         try:
             with pytest.raises(pytest.fail.Exception, match='this suite did not create'):
                 next(generator)

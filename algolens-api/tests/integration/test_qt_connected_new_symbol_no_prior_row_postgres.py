@@ -41,7 +41,7 @@ from hashlib import sha256
 import json
 import os
 import subprocess
-from datetime import timedelta
+from datetime import timedelta, timezone
 
 from psycopg2.extras import Json
 import pytest
@@ -60,6 +60,7 @@ from tests.integration.test_qt_connected_workflow import (
     connected_db, desk, report, assert_positions_rows_match_saved, OBSERVATION, REPORT, DELIVERY_GUARD,
 )
 import psycopg2
+from tests.qt_report_probe import report_probe_environment
 
 
 NEW_NAME_PUBLICATION = "10000000-0000-4000-8000-000000000091"
@@ -74,7 +75,7 @@ def report_with_names(preview, directory, *strategy_names):
     test_qt_connected_multiowner.py's report_multiowner())."""
     directory.mkdir()
     assert DELIVERY_GUARD.is_file(), 'Build the test-only delivery guard first'
-    report_environment = {**os.environ, 'LD_PRELOAD': str(DELIVERY_GUARD)}
+    report_environment = report_probe_environment(DELIVERY_GUARD)
     return subprocess.run([str(REPORT), "BOOK", preview["source_day"], "engine-one", str(directory), *strategy_names],
         capture_output=True, text=True, timeout=30, env=report_environment)
 
@@ -131,7 +132,7 @@ def observe_editable_rows(dsn, preview, decision):
             "execution_id": "synthetic-connected-fill-" + tag,
             "accounting_source_id": "synthetic-connected-accounting-" + tag,
             "daily_unrealized_pnl_exact": "3", "daily_realized_pnl_exact": "-1",
-            "last_update": now.isoformat().replace("+00:00", "Z")})
+            "last_update": now.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")})
         totals[0] += Decimal("0.02"); totals[1] += Decimal("3"); totals[2] += Decimal("-1")
     payload = {"schema_version": "qt-execution/v1", "decision_id": decision["decision_id"], "book_id": "BOOK",
         "source_day": preview["source_day"], "fills": fills, "results": {"position_count": len(fills),

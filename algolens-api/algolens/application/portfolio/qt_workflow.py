@@ -215,7 +215,11 @@ class QtWorkflowService:
                 and str(decision["source_day"]) == day.isoformat()
                 and str(decision["draft_id"]) == str(head["draft_id"])
                 and decision["draft_revision"] == head["revision"]
-                and decision["draft_digest"] == decision["selection_digest"] == head["draft_digest"]
+                # The immutable draft signs rationale and rows; the receipt's
+                # independently proved selection signs only the actual rows.
+                and decision["draft_digest"] == head["draft_digest"]
+                and decision["selection_digest"] == qt_digest_v1({
+                    "selection_rows": head["selection_payload"]["selection_rows"]})
                 and qt_digest_v1(head["selection_payload"]) == head["draft_digest"]
                 and decision["provenance_digest"] == head["provenance_digest"]
                 and decision["source_digest"] == head["source_digest"] == provenance.observed_source_digest
@@ -545,7 +549,9 @@ class QtWorkflowService:
                     or provenance.observed_source_digest != preview["source_digest"]
                     or provenance.legacy_audit_chain_digest != preview["provenance_digest"]):
                 raise QtWorkflowError("preview_stale")
-            if qt_digest_v1({"selection_rows": payload["selection_rows"]}) != head["draft_digest"]:
+            # The immutable draft binds the rationale as well as its rows.
+            # Substitute preview rows without dropping any saved draft fields.
+            if qt_digest_v1({**head["selection_payload"], "selection_rows": payload["selection_rows"]}) != head["draft_digest"]:
                 raise QtWorkflowError("preview_mismatch")
             saved_rows = self._stored_rows(head)
             base, immutable = self._base_rows(tx, source, provenance, registry_kind)

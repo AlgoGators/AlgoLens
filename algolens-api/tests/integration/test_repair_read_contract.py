@@ -42,8 +42,8 @@ def test_current_and_previous_snapshots_keep_two_engine_names_for_same_symbol(cu
         _insert(cursor, 'ES', 7, 100, day)
         cursor.execute("UPDATE trading.positions SET strategy_name = 'Slow' WHERE quantity = 7")
     reader = PostgresPortfolioRepository()
-    current = reader._fetch_current_positions(cursor, STRATEGY, BOOK, has_portfolio_type=True)
-    previous = reader._fetch_yesterday_positions(cursor, STRATEGY, BOOK, has_portfolio_type=True)
+    current = reader._fetch_current_positions(cursor, STRATEGY, BOOK, portfolio_type="qt", has_portfolio_type=True)
+    previous = reader._fetch_yesterday_positions(cursor, STRATEGY, BOOK, portfolio_type="qt", has_portfolio_type=True)
     assert {(r.get('strategy_name'), r['quantity']) for r in current} == {('Slow', 7), ('Trend Following', 2)}
     assert {r.get('date') for r in current} == {date.today()}
     assert {(r.get('strategy_name'), r['quantity']) for r in previous} == {('Slow', 7), ('Trend Following', 2)}
@@ -61,7 +61,7 @@ def test_executions_are_only_the_selected_utc_day_and_qt_stream(cursor):
         cursor.execute('''INSERT INTO trading.executions VALUES (%s,%s,%s,%s,'BUY',1,100,%s,0)''',
                        (STRATEGY, book, stream, symbol, when))
     reader = PostgresPortfolioRepository()
-    rows = reader._fetch_recent_executions(cursor, STRATEGY, BOOK, day, has_portfolio_type=True)
+    rows = reader._fetch_recent_executions(cursor, STRATEGY, BOOK, day, portfolio_type="qt", has_portfolio_type=True)
     assert {r['symbol'] for r in rows} == {'ES', 'NQ'}
 
 
@@ -74,7 +74,7 @@ def test_legacy_execution_rows_are_not_guessed_to_be_qt(cursor):
 
 
 def test_detail_reader_retains_date_and_identity_after_all_positions_close(cursor):
-    _result(cursor, 'qt', date.today(), 200)
+    _result(cursor, 'system', date.today(), 200)
     _insert(cursor, 'ES', 0, 100, date.today())
     rows = _reader(cursor).fetch_detail_rows(STRATEGY, BOOK, "qt")
     assert rows.positions == []
@@ -104,28 +104,28 @@ def _result(cursor, stream, day, value, strategy=STRATEGY, book=BOOK):
         (book, '{"strategy_type":"' + strategy + '"}', stream, day, value))
 
 
-def test_result_helpers_choose_qt_with_same_day_system_and_other_scope(cursor):
+def test_result_helpers_choose_system_with_same_day_qt_and_other_scope(cursor):
     day = date(2026, 9, 18)
-    _result(cursor, 'system', day, 900)
-    _result(cursor, 'qt', day, 200)
-    _result(cursor, 'qt', day + timedelta(days=1), 800, book='OTHER')
-    _result(cursor, 'qt', day + timedelta(days=1), 700, strategy='OTHER')
+    _result(cursor, 'qt', day, 900)
+    _result(cursor, 'system', day, 200)
+    _result(cursor, 'system', day + timedelta(days=1), 800, book='OTHER')
+    _result(cursor, 'system', day + timedelta(days=1), 700, strategy='OTHER')
     reader = _reader(cursor)
     assert reader._fetch_latest_live_results(cursor, STRATEGY, BOOK)['current_portfolio_value'] == 200
     assert reader.fetch_summary_row(STRATEGY, BOOK)['current_portfolio_value'] == 200
 
 
-def test_result_helpers_do_not_choose_newer_system_day(cursor):
-    qt_day = date(2026, 9, 18)
-    _result(cursor, 'qt', qt_day, 200)
-    _result(cursor, 'system', qt_day + timedelta(days=1), 900)
+def test_result_helpers_do_not_choose_newer_qt_day(cursor):
+    system_day = date(2026, 9, 18)
+    _result(cursor, 'system', system_day, 200)
+    _result(cursor, 'qt', system_day + timedelta(days=1), 900)
     reader = _reader(cursor)
-    assert reader._fetch_latest_live_results(cursor, STRATEGY, BOOK)['date'] == qt_day
+    assert reader._fetch_latest_live_results(cursor, STRATEGY, BOOK)['date'] == system_day
     assert reader.fetch_summary_row(STRATEGY, BOOK)['current_portfolio_value'] == 200
 
 
-def test_qt_result_absent_and_legacy_result_unattributed(cursor):
-    _result(cursor, 'system', date(2026, 9, 18), 900)
+def test_system_result_absent_and_legacy_result_unattributed(cursor):
+    _result(cursor, 'qt', date(2026, 9, 18), 900)
     reader = _reader(cursor)
     assert reader.fetch_summary_row(STRATEGY, BOOK) is None
     assert reader.fetch_detail_rows(STRATEGY, BOOK).latest is None
@@ -137,9 +137,9 @@ def test_qt_result_absent_and_legacy_result_unattributed(cursor):
     assert reader.fetch_detail_rows(STRATEGY, BOOK).latest is None
 
 
-def test_qt_snapshot_survives_missing_result_without_borrowing_system_execution_day(cursor):
+def test_qt_snapshot_survives_missing_system_result_without_borrowing_qt_activity(cursor):
     today = date.today()
-    _result(cursor, 'system', today, 900)
+    _result(cursor, 'qt', today, 900)
     _insert(cursor, 'ES', 2, 100, today - timedelta(days=1))
     _insert(cursor, 'NQ', 3, 100, today)
     cursor.execute('''INSERT INTO trading.equity_curve VALUES (%s,%s,'qt',%s,123)''',
@@ -152,29 +152,30 @@ def test_qt_snapshot_survives_missing_result_without_borrowing_system_execution_
     assert rows.position_date == today
     assert rows.position_strategy_names == ('Trend Following',)
     assert rows.position_stream == 'qt'
-    assert rows.equity_curve[0]['equity'] == 123
-    assert [row['symbol'] for row in rows.yesterday_positions] == ['ES']
+    assert rows.equity_curve == []
+    assert rows.equity_by_stream['qt'][0]['equity'] == 123
+    assert rows.yesterday_positions == []
     assert rows.execution_date is None
     assert rows.executions == []
     assert rows.executions_available is False
 
 
-def test_detail_execution_day_uses_qt_result_even_with_newer_system_result(cursor):
-    qt_day = date(2026, 9, 18)
-    system_day = qt_day + timedelta(days=1)
-    _result(cursor, 'qt', qt_day, 200)
-    _result(cursor, 'system', system_day, 900)
-    _insert(cursor, 'NQ', 3, 100, system_day)
-    for day, symbol in ((qt_day, 'QT_DAY'), (system_day, 'SYSTEM_DAY')):
+def test_detail_execution_day_uses_system_result_even_with_newer_qt_result(cursor):
+    system_day = date(2026, 9, 18)
+    qt_day = system_day + timedelta(days=1)
+    _result(cursor, 'system', system_day, 200)
+    _result(cursor, 'qt', qt_day, 900)
+    _insert(cursor, 'NQ', 3, 100, qt_day)
+    for day, symbol in ((system_day, 'SYSTEM_DAY'), (qt_day, 'QT_DAY')):
         cursor.execute('''INSERT INTO trading.executions VALUES
-            (%s,%s,'qt',%s,'BUY',1,100,%s,0)''',
+            (%s,%s,'system',%s,'BUY',1,100,%s,0)''',
             (STRATEGY, BOOK, symbol, day))
 
     rows = _reader(cursor).fetch_detail_rows(STRATEGY, BOOK, "qt")
     assert rows.latest['current_portfolio_value'] == 200
-    assert rows.execution_date == qt_day
-    assert [row['symbol'] for row in rows.executions] == ['QT_DAY']
-    assert rows.position_date == system_day
+    assert rows.execution_date == system_day
+    assert [row['symbol'] for row in rows.executions] == ['SYSTEM_DAY']
+    assert rows.position_date == qt_day
 
 
 def test_zero_quantity_qt_snapshot_without_result_retains_engine_identity(cursor):
@@ -214,7 +215,7 @@ def test_mixed_qt_component_identity_stays_uneditable(cursor):
     assert 'identity' in detail['positionEditUnavailableReason'].lower()
 
 
-def test_selected_stream_http_bytes_and_qt_activity_are_separate(
+def test_selected_qt_positions_and_system_reporting_are_separate(
     cursor, client, monkeypatch, tmp_path,
 ):
     from flask_jwt_extended import create_access_token
@@ -239,7 +240,7 @@ def test_selected_stream_http_bytes_and_qt_activity_are_separate(
     cursor.execute('''INSERT INTO trading.executions VALUES
         (%s,%s,'qt','ES','BUY',1,100,%s,2)''', (STRATEGY, BOOK, qt_day))
     cursor.execute('''INSERT INTO trading.executions VALUES
-        (%s,%s,'system','NQ','BUY',1,100,%s,2)''', (STRATEGY, BOOK, qt_day))
+        (%s,%s,'system','NQ','BUY',1,100,%s,2)''', (STRATEGY, BOOK, model_day))
 
     reader = _reader(cursor)
     class Registry:
@@ -279,14 +280,13 @@ def test_selected_stream_http_bytes_and_qt_activity_are_separate(
         assert detail['positionDate'] == expected_day.isoformat()
         assert detail['positionStrategyNames'] == expected_names
         assert sorted(p['quantity'] for p in detail['positions']) == sorted(expected_quantities)
-        assert detail['currentValue'] == 250000.0
+        assert detail['currentValue'] == 900000.0
         assert detail['activityStream'] == 'system'
         assert detail['finalizedPositionsAvailable'] is False
         assert detail['finalizedPositions'] == []
         assert [e['symbol'] for e in detail['executions']] == ['NQ']
-        assert [p['percentOfTotal'] for p in detail['positions']] == (
-            [None, None] if stream == 'system' else [34.0]
-        )
+        percentages = [p['percentOfTotal'] for p in detail['positions']]
+        assert percentages == ([None, None] if stream == 'system' else pytest.approx([9.444444444444445]))
         capture = tmp_path / f'issue83-backend-{stream}-http.json'
         capture.write_bytes(response.data)
         print(f'ISSUE83_HTTP_CAPTURE={capture}')
@@ -322,8 +322,8 @@ def test_selected_stream_http_bytes_and_qt_activity_are_separate(
     absent = reader.fetch_detail_rows(STRATEGY, BOOK, 'system')
     assert absent.positions == []
     assert absent.position_date == model_day + timedelta(days=1)
-    assert absent.finalized_positions_available is False
-    assert absent.executions and absent.latest['current_portfolio_value'] == 250000
+    assert absent.finalized_positions_available is True
+    assert absent.executions and absent.latest['current_portfolio_value'] == 900000
 
 
 def test_missing_results_table_is_an_error_not_a_legacy_unstreamed_result(cursor):

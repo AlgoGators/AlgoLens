@@ -5,6 +5,7 @@ from dataclasses import replace
 import pytest
 
 from algolens.infrastructure.config.dependencies import create_qt_workflow_service
+from algolens.domain.portfolio.qt_canonical import qt_digest_v1
 from algolens.domain.portfolio.qt_workflow_errors import QtWorkflowError
 from algolens.infrastructure.portfolio.qt_provenance import QtExactPosition, QtVerifiedQtEdit
 from tests.test_qt_a4_draft import DraftRepository, _ready_provenance, _save_request, key, choice, DAY, BOOK
@@ -23,7 +24,8 @@ def successor_fixture(monkeypatch):
     decision = {"decision_id": "00000000-0000-4000-8000-000000000081", "source_day": DAY,
         "model_publication_id": head["model_publication_id"], "draft_id": head["draft_id"],
         "draft_revision": head["revision"], "draft_digest": head["draft_digest"],
-        "selection_digest": head["draft_digest"], "source_digest": head["source_digest"],
+        "selection_digest": qt_digest_v1({"selection_rows": head["selection_payload"]["selection_rows"]}),
+        "source_digest": head["source_digest"],
         "provenance_digest": head["provenance_digest"]}
     state[0] = replace(state[0], legacy_audit_chain_digest="d" * 64, draft_overlay=overlay,
         verified_qt_edits=tuple(QtVerifiedQtEdit(source, position.key, (100 + index,), "verified_qt_decision")

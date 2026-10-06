@@ -234,13 +234,22 @@ def _prove(accounting, decision):
     _need(original['input_digest'] == inputs['content_digest'] == _digest(source))
     _need(row['input_digest'] == inputs['content_digest'] and
           row['output_digest'] == accounting['content_digest'])
-    _need(source['schema_version'] in {'qt-futures-accounting-input/v1', 'qt-futures-accounting-input/v2'})
+    first_day = source['schema_version'] == 'qt-futures-accounting-input-first-day/v1'
+    _need(first_day or source['schema_version'] in {'qt-futures-accounting-input/v1', 'qt-futures-accounting-input/v2'})
     _need(source['timestamp'] == day + 'T00:00:00Z')
-    _need(transition['predecessor_finalization_source_id'] == predecessor['source_id'] == source['prior_finalization_source_id'])
-    _need(transition['predecessor_finalization_digest'] == predecessor['content_digest'] == _digest(predecessor['payload']))
-    _need(predecessor['book_id'] == predecessor['payload']['book_id'] == book)
-    _need(str(predecessor['source_day']) == predecessor['payload']['source_day'] == source['previous_day'] < day)
-    _need(source['previous_totals'] == predecessor['payload']['previous_totals'])
+    if first_day:
+        from algolens.infrastructure.portfolio.qt_first_day_proof import verify_first_day_input
+        verify_first_day_input(accounting, decision)
+        _need(not {'predecessor_finalization_source_id', 'predecessor_finalization_digest'} & transition.keys())
+        _need(transition['first_day_anchor_id'] == source['first_day_anchor_id'] and
+              transition['first_day_anchor_digest'] == source['first_day_anchor_digest'])
+    else:
+        _need(not {'first_day_anchor_id', 'first_day_anchor_digest'} & transition.keys())
+        _need(transition['predecessor_finalization_source_id'] == predecessor['source_id'] == source['prior_finalization_source_id'])
+        _need(transition['predecessor_finalization_digest'] == predecessor['content_digest'] == _digest(predecessor['payload']))
+        _need(predecessor['book_id'] == predecessor['payload']['book_id'] == book)
+        _need(str(predecessor['source_day']) == predecessor['payload']['source_day'] == source['previous_day'] < day)
+        _need(source['previous_totals'] == predecessor['payload']['previous_totals'])
     _need(transition['currency'] == source['currency'] == market['currency'])
     observation = original['observation']
     _need(transition['original_observation_digest'] == _digest(observation))
@@ -250,7 +259,7 @@ def _prove(accounting, decision):
     before = {'positions': [], 'live_results': [], 'equity_curve': []}
     costs = {}
     for fill in observation['fills']:
-        _need(fill['daily_realized_pnl_exact'] == '0' and fill['daily_unrealized_pnl_exact'] == '0' and
+        _need((first_day or (fill['daily_realized_pnl_exact'] == '0' and fill['daily_unrealized_pnl_exact'] == '0')) and
               fill['last_update'] == source['timestamp'] and fill['currency'] == source['currency'])
         charge = _exact(fill['actual_cash_cost_exact'])
         _need(charge >= 0)
@@ -262,7 +271,8 @@ def _prove(accounting, decision):
                                             'daily_unrealized_pnl_exact', 'last_update')}})
     for live in original['live_results']:
         _need(live['portfolio_id'] == book and live['date'] == day and live['portfolio_type'] == 'qt')
-        before['live_results'].append({**live, 'daily_realized_pnl_exact': '0', 'daily_unrealized_pnl_exact': '0'})
+        before['live_results'].append(dict(live) if first_day else
+            {**live, 'daily_realized_pnl_exact': '0', 'daily_unrealized_pnl_exact': '0'})
         before['equity_curve'].append({'portfolio_id': book, 'strategy_id': live['strategy_id'],
             'timestamp': day + 'T00:00:00Z', 'portfolio_type': 'qt', 'equity_exact': live['current_portfolio_value_exact']})
     _need(set(transition['before_financial']) == set(before))
@@ -295,7 +305,7 @@ def _prove(accounting, decision):
         _need(mark['instrument_type'] == 'FUTURE' and mark['price_time'] == day + 'T00:00:00Z')
         quantity = _exact(position['quantity_exact'])
         _need(quantity == quantity.to_integral_value() and _exact(position['average_price_exact']) > 0)
-        legacy = source['schema_version'].endswith('/v1')
+        legacy = source['schema_version'] == 'qt-futures-accounting-input/v1'
         reference_value = _decimal_model(reference['price_exact']) if legacy else _model(reference['price_model_number'])
         settlement = _model(mark['price_model_number'])
         point = _decimal_model(reference['point_value']) if legacy else _model(reference['point_value'])
@@ -309,7 +319,8 @@ def _prove(accounting, decision):
               _model(component['point_value_model_number']) == point and
               _model(component['gross_pnl_model_number']) == gross and component['gross_pnl_exact'] == realized)
         _need(component['reference_source_id'] == reference['source_id'] and component['settlement_source_id'] == mark['source_id'])
-        after_positions[key].update(daily_realized_pnl_exact=realized, daily_unrealized_pnl_exact='0',
+        after_positions[key].update(daily_realized_pnl_exact=_wire(_exact(position['daily_realized_pnl_exact']) + _exact(realized)),
+                                    daily_unrealized_pnl_exact=position['daily_unrealized_pnl_exact'],
                                     last_update=transition['valuation_time'])
         gross_by_engine[engine] = gross_by_engine.get(engine, 0.0) + gross
         _need(math.isfinite(gross_by_engine[engine]))
@@ -319,11 +330,13 @@ def _prove(accounting, decision):
     equity_rows = _indexed(after['equity_curve'], lambda item: item['strategy_id'])
     for live in after['live_results']:
         engine = live['strategy_id']
-        cost = _exact(live['daily_transaction_costs_exact'])
+        cost = costs[engine]
         gross, anchor = _cash(gross_by_engine[engine]), previous[engine]
         prior_equity, prior_total = _exact(anchor['equity_exact']), _exact(anchor['total_pnl_exact'])
-        _need(prior_equity > 0 and cost == costs[engine] and
-              _exact(live['daily_pnl_exact']) == -cost and
+        opening_daily = _exact(anchor['daily_pnl_exact']) if first_day else Decimal(0)
+        opening_cost = _exact(anchor['daily_transaction_costs_exact']) if first_day else Decimal(0)
+        _need(prior_equity > 0 and _exact(live['daily_transaction_costs_exact']) == opening_cost + cost and
+              _exact(live['daily_pnl_exact']) == opening_daily - cost and
               _exact(live['current_portfolio_value_exact']) == prior_equity - cost and
               _exact(live['total_pnl_exact']) == prior_total - cost)
         net = gross - cost
@@ -337,8 +350,8 @@ def _prove(accounting, decision):
                     'equity_exact': _wire(equity), 'total_pnl_exact': _wire(total)}
         _need({name: value for name, value in totals[engine].items() if name != 'gross_pnl_model_number'} == expected)
         _need(_model(totals[engine]['gross_pnl_model_number']) == gross_by_engine[engine])
-        live.update(daily_realized_pnl_exact=_wire(gross), daily_unrealized_pnl_exact='0',
-                    daily_pnl_exact=_wire(net), total_pnl_exact=_wire(total), current_portfolio_value_exact=_wire(equity))
+        live.update(daily_realized_pnl_exact=_wire(_exact(live['daily_realized_pnl_exact']) + gross),
+                    daily_pnl_exact=_wire(opening_daily + net), total_pnl_exact=_wire(total), current_portfolio_value_exact=_wire(equity))
         equity_rows[engine]['equity_exact'] = _wire(equity)
     _need(set(transition['after_financial']) == set(after))
     _same_rows(transition['after_financial']['positions'], after['positions'], _key)

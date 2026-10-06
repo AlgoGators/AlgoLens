@@ -1,5 +1,4 @@
 """Approval snapshots/revisions against owned disposable PostgreSQL only."""
-from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 from threading import Event
 
@@ -18,6 +17,7 @@ pytestmark = pytest.mark.integration
 
 @pytest.fixture
 def database():
+    native_paths = require_native_artifact_paths()
     dsn = require_test_dsn()
     conn = psycopg2.connect(dsn)
     conn.autocommit = True
@@ -38,7 +38,7 @@ def database():
                       'executions', 'signals', 'live_run_metadata', 'run_inputs'):
             cursor.execute(f'CREATE TABLE trading.{table} '
                            '(strategy_id TEXT, portfolio_id TEXT, portfolio_type TEXT)')
-        migration = require_native_artifact_paths().source_dir / 'migrations/013_runtime_control.sql'
+        migration = native_paths.source_dir / 'migrations/013_runtime_control.sql'
         cursor.execute(migration.read_text())
     def factory():
         return psycopg2.connect(dsn, cursor_factory=RealDictCursor,

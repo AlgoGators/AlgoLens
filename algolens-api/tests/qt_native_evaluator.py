@@ -2,11 +2,27 @@
 import atexit
 from functools import lru_cache
 import importlib.util
+import json
 from pathlib import Path
 import sys
 import tempfile
 
 from tests.qt_native_artifacts import require_native_artifact_paths
+
+
+def native_evaluator_requests():
+    """Fresh synthetic requests from the same explicit source as the bundle.
+
+    Match trade-ngin's CLI contract fixture binding: only the synthetic build
+    placeholder is replaced. A deliberately wrong identity stays wrong.
+    """
+    paths = require_native_artifact_paths()
+    requests = json.loads((paths.source_dir / "tests/contracts/qt-eval-v1.json").read_text())
+    build = native_evaluator_configuration()["expected_build"]
+    for request in requests.values():
+        if request.get("evaluator_build") == "local-qt-controlled":
+            request["evaluator_build"] = build
+    return requests
 
 
 @lru_cache(maxsize=1)

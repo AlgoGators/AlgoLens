@@ -15,7 +15,7 @@ from algolens.infrastructure.portfolio.qt_upstream_input_proof import verify_ups
 
 def _uses_equity_accounting(row):
     schemas = (row['input_row']['payload'].get('schema_version'),
-        row['payload'].get('schema_version'), row['finalization_row']['payload'].get('schema_version'))
+        row['payload'].get('schema_version'), (row.get('finalization_row') or {}).get('payload', {}).get('schema_version'))
     if not any(isinstance(value, str) and value.startswith('qt-equity-') for value in schemas):
         return False
     legacy = (schemas[:2] == ('qt-equity-accounting-input/v1', 'qt-equity-accounting/v1')
@@ -49,13 +49,20 @@ def _load_upstream_context(cursor, evidence):
     cursor.execute("SELECT r.*,to_jsonb(i) AS input_row,to_jsonb(f) AS finalization_row "
         "FROM trading.qt_desk_finalizations t JOIN trading.desk_run_results r ON r.decision_id=t.decision_id "
         "JOIN trading.qt_desk_accounting_inputs i ON i.input_id=r.input_id AND i.decision_id=r.decision_id "
-        "JOIN trading.qt_desk_finalization_sources f ON f.source_id=i.payload->>'prior_finalization_source_id' "
+        "LEFT JOIN trading.qt_desk_finalization_sources f ON f.source_id=i.payload->>'prior_finalization_source_id' "
         "WHERE t.finalization_id::text=%s", (evidence['finalization_row']['payload'].get('finalization_id'),))
     prior=cursor.fetchone()
     evidence['prior_accounting']=dict(prior) if prior is not None else None
     if prior is not None:
         evidence['prior_accounting']['successor']=_load_successor(cursor,prior['decision_id'])
-        cursor.execute("SELECT to_jsonb(d) AS decision,to_jsonb(p) AS preview,"
+        _load_processing_context(cursor, evidence['prior_accounting'])
+        if prior['input_row']['payload'].get('schema_version') == 'qt-futures-accounting-input-first-day/v1':
+            from algolens.infrastructure.portfolio.qt_first_day_proof import load_first_day_context
+            load_first_day_context(cursor, evidence['prior_accounting'])
+
+
+def _load_processing_context(cursor, accounting):
+    cursor.execute("SELECT to_jsonb(d) AS decision,to_jsonb(p) AS preview,"
             "to_jsonb(r) AS receipt,to_jsonb(o) AS observation,to_jsonb(s) AS result,"
             "to_jsonb(m) AS model_publication FROM trading.qt_decisions d "
             "LEFT JOIN trading.qt_previews p ON p.preview_id=d.preview_id "
@@ -64,9 +71,9 @@ def _load_upstream_context(cursor, evidence):
             "LEFT JOIN trading.qt_desk_results s ON s.decision_id=d.decision_id "
             "AND s.observation_id=o.observation_id AND s.attempt_id=r.attempt_id "
             "LEFT JOIN trading.qt_model_seed_publications m ON m.publication_id=d.model_publication_id "
-            "WHERE d.decision_id=%s", (str(prior['input_id']),str(prior['decision_id'])))
-        original=cursor.fetchone()
-        evidence['prior_accounting']['processing_context']=dict(original) if original is not None else None
+            "WHERE d.decision_id=%s", (str(accounting['input_id']),str(accounting['decision_id'])))
+    original=cursor.fetchone()
+    accounting['processing_context']=dict(original) if original is not None else None
 
 
 def load_accounting_evidence(cursor, decision, observation_id, *, current=False):
@@ -77,12 +84,16 @@ def load_accounting_evidence(cursor, decision, observation_id, *, current=False)
         return None
     cursor.execute("SELECT r.*,to_jsonb(i) AS input_row,to_jsonb(f) AS finalization_row "
         "FROM trading.desk_run_results r JOIN trading.qt_desk_accounting_inputs i ON i.input_id=r.input_id "
-        "JOIN trading.qt_desk_finalization_sources f ON f.source_id=i.payload->>'prior_finalization_source_id' "
+        "LEFT JOIN trading.qt_desk_finalization_sources f ON f.source_id=i.payload->>'prior_finalization_source_id' "
         "WHERE r.decision_id=%s AND i.decision_id=r.decision_id AND r.input_id=%s AND r.portfolio_id=%s",
         (str(decision['decision_id']),observation_id,decision['book_id']))
     raw=cursor.fetchone()
     if raw is None:return None
     evidence=dict(raw)
+    if evidence['input_row']['payload'].get('schema_version') == 'qt-futures-accounting-input-first-day/v1':
+        from algolens.infrastructure.portfolio.qt_first_day_proof import load_first_day_context
+        load_first_day_context(cursor, evidence)
+        _load_processing_context(cursor, evidence)
     cursor.execute("SELECT to_regclass('trading.qt_desk_finalizations') IS NOT NULL "
                    "AND to_regclass('trading.qt_desk_market_sources') IS NOT NULL AS ready")
     if cursor.fetchone()['ready']:
@@ -171,8 +182,11 @@ def _verify_current_financial_rows(row, require, exact):
             require(str(item['date']) == expected['date'])
         for name in ('daily_pnl','daily_transaction_costs','total_pnl','current_portfolio_value'):
             require(item[name]==exact(expected[name+'_exact']))
+        first_day = row['input_row']['payload']['schema_version'] == 'qt-futures-accounting-input-first-day/v1'
         for name in ('daily_realized_pnl','daily_unrealized_pnl'):
-            require(item[name] == (exact(expected[name+'_exact']) if successor else 0))
+            require(item[name] == (exact(expected[name+'_exact']) if successor or first_day else 0))
+        if first_day:
+            require(item['total_transaction_costs'] == exact(expected['total_transaction_costs_exact']))
         require(equity[engine]['equity']==exact(expected['current_portfolio_value_exact']))
 
 
@@ -197,24 +211,31 @@ def producer_prior_carries(evidence, *, recompute_client_factory=None, finalizat
     require(row['portfolio_id']==d['book_id'] and str(row['date'])==str(d['source_day']))
     require(row['content_digest']==digest(output) and output['schema_version']=='qt-futures-accounting/v1')
     require(inputs['content_digest']==digest(inputs['payload'])==output['input_digest'])
-    require(final['content_digest']==digest(final['payload']))
+    first_day = inputs['payload']['schema_version'] == 'qt-futures-accounting-input-first-day/v1'
+    if not first_day:
+        require(final['content_digest']==digest(final['payload']))
     require(output['observation']==o['payload'])
     require(o['payload']['schema_version']=='qt-execution/v2' and
             o['payload']['accounting_input_id']==str(inputs['input_id']))
     for field in ('producer_id','policy_version'):
-        require(inputs[field]==o[field]==final[field])
+        require(inputs[field]==o[field] and (first_day or inputs[field]==final[field]))
     require(type(inputs.get('source_version')) is str and bool(inputs['source_version'])
             and inputs['source_version']==o.get('source_version'))
-    source=inputs['payload'];anchor=final['payload']
-    if source['schema_version']=='qt-futures-accounting-input/v2':
+    source=inputs['payload']
+    if first_day:
+        from algolens.infrastructure.portfolio.qt_first_day_proof import verify_first_day_input
+        verify_first_day_input(row, d, evidence['preview']['payload']['selection_rows'])
+    elif source['schema_version']=='qt-futures-accounting-input/v2':
         verify_upstream_accounting_input(row,d,evidence['preview']['payload']['selection_rows'])
     else:
-        require(source['schema_version']=='qt-futures-accounting-input/v1' and anchor['schema_version']=='qt-finalized-accounting/v1')
+        require(source['schema_version']=='qt-futures-accounting-input/v1' and final['payload']['schema_version']=='qt-finalized-accounting/v1')
     for field in ('decision_id','book_id','source_day'):require(source[field]==str(d[field]))
-    require(source['prior_finalization_source_id']==final['source_id'])
-    require(final['book_id']==anchor['book_id']==d['book_id'])
-    require(str(final['source_day'])==anchor['source_day']==source['previous_day']<source['source_day'])
-    require(source['previous_totals']==anchor['previous_totals'])
+    if not first_day:
+        anchor=final['payload']
+        require(source['prior_finalization_source_id']==final['source_id'])
+        require(final['book_id']==anchor['book_id']==d['book_id'])
+        require(str(final['source_day'])==anchor['source_day']==source['previous_day']<source['source_day'])
+        require(source['previous_totals']==anchor['previous_totals'])
     _verify_current_financial_rows(row,require,exact)
     def timestamp(value):
         return value if isinstance(value,datetime) else datetime.fromisoformat(value.replace('Z','+00:00'))
@@ -224,7 +245,7 @@ def producer_prior_carries(evidence, *, recompute_client_factory=None, finalizat
     previous={}
     for item in source['previous_positions']:
         key=QtKey.from_wire(item['key'])
-        require(key.portfolio_id==d['book_id'] and key.date==source['previous_day'] and key.portfolio_type=='qt')
+        require(key.portfolio_id==d['book_id'] and key.date==source['opening_day' if first_day else 'previous_day'] and key.portfolio_type=='qt')
         normalized=QtKey.from_wire({**item['key'],'date':source['source_day']})
         require(normalized not in previous)
         exact(item['quantity_exact']);exact(item['average_price_exact']);previous[normalized]=item

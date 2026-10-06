@@ -5,7 +5,7 @@ Every test stops at the transport: a stub process whose launch raises a fixed er
 validation surfaces ``equity_finalization_transport_unavailable`` (or, off Linux, the isolation error) and a request
 that is refused surfaces ``equity_finalization_request_invalid``.  Nothing is launched and nothing touches a database.
 
-The request body is the native wire fixture ``trade-ngin-qt/tests/contracts/qt-equity-finalization-wire.json``.
+The request body is the frozen synthetic wire fixture in ``tests/fixtures``.
 """
 from contextlib import contextmanager
 from copy import deepcopy
@@ -28,13 +28,7 @@ INVALID = 'equity_finalization_request_invalid'
 
 
 def wire_path():
-    here = Path(__file__).resolve()
-    name = 'trade-ngin-qt/tests/contracts/qt-equity-finalization-wire.json'
-    for base in here.parents:
-        for prefix in ('', '.review/'):
-            if (base / (prefix + name)).is_file():
-                return base / (prefix + name)
-    raise AssertionError('the sibling native wire fixture is missing')
+    return Path(__file__).with_name('fixtures') / 'qt-equity-finalization-wire.json'
 
 
 @dataclass(frozen=True)

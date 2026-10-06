@@ -10,7 +10,7 @@ from algolens.domain.portfolio.qt_workflow_errors import QtWorkflowError
 from algolens.infrastructure.portfolio.qt_evaluator_client import QtEvaluatorClient
 
 
-FIXTURE = Path(__file__).resolve().parents[3] / "trade-ngin-qt/tests/contracts/qt-eval-v1.json"
+FIXTURE = Path(__file__).with_name("fixtures") / "qt-eval-v1.json"
 RISK_METRICS = (
     "portfolio_var", "jump_risk", "correlation_risk", "gross_leverage", "net_leverage",
     "max_portfolio_risk", "max_jump_risk", "max_leverage_risk", "portfolio_multiplier",

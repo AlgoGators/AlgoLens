@@ -14,7 +14,7 @@ pytestmark = pytest.mark.integration
 
 
 def _reader_connection(dsn):
-    connection = psycopg2.connect(dsn, cursor_factory=RealDictCursor)
+    connection = psycopg2.connect(dsn, cursor_factory=RealDictCursor, options="-c timezone=UTC")
     connection.set_session(readonly=True)
     return connection
 

@@ -9,9 +9,16 @@ import json
 import sys
 
 import pytest
+import tests
 from psycopg2.extras import RealDictCursor
 
-ENGINE_TESTS = Path(__file__).resolve().parents[4] / 'trade-ngin-qt/tests/integration'
+from tests.qt_native_artifacts import require_native_artifact_paths
+
+ENGINE_SOURCE = require_native_artifact_paths(allow_module_level=True).source_dir
+ENGINE_TESTS = ENGINE_SOURCE / 'tests/integration'
+# Keep the API test namespace while allowing the selected engine's shared
+# artifact helper; adding its repository to sys.path cannot extend it.
+tests.__path__ = [*tests.__path__, str(ENGINE_SOURCE / 'tests')]
 sys.path.insert(0, str(ENGINE_TESTS))
 from test_qt_desk_upstream import upstream, invoke, OLD, OLD_INPUT, FINAL, MARKET, DECISION, ATTEMPT
 from test_qt_desk_accounting import accounting

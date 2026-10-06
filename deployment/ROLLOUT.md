@@ -71,28 +71,58 @@ acceptance requires all four final inputs:
 4. T4 `qt-worker-service/v1`: resolved digest and a runtime probe proving the
    separate worker service is installed and healthy.
 
-The Flask configuration keys `QT_SCHEMA_READINESS_PROBE`,
-`QT_ROLE_READINESS_PROBE`,
-`QT_CAPABILITY_READINESS_PROBE`, and `QT_WORKER_READINESS_PROBE` are deliberate
-integration points. The schema and role callbacks accept the active read-only
-cursor and return the expected 64-hex schema and least-privilege role-contract
-digests respectively. The built-in role check also rejects PostgreSQL roles
-with superuser, create-role, create-database, replication, or bypass-RLS flags.
-Capability/worker callbacks accept their
-resolved dependency entry and return exactly `True` only after verifying that
-runtime. Their absence, an unresolved manifest, an unexpected live book, or any
-identity mismatch returns HTTP 503 from `/ready`. `/health` is process-only
-liveness and is not a release gate. Deep readiness probes are serialized and
-cached for at most five seconds per backend process; readiness responses always
-use `Cache-Control: no-store`.
+`evaluate_runtime_readiness` supplies the concrete schema, role, capability and
+worker probes to both `/ready` and the CLI. Schema/role callbacks query the
+active read-only transaction and return 64-hex catalog digests. Runtime roles
+with superuser, create-role, create-database, replication, or bypass-RLS flags
+are refused. Capability readiness resolves exactly one non-retired user per
+approved normalized email before checking roles and exact user-ID-bound grants
+and approver mappings. Worker readiness checks the pinned contract, visible
+worker session and governed queue age/lease state. An unresolved manifest,
+unexpected live book or identity mismatch returns HTTP 503. `/health` remains
+process-only liveness. Deep readiness probes are serialized and cached for at
+most five seconds; responses always use `Cache-Control: no-store`.
 
-The staged CLI intentionally supplies none of those four callbacks, so it
-cannot return ready merely because a placeholder was replaced. During T6, wire
-the reviewed T1/T3/T4 probe implementations into both the Flask keys and the
-CLI call before candidate acceptance; the T5 signatures and refusal tests must
-remain unchanged. `app_factory.py` installs T1's `install_capability_guard`
+The CLI's explicit `--rehearsal-root` and matching app factory argument bind
+all authenticated requests, repository connections and readiness checks to
+one private socket-only `qt_rehearsal_migrated` connector. No database password
+is required for the private trust-authenticated cluster. Any inherited `PG*`
+libpq configuration with a nonempty value is refused; no environment service,
+host address or options can redirect the connection. A rehearsal connection
+without its bound application context is refused. Production still uses its
+existing explicitly configured connector and requires `new_algo_data`.
+
+`app_factory.py` installs T1's `install_capability_guard`
 only after all blueprints plus `/version`, `/health`, and `/ready` are present;
 those three endpoints are the only explicit application-level open routes.
+
+### Environment-specific database attestations are a hard gate
+
+The catalog digest includes all non-system schemas and the role digest includes
+all `qt_*` roles, object owners, ACLs, RLS and function security settings. A
+rehearsal clone may omit non-admitted schemas, Timescale objects or indexes and
+normalize owners; it also has a rehearsal administrator. Its final digest is
+therefore not automatically the production final digest. The current release
+helper compares readiness against the operator-supplied identity manifest; it
+does not translate clone digests or generate production expectations.
+
+Retain separate hash-pinned rehearsal and production identity manifests.
+Rehearsal evidence binds the private database/root, exact migration ledger and
+its resulting catalog. Before an authorized production rollout, establish and
+review the expected production final catalog using a production-faithful
+catalog/ownership rehearsal or an explicitly audited transformation from the
+verified production baseline and exact migration ledger. Record every omitted
+schema/object and ownership/role difference. Capture expected production
+schema/role digests before accepting the production candidate; compare those
+expectations to read-only post-migration runtime attestation. Never copy the
+clone digest into a manifest renamed `new_algo_data`, ignore a mismatch, or
+replace the expected value with an unreviewed observed production value.
+
+Until this production expectation is independently established, production
+acceptance remains blocked even if the private clone is green. Runtime does
+not query privileged `data_directory`; the rehearsal/mutation harness retains
+its exact data-directory guard. No settings/statistics privileges are added
+to runtime accounts for this process.
 
 The checked-in host Nginx configuration does not currently expose backend
 `/ready`. Add and independently review an exact no-cache proxy route during the

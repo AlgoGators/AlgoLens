@@ -125,15 +125,17 @@ def test_confirmation_waiter_rechecks_committed_source_or_authority(preview_db, 
 @pytest.mark.parametrize('stage,mutation', [
     ('lock_books', "UPDATE trading.positions SET quantity=9 WHERE portfolio_type='qt_proposal'"),
     ('lock_books', "UPDATE trading.qt_source_policies SET version=version+1"),
-    ('lock_authorities', "UPDATE auth.users SET role='guest' WHERE id=101"),
-    ('lock_authorities', "UPDATE trading.qt_action_grants SET active=false,version=version+1 WHERE user_id=101 AND capability='qt_approve'"),
-    ('lock_authorities', "UPDATE trading.qt_approver_allowlist SET active=false,mapping_version=mapping_version+1 WHERE user_id=101"),
+    ('lock_authorities', "UPDATE auth.users SET role='guest' WHERE id=202"),
+    ('lock_authorities', "UPDATE trading.qt_action_grants SET active=false,version=version+1 WHERE user_id=202 AND capability='qt_approve'"),
+    ('lock_authorities', "UPDATE trading.qt_approver_allowlist SET active=false,mapping_version=mapping_version+1 WHERE user_id=202"),
 ])
 def test_second_approval_waiter_rechecks_first_person_and_source(preview_db, monkeypatch, stage, mutation):
     service, decision = pending(preview_db)
-    service.approve_override(decision['request_id'], 101, approval_request())
+    assert query(preview_db, 'SELECT created_by FROM trading.qt_decisions') == [(101,)]
+    service.approve_override(decision['request_id'], 202, approval_request())
+    assert query(preview_db, 'SELECT user_id FROM trading.qt_override_approvals') == [(202,)]
     results, expected, actual = queued(preview_db, service, monkeypatch, stage,
-        [lambda: service.approve_override(decision['request_id'], 202, approval_request())], mutation)
+        [lambda: service.approve_override(decision['request_id'], 303, approval_request())], mutation)
     assert results[0].get('rejected') in {'preview_stale', 'provenance_unresolved', 'authorization_changed', 'draft_stale', 'approval_identity_unmapped'}, results
     assert actual == expected
 
@@ -153,15 +155,19 @@ def test_two_confirmations_are_observed_waiting_before_single_consumption(previe
 
 def test_two_second_approvers_are_observed_waiting_before_single_promotion(preview_db, monkeypatch):
     service, decision = pending(preview_db)
-    query(preview_db, 'UPDATE trading.qt_approver_allowlist SET active=true WHERE user_id=303')
-    service.approve_override(decision['request_id'], 101, approval_request())
+    assert query(preview_db, 'SELECT created_by FROM trading.qt_decisions') == [(101,)]
+    query(preview_db, 'UPDATE trading.qt_approver_allowlist SET active=true WHERE user_id=404')
+    service.approve_override(decision['request_id'], 202, approval_request())
+    assert query(preview_db, 'SELECT user_id FROM trading.qt_override_approvals') == [(202,)]
     def action(actor):
         return lambda: service.approve_override(decision['request_id'], actor, approval_request())
-    results, expected, actual = queued(preview_db, service, monkeypatch, 'lock_authorities', [action(202), action(303)])
+    results, expected, actual = queued(preview_db, service, monkeypatch, 'lock_authorities', [action(303), action(404)])
     assert {name: actual[name] for name in FINANCIAL_TABLES} == {name: expected[name] for name in FINANCIAL_TABLES}
     assert sum(value.get('status') == 'confirmed_decision' for value in results) == 1
     assert sum('rejected' in value for value in results) == 1
     assert query(preview_db, 'SELECT count(*) FROM trading.qt_override_approvals') == [(2,)]
+    actors = {row[0] for row in query(preview_db, 'SELECT user_id FROM trading.qt_override_approvals')}
+    assert actors in ({202, 303}, {202, 404})
     assert query(preview_db, 'SELECT status FROM trading.qt_decisions') == [('confirmed_decision',)]
     assert query(preview_db, 'SELECT state FROM trading.qt_previews') == [('confirmed_decision',)]
     assert query(preview_db, 'SELECT count(*) FROM trading.qt_desk_receipts') == [(0,)]
