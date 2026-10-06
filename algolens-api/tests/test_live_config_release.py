@@ -46,7 +46,7 @@ def test_version2_verifies_actual_installed_closure_and_core(provision):
     result=config.load('test',data['scopes'][0]['portfolio_id']);config.recheck(result)
     assert result['release']==data['release']
 
-@pytest.mark.parametrize('damage',['publisher','engine','validator','sidecar','core','profile','build','legacy'])
+@pytest.mark.parametrize('damage',['publisher','engine','validator','sidecar','core','profile','build','legacy','core_array'])
 def test_provisioning_fails_closed(provision,damage):
     path,data,config=provision
     result=config.load('test',data['scopes'][0]['portfolio_id'])
@@ -55,6 +55,9 @@ def test_provisioning_fails_closed(provision,damage):
         (root/'bin/Release'/dict(publisher='live_portfolio',engine='libtrade_ngin.so',validator='live_config_validate')[damage]).write_bytes(b'changed')
     elif damage in ('sidecar','core'):
         Path(data['release']['sidecar_path' if damage=='sidecar' else 'core_manifest_path']).write_text('{}')
+    elif damage=='core_array':
+        core=Path(data['release']['core_manifest_path']);core.write_text('[]')
+        data['release']['core_manifest_sha256']=sha256(core.read_bytes()).hexdigest()
     elif damage=='profile':data['validator']['bundle_directory']=data['release']['qt_bundle_directory']
     elif damage=='build':data['validator']['build']='other'
     elif damage=='legacy':data.pop('release');data['version']=1

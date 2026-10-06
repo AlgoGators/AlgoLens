@@ -25,7 +25,9 @@ def _read(path,limit=1024*1024*1024):
 def _json(path,digest):
     data=_read(path,4*1024*1024)
     if sha256(data).hexdigest()!=digest:raise ValueError('live_config_release_pin_mismatch')
-    return json.loads(data,object_pairs_hook=_pairs)
+    value=json.loads(data,object_pairs_hook=_pairs)
+    if type(value) is not dict:raise ValueError('invalid_live_config_release_document')
+    return value
 
 
 def verify_release(pin,release):
