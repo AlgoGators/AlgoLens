@@ -240,7 +240,7 @@ describe('QT proposal workspace', () => {
     api.getBookDecision.mockResolvedValue({ schema_version: 'qt-workflow/v1', book_id: props.bookId,
       source_day: props.sourceDay, decision: review, preview: breach() });
     api.approveOverride.mockResolvedValue(decodeQtDecision({ ...review, status: 'confirmed_decision', can_approve: false,
-      approvals_count: 2, approvals: [...review.approvals, { person_id: 'john_riley', display_label: 'John Riley',
+      approvals_count: 2, approvals: [...review.approvals, { person_id: 'xander_robbins', display_label: 'Xander Robbins',
         user_id: '202', approved_at: '2026-09-25T16:01:00Z' }], receipt: null }));
     const onPublished = vi.fn();
     render(<QtProposalWorkspace {...props} actorId="202" onPublished={onPublished} />);

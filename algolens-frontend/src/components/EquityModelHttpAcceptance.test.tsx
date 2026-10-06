@@ -63,7 +63,7 @@ describe('actual equity MODEL publication to protected HTTP to frontend', () => 
       headers: { 'Content-Type': manifest.response.content_type },
     }));
     render(<ConfigurationInspectionPanel registryId={manifest.request.registry_id}
-      portfolioId={manifest.request.portfolio_id} userId="synthetic-capture-reader" role="general_member" />);
+      portfolioId={manifest.request.portfolio_id} userId="synthetic-capture-reader" allowed />);
     fireEvent.click(screen.getByRole('button', { name: /Published configuration/ }));
     const region = await screen.findByRole('region', { name: 'Equity settings recorded for this run' });
     expect(within(region).getByText('Read coverage: complete')).toBeTruthy();
@@ -89,7 +89,7 @@ describe('actual equity MODEL publication to protected HTTP to frontend', () => 
       headers: { 'Content-Type': manifest.response.content_type },
     }));
     render(<ConfigurationInspectionPanel registryId={manifest.request.registry_id}
-      portfolioId={manifest.request.portfolio_id} userId="synthetic-capture-reader" role="general_member" />);
+      portfolioId={manifest.request.portfolio_id} userId="synthetic-capture-reader" allowed />);
     fireEvent.click(screen.getByRole('button', { name: /Published configuration/ }));
     expect(await screen.findByText('Published configuration could not be loaded.')).toBeTruthy();
     expect(screen.queryByRole('region', { name: 'Equity settings recorded for this run' })).toBeNull();

@@ -57,7 +57,9 @@ vi.mock('../adapters/react/ThemeContext', () => ({
 let role = 'subscriber_individual';
 let userId = 'reader-one';
 vi.mock('../adapters/react/useAuth', () => ({
-  useAuth: () => ({ user: { id: userId, role } }),
+  useAuth: () => ({ user: { id: userId, role, capabilities:
+    role === 'admin' || role === 'general_member' || role === 'exec_board'
+      ? ['view_internal', 'view_qt_platform', 'edit_qt_book'] : [] } }),
 }));
 
 // The children are stubbed down to the one thing these tests care about:
@@ -398,6 +400,7 @@ describe('QT proposal capability cutover', () => {
   const books = ['CONSERVATIVE_PORTFOLIO', 'AGGRESSIVE_PORTFOLIO'];
   const qtDetail = () => strategy({ tag: 'QT', positionDate: '2026-09-23', positionsEditable: true,
     positionStrategyNames: ['Engine A'], books });
+  beforeEach(() => { role = 'general_member'; });
 
   it('keeps MODEL read data unchanged without requesting QT capability or mounting a workspace', async () => {
     render(<StrategyDetail strategy={qtDetail()} onBack={() => {}} />);
@@ -644,6 +647,7 @@ describe('position identity plumbing', () => {
 });
 
 describe('QT result availability beside a real position snapshot', () => {
+  beforeEach(() => { role = 'general_member'; });
   it('shows editable QT positions with unknown performance and no zero-value substitute', async () => {
     const qt = strategy({
       tag: 'QT', dataAvailable: false, resultSource: 'qt', resultDate: null,

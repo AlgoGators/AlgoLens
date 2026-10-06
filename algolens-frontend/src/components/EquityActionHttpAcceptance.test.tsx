@@ -57,7 +57,7 @@ describe('actual action-adjusted MODEL publication to HTTP and inspection', () =
       headers: { 'Content-Type': manifest.response.content_type },
     }));
     render(<ConfigurationInspectionPanel registryId={manifest.request.registry_id}
-      portfolioId={manifest.request.portfolio_id} userId="synthetic-capture-reader" role="general_member" />);
+      portfolioId={manifest.request.portfolio_id} userId="synthetic-capture-reader" allowed />);
     fireEvent.click(screen.getByRole('button', { name: /Published configuration/ }));
     const region = await screen.findByRole('region', { name: 'Equity settings recorded for this run' });
     fireEvent.click(within(region).getByRole('button', { name: /Show corporate actions observations/ }));
@@ -74,7 +74,7 @@ describe('actual action-adjusted MODEL publication to HTTP and inspection', () =
       headers: { 'Content-Type': manifest.response.content_type },
     }));
     render(<ConfigurationInspectionPanel registryId={manifest.request.registry_id}
-      portfolioId={manifest.request.portfolio_id} userId="synthetic-capture-reader" role="general_member" />);
+      portfolioId={manifest.request.portfolio_id} userId="synthetic-capture-reader" allowed />);
     fireEvent.click(screen.getByRole('button', { name: /Published configuration/ }));
     expect(await screen.findByText('Published configuration could not be loaded.')).toBeTruthy();
     expect(screen.queryByRole('region', { name: 'Equity settings recorded for this run' })).toBeNull();

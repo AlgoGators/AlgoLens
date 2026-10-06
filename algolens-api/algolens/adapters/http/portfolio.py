@@ -69,6 +69,9 @@ from algolens.infrastructure.config.dependencies import (
 
 portfolio_bp = Blueprint("portfolio", __name__)
 
+from algolens.adapters.http.capability_guard import requires_capability
+from algolens.domain.identity.capabilities import role_has_capability
+
 # Rendered from PositionValidationError.code rather than from the exception
 # itself, so no exception text can reach a client (CodeQL py/stack-trace-
 # exposure). Every message here is authored, not derived.
@@ -138,11 +141,6 @@ VALIDATION_MESSAGES = {
     "price_negative": "Field 'average_price' must not be negative",
 }
 
-# Incubation is an internal member-only surface. Default-deny: an unrecognised
-# or absent role is refused, so new roles stay locked out until explicitly added.
-INTERNAL_ROLES = frozenset({"admin", "general_member"})
-
-
 def _portfolio_dependencies():
     return create_portfolio_dependencies()
 
@@ -203,7 +201,7 @@ def internal_only(fn):
             return jsonify({"error": "Authorization check failed"}), 500
 
         role = user.role
-        if role not in INTERNAL_ROLES:
+        if not role_has_capability(role, "view_internal"):
             current_app.logger.warning(
                 "Refused %s to %s: role %r is not internal",
                 request.method,
@@ -258,6 +256,7 @@ def _incubation_error_body(exc):
 
 
 @portfolio_bp.route("/strategy/<strategy_id>", methods=["GET"])
+@requires_capability("view_internal")
 @jwt_required()
 def get_strategy(strategy_id):
     start = time.perf_counter()
@@ -317,6 +316,7 @@ def get_strategy(strategy_id):
 
 
 @portfolio_bp.route("/strategies", methods=["GET"])
+@requires_capability("view_internal")
 @jwt_required()
 def get_all_strategies():
     start = time.perf_counter()
@@ -351,6 +351,7 @@ def get_all_strategies():
 
 
 @portfolio_bp.route("/correlations", methods=["GET"])
+@requires_capability("view_internal")
 @jwt_required()
 def get_correlations():
     """Correlations between the instruments the fund currently holds."""
@@ -366,6 +367,7 @@ def get_correlations():
 
 
 @portfolio_bp.route("/incubation", methods=["GET"])
+@requires_capability("view_internal")
 @jwt_required()
 @internal_only
 def get_incubation_strategies():
@@ -383,6 +385,7 @@ def get_incubation_strategies():
 
 
 @portfolio_bp.route("/incubation/<strategy_id>/performance", methods=["GET"])
+@requires_capability("view_internal")
 @jwt_required()
 @internal_only
 def get_incubation_perf(strategy_id):
@@ -401,6 +404,7 @@ def get_incubation_perf(strategy_id):
 
 
 @portfolio_bp.route("/incubation/<strategy_id>/start", methods=["POST"])
+@requires_capability("manage_incubation")
 @jwt_required()
 @internal_only
 def start_strategy_incubation(strategy_id):
@@ -445,6 +449,7 @@ def start_strategy_incubation(strategy_id):
 
 
 @portfolio_bp.route("/incubation/<strategy_id>/promote", methods=["POST"])
+@requires_capability("manage_incubation")
 @jwt_required()
 @internal_only
 def promote_strategy_to_live(strategy_id):
@@ -478,6 +483,7 @@ def promote_strategy_to_live(strategy_id):
 
 
 @portfolio_bp.route("/incubation/<strategy_id>/retire", methods=["POST"])
+@requires_capability("manage_incubation")
 @jwt_required()
 @internal_only
 def retire_strategy(strategy_id):
@@ -511,6 +517,7 @@ def retire_strategy(strategy_id):
 
 
 @portfolio_bp.route("/positions", methods=["POST"])
+@requires_capability("edit_qt_book")
 @jwt_required()
 @internal_only
 def upsert_position():
@@ -608,6 +615,7 @@ def upsert_position():
 
 
 @portfolio_bp.route("/overrides/<strategy_id>", methods=["GET"])
+@requires_capability("view_qt_platform")
 @jwt_required()
 @internal_only
 def get_overrides(strategy_id):
@@ -631,6 +639,7 @@ def get_overrides(strategy_id):
 
 
 @portfolio_bp.route("/portfolios", methods=["GET"])
+@requires_capability("view_internal")
 @jwt_required()
 def get_portfolios():
     """The strategies grouped by the portfolio they belong to.
@@ -650,6 +659,7 @@ def get_portfolios():
 
 
 @portfolio_bp.route("/strategies/<strategy_id>/portfolio", methods=["PUT"])
+@requires_capability("manage_books")
 @jwt_required()
 @internal_only
 def reassign_strategy_portfolio(strategy_id):
@@ -697,6 +707,7 @@ def reassign_strategy_portfolio(strategy_id):
 
 
 @portfolio_bp.route("/strategies/<strategy_id>/portfolio/history", methods=["GET"])
+@requires_capability("view_internal")
 @jwt_required()
 @internal_only
 def get_assignment_history(strategy_id):
@@ -712,6 +723,7 @@ def get_assignment_history(strategy_id):
 
 
 @portfolio_bp.route("/strategies/<strategy_id>/lifecycle/history", methods=["GET"])
+@requires_capability("view_internal")
 @jwt_required()
 @internal_only
 def get_lifecycle_history(strategy_id):
@@ -729,6 +741,7 @@ def get_lifecycle_history(strategy_id):
 
 
 @portfolio_bp.route("/books", methods=["GET"])
+@requires_capability("view_internal")
 @jwt_required()
 @internal_only
 def get_books():
@@ -742,6 +755,7 @@ def get_books():
 
 
 @portfolio_bp.route("/books", methods=["POST"])
+@requires_capability("manage_books")
 @jwt_required()
 @internal_only
 def create_book():
@@ -765,6 +779,7 @@ def create_book():
 
 
 @portfolio_bp.route("/books/<portfolio_id>", methods=["DELETE"])
+@requires_capability("manage_books")
 @jwt_required()
 @internal_only
 def delete_book(portfolio_id):
@@ -802,6 +817,7 @@ def delete_book(portfolio_id):
 
 
 @portfolio_bp.route("/books/<portfolio_id>/strategies", methods=["POST"])
+@requires_capability("manage_books")
 @jwt_required()
 @internal_only
 def add_strategy_to_book(portfolio_id):
@@ -834,6 +850,7 @@ def add_strategy_to_book(portfolio_id):
 
 
 @portfolio_bp.route("/books/<portfolio_id>/strategies/<strategy_id>", methods=["DELETE"])
+@requires_capability("manage_books")
 @jwt_required()
 @internal_only
 def remove_strategy_from_book(portfolio_id, strategy_id):

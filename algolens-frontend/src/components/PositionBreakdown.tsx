@@ -3,7 +3,7 @@ import { formatPrice } from '../domain/portfolio/formatPrice';
 import { Pencil, Plus } from 'lucide-react';
 import { useTheme } from '../adapters/react/ThemeContext';
 import { useAuth } from '../adapters/react/useAuth';
-import { isInternalRole } from '../domain/identity/user';
+import { can } from '../domain/identity/user';
 import type { Position, PositionStream } from '../domain/portfolio/portfolioData';
 import { positionValueEvidence, type ExistingPositionValue } from '../domain/portfolio/positionEdit';
 import { EditPositionModal } from './EditPositionModal';
@@ -75,14 +75,15 @@ export function PositionBreakdown({
 
   // The backend enforces this too (@internal_only); this only avoids offering a
   // button that would come back 403.
-  const isInternalMember = isInternalRole(user?.role);
+  const canViewQt = can(user, 'view_qt_platform');
+  const canEditQt = can(user, 'edit_qt_book');
   // Fail closed for legacy/unknown payloads. Only the API's explicit true says
   // this is the current server-date snapshot with resolvable engine identity.
   const canEdit = Boolean(strategyId) && positionStream === 'qt'
-    && isInternalMember && positionsEditable === true;
+    && canEditQt && positionsEditable === true;
   useEffect(() => {
     setEditing(null);
-  }, [strategyId, portfolioId, positionStream, positionDate, positionsEditable, user?.id, user?.role]);
+  }, [strategyId, portfolioId, positionStream, positionDate, positionsEditable, user?.id, canEditQt]);
   const addIdentityFieldIsValid = Array.isArray(positionStrategyNames)
     && positionStrategyNames.every(
       name => typeof name === 'string' && name.trim().length > 0,
@@ -102,8 +103,8 @@ export function PositionBreakdown({
   const statusBoxId = useId();
   const reasonId = useId();
   const editEntryReason = workspaceEditUnavailableReason?.trim() || null;
-  const showEditEntry = isInternalMember && !canEdit && (!!editEntryReason || !!onEditInWorkspace);
-  const statusBoxShown = isInternalMember && !canEdit && !!positionEditUnavailableReason;
+  const showEditEntry = canViewQt && !canEdit && (!!editEntryReason || !!onEditInWorkspace);
+  const statusBoxShown = canViewQt && !canEdit && !!positionEditUnavailableReason;
   const reasonInStatusBox = statusBoxShown && editEntryReason === positionEditUnavailableReason?.trim();
 
   // Only rows whose exposure could actually be computed contribute to the

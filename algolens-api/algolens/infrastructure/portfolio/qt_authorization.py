@@ -4,7 +4,7 @@ from dataclasses import asdict, dataclass
 
 from algolens.domain.portfolio.qt_workflow_errors import QtWorkflowError
 
-CANONICAL_APPROVERS = frozenset({"john_riley", "xander_robbins", "hemdutt_rao", "dominick_dupuoy"})
+CANONICAL_APPROVERS = frozenset({"xander_robbins", "hemdutt_rao", "dominick_dupuy"})
 
 
 @dataclass(frozen=True)

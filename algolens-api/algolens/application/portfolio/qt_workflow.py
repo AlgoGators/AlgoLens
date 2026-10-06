@@ -668,6 +668,8 @@ class QtWorkflowService:
         route = self.repository.override_routing(request_id)
         if route is None: raise QtWorkflowError("not_found")
         book_id, submitter = route["book_id"], route["created_by"]
+        if actor_id == submitter:
+            raise QtWorkflowError("authorization_changed")
         discovered = self._approval_snapshot(route["approvals"])
         users = sorted({actor_id, submitter, *(row[1] for row in discovered)})
         with self.repository.transaction(book_id, actor_id) as tx:

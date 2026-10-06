@@ -10,7 +10,7 @@ vi.mock('../application/portfolio/portfolioService', () => ({
   PortfolioApplicationService: { getPortfolioData, testConnectivity: vi.fn() },
 }));
 vi.mock('../adapters/react/ThemeContext', () => ({ useTheme: () => ({ theme: 'light' }) }));
-vi.mock('../adapters/react/useAuth', () => ({ useAuth: () => ({ user: { role: 'admin' } }) }));
+vi.mock('../adapters/react/useAuth', () => ({ useAuth: () => ({ user: { role: 'admin', capabilities: ['manage_books', 'manage_incubation'] } }) }));
 vi.mock('./Header', () => ({ Header: (p: any) => <div>
   <button onClick={p.onHomeClick}>Header Portfolio</button>
   <button onClick={p.onBuilderClick}>Header Builder</button>

@@ -47,6 +47,22 @@ def create_identity_dependencies(
     return users, hasher, sessions
 
 
+def load_identity_authority_rows(user_id, execute_query_func=None):
+    """Read current QT grants/mappings at the HTTP composition boundary."""
+    query = execute_query_func or execute_query
+    grants = query(
+        "SELECT capability, active FROM trading.qt_action_grants WHERE user_id = %s",
+        (user_id,),
+    )
+    mappings = query(
+        "SELECT person_id, active FROM trading.qt_approver_allowlist WHERE user_id = %s",
+        (user_id,),
+    )
+    if not isinstance(grants, (list, tuple)) or not isinstance(mappings, (list, tuple)):
+        raise RuntimeError("invalid_authority_rows")
+    return grants, mappings
+
+
 def create_portfolio_dependencies(connection_factory=None):
     registry = PostgresStrategyRegistry(connection_factory=connection_factory)
     reader = PostgresPortfolioRepository(

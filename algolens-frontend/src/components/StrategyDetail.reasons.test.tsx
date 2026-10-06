@@ -22,7 +22,7 @@ vi.mock('./QtProposalWorkspace', () => ({
 }));
 vi.mock('../adapters/react/ThemeContext', () => ({ useTheme: () => ({ theme: 'light' }) }));
 vi.mock('../adapters/react/useAuth', () => ({
-  useAuth: () => ({ user: { id: '101', role: 'admin' } }),
+  useAuth: () => ({ user: { id: '101', role: 'admin', capabilities: ['view_internal', 'view_qt_platform', 'edit_qt_book'] } }),
 }));
 vi.mock('./FinancialAnalysis', () => ({ FinancialAnalysis: () => null }));
 vi.mock('./TradingActivity', () => ({ TradingActivity: () => null }));

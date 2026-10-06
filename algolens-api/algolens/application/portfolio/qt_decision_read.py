@@ -271,7 +271,7 @@ class QtDecisionReadService:
                     # approve button never appears (F2).
                     _, _, _, policy = self.workflow._validate_preview_evidence(
                         tx, preview, book, day, facts, registry_asset_class(registries))
-                    can_approve = (self._enabled_prerequisites(tx) and preview['state'] == 'pending_override' and
+                    can_approve = (actor_id != submitter and self._enabled_prerequisites(tx) and preview['state'] == 'pending_override' and
                         context['request']['required_approvals'] == 2 and counted_current and
                         context['request']['eligibility_version'] == policy['version']) and not any(
                         row['user_id'] == actor_id or row['person_id'] == person.person_id for row in approvals)

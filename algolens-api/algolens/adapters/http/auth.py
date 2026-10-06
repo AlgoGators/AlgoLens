@@ -34,6 +34,9 @@ from algolens.infrastructure.config.dependencies import (
     get_db_connection,
 )
 from extensions import limiter
+from algolens.adapters.http.capability_guard import (
+    dev_only_route, open_route, resolve_user_capabilities, session_route,
+)
 
 auth_bp = Blueprint("auth", __name__)
 
@@ -54,7 +57,7 @@ def _identity_dependencies():
 def _json_session(user, status_code):
     _users, _hasher, sessions = _identity_dependencies()
     access_token = sessions.create_token(user)
-    resp = jsonify(serialize_user_session(user))
+    resp = jsonify(serialize_user_session(user, resolve_user_capabilities(user)))
     sessions.set_access_cookie(resp, access_token)
     return resp, status_code
 
@@ -84,6 +87,7 @@ def _dev_user_from_config(config):
 
 
 @auth_bp.route("/login", methods=["POST"])
+@open_route
 @limiter.limit("10 per minute")
 def login():
     current_app.logger.info("Login attempt started")
@@ -112,6 +116,7 @@ def login():
 
 
 @auth_bp.route("/verify", methods=["GET"])
+@session_route
 @jwt_required()
 def verify():
     current_user_id = get_jwt_identity()
@@ -119,7 +124,7 @@ def verify():
     if config.is_enabled():
         dev_user = _dev_user_from_config(config)
         if str(dev_user.id) == str(current_user_id):
-            return jsonify(serialize_user_session(dev_user)), 200
+            return jsonify(serialize_user_session(dev_user, resolve_user_capabilities(dev_user))), 200
 
     users, _hasher, _sessions = _identity_dependencies()
 
@@ -128,10 +133,11 @@ def verify():
     except UserNotFound:
         return jsonify({"error": "User not found"}), 404
 
-    return jsonify(serialize_user_session(user)), 200
+    return jsonify(serialize_user_session(user, resolve_user_capabilities(user))), 200
 
 
 @auth_bp.route("/logout", methods=["POST"])
+@open_route
 def logout():
     Logout().execute()
     _users, _hasher, sessions = _identity_dependencies()
@@ -141,6 +147,7 @@ def logout():
 
 
 @auth_bp.route("/dev-login", methods=["POST"])
+@dev_only_route
 def dev_login():
     config = create_dev_auth_config()
     try:
@@ -158,6 +165,7 @@ def dev_login():
 
 
 @auth_bp.route("/check-email", methods=["POST"])
+@open_route
 @limiter.limit("20 per minute")
 def check_email():
     data = request.get_json()
@@ -170,6 +178,7 @@ def check_email():
 
 
 @auth_bp.route("/register", methods=["POST"])
+@open_route
 @limiter.limit("5 per minute")
 def register():
     data = request.get_json()

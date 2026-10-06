@@ -44,7 +44,9 @@ vi.mock('../adapters/react/ThemeContext', () => ({ useTheme: () => ({ theme: 'li
 let role = 'admin';
 let userId = '101';
 vi.mock('../adapters/react/useAuth', () => ({
-  useAuth: () => ({ user: { id: userId, role, first_name: 'John', last_name: 'Riley', email: 'john@example.com' } }),
+  useAuth: () => ({ user: { id: userId, role, first_name: 'John', last_name: 'Riley', email: 'john@example.com',
+    capabilities: role === 'admin' || role === 'general_member'
+      ? ['view_internal', 'view_qt_platform', 'edit_qt_book'] : [] } }),
 }));
 vi.mock('./FinancialAnalysis', () => ({ FinancialAnalysis: () => null }));
 vi.mock('./TradingActivity', () => ({ TradingActivity: () => null }));

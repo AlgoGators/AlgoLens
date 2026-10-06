@@ -21,7 +21,8 @@ vi.mock('../adapters/react/ThemeContext', () => ({
 
 let role = 'admin';
 vi.mock('../adapters/react/useAuth', () => ({
-  useAuth: () => ({ user: { id: 'internal-one', role } }),
+  useAuth: () => ({ user: { id: 'internal-one', role, capabilities:
+    role === 'admin' || role === 'general_member' ? ['view_qt_platform', 'edit_qt_book'] : [] } }),
 }));
 
 function position(): Position {

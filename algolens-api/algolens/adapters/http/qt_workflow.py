@@ -11,6 +11,8 @@ from algolens.domain.portfolio.qt_workflow_models import (
 from algolens.infrastructure.config.dependencies import (create_identity_dependencies,
     create_qt_workflow_service, create_qt_decision_read_service, create_qt_investor_publication_service)
 from algolens.application.portfolio.qt_investor_publication import QtPublishRequest
+from algolens.adapters.http.capability_guard import disabled_route, requires_capability
+from algolens.domain.identity.capabilities import role_has_capability
 
 qt_workflow_bp = Blueprint('qt_workflow', __name__)
 
@@ -45,7 +47,7 @@ def _read_service():
     return create_qt_decision_read_service(evaluator_bundle_directory=configured if configured else None)
 
 
-def current_actor(allowed_roles=frozenset({'admin', 'general_member'})):
+def current_actor(required_capability='view_qt_platform'):
     subject = get_jwt_identity()
     if type(subject) is not str or not subject.isascii() or not subject.isdecimal() or subject.startswith('0'):
         raise QtWorkflowError('authorization_changed')
@@ -54,7 +56,7 @@ def current_actor(allowed_roles=frozenset({'admin', 'general_member'})):
         account = VerifySession(users).execute(subject)
     except UserNotFound:
         raise QtWorkflowError('authorization_changed') from None
-    if str(account.id) != subject or account.role not in allowed_roles:
+    if str(account.id) != subject or not role_has_capability(account.role, required_capability):
         raise QtWorkflowError('authorization_changed')
     return int(subject)
 
@@ -85,13 +87,13 @@ def _id(value):
         raise QtWorkflowError('invalid_qt_payload') from None
 
 
-def _boundary_for_roles(allowed_roles):
+def _boundary_for_capability(required_capability):
     def decorate(fn):
         @wraps(fn)
         @jwt_required()
         def wrapped(*args, **kwargs):
             try:
-                return jsonify(fn(current_actor(allowed_roles), *args, **kwargs).to_wire())
+                return jsonify(fn(current_actor(required_capability), *args, **kwargs).to_wire())
             except QtWorkflowError as exc:
                 return jsonify(exc.to_wire(book_id=kwargs.get('book_id'), preview_id=kwargs.get('preview_id'))), exc.http_status
             except Exception:
@@ -101,53 +103,61 @@ def _boundary_for_roles(allowed_roles):
     return decorate
 
 
-_boundary = _boundary_for_roles(frozenset({'admin', 'general_member'}))
-_approval_boundary = _boundary_for_roles(frozenset({'admin', 'general_member', 'exec_board'}))
+_boundary = _boundary_for_capability('view_qt_platform')
+_approval_boundary = _boundary_for_capability('view_qt_platform')
 
 
 @qt_workflow_bp.get('/qt-books/<book_id>/proposal')
+@requires_capability('view_qt_platform')
 @_boundary
 def proposal(actor, book_id):
     return _read_service().get_proposal(book_id, actor)
 
 
 @qt_workflow_bp.get('/qt-books/<book_id>/draft')
+@requires_capability('view_qt_platform')
 @_boundary
 def draft(actor, book_id):
     return _read_service().get_draft(book_id, actor)
 
 
 @qt_workflow_bp.put('/qt-books/<book_id>/draft')
+@requires_capability('edit_qt_book')
 @_boundary
 def save_draft(actor, book_id):
     return _workflow_service().save_draft(book_id, actor, _body(QtDraftSaveRequest))
 
 
 @qt_workflow_bp.post('/qt-previews')
+@requires_capability('edit_qt_book')
 @_boundary
 def preview(actor):
     return _workflow_service().create_preview(actor, _body(QtCreatePreviewRequest))
 
 
 @qt_workflow_bp.post('/qt-previews/<preview_id>/confirm')
+@requires_capability('edit_qt_book')
 @_boundary
 def confirm(actor, preview_id):
     return _workflow_service().confirm_preview(_id(preview_id), actor, _body(QtConfirmRequest))
 
 
 @qt_workflow_bp.post('/qt-override-requests/<request_id>/approvals')
+@requires_capability('approve_qt_override')
 @_approval_boundary
 def approve(actor, request_id):
     return _workflow_service().approve_override(_id(request_id), actor, _body(QtApproveRequest))
 
 
 @qt_workflow_bp.get('/qt-decisions/<decision_id>')
+@requires_capability('view_qt_platform')
 @_approval_boundary
 def decision(actor, decision_id):
     return _read_service().get_decision(_id(decision_id), actor)
 
 
 @qt_workflow_bp.get('/qt-books/<book_id>/decision')
+@requires_capability('view_qt_platform')
 @_approval_boundary
 def book_decision(actor, book_id):
     if set(request.args) - {'source_day'} or len(request.args.getlist('source_day')) > 1:
@@ -156,12 +166,14 @@ def book_decision(actor, book_id):
 
 
 @qt_workflow_bp.post('/qt-decisions/<decision_id>/publish')
+@requires_capability('publish_qt_book')
 @_boundary
 def publish_decision(actor, decision_id):
     return _publication_service().publish(_id(decision_id), actor, _body(QtPublishRequest))
 
 
 @qt_workflow_bp.get('/qt-published-books/<book_id>/<source_day>')
+@disabled_route
 def published_book(book_id, source_day):
     # Public disclosure is separately default-denied by the book policy. This
     # route never falls back to the mutable desk or MODEL positions.

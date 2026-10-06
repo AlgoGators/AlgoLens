@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Bell, FlaskConical, Library, User, X } from 'lucide-react';
 import logo from '../assets/logo.png';
-import { isInternalRole } from '../domain/identity/user';
+import { can } from '../domain/identity/user';
 import { useAuth } from '../adapters/react/useAuth';
 import { useTheme } from '../adapters/react/ThemeContext';
 
@@ -25,7 +25,8 @@ export function Header({
   const { theme } = useTheme();
   const { user } = useAuth();
   const [showNotification, setShowNotification] = useState(false);
-  const isInternalMember = isInternalRole(user?.role);
+  const canManageBooks = can(user, 'manage_books');
+  const canManageIncubation = can(user, 'manage_incubation');
 
 
   // There was a clock here, not a data source. Any weekday after 09:30 EST it
@@ -87,7 +88,7 @@ export function Header({
               >
                 Strategy Builder
               </button>
-              {isInternalMember && (
+              {canManageBooks && (
                 <button
                   onClick={onBooksClick}
                   className={`transition-colors flex items-center gap-2 ${activeTab === 'books'
@@ -103,7 +104,7 @@ export function Header({
                   Books
                 </button>
               )}
-              {isInternalMember && (
+              {canManageIncubation && (
                 <button
                   onClick={onIncubationClick}
                   className={`transition-colors flex items-center gap-2 ${activeTab === 'incubation'

@@ -33,7 +33,8 @@ vi.mock('../adapters/react/ThemeContext', () => ({
 let role = 'subscriber';
 let userId = 'internal-one';
 vi.mock('../adapters/react/useAuth', () => ({
-  useAuth: () => ({ user: { id: userId, role } }),
+  useAuth: () => ({ user: { id: userId, role, capabilities:
+    role === 'admin' || role === 'general_member' ? ['view_qt_platform', 'edit_qt_book'] : [] } }),
 }));
 
 function position(over: Partial<Position> = {}): Position {

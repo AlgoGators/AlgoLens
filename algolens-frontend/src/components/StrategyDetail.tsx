@@ -12,7 +12,7 @@ import { LineChart, Line, XAxis, YAxis, ResponsiveContainer, Tooltip } from 'rec
 import type { PositionStream, Strategy } from '../domain/portfolio/portfolioData';
 import { useTheme } from '../adapters/react/ThemeContext';
 import { useAuth } from '../adapters/react/useAuth';
-import { isInternalRole } from '../domain/identity/user';
+import { can } from '../domain/identity/user';
 import { FinancialAnalysis } from './FinancialAnalysis';
 import { PositionBreakdown } from './PositionBreakdown';
 import { PortfolioApiService } from '../infrastructure/api/portfolioApi';
@@ -64,9 +64,10 @@ export function StrategyDetail({
     try { QtRecovery.activateActor(sessionStorage, user.id); }
     catch { /* Required-workspace actions independently block when recovery storage is unavailable. */ }
   }, [user?.id]);
-  const canReadOverrideHistory = isInternalRole(user?.role);
+  const canReadOverrideHistory = can(user, 'view_qt_platform');
+  const canViewInternal = can(user, 'view_internal');
   const books = strategy.books ?? (strategy.portfolio_id ? [strategy.portfolio_id] : []);
-  const owner = JSON.stringify([strategy.id, strategy.portfolio_id, initialBook, user?.id, user?.role]);
+  const owner = JSON.stringify([strategy.id, strategy.portfolio_id, initialBook, user?.id, user?.capabilities]);
   const defaultBook = initialBook ?? strategy.portfolio_id;
   const [selection, setSelection] = useState<{ owner: string; book?: string; stream: PositionStream }>({
     owner, book: defaultBook, stream: 'system',
@@ -116,7 +117,7 @@ export function StrategyDetail({
   const workflowRequired = matchingProposal?.capability?.required === true;
   const workflowAvailable = matchingProposal?.capability?.available === true;
   const legacyEditingAllowed = workflowAvailable && matchingProposal?.capability?.required === false;
-  const mountWorkspace = workflowRequired && workflowAvailable && !!user?.id && !!workflowBook && !!sourceDay;
+  const mountWorkspace = canReadOverrideHistory && workflowRequired && workflowAvailable && !!user?.id && !!workflowBook && !!sourceDay;
   const workflowReason = positionStream !== 'qt' ? '' : !qtSnapshot || !workflowBook || !sourceDay
     ? 'QT workflow source identity and date are unavailable. Position changes are disabled.'
     : !user?.id ? 'Sign in before changing QT positions.'
@@ -176,7 +177,7 @@ export function StrategyDetail({
     : positionStream === 'system' ? editInQt : openEditor;
 
   useEffect(() => {
-    if (!qtSnapshot || !workflowBook || !sourceDay || !user?.id) return;
+    if (!canReadOverrideHistory || !qtSnapshot || !workflowBook || !sourceDay || !user?.id) return;
     const controller = new AbortController();
     let live = true;
     void (async () => {
@@ -198,7 +199,7 @@ export function StrategyDetail({
       }
     })();
     return () => { live = false; controller.abort(); };
-  }, [qtSnapshot, workflowBook, sourceDay, workflowScope, user?.id]);
+  }, [canReadOverrideHistory, qtSnapshot, workflowBook, sourceDay, workflowScope, user?.id]);
 
   useEffect(() => {
     if (!book) {
@@ -431,7 +432,7 @@ export function StrategyDetail({
           registryId={strategy.id}
           portfolioId={bookOnScreen}
           userId={user?.id}
-          role={user?.role}
+          allowed={canViewInternal}
         />
       )}
 

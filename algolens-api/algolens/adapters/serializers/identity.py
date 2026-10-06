@@ -1,18 +1,19 @@
 """Identity HTTP serializers."""
 
 
-def serialize_user(user):
+def serialize_user(user, capabilities=()):
     return {
         "id": user.id,
         "email": user.email,
         "first_name": user.first_name,
         "last_name": user.last_name,
         "role": user.role,
+        "capabilities": sorted(set(capabilities)),
     }
 
 
-def serialize_user_session(user):
-    return {"user": serialize_user(user)}
+def serialize_user_session(user, capabilities=()):
+    return {"user": serialize_user(user, capabilities)}
 
 
 def serialize_check_email(result):

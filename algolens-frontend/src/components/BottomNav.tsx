@@ -1,6 +1,6 @@
 import React from 'react';
 import { Home, TrendingUp, FileText, FlaskConical, Library, User } from 'lucide-react';
-import { isInternalRole } from '../domain/identity/user';
+import { can } from '../domain/identity/user';
 import { useAuth } from '../adapters/react/useAuth';
 import { useTheme } from '../adapters/react/ThemeContext';
 
@@ -12,16 +12,13 @@ interface BottomNavProps {
 export function BottomNav({ activeTab = 'portfolio', onTabChange }: BottomNavProps) {
   const { theme } = useTheme();
   const { user } = useAuth();
-  const isInternalMember = isInternalRole(user?.role);
+  const canManageBooks = can(user, 'manage_books');
+  const canManageIncubation = can(user, 'manage_incubation');
   
   const tabs = [
     { id: 'portfolio', label: 'Portfolio', icon: Home },
-    ...(isInternalMember
-      ? [
-          { id: 'books', label: 'Books', icon: Library },
-          { id: 'incubation', label: 'Incubation', icon: FlaskConical },
-        ]
-      : []),
+    ...(canManageBooks ? [{ id: 'books', label: 'Books', icon: Library }] : []),
+    ...(canManageIncubation ? [{ id: 'incubation', label: 'Incubation', icon: FlaskConical }] : []),
     { id: 'builder', label: 'Builder', icon: TrendingUp },
     { id: 'news', label: 'News', icon: FileText },
     { id: 'profile', label: 'Profile', icon: User },
@@ -34,7 +31,8 @@ export function BottomNav({ activeTab = 'portfolio', onTabChange }: BottomNavPro
         : 'bg-white border-gray-200'
     }`}>
       <div
-        className={isInternalMember ? 'grid grid-cols-6' : 'grid grid-cols-4'}
+        style={{ gridTemplateColumns: `repeat(${tabs.length}, minmax(0, 1fr))` }}
+        className="grid"
       >
         {tabs.map((tab) => {
           const Icon = tab.icon;

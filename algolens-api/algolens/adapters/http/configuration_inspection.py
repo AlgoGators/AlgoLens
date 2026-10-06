@@ -7,6 +7,7 @@ from algolens.adapters.http.portfolio import ASSIGNMENT_MESSAGES, internal_only
 from algolens.application.configuration_inspection import InspectionError
 from algolens.domain.portfolio.portfolio_assignment import AssignmentValidationError
 from algolens.infrastructure.config.dependencies import create_configuration_inspection_service
+from algolens.adapters.http.capability_guard import requires_capability
 
 
 configuration_inspection_bp = Blueprint("configuration_inspection", __name__)
@@ -19,6 +20,7 @@ def _no_store(response):
 
 
 @configuration_inspection_bp.route("/strategies/<registry_id>/configuration", methods=["GET"])
+@requires_capability("view_internal")
 @jwt_required()
 @internal_only
 def get_configuration_inspection(registry_id):

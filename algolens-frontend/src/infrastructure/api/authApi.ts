@@ -1,4 +1,4 @@
-import type { AuthResponse, User } from '../../domain/identity/user';
+import { decodeUser, type AuthResponse, type User } from '../../domain/identity/user';
 import { positionEditDemoResponse } from '../demo/positionEditDemo';
 import { API_BASE_URL } from './httpClient';
 
@@ -22,7 +22,7 @@ export async function verifySessionRequest(): Promise<SessionResult> {
   }
 
   const data: AuthResponse = await response.json();
-  return { user: data.user, status: response.status };
+  return { user: decodeUser(data.user), status: response.status };
 }
 
 export async function devLoginRequest(): Promise<SessionResult> {
@@ -37,7 +37,7 @@ export async function devLoginRequest(): Promise<SessionResult> {
   }
 
   const data: AuthResponse = await response.json();
-  return { user: data.user, status: response.status };
+  return { user: decodeUser(data.user), status: response.status };
 }
 
 export async function loginRequest(email: string, password: string): Promise<User> {
@@ -57,7 +57,7 @@ export async function loginRequest(email: string, password: string): Promise<Use
   }
 
   const data: AuthResponse = await response.json();
-  return data.user;
+  return decodeUser(data.user);
 }
 
 export async function registerRequest(
@@ -87,7 +87,7 @@ export async function registerRequest(
   }
 
   const data: AuthResponse = await response.json();
-  return data.user;
+  return decodeUser(data.user);
 }
 
 export async function logoutRequest(): Promise<void> {

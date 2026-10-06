@@ -1,6 +1,5 @@
 import React, { useEffect, useState } from 'react';
 import { ChevronDown, FileCheck2 } from 'lucide-react';
-import { isInternalRole } from '../domain/identity/user';
 import type { InspectionField, InspectionResponse, TrendStage } from '../domain/portfolio/configurationInspection';
 import { UnsupportedNumericRepresentationError } from '../domain/portfolio/configurationInspection';
 import { getConfigurationInspection } from '../infrastructure/api/configurationInspectionApi';
@@ -9,7 +8,7 @@ import { counted } from '../domain/text/pluralize';
 import { ConsumptionInspection } from './ConsumptionInspection';
 import { EquityRunConsumptionInspection } from './EquityRunConsumptionInspection';
 
-type Props = { registryId: string; portfolioId: string; userId?: string; role?: string };
+type Props = { registryId: string; portfolioId: string; userId?: string; allowed: boolean };
 type View = { kind: 'loading' } | { kind: 'error'; message: string } |
   { kind: 'ready'; response: InspectionResponse };
 
@@ -204,9 +203,9 @@ function ScopedPanel({ registryId, portfolioId }: Pick<Props, 'registryId' | 'po
   </section>;
 }
 
-export function ConfigurationInspectionPanel({ registryId, portfolioId, userId, role }: Props) {
-  if (!isInternalRole(role) || !registryId || !portfolioId) return null;
+export function ConfigurationInspectionPanel({ registryId, portfolioId, userId, allowed }: Props) {
+  if (!allowed || !registryId || !portfolioId) return null;
   // A changed identity gets a new instance in the same render, before effect cleanup.
-  return <ScopedPanel key={JSON.stringify([registryId, portfolioId, userId, role])}
+  return <ScopedPanel key={JSON.stringify([registryId, portfolioId, userId, allowed])}
     registryId={registryId} portfolioId={portfolioId} />;
 }

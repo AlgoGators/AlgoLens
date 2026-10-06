@@ -6,6 +6,7 @@ from algolens.adapters.http import portfolio as portfolio_http
 from algolens.application.identity.use_cases import UserNotFound
 from algolens.application.runtime_control import RuntimeControlError
 from algolens.infrastructure.config.dependencies import create_runtime_control_service
+from algolens.adapters.http.capability_guard import requires_capability
 
 runtime_control_bp = Blueprint('runtime_control', __name__)
 
@@ -45,6 +46,7 @@ def _invoke(operation, status=200):
 
 
 @runtime_control_bp.route('/strategies/<strategy_id>/runtime', methods=['GET'])
+@requires_capability('view_internal')
 @jwt_required()
 @portfolio_http.internal_only
 def runtime_status(strategy_id):
@@ -53,6 +55,7 @@ def runtime_status(strategy_id):
 
 
 @runtime_control_bp.route('/strategies/<strategy_id>/runtime/requests', methods=['POST'])
+@requires_capability('request_runtime_control')
 @jwt_required()
 @portfolio_http.internal_only
 def request_runtime(strategy_id):
@@ -61,6 +64,7 @@ def request_runtime(strategy_id):
 
 
 @runtime_control_bp.route('/strategies/<strategy_id>/runtime/requests/<int:intent_id>/approve', methods=['POST'])
+@requires_capability('approve_runtime_control')
 @jwt_required()
 @portfolio_http.internal_only
 def approve_runtime(strategy_id, intent_id):

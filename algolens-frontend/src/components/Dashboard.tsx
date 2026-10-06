@@ -13,7 +13,7 @@ import { EmptyPortfolioScreen } from './EmptyPortfolioScreen';
 import { IncubationScreen } from './IncubationScreen';
 import type { PortfolioData } from '../domain/portfolio/portfolioData';
 import { PortfolioApplicationService } from '../application/portfolio/portfolioService';
-import { isInternalRole } from '../domain/identity/user';
+import { can } from '../domain/identity/user';
 import { useAuth } from '../adapters/react/useAuth';
 import { useTheme } from '../adapters/react/ThemeContext';
 import { BooksScreen } from './BooksScreen';
@@ -37,7 +37,8 @@ export function Dashboard({ onLogout }: DashboardProps) {
   const [error, setError] = useState<string | null>(null);
   const { theme } = useTheme();
   const { user } = useAuth();
-  const isInternalMember = isInternalRole(user?.role);
+  const canManageBooks = can(user, 'manage_books');
+  const canManageIncubation = can(user, 'manage_incubation');
 
   // Hoisted out of the mount effect so a manual position edit can re-run it.
   // `silent` re-reads without flipping the page into its loading state. A
@@ -95,11 +96,12 @@ export function Dashboard({ onLogout }: DashboardProps) {
   }, [activeTab, fetchPortfolioData]);
 
   useEffect(() => {
-    if ((activeTab === 'incubation' || activeTab === 'books') && !isInternalMember) {
+    if ((activeTab === 'incubation' && !canManageIncubation) ||
+        (activeTab === 'books' && !canManageBooks)) {
       setActiveTab('portfolio');
       setSelectedStrategy(null);
     }
-  }, [activeTab, isInternalMember]);
+  }, [activeTab, canManageBooks, canManageIncubation]);
 
   // Something to show: an open position anywhere, or a strategy the engine has
   // not published yet. The second case matters -- a fund whose strategies are
@@ -108,7 +110,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
   const hasPortfolioContent = Boolean(portfolioData?.strategies?.length);
 
   const handleTabChange = (tab: string) => {
-    if (tab === 'incubation' && !isInternalMember) {
+    if ((tab === 'incubation' && !canManageIncubation) || (tab === 'books' && !canManageBooks)) {
       return;
     }
 
@@ -163,13 +165,13 @@ export function Dashboard({ onLogout }: DashboardProps) {
             setSelectedStrategy(null);
           }}
           onBooksClick={() => {
-            if (!isInternalMember) return;
+            if (!canManageBooks) return;
             setSettingsScreen(null);
             setActiveTab('books');
             setSelectedStrategy(null);
           }}
           onIncubationClick={() => {
-            if (!isInternalMember) return;
+            if (!canManageIncubation) return;
             setSettingsScreen(null);
             setActiveTab('incubation');
             setSelectedStrategy(null);
@@ -235,9 +237,9 @@ export function Dashboard({ onLogout }: DashboardProps) {
         </div>
       )}
 
-      {activeTab === 'books' && isInternalMember && <BooksScreen />}
+      {activeTab === 'books' && canManageBooks && <BooksScreen />}
 
-      {activeTab === 'incubation' && isInternalMember && (
+      {activeTab === 'incubation' && canManageIncubation && (
         <div className="max-w-5xl mx-auto px-4 md:px-6 py-6 md:py-8">
           <IncubationScreen />
         </div>

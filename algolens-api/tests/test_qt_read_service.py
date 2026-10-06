@@ -1,5 +1,7 @@
 """Read access has current grants and registry scope, separate from submission."""
 from copy import deepcopy
+from contextlib import contextmanager
+from types import SimpleNamespace
 import pytest
 from algolens.domain.portfolio.qt_workflow_errors import QtWorkflowError
 from algolens.infrastructure.config.dependencies import create_qt_decision_read_service
@@ -172,6 +174,43 @@ def test_decision_reader_separately_authorizes_reader_and_captures_submitter_sou
     assert actors == [101]
     assert tx.lock_order == ['auth', 'registry', 'book', 'mutable']
     assert tx.position_mutations == 0
+
+
+def test_pending_decision_never_offers_approval_to_its_submitter(monkeypatch):
+    from algolens.infrastructure.portfolio import qt_decision_read_repository as storage
+
+    service, tx, _, _, context = decision_reader(monkeypatch)
+    @contextmanager
+    def self_transaction(book, actor):
+        assert (book, actor) == ('BOOK', 101)
+        yield tx
+    service.repository.transaction = self_transaction
+    def self_authorities(ids):
+        tx.lock_order.append('auth')
+        assert set(ids) == {101}
+        return ({'id': 101, 'role': 'general_member'},)
+    tx.lock_authorities = self_authorities
+    context['decision']['status'] = 'pending_override'
+    context['request'] = {
+        'request_id': '00000000-0000-4000-8000-000000000090',
+        'required_approvals': 2,
+        'eligibility_version': 1,
+    }
+    monkeypatch.setattr(storage, '_context', lambda *a: deepcopy(context))
+    tx.get_receipt = lambda _: None
+    tx.lock_registries = lambda ids: [{
+        'id': 'registry-1', 'strategy_type': 'LIVE_TREND', 'portfolio_id': 'BOOK',
+        'is_active': True, 'lifecycle': 'live', 'asset_class': 'EQUITY',
+    }]
+    service.authorization = SimpleNamespace(resolve=lambda actor_id, _tx: SimpleNamespace(
+        person_id='hemdutt_rao', user_id=actor_id, mapping_version=1, grant_version=1,
+    ))
+    monkeypatch.setattr(service.workflow, '_validate_preview_evidence',
+        lambda *args, **kwargs: ({}, {}, {}, {'version': 1}))
+    monkeypatch.setattr(service, '_enabled_prerequisites', lambda _tx: True)
+
+    response = service.get_decision('00000000-0000-4000-8000-000000000081', 101).to_wire()
+    assert response['can_approve'] is False
 
 
 @pytest.mark.parametrize('change', ['late_pending', 'accounting', 'policy'])

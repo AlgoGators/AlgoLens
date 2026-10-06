@@ -24,6 +24,7 @@ import {
 } from '../domain/portfolio/incubationUtils';
 import { useTheme } from '../adapters/react/ThemeContext';
 import { useAuth } from '../adapters/react/useAuth';
+import { can } from '../domain/identity/user';
 import { IncubationActions } from './IncubationActions';
 import { ConfigurationInspectionPanel } from './ConfigurationInspectionPanel';
 import { formatBarDate } from '../domain/portfolio/formatBarDate';
@@ -124,7 +125,7 @@ export function IncubationDetail({
         registryId={strategy.id}
         portfolioId={strategy.portfolio_id}
         userId={user?.id}
-        role={user?.role}
+        allowed={can(user, 'view_internal')}
       />
 
       {isLoading ? (

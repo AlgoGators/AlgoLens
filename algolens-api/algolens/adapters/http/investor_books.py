@@ -9,6 +9,7 @@ from flask_jwt_extended import get_jwt_identity, jwt_required
 from algolens.adapters.http.portfolio import _current_user
 from algolens.application.identity.use_cases import UserNotFound
 from algolens.infrastructure.config.dependencies import create_investor_book_service
+from algolens.adapters.http.capability_guard import disabled_route
 
 
 investor_books_bp = Blueprint("investor_books", __name__)
@@ -24,6 +25,7 @@ def _not_found():
 
 
 @investor_books_bp.route("/investor/books/<portfolio_id>", methods=["GET"])
+@disabled_route
 @jwt_required()
 def get_investor_book(portfolio_id):
     if _BOOK.fullmatch(portfolio_id) is None:

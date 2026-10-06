@@ -11,7 +11,8 @@ import { ProfileScreen } from './ProfileScreen';
 
 let role = 'admin';
 vi.mock('../adapters/react/useAuth', () => ({
-  useAuth: () => ({ user: { role, email: 'member@example.test', first_name: 'Ada', last_name: 'Lovelace' }, login: vi.fn() }),
+  useAuth: () => ({ user: { role, email: 'member@example.test', first_name: 'Ada', last_name: 'Lovelace',
+    capabilities: role === 'admin' ? ['manage_books', 'manage_incubation'] : [] }, login: vi.fn() }),
 }));
 vi.mock('../adapters/react/ThemeContext', () => ({
   useTheme: () => ({ theme: 'light', toggleTheme: vi.fn() }),

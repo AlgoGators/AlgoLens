@@ -31,8 +31,8 @@ const reply = (book = 'BOOK', status: 'available' | 'unavailable' = 'available')
   publication: status === 'available'
     ? { ...fixture, identity: { ...fixture.identity, portfolio_id: book } } : null,
 }), { headers: { 'Content-Type': 'application/json' } });
-const panel = (book = 'BOOK', userId = 'u1', role = 'general_member') =>
-  <ConfigurationInspectionPanel registryId="trend" portfolioId={book} userId={userId} role={role} />;
+const panel = (book = 'BOOK', userId = 'u1', allowed = true) =>
+  <ConfigurationInspectionPanel registryId="trend" portfolioId={book} userId={userId} allowed={allowed} />;
 const openPublishedConfiguration = () =>
   fireEvent.click(screen.getByRole('button', { name: /Published configuration/ }));
 
@@ -57,7 +57,7 @@ describe('read-only published configuration panel', () => {
     const bytes = readFileSync(`../contracts/equity-inspection-v3-synthetic-${status}.json`, 'utf8');
     const sample = JSON.parse(bytes);
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(bytes, { headers: { 'Content-Type': 'application/json' } }));
-    render(<ConfigurationInspectionPanel registryId={sample.scope.registry_id} portfolioId={sample.scope.portfolio_id} userId="u1" role="general_member" />);
+    render(<ConfigurationInspectionPanel registryId={sample.scope.registry_id} portfolioId={sample.scope.portfolio_id} userId="u1" allowed />);
     openPublishedConfiguration();
     const region = await screen.findByRole('region', { name: 'Equity settings recorded for this run' });
     expect(within(region).getByText(`Read coverage: ${status === 'available' ? 'complete' : 'unavailable'}`)).toBeTruthy();
@@ -148,7 +148,7 @@ describe('read-only published configuration panel', () => {
     expect(screen.queryByRole('region', { name: 'Settings actually used' })).toBeNull();
     expect(await screen.findByText('This publication could not be inspected.')).toBeTruthy();
     expect(screen.queryByRole('button', { name: /Observation #0: setup.selector/ })).toBeNull();
-    view.rerender(panel('BOOK', 'u1', 'subscriber_individual'));
+    view.rerender(panel('BOOK', 'u1', false));
     expect(screen.queryByRole('region', { name: 'Settings actually used' })).toBeNull();
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
@@ -284,7 +284,7 @@ describe('read-only published configuration panel', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Refresh published configuration' }));
     await screen.findByText(/could not be loaded/i);
     expect(screen.queryByText('PRIVATE-SECRET')).toBeNull();
-    view.rerender(panel('BOOK', 'u1', 'subscriber_individual'));
+    view.rerender(panel('BOOK', 'u1', false));
     expect(screen.queryByText(/Published configuration/)).toBeNull();
     expect(fetchMock).toHaveBeenCalledTimes(3);
   });

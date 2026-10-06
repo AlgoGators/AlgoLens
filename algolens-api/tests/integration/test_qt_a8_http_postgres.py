@@ -22,12 +22,12 @@ from tests.integration.test_qt_a3_read_set_postgres import a3_db
 
 
 def seed_http_approvers(dsn):
-    query(dsn, """INSERT INTO auth.users(id,role) VALUES(202,'exec_board')
+    query(dsn, """INSERT INTO auth.users(id,role) VALUES(202,'exec_board'),(303,'general_member')
         ON CONFLICT(id) DO UPDATE SET role=excluded.role;
         INSERT INTO trading.qt_action_grants(user_id,capability,active,version)
-          VALUES(101,'qt_approve',true,1),(202,'qt_approve',true,1);
+          VALUES(202,'qt_approve',true,1),(303,'qt_approve',true,1);
         INSERT INTO trading.qt_approver_allowlist(person_id,display_label,user_id,active,mapping_version)
-          VALUES('john_riley','john riley',101,true,1),('hemdutt_rao','hemdutt rao',202,true,1);""")
+          VALUES('hemdutt_rao','hemdutt rao',202,true,1),('xander_robbins','xander robbins',303,true,1);""")
 
 
 def http_harness(dsn, service, monkeypatch):
@@ -101,6 +101,7 @@ def test_actual_two_people_approve_known_breach_then_discover_same_immutable_pre
     _, clients, _ = http_harness(preview_db, service, monkeypatch)
     first, first_headers = clients(101)
     second, second_headers = clients(202)
+    third, third_headers = clients(303)
     preview_response = first.post('/portfolio/qt-previews', json=request, headers=first_headers)
     assert preview_response.status_code == 200, preview_response.json
     preview = preview_response.json
@@ -119,10 +120,12 @@ def test_actual_two_people_approve_known_breach_then_discover_same_immutable_pre
     positions = query(preview_db, 'SELECT row_to_json(p)::text FROM trading.positions p ORDER BY symbol,portfolio_type')
     path = '/portfolio/qt-override-requests/' + pending['request_id'] + '/approvals'
     approved = first.post(path, headers=first_headers, json={'action': 'approve', 'idempotency_key': str(uuid4())})
-    assert approved.status_code == 200, approved.json
-    assert approved.json['approvals_count'] == 1
+    assert approved.status_code == 403, approved.json
     assert second.post(path, json={'action': 'approve', 'idempotency_key': str(uuid4())}).status_code == 401
     approved = second.post(path, headers=second_headers, json={'action': 'approve', 'idempotency_key': str(uuid4())})
+    assert approved.status_code == 200, approved.json
+    assert approved.json['approvals_count'] == 1
+    approved = third.post(path, headers=third_headers, json={'action': 'approve', 'idempotency_key': str(uuid4())})
     assert approved.status_code == 200, approved.json
     assert approved.json['status'] == 'confirmed_decision' and approved.json['approvals_count'] == 2
     assert query(preview_db, 'SELECT status FROM trading.qt_decisions') == [('confirmed_decision',)]

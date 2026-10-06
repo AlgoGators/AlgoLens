@@ -35,6 +35,10 @@ describe('local position-edit visual demo', () => {
         first_name: 'Demo',
         last_name: 'Reviewer',
         role: 'admin',
+        capabilities: [
+          'view_internal', 'view_qt_platform', 'edit_qt_book', 'manage_incubation',
+          'manage_books', 'request_runtime_control', 'approve_runtime_control',
+        ],
       },
     });
   });

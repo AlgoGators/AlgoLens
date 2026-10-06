@@ -51,21 +51,21 @@ def test_equity_book_not_in_the_catalog_still_shows_can_approve_true(preview_db)
     _catalog_silent_for_syn(preview_db)
     query(preview_db, "UPDATE trading.strategy_registry SET asset_class = 'EQUITY' WHERE id = 'ui-one'")
     reader = _reader(preview_db, service)
-    # 202 ('john_riley') is an eligible second approver in a7's `pending()`
-    # allowlist, distinct from the 101 submitter -- exactly the reader used
+    # 303 (Xander) is an eligible approver in a7's `pending()` allowlist,
+    # distinct from the 101 submitter -- exactly the reader used
     # by the frontend's QtDecisionStatus approve button.
-    read = reader.get_decision(decision["decision_id"], 202).to_wire()
+    read = reader.get_decision(decision["decision_id"], 303).to_wire()
     assert read["status"] == "pending_override"
     assert read["can_approve"] is True
     # The real write path (which already threads the registry fallback --
     # INDEPENDENT-REVIEW-1's fix) then approves: the requester 101 counts
     # explicitly, the eligible second approver 202 promotes. The read-side
-    # flag is therefore not a false positive, and it stays true for 202 after
-    # 101 has approved.
-    first = service.approve_override(decision["request_id"], 101, approval_request()).to_wire()
+    # flag is therefore not a false positive, and it stays true for 303 after
+    # Hemdutt has approved.
+    first = service.approve_override(decision["request_id"], 202, approval_request()).to_wire()
     assert first["status"] == "pending_override" and first["approvals_count"] == 1
-    assert reader.get_decision(decision["decision_id"], 202).to_wire()["can_approve"] is True
-    second = service.approve_override(decision["request_id"], 202, approval_request()).to_wire()
+    assert reader.get_decision(decision["decision_id"], 303).to_wire()["can_approve"] is True
+    second = service.approve_override(decision["request_id"], 303, approval_request()).to_wire()
     assert second["status"] == "confirmed_decision" and second["approvals_count"] == 2
 
 

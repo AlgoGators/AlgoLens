@@ -96,7 +96,7 @@ def test_two_people_cannot_map_to_one_account(qt_db):
     with pytest.raises(UniqueViolation):
         _execute(qt_db, """INSERT INTO trading.qt_approver_allowlist
             (person_id, display_label, user_id, active, mapping_version)
-            VALUES ('john_riley', 'john riley', 101, true, 1)""")
+            VALUES ('xander_robbins', 'xander robbins', 101, true, 1)""")
 
 
 def test_one_decision_per_preview_rolls_back_entire_transaction(qt_db):
@@ -149,7 +149,7 @@ def test_approval_insert_rejects_request_from_another_book(qt_db):
                 VALUES ('00000000-0000-4000-8000-000000000044', %s, 1, 2)""", (DECISION,))
             cur.execute("""INSERT INTO trading.qt_approver_allowlist
                 (person_id, display_label, user_id, active, mapping_version)
-                VALUES ('john_riley', 'john riley', 202, true, 1)""")
+                VALUES ('xander_robbins', 'xander robbins', 202, true, 1)""")
     repository = QtWorkflowRepository(lambda: psycopg2.connect(qt_db))
     with pytest.raises(QtWorkflowError):
         with repository.transaction("OTHER", 202) as tx:
@@ -160,7 +160,7 @@ def test_approval_insert_rejects_request_from_another_book(qt_db):
             tx.insert_approval({
                 "approval_id": "00000000-0000-4000-8000-000000000066",
                 "request_id": "00000000-0000-4000-8000-000000000044",
-                "person_id": "john_riley",
+                "person_id": "xander_robbins",
                 "user_id": 202,
                 "mapping_version": 1,
                 "grant_version": 1,
@@ -296,11 +296,11 @@ def _populate_immutable_evidence(dsn):
                 VALUES ('00000000-0000-4000-8000-000000000044', %s, 1, 2)""", (DECISION,))
             cur.execute("""INSERT INTO trading.qt_approver_allowlist
                 (person_id, display_label, user_id, active, mapping_version)
-                VALUES ('john_riley', 'john riley', 202, true, 1)""")
+                VALUES ('xander_robbins', 'xander robbins', 202, true, 1)""")
             cur.execute("""INSERT INTO trading.qt_override_approvals
                 (approval_id, request_id, person_id, user_id, mapping_version, grant_version)
                 VALUES ('00000000-0000-4000-8000-000000000066',
-                        '00000000-0000-4000-8000-000000000044', 'john_riley', 202, 1, 1)""")
+                        '00000000-0000-4000-8000-000000000044', 'xander_robbins', 202, 1, 1)""")
             cur.execute("""INSERT INTO trading.qt_idempotency
                 (actor_id, book_id, operation, scope_id, idempotency_key, request_digest, response_payload)
                 VALUES (101, 'BOOK', 'confirm_preview', 'scope',

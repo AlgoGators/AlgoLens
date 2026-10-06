@@ -92,7 +92,20 @@ def test_approval_single_attempt_and_typed_conflict(client):
     assert service.approve_override.call_args.args[1] == 101
 
 
-def test_exec_board_can_approve_but_cannot_open_submitter_workspace(client):
+def test_submitter_self_approval_is_returned_as_forbidden(client):
+    browser, csrf, service, _, _, _ = client
+    service.approve_override.side_effect = QtWorkflowError('authorization_changed')
+    response = browser.post(
+        '/portfolio/qt-override-requests/00000000-0000-4000-8000-000000000061/approvals',
+        json={'action': 'approve', 'idempotency_key': '00000000-0000-4000-8000-000000000064'},
+        headers={'X-CSRF-TOKEN': csrf},
+    )
+    assert response.status_code == 403
+    assert response.json['error']['code'] == 'authorization_changed'
+    service.approve_override.assert_called_once()
+
+
+def test_exec_board_can_open_review_and_approve_without_submitter_authority(client):
     browser, csrf, service, reads, _, account = client
     account.role = 'exec_board'
     response = browser.post('/portfolio/qt-override-requests/00000000-0000-4000-8000-000000000061/approvals',
@@ -100,9 +113,9 @@ def test_exec_board_can_approve_but_cannot_open_submitter_workspace(client):
         headers={'X-CSRF-TOKEN': csrf})
     assert response.status_code == 200
     service.approve_override.assert_called_once()
-    denied = browser.get('/portfolio/qt-books/BOOK/proposal')
-    assert denied.status_code == 403
-    reads.get_proposal.assert_not_called()
+    review = browser.get('/portfolio/qt-books/BOOK/proposal')
+    assert review.status_code == 200
+    reads.get_proposal.assert_called_once_with('BOOK', 101)
 
 
 def test_storage_failure_is_safe_503(client):

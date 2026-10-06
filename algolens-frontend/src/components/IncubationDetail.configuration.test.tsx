@@ -9,7 +9,8 @@ vi.mock('../adapters/react/ThemeContext', () => ({ useTheme: () => ({ theme: 'li
 let role: string | undefined = 'general_member';
 let userId = 'issue84-reader';
 vi.mock('../adapters/react/useAuth', () => ({
-  useAuth: () => ({ user: { id: userId, role } }),
+  useAuth: () => ({ user: { id: userId, role, capabilities:
+    role === 'admin' || role === 'general_member' ? ['view_internal', 'manage_incubation'] : [] } }),
 }));
 
 const equity: IncubatingStrategy = {

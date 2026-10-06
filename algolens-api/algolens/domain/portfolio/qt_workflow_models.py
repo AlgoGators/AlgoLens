@@ -16,7 +16,7 @@ from algolens.domain.shared.fixed_decimal8 import parse_fixed_decimal8
 
 SCHEMA_VERSION = "qt-workflow/v1"
 _KEY_NAMES = ("portfolio_id", "strategy_id", "strategy_name", "date", "symbol", "portfolio_type")
-_APPROVER_IDS = frozenset({"john_riley", "xander_robbins", "hemdutt_rao", "dominick_dupuoy"})
+_APPROVER_IDS = frozenset({"xander_robbins", "hemdutt_rao", "dominick_dupuy"})
 _UTC_TIMESTAMP = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|\+00:00)\Z")
 
 
