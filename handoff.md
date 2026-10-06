@@ -32,7 +32,7 @@ The most important facts are:
 
 - Repository: `AlgoGators/AlgoLens`
 - Worktree:
-  `/home/john-riley/projects/Algo/.worktrees/AlgoLens/codex-qt-exact-choice-continuation`
+  `<ALGOLENS_WORKTREE>`
 - Branch: `codex/qt-exact-choice-continuation`
 - Current local HEAD at handoff time: `9c2e41ff`
 - Remote tracking branch at handoff time:
@@ -320,7 +320,7 @@ Primary mock file:
 To start the frontend if port 3002 is not already serving:
 
 ```bash
-cd /home/john-riley/projects/Algo/.worktrees/AlgoLens/codex-qt-exact-choice-continuation/algolens-frontend
+cd <ALGOLENS_WORKTREE>/algolens-frontend
 npm run dev -- --host 127.0.0.1 --port 3002
 ```
 
@@ -348,7 +348,7 @@ A read-only audit on 2026-10-02 found:
 A backup of the affected schemas was created and restore-tested:
 
 - Path:
-  `/home/john-riley/projects/Algo/.database-backups/new_algo_data-trading-auth-pre-qt-20261002.dump`
+  `<OFFLINE_BACKUP_DIR>/new_algo_data-trading-auth-pre-qt-20261002.dump`
 - Permissions at audit time: mode `0600`
 - SHA-256:
   `a8dc0ab4ac8cc322cd6ffb9495a000af2270d20b93176d49b9ff0124ffbca532`
@@ -600,7 +600,7 @@ database.
 ## Suggested opening prompt for the next chat
 
 > Continue the AlgoLens work in
-> `/home/john-riley/projects/Algo/.worktrees/AlgoLens/codex-qt-exact-choice-continuation`.
+> `<ALGOLENS_WORKTREE>`.
 > Read `handoff.md` and
 > `docs/audits/2026-10-02-qt-workflow-database-readiness.md` completely before
 > making changes. Preserve the dirty worktree. Verify the current branch and

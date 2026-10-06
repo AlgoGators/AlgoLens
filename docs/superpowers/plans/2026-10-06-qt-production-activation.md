@@ -184,7 +184,7 @@ npm run typecheck
 - Create: focused artifact-manifest generator/schema/tests under `apps/tools/` and `tests/contracts/`
 - Do not edit: QT processor/worker logic, migrations, live portfolio schedule
 
-- [ ] Replace fixed `/home/devcontainers/qt-validation-20260921/bin/Debug` references with `TRADE_NGIN_TEST_BUILD_DIR` and `TRADE_NGIN_TEST_ARTIFACT_DIR`.
+- [ ] Replace fixed developer-build references with `TRADE_NGIN_TEST_BUILD_DIR` and `TRADE_NGIN_TEST_ARTIFACT_DIR`.
 - [ ] Make `evaluator_build` derive from the exact reviewed source/build and reject `unknown`, `local-*`, and dirty/synthetic identities for release mode.
 - [ ] Build once from the exact SHA and package/test those same bytes; remove source mutation from the image build.
 - [ ] Pin mutable build inputs or record immutable digests sufficient to reproduce/audit them.

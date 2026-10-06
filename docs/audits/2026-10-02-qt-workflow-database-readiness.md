@@ -55,7 +55,7 @@ receipt, and finalization relations present; `positions` retained exactly 3,878
 `system` rows and contained zero `qt` or `qt_proposal` rows. The disposable
 database was dropped after verification. The affected-schema backup is retained
 outside the repositories at
-`/home/john-riley/projects/Algo/.database-backups/new_algo_data-trading-auth-pre-qt-20261002.dump`
+`<OFFLINE_BACKUP_DIR>/new_algo_data-trading-auth-pre-qt-20261002.dump`
 with SHA-256
 `a8dc0ab4ac8cc322cd6ffb9495a000af2270d20b93176d49b9ff0124ffbca532`.
 

@@ -8,6 +8,12 @@ import subprocess
 ROOT = Path(__file__).resolve().parents[1]
 DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
 FROM = re.compile(r"^FROM\s+([^\s]+)", re.MULTILINE)
+HISTORICAL_PATH_FIXTURES = {
+    "algolens-api/tests/fixtures/configuration_inspection_cpp_controlled_v1.provenance.json",
+    "algolens-frontend/src/infrastructure/api/__fixtures__/equityActionActual/manifest.json",
+    "algolens-frontend/src/infrastructure/api/__fixtures__/equityModelFullRun/capture-pins.json",
+    "algolens-frontend/src/infrastructure/api/__fixtures__/equityModelFullRun/manifest.json",
+}
 
 
 def tracked_files():
@@ -60,15 +66,25 @@ def test_active_code_and_configuration_contain_no_developer_home_paths():
     assert offenders == []
 
 
+def test_mutable_developer_paths_are_absent_outside_immutable_fixture_evidence():
+    forbidden = ("/home/" + "devcontainers/", "/home/" + "john-riley/")
+    offenders = []
+    for path in tracked_files():
+        relative = path.relative_to(ROOT).as_posix()
+        if relative in HISTORICAL_PATH_FIXTURES or path == Path(__file__):
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            continue
+        if any(value in text for value in forbidden):
+            offenders.append(relative)
+    assert offenders == []
+
+
 def test_historical_developer_paths_are_confined_to_non_executable_fixture_provenance():
     """Captured path strings are evidence only; digests, not paths, authenticate artifacts."""
     forbidden = ("/home/" + "devcontainers/", "/home/" + "john-riley/")
-    allowed = {
-        "algolens-api/tests/fixtures/configuration_inspection_cpp_controlled_v1.provenance.json",
-        "algolens-frontend/src/infrastructure/api/__fixtures__/equityActionActual/manifest.json",
-        "algolens-frontend/src/infrastructure/api/__fixtures__/equityModelFullRun/capture-pins.json",
-        "algolens-frontend/src/infrastructure/api/__fixtures__/equityModelFullRun/manifest.json",
-    }
     found = set()
     for path in tracked_files():
         if path.suffix != ".json":
@@ -80,4 +96,4 @@ def test_historical_developer_paths_are_confined_to_non_executable_fixture_prove
             value = json.loads(text)
             assert "sha256" in text.lower(), f"{relative} lacks artifact digest evidence"
             assert isinstance(value, dict)
-    assert found == allowed
+    assert found == HISTORICAL_PATH_FIXTURES
