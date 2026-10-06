@@ -93,7 +93,8 @@ CREATE TABLE trading.equity_curve(
  id serial PRIMARY KEY,strategy_id text,portfolio_id text,portfolio_type text NOT NULL
 );
 CREATE TABLE trading.executions(
- strategy_id text,portfolio_id text,portfolio_type text NOT NULL
+ strategy_id text,portfolio_id text,portfolio_type text NOT NULL,
+ netting_adjustment numeric NOT NULL DEFAULT 0
 );
 CREATE TABLE trading.signals(
  id serial PRIMARY KEY,strategy_id varchar(50) NOT NULL,symbol varchar(20) NOT NULL,
@@ -262,6 +263,14 @@ INSERT INTO trading.run_inputs(
             + ";\nROLLBACK;\n"
         )
         return self.cluster._psql(database, script, check=False)
+
+    def test_postlude_refuses_missing_shared_execution_storage_column(self):
+        """Fails if a futures writer can be admitted without its migration-027 column."""
+        self._apply_fixture()
+        self.cluster.apply_sql("qt_rehearsal_migrated", "ALTER TABLE trading.executions DROP COLUMN netting_adjustment;")
+        with self.assertRaises(SafetyError) as caught:
+            self.cluster.apply_sql("qt_rehearsal_migrated", self.FORWARD.read_text(encoding="utf-8"))
+        self.assertIn("executions.netting_adjustment", caught.exception.__cause__.stderr)
 
     def test_real_shape_signals_are_publisher_only_and_serial_inserts_work(self):
         """Fails if legacy signals need a nonexistent stream or serial grants are omitted."""

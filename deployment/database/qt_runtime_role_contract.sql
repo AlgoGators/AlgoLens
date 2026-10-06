@@ -90,6 +90,16 @@ BEGIN
       RAISE EXCEPTION 'QT role contract prerequisite missing: %',relation_name;
     END IF;
   END LOOP;
+  -- The shared native execution writer uses this column for futures too.
+  -- Migration 027 is an additive storage prerequisite, not equity activation.
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_attribute
+     WHERE attrelid='trading.executions'::regclass
+       AND attname='netting_adjustment' AND NOT attisdropped
+       AND atttypid='numeric'::regtype AND attnotnull
+  ) THEN
+    RAISE EXCEPTION 'QT role contract prerequisite missing: trading.executions.netting_adjustment (migration 027)';
+  END IF;
   IF to_regclass('trading.investor_books') IS NOT NULL
      OR to_regclass('trading.investor_book_publications') IS NOT NULL
      OR to_regclass('trading.qt_investor_publications') IS NOT NULL THEN
