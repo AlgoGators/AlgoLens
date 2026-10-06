@@ -501,7 +501,8 @@ SELECT to_regclass('trading.qt_action_grants') IS NOT NULL
    NOT EXISTS (
      SELECT 1 FROM resolved WHERE identity_count<>1 OR role_matches IS DISTINCT FROM true
    )
-   AND (SELECT count(*) FROM trading.qt_action_grants WHERE active) = 4
+   AND (SELECT count(*) FROM trading.qt_action_grants
+         WHERE active AND capability IN ('qt_submit','qt_approve')) = 4
    AND NOT EXISTS (
      SELECT 1 FROM resolved e WHERE NOT EXISTS (
         SELECT 1 FROM trading.qt_action_grants g
