@@ -125,7 +125,7 @@ cd ../algolens-frontend && npm test && npm run typecheck && npm run build
 - verification: focused backend/frontend tests plus scratch-PostgreSQL migration tests and route-walk matrix
 - estimate: L
 - coordination_risk: moderate
-- status: running
+- status: complete
 
 **Owned files:**
 
@@ -275,7 +275,7 @@ PYTHONDONTWRITEBYTECODE=1 python3 -B -m unittest -v test_qt_evaluator_bundle.py 
 - verification: container/config unit tests, candidate-container preflight, post-start endpoint/identity tests
 - estimate: L
 - coordination_risk: moderate
-- status: running
+- status: complete
 
 **Owned files:**
 
