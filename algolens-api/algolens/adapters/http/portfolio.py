@@ -16,23 +16,59 @@ from algolens.adapters.serializers.portfolio import (
 from algolens.application.portfolio.ports import IncubationError
 from algolens.application.portfolio.use_cases import (
     GetIncubationPerformance,
+    GetPortfolioDetail,
     GetStrategyDetail,
     InvalidBook,
     ListIncubatingStrategies,
+    ListPortfolios,
     ListStrategies,
+    PortfolioNotFound,
     PromoteToLive,
     RetireStrategy,
     StartIncubation,
     StrategyDataNotFound,
     StrategyNotFound,
 )
-from algolens.infrastructure.config.dependencies import create_portfolio_dependencies
+from algolens.infrastructure.config.dependencies import (
+    create_portfolio_dependencies,
+    load_qt_settings,
+)
 
 portfolio_bp = Blueprint("portfolio", __name__)
 
 # Incubation is an internal member-only surface. Default-deny: an unrecognised
 # or absent role is refused, so new roles stay locked out until explicitly added.
 INTERNAL_ROLES = frozenset({"admin", "general_member"})
+
+
+def can_use_qt_desk(user):
+    """Whether a signed-in user may use the QT desk (edit, publish, settings).
+
+    Provisional: the internal allow-list above. AlgoLens#94 replaces this with
+    the qt_desk capability; every desk route goes through this one helper.
+    """
+    return (user or {}).get("role") in INTERNAL_ROLES
+
+
+def is_approver(user, role):
+    """Whether a signed-in user is the configured approver for `role`.
+
+    `role` is 'vp' or 'president'; the addresses come from QT_APPROVERS.
+    Provisional until AlgoLens#94 gives approvers a role of their own.
+    """
+    email = ((user or {}).get("email") or "").strip().lower()
+    expected = load_qt_settings().approvers.get(role)
+    return bool(email) and expected is not None and email == expected
+
+
+def current_user():
+    """The signed-in user as {id, email, role}, from the JWT claims."""
+    claims = get_jwt()
+    return {
+        "id": str(get_jwt_identity()),
+        "email": claims.get("email") or "",
+        "role": claims.get("role"),
+    }
 
 
 def _portfolio_dependencies():
@@ -121,6 +157,44 @@ def get_all_strategies():
             "[STRATEGIES] Error fetching strategies: %s", str(exc), exc_info=True
         )
         return jsonify({"error": "Failed to fetch strategies"}), 500
+
+
+@portfolio_bp.route("/portfolios", methods=["GET"])
+@jwt_required()
+def list_portfolios():
+    """The portfolio switcher: live portfolios grouped by portfolio_group."""
+    try:
+        registry, _reader = _portfolio_dependencies()
+        groups = ListPortfolios(registry).execute()
+        return jsonify(
+            {"groups": groups, "deskEnabled": load_qt_settings().desk_enabled}
+        ), 200
+    except Exception as exc:
+        current_app.logger.error("Error listing portfolios: %s", str(exc), exc_info=True)
+        return jsonify({"error": "Failed to list portfolios"}), 500
+
+
+@portfolio_bp.route("/portfolios/<portfolio_id>", methods=["GET"])
+@jwt_required()
+def get_portfolio(portfolio_id):
+    """One portfolio's book by portfolio id; ?book=system|qt_proposal|qt."""
+    try:
+        registry, reader = _portfolio_dependencies()
+        detail = GetPortfolioDetail(registry, reader).execute(
+            portfolio_id, book=request.args.get("book")
+        )
+        return jsonify(serialize_strategy_detail(detail)), 200
+    except InvalidBook as exc:
+        return jsonify({"error": str(exc)}), 400
+    except PortfolioNotFound:
+        return jsonify({"error": "Portfolio not found"}), 404
+    except StrategyDataNotFound:
+        return jsonify({"error": "No data found for portfolio"}), 404
+    except Exception as exc:
+        current_app.logger.error(
+            "Error fetching portfolio %s: %s", portfolio_id, str(exc), exc_info=True
+        )
+        return jsonify({"error": "Failed to fetch portfolio"}), 500
 
 
 @portfolio_bp.route("/incubation", methods=["GET"])

@@ -9,6 +9,7 @@ from algolens.infrastructure.identity.security import WerkzeugPasswordHasher
 from algolens.infrastructure.identity.sessions import FlaskJwtSessionIssuer
 from algolens.infrastructure.portfolio.repositories import PostgresPortfolioRepository
 from algolens.infrastructure.portfolio.strategy_registry import PostgresStrategyRegistry
+from algolens.infrastructure.config.qt import load_qt_settings  # noqa: F401  (re-exported for adapters)
 
 
 def create_identity_dependencies(

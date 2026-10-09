@@ -11,6 +11,9 @@ import { StrategyBuilder } from './StrategyBuilder';
 import { NewsView } from './NewsView';
 import { EmptyPortfolioScreen } from './EmptyPortfolioScreen';
 import { IncubationScreen } from './IncubationScreen';
+import { PortfolioSwitcher } from './PortfolioSwitcher';
+import { PortfolioBookView } from './PortfolioBookView';
+import { findPortfolio, type PortfolioList } from '../domain/portfolio/portfolioRegistry';
 import type { PortfolioData } from '../domain/portfolio/portfolioData';
 import { PortfolioApplicationService } from '../application/portfolio/portfolioService';
 import { isInternalRole } from '../domain/identity/user';
@@ -32,6 +35,8 @@ export function Dashboard({ onLogout }: DashboardProps) {
   const [portfolioData, setPortfolioData] = useState<PortfolioData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [portfolioList, setPortfolioList] = useState<PortfolioList | null>(null);
+  const [selectedPortfolioId, setSelectedPortfolioId] = useState<string | null>(null);
   const { theme } = useTheme();
   const { user } = useAuth();
   const isInternalMember = isInternalRole(user?.role);
@@ -74,6 +79,18 @@ export function Dashboard({ onLogout }: DashboardProps) {
 
     fetchPortfolioData();
   }, []);
+
+  // The switcher's registry, read by portfolio id. A failure only hides the
+  // switcher; the all-strategies view still works.
+  useEffect(() => {
+    PortfolioApplicationService.listPortfolios()
+      .then(setPortfolioList)
+      .catch(err => console.error('[Dashboard] Could not list portfolios:', err));
+  }, []);
+
+  const selectedPortfolio = portfolioList
+    ? findPortfolio(portfolioList.groups, selectedPortfolioId)
+    : null;
 
   useEffect(() => {
     if (activeTab === 'incubation' && !isInternalMember) {
@@ -144,7 +161,22 @@ export function Dashboard({ onLogout }: DashboardProps) {
 
       {activeTab === 'portfolio' && (
         <div className="max-w-5xl mx-auto px-4 md:px-6 py-6 md:py-8">
-          {isLoading ? (
+          {portfolioList && portfolioList.groups.length > 0 && (
+            <PortfolioSwitcher
+              groups={portfolioList.groups}
+              selected={selectedPortfolio ? selectedPortfolio.portfolio_id : null}
+              onSelect={(id) => {
+                setSelectedPortfolioId(id);
+                setSelectedStrategy(null);
+              }}
+            />
+          )}
+          {selectedPortfolio ? (
+            <PortfolioBookView
+              portfolio={selectedPortfolio}
+              onBack={() => setSelectedPortfolioId(null)}
+            />
+          ) : isLoading ? (
             <div className="flex items-center justify-center min-h-[400px]">
               <div className="text-center">
                 <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>

@@ -369,6 +369,219 @@ class PostgresPortfolioRepository:
             fell_back=fell_back,
         )
 
+    # --- reads keyed by portfolio id (AlgoLens#102) ------------------------
+    #
+    # One portfolio is one book: these reads find a book by its portfolio id
+    # and never match on the strategy id. A book with several sleeves is
+    # netted per symbol.
+
+    def _has_column(self, cursor, table, column):
+        cursor.execute(
+            """
+            SELECT 1 FROM information_schema.columns
+            WHERE table_schema = 'trading' AND table_name = %s AND column_name = %s
+            """,
+            (table, column),
+        )
+        return cursor.fetchone() is not None
+
+    def _portfolio_book_has_positions(self, cursor, portfolio_id, book):
+        cursor.execute(
+            """
+            SELECT 1 FROM trading.positions
+            WHERE portfolio_id = %s AND portfolio_type = %s
+            LIMIT 1
+            """,
+            (portfolio_id, book),
+        )
+        return cursor.fetchone() is not None
+
+    def _portfolio_latest_results(self, cursor, portfolio_id, book, results_have_book):
+        if results_have_book:
+            # The served book's own row; a book whose results are not written
+            # (qt_proposal never has any) shows the system row's numbers.
+            cursor.execute(
+                """
+                SELECT * FROM trading.live_results
+                WHERE portfolio_id = %s AND portfolio_type IN (%s, 'system')
+                ORDER BY date DESC, (portfolio_type = %s) DESC
+                LIMIT 1
+                """,
+                (portfolio_id, book, book),
+            )
+        else:
+            cursor.execute(
+                """
+                SELECT * FROM trading.live_results
+                WHERE portfolio_id = %s
+                ORDER BY date DESC
+                LIMIT 1
+                """,
+                (portfolio_id,),
+            )
+        return cursor.fetchone()
+
+    def _portfolio_equity_curve(self, cursor, portfolio_id, book, has_portfolio_type):
+        if has_portfolio_type:
+            cursor.execute(
+                """
+                SELECT timestamp, equity FROM trading.equity_curve
+                WHERE portfolio_id = %s AND portfolio_type = %s
+                ORDER BY timestamp ASC
+                """,
+                (portfolio_id, book),
+            )
+        else:
+            cursor.execute(
+                """
+                SELECT timestamp, equity FROM trading.equity_curve
+                WHERE portfolio_id = %s
+                ORDER BY timestamp ASC
+                """,
+                (portfolio_id,),
+            )
+        return cursor.fetchall()
+
+    def _portfolio_equity_by_stream(self, cursor, portfolio_id, has_portfolio_type):
+        if not has_portfolio_type:
+            return {}
+        by_stream = {}
+        for stream in PORTFOLIO_STREAMS:
+            rows = self._portfolio_equity_curve(cursor, portfolio_id, stream, True)
+            if rows:
+                by_stream[stream] = rows
+        return by_stream
+
+    def _portfolio_positions(self, cursor, portfolio_id, book, has_portfolio_type):
+        """The book's positions on its latest date, netted across sleeves.
+
+        A symbol whose net quantity is zero (a flatten row) is left out.
+        """
+        book_filter = "AND portfolio_type = %s" if has_portfolio_type else ""
+        params = (portfolio_id, book) if has_portfolio_type else (portfolio_id,)
+        cursor.execute(
+            f"""
+            SELECT symbol,
+                   SUM(quantity) AS quantity,
+                   CASE WHEN SUM(quantity) <> 0
+                        THEN SUM(quantity * average_price) / SUM(quantity)
+                        ELSE MAX(average_price) END AS average_price,
+                   SUM(daily_unrealized_pnl) AS daily_unrealized_pnl,
+                   SUM(daily_realized_pnl) AS daily_realized_pnl
+            FROM trading.positions
+            WHERE portfolio_id = %s {book_filter}
+            AND date = (
+                SELECT max(date) FROM trading.positions
+                WHERE portfolio_id = %s {book_filter}
+            )
+            GROUP BY symbol
+            HAVING SUM(quantity) <> 0
+            ORDER BY ABS(SUM(quantity * average_price)) DESC, symbol
+            """,
+            params * 2,
+        )
+        return cursor.fetchall()
+
+    def _portfolio_yesterday_positions(self, cursor, portfolio_id, book, has_portfolio_type):
+        book_filter = "AND portfolio_type = %s" if has_portfolio_type else ""
+        params = (portfolio_id, book) if has_portfolio_type else (portfolio_id,)
+        cursor.execute(
+            f"""
+            SELECT DISTINCT ON (symbol)
+                   symbol, quantity, average_price,
+                   daily_unrealized_pnl, daily_realized_pnl, updated_at
+            FROM trading.positions
+            WHERE portfolio_id = %s {book_filter}
+            AND updated_at::date = (CURRENT_DATE - INTERVAL '1 day')::date
+            ORDER BY symbol, updated_at DESC
+            """,
+            params,
+        )
+        return cursor.fetchall()
+
+    def _portfolio_executions(self, cursor, portfolio_id, book, executions_have_book):
+        book_filter = "AND portfolio_type = %s" if executions_have_book else ""
+        params = (portfolio_id, book) if executions_have_book else (portfolio_id,)
+        cursor.execute(
+            f"""
+            SELECT symbol, side, quantity, price, execution_time, commissions_fees
+            FROM trading.executions
+            WHERE portfolio_id = %s {book_filter}
+            ORDER BY execution_time DESC
+            LIMIT 100
+            """,
+            params,
+        )
+        return cursor.fetchall()
+
+    def fetch_portfolio_rows(self, portfolio_id, book=DEFAULT_BOOK, allow_fallback=True):
+        """Detail rows for one portfolio's book, found by portfolio id alone."""
+        conn = self.connection_factory()
+        try:
+            with conn.cursor() as cursor:
+                has_portfolio_type = self._has_portfolio_type(cursor)
+                if not allow_fallback or book == FALLBACK_BOOK:
+                    served_book, fell_back = book, False
+                elif not has_portfolio_type:
+                    served_book, fell_back = FALLBACK_BOOK, True
+                elif self._portfolio_book_has_positions(cursor, portfolio_id, book):
+                    served_book, fell_back = book, False
+                else:
+                    served_book, fell_back = FALLBACK_BOOK, True
+
+                results_have_book = self._has_column(cursor, "live_results", "portfolio_type")
+                latest = self._portfolio_latest_results(
+                    cursor, portfolio_id, served_book, results_have_book
+                )
+                if not latest:
+                    return PortfolioDetailRows(
+                        latest=None,
+                        equity_curve=[],
+                        equity_by_stream={},
+                        positions=[],
+                        executions=[],
+                        yesterday_positions=[],
+                        book=served_book,
+                        fell_back=fell_back,
+                    )
+
+                if has_portfolio_type or served_book == FALLBACK_BOOK:
+                    equity_curve = self._portfolio_equity_curve(
+                        cursor, portfolio_id, served_book, has_portfolio_type
+                    )
+                    positions = self._portfolio_positions(
+                        cursor, portfolio_id, served_book, has_portfolio_type
+                    )
+                    yesterday = self._portfolio_yesterday_positions(
+                        cursor, portfolio_id, served_book, has_portfolio_type
+                    )
+                else:
+                    # Unmigrated schema: no rows for a non-system book.
+                    equity_curve, positions, yesterday = [], [], []
+                equity_by_stream = self._portfolio_equity_by_stream(
+                    cursor, portfolio_id, has_portfolio_type
+                )
+                executions_have_book = self._has_column(cursor, "executions", "portfolio_type")
+                if executions_have_book or served_book == FALLBACK_BOOK:
+                    executions = self._portfolio_executions(
+                        cursor, portfolio_id, served_book, executions_have_book
+                    )
+                else:
+                    executions = []
+        finally:
+            conn.close()
+
+        return PortfolioDetailRows(
+            latest=latest,
+            equity_curve=equity_curve,
+            equity_by_stream=equity_by_stream,
+            positions=positions,
+            executions=executions,
+            yesterday_positions=yesterday,
+            book=served_book,
+            fell_back=fell_back,
+        )
+
     def list_incubating_strategies(self):
         conn = self.connection_factory()
         try:

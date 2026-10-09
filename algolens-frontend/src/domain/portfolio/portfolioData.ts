@@ -95,6 +95,12 @@ export interface Strategy {
   book?: PositionBook;
   /** True when the default QT book had no rows and the system book was served. */
   fellBack?: boolean;
+  /** Set by the portfolio-id endpoint (/portfolio/portfolios/<id>). */
+  portfolioId?: string;
+  portfolioGroup?: string | null;
+  assetClass?: 'futures' | 'equity';
+  /** desk_editable and futures (ruling 13). */
+  deskEditable?: boolean;
 }
 
 export interface PortfolioData {
