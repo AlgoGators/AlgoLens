@@ -78,11 +78,15 @@ def test_bad_changes_are_refused(change):
         changes_to_overrides(RUNNING, [change])
 
 
-def test_unchanged_values_and_empty_changes_are_refused():
-    with pytest.raises(SettingsRuleError, match="No setting changed"):
-        changes_to_overrides(RUNNING, [{"path": ["risk", "max_leverage"], "value": 2.0}])
+def test_empty_changes_are_refused():
     with pytest.raises(SettingsRuleError):
         changes_to_overrides(RUNNING, [])
+
+
+def test_a_value_equal_to_the_running_one_is_kept_to_undo_a_pending_change():
+    assert changes_to_overrides(RUNNING, [{"path": ["risk", "max_leverage"], "value": 2.0}]) == {
+        "risk": {"max_leverage": 2.0}
+    }
 
 
 def test_int_and_float_are_both_numbers():

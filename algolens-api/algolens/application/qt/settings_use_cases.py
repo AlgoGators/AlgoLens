@@ -132,6 +132,8 @@ class SaveSettings:
         active = _active(self.repo.config_versions(portfolio_id))
         base = active["overrides"] if active else {}
         overrides = deep_merge(base, edits)
+        if overrides == base:
+            raise SettingsRuleError("No setting changed")
         check_overrides_apply(running["config"], overrides)
         row = self.repo.insert_config_version(
             portfolio_id,

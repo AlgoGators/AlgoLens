@@ -122,8 +122,7 @@ def _set(tree: dict[str, Any], path: list[str], value: Any) -> None:
 def changes_to_overrides(running: Mapping[str, Any], changes: Any) -> dict[str, Any]:
     """Validate {path, value} changes against the running config and return
     them as a nested overrides object. Refuses unknown keys, hidden sections,
-    credential keys, null, a type change, and changes equal to the running
-    value."""
+    credential keys, null and a type change."""
     if not isinstance(changes, list) or not changes:
         raise SettingsRuleError("changes must be a non-empty list of {path, value}")
     visible = visible_config(running)
@@ -152,11 +151,10 @@ def changes_to_overrides(running: Mapping[str, Any], changes: Any) -> dict[str, 
             raise SettingsRuleError(
                 f"{name} must stay a {value_type(old)} (got {value_type(new)})"
             )
-        if new == old and value_type(new) == value_type(old):
-            continue
+        # A value equal to the running one is kept: it may undo a pending
+        # change. Whether anything changes at all is judged against the desk
+        # layer by the caller.
         _set(overrides, path, new)
-    if not overrides:
-        raise SettingsRuleError("No setting changed")
     return overrides
 
 

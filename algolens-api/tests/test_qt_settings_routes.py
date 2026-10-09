@@ -70,6 +70,16 @@ def test_save_merges_over_the_active_layer_and_is_pending():
     assert all(f["path"][0] != "database" for f in view["fields"])
 
 
+def test_setting_a_pending_key_back_to_its_running_value_undoes_it():
+    repo = FakeSettingsRepo(used())
+    SaveSettings(repo).execute(QT, [{"path": ["risk", "max_leverage"], "value": 1.5}], "a", "d@x.com")
+    SaveSettings(repo).execute(QT, [{"path": ["risk", "max_leverage"], "value": 2.0}], "undo", "d@x.com")
+    assert repo.versions[-1]["overrides"] == {"risk": {"max_leverage": 2.0}}
+    with pytest.raises(SettingsRuleError, match="No setting changed"):
+        SaveSettings(repo).execute(QT, [{"path": ["risk", "max_leverage"], "value": 2.0}], "again", "d@x.com")
+    assert len(repo.versions) == 2
+
+
 def test_running_version_equal_to_active_is_not_pending():
     repo = FakeSettingsRepo(used())
     SaveSettings(repo).execute(QT, [{"path": ["capital"], "value": 1}], "r", "d@x.com")
