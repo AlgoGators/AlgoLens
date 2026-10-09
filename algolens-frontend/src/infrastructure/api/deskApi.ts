@@ -4,6 +4,7 @@ import type {
   QuantityChange,
   SymbolChoice,
 } from '../../domain/qt/desk';
+import type { SettingChange, SettingsState, SettingsVersion } from '../../domain/qt/settings';
 import { API_BASE_URL } from './httpClient';
 
 /** An API error with its HTTP status (409 = not seeded / conflict, ...). */
@@ -68,6 +69,13 @@ export const DeskApi = {
   requestOverride: (portfolioId: string, reason: string) =>
     request<CommandResult>('POST', `${desk(portfolioId)}/override-request`, { reason }),
   publish: (portfolioId: string) => request<CommandResult>('POST', `${desk(portfolioId)}/publish`, {}),
+  settings: (portfolioId: string) => request<SettingsState>('GET', `${desk(portfolioId)}/settings`),
+  saveSettings: async (portfolioId: string, changes: SettingChange[], reason: string) =>
+    (await request<{ version: SettingsVersion }>('POST', `${desk(portfolioId)}/settings`, { changes, reason }))
+      .version,
+  revertSettings: async (portfolioId: string, version: number, reason: string) =>
+    (await request<{ version: SettingsVersion }>('POST', `${desk(portfolioId)}/settings/revert`, { version, reason }))
+      .version,
   approval: (token: string) => request<ApprovalPage>('POST', '/portfolio/desk/approval', { token }),
   decide: (token: string, approved: boolean, reason: string) =>
     request<CommandResult>('POST', '/portfolio/desk/approval/decide', {
