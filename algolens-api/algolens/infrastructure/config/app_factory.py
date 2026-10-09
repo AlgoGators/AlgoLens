@@ -204,8 +204,17 @@ def create_app():
     app.register_blueprint(portfolio_bp, url_prefix="/portfolio")
     app.register_blueprint(desk_bp, url_prefix="/portfolio/desk")
 
+    @app.route("/health/live", methods=["GET"])
+    def liveness_check():
+        """Liveness: the process serves requests. No database: the container
+        healthcheck uses this, so a database outage does not mark the
+        backend unhealthy (and restart it) while the DB is the problem."""
+        return {"status": "ok"}, 200
+
     @app.route("/health", methods=["GET"])
     def health_check():
+        """Readiness: the backend can reach its database (503 when not).
+        deploy.sh gates a deploy on this."""
         app.logger.info("[HEALTH] Health check called")
 
         health_status = {"status": "ok", "checks": {}}

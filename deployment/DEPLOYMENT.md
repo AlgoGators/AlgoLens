@@ -79,17 +79,33 @@ Push to the `prod` branch (for example `git push origin main:prod`).
 - dies if `/home/ubuntu/.config/algogators/algolens.env` is missing;
 - `docker network create qt || true`;
 - pulls both images;
-- records the running image refs;
-- stops `algolens-edge`, `algolens-frontend` and `algolens-backend`;
+- **pre-flight**: runs a one-off container of the new backend image
+  (`docker compose run --rm backend`, so the env file is read exactly as the
+  service reads it) that connects to the database. If that fails, the deploy
+  stops before anything running is touched;
+- stops `algolens-edge`, `algolens-frontend` and `algolens-backend` (memory:
+  old and new never run side by side);
 - runs `docker compose up -d --remove-orphans`;
-- waits up to 3 minutes for `localhost:8088/health`;
-- writes `algolens.previous-images` and `algolens.current-images` to
-  `/home/ubuntu/.config/algogators/`;
-- prints the exact rollback command;
-- prunes images older than 168h.
+- waits up to 3 minutes for readiness, `localhost:8088/health` (backend and
+  database);
+- **on failure rolls back automatically** to the pair recorded in
+  `algolens.current-images` by the last good deploy (never the running
+  containers' images, which may belong to a half-finished roll), waits for it
+  to be healthy, and exits 1 either way;
+- on success writes `algolens.previous-images` and `algolens.current-images`
+  to `/home/ubuntu/.config/algogators/`, tags the images locally
+  `algolens-{backend,frontend}:current` and `:previous` so `docker image
+  prune` never removes a rollback target, and prints the rollback command;
+- prunes dangling images older than 168h.
 
-`/health` returns 503 when the backend cannot reach the database, so a broken
-env file fails the deploy.
+Health endpoints: `/health/live` is liveness (no database) and is the
+containers' healthcheck, so a database outage does not mark the backend
+unhealthy. `/health` is readiness (503 when the backend cannot reach the
+database) and is the deploy gate, so a broken env file fails the deploy.
+
+Logs: every service logs to json-file capped at 3 x 10 MB, set per service in
+`docker-compose.prod.yml`. The Docker daemon config is shared with the live
+trading engine and is left alone.
 
 Manual runs: *Actions > Deploy AlgoLens > Run workflow*. `dry-run` (default on)
 builds without pushing. Untick it and tick `deploy` on the `prod` branch to
@@ -177,8 +193,9 @@ sudo cp /etc/nginx/conf.d/algolens.conf.pre-docker /etc/nginx/conf.d/algolens.co
 That restores `/` -> `localhost:3000` and `/auth`, `/portfolio` ->
 `localhost:5001`.
 
-**Previous AlgoLens version on the box.** `deploy.sh` prints the exact command
-at the end of every deploy. In general:
+**Previous AlgoLens version on the box.** A deploy that never becomes healthy
+rolls itself back to the last good pair. To go back further by hand,
+`deploy.sh` prints the exact command at the end of every deploy. In general:
 
 ```bash
 cd ~/algolens && bash deployment/deploy.sh $(cat ~/.config/algogators/algolens.previous-images)
