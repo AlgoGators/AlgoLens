@@ -7,6 +7,7 @@ import { FinancialAnalysis } from './FinancialAnalysis';
 import { PositionBreakdown } from './PositionBreakdown';
 import { TradingActivity } from './TradingActivity';
 import { AlphaAttribution } from './AlphaAttribution';
+import { describeServedBook } from '../domain/portfolio/bookLabel';
 
 interface StrategyDetailProps {
   strategy: Strategy;
@@ -19,6 +20,7 @@ export function StrategyDetail({ strategy, onBack }: StrategyDetailProps) {
   const { theme } = useTheme();
   const isPositive = strategy.return >= 0;
   const periods = ['1W', '1M', '3M', '1Y', 'ALL'];
+  const bookLabel = describeServedBook(strategy);
 
   // Filter data based on selected period
   const filteredData = useMemo(() => {
@@ -87,6 +89,17 @@ export function StrategyDetail({ strategy, onBack }: StrategyDetailProps) {
             <div className={`text-sm mt-2 ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'
               }`}>
               Managed by {strategy.managers.join(' & ')} • {strategy.lastUpdate}
+              {bookLabel && (
+                <span
+                  data-testid="served-book"
+                  className={`ml-2 inline-block rounded px-2 py-0.5 text-xs ${strategy.fellBack
+                    ? theme === 'dark' ? 'bg-yellow-900/40 text-yellow-300' : 'bg-yellow-100 text-yellow-800'
+                    : theme === 'dark' ? 'bg-gray-800 text-gray-300' : 'bg-gray-100 text-gray-700'
+                    }`}
+                >
+                  {bookLabel}
+                </span>
+              )}
             </div>
           </div>
         </div>

@@ -17,6 +17,7 @@ from algolens.application.portfolio.ports import IncubationError
 from algolens.application.portfolio.use_cases import (
     GetIncubationPerformance,
     GetStrategyDetail,
+    InvalidBook,
     ListIncubatingStrategies,
     ListStrategies,
     PromoteToLive,
@@ -75,7 +76,9 @@ def get_strategy(strategy_id):
     try:
         current_app.logger.info("Fetching strategy: %s", strategy_id)
         registry, reader = _portfolio_dependencies()
-        strategy = GetStrategyDetail(registry, reader).execute(strategy_id)
+        strategy = GetStrategyDetail(registry, reader).execute(
+            strategy_id, book=request.args.get("book")
+        )
         elapsed_ms = (time.perf_counter() - start) * 1000
         current_app.logger.info(
             "[PORTFOLIO_TIMING] detail strategy_id=%s elapsed_ms=%.0f",
@@ -83,6 +86,8 @@ def get_strategy(strategy_id):
             elapsed_ms,
         )
         return jsonify(serialize_strategy_detail(strategy)), 200
+    except InvalidBook as exc:
+        return jsonify({"error": str(exc)}), 400
     except StrategyNotFound:
         return jsonify({"error": "Strategy not found"}), 404
     except StrategyDataNotFound:

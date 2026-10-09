@@ -55,16 +55,20 @@ def _fetch_equity_by_stream(cursor, strategy_type, portfolio_id):
     return by_stream
 
 
-def _fetch_current_positions(cursor, strategy_type, portfolio_id):
-    return _repository()._fetch_current_positions(cursor, strategy_type, portfolio_id)
+def _fetch_current_positions(cursor, strategy_type, portfolio_id, book):
+    return _repository()._fetch_current_positions(
+        cursor, strategy_type, portfolio_id, book
+    )
 
 
 def _fetch_recent_executions(cursor, strategy_type, portfolio_id):
     return _repository()._fetch_recent_executions(cursor, strategy_type, portfolio_id)
 
 
-def _fetch_yesterday_positions(cursor, strategy_type, portfolio_id):
-    return _repository()._fetch_yesterday_positions(cursor, strategy_type, portfolio_id)
+def _fetch_yesterday_positions(cursor, strategy_type, portfolio_id, book):
+    return _repository()._fetch_yesterday_positions(
+        cursor, strategy_type, portfolio_id, book
+    )
 
 
 def get_strategy_detail(cfg):
