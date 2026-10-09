@@ -2,8 +2,8 @@ from algolens.infrastructure.portfolio.strategy_registry import PostgresStrategy
 
 
 class FakeCursor:
-    def __init__(self, *, has_lifecycle, rows):
-        self.has_lifecycle = has_lifecycle
+    def __init__(self, *, has_lifecycle, rows, extra_columns=()):
+        self.columns = (["lifecycle"] if has_lifecycle else []) + list(extra_columns)
         self.rows = rows
         self.calls = []
         self.result = None
@@ -17,7 +17,7 @@ class FakeCursor:
     def execute(self, sql, params=None):
         self.calls.append((sql, params))
         if "information_schema.columns" in sql:
-            self.result = {"exists": 1} if self.has_lifecycle else None
+            self.result = [{"column_name": c} for c in self.columns if c in params[0]]
         elif "FROM trading.strategy_registry" in sql:
             self.result = self.rows
         else:
@@ -98,3 +98,40 @@ def test_list_filters_incubating_rows_when_lifecycle_column_exists():
     assert [strategy["id"] for strategy in strategies] == ["live"]
     registry_select = cursor.calls[1][0]
     assert "lifecycle" in registry_select
+
+
+def test_list_reads_group_and_desk_flag_when_migration_023_applied():
+    row = make_row("qt", lifecycle="live")
+    row.update({"portfolio_group": "qt_conservative", "desk_editable": True})
+    cursor = FakeCursor(
+        has_lifecycle=True,
+        rows=[row],
+        extra_columns=["portfolio_group", "desk_editable"],
+    )
+    registry = PostgresStrategyRegistry(connection_factory=lambda: FakeConnection(cursor))
+
+    [entry] = registry.list(active_only=True)
+
+    assert entry["portfolio_group"] == "qt_conservative"
+    assert entry["desk_editable"] is True
+    registry_select = cursor.calls[1][0]
+    assert "portfolio_group" in registry_select and "desk_editable" in registry_select
+
+
+def test_list_defaults_group_and_desk_flag_before_migration_023():
+    cursor = FakeCursor(has_lifecycle=True, rows=[make_row("a", lifecycle="live")])
+    registry = PostgresStrategyRegistry(connection_factory=lambda: FakeConnection(cursor))
+
+    [entry] = registry.list(active_only=True)
+
+    assert entry["portfolio_group"] is None
+    assert entry["desk_editable"] is False
+    assert "desk_editable" not in cursor.calls[1][0]
+
+
+def test_get_portfolio_finds_entry_by_portfolio_id():
+    cursor = FakeCursor(has_lifecycle=True, rows=[make_row("a", lifecycle="live")])
+    registry = PostgresStrategyRegistry(connection_factory=lambda: FakeConnection(cursor))
+
+    assert registry.get_portfolio("A_PORTFOLIO")["id"] == "a"
+    assert registry.get_portfolio("NOPE") is None
