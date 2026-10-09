@@ -1,10 +1,13 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useTheme } from '../../adapters/react/ThemeContext';
 import { useCommandPoll } from '../../adapters/react/useCommandPoll';
 import { DeskService } from '../../application/qt/deskService';
 import type { PositionBook } from '../../domain/portfolio/bookLabel';
 import {
   describeCommand,
+  editBlockedReason,
+  overrideBlockedReason,
+  proposalKey,
   publishBlockedReason,
   type ComparisonRow,
   type DeskCommand,
@@ -47,8 +50,14 @@ function CommandStatus({ command, label, onFinal }: {
       className={`mt-3 rounded border px-3 py-2 text-sm ${tone(polled.command, theme === 'dark')}`}
     >
       <span className="font-medium">#{polled.command.id}</span>{' '}
-      {describeCommand(polled.command, polled.timedOut)}
+      {describeCommand(polled.command, polled.phase)}
       <span className="opacity-70"> ({polled.command.requested_by})</span>
+      {polled.error && <div className="mt-1 text-red-500">{polled.error}</div>}
+      {(polled.phase !== 'normal' || polled.error) && (
+        <button type="button" className="ml-2 underline" onClick={polled.refresh}>
+          Refresh
+        </button>
+      )}
     </div>
   );
 }
@@ -105,24 +114,42 @@ export function DeskPanel({ portfolioId, book, reloadBook }: DeskPanelProps) {
   const [overrideOpen, setOverrideOpen] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [reloading, setReloading] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  // Only the newest state request may land: an older answer (a slow one, or
+  // one for the portfolio shown before) is dropped.
+  const requestSeq = useRef(0);
 
   const load = useCallback(async () => {
+    const seq = ++requestSeq.current;
     try {
       const next = await DeskService.state(portfolioId);
+      if (seq !== requestSeq.current || next.portfolioId !== portfolioId) return;
       setState(next);
       setError(null);
       setLastSave(prev => (prev && next.latestSave?.id === prev.id ? prev : next.latestSave));
       setLastPublish(prev => (prev && next.publish?.id === prev.id ? prev : next.publish));
     } catch (err) {
+      if (seq !== requestSeq.current) return;
       setError(err instanceof Error ? err.message : String(err));
     }
   }, [portfolioId]);
 
   useEffect(() => {
     setEditing(false);
+    setLastRequest(null);
+    setActionError(null);
     load();
+    return () => {
+      requestSeq.current += 1; // drop answers still in flight
+    };
   }, [load]);
+
+  // A day that becomes published (or starts publishing) takes no more edits.
+  const editBlocked = state ? editBlockedReason(state) : null;
+  useEffect(() => {
+    if (editBlocked) setEditing(false);
+  }, [editBlocked]);
 
   const refreshAll = useCallback(() => {
     load();
@@ -206,10 +233,12 @@ export function DeskPanel({ portfolioId, book, reloadBook }: DeskPanelProps) {
         <button
           type="button"
           data-testid="edit-button"
-          className="mt-4 px-4 py-2 rounded border"
+          className="mt-4 px-4 py-2 rounded border disabled:opacity-50"
+          disabled={reloading || editBlocked !== null}
+          title={editBlocked ?? (reloading ? 'Reloading the proposal...' : undefined)}
           onClick={() => setEditing(true)}
         >
-          Edit the proposal
+          {editBlocked === 'Published' ? 'Published: no more edits' : 'Edit the proposal'}
         </button>
       )}
       {state.seeded && book !== 'qt_proposal' && (
@@ -217,13 +246,22 @@ export function DeskPanel({ portfolioId, book, reloadBook }: DeskPanelProps) {
       )}
       {editing && book === 'qt_proposal' && (
         <DeskEditForm
+          // Keyed on the proposal: a reload that changes it resets the draft.
+          key={proposalKey(state.books.qt_proposal)}
           portfolioId={portfolioId}
           proposal={state.books.qt_proposal}
           onCancel={() => setEditing(false)}
+          onStale={message => {
+            setActionError(message);
+            load();
+          }}
           onSaved={command => {
             setEditing(false);
             setLastSave(command);
-            refreshAll();
+            // Edit stays disabled until the proposal this save wrote is reloaded.
+            setReloading(true);
+            reloadBook();
+            load().finally(() => setReloading(false));
           }}
         />
       )}
@@ -245,8 +283,9 @@ export function DeskPanel({ portfolioId, book, reloadBook }: DeskPanelProps) {
         {!overrideOpen ? (
           <button
             type="button"
-            className="mt-1 px-3 py-1 rounded border text-sm"
-            disabled={!state.seeded || busy}
+            className="mt-1 px-3 py-1 rounded border text-sm disabled:opacity-50"
+            disabled={busy || overrideBlockedReason(state) !== null}
+            title={overrideBlockedReason(state) ?? undefined}
             onClick={() => setOverrideOpen(true)}
           >
             Request override
@@ -254,7 +293,9 @@ export function DeskPanel({ portfolioId, book, reloadBook }: DeskPanelProps) {
         ) : (
           <div className="mt-2">
             <p className={`text-xs ${muted}`}>
-              Asks the VP and the President (by e-mail) to let the proposal trade exactly as asked.
+              Asks the VP and the President (by e-mail) to let the proposal trade exactly as asked. The request
+              records the proposal as it is now; if the desk changes it afterwards, the request can no longer be
+              approved.
             </p>
             <textarea
               aria-label="Override reason"
@@ -268,7 +309,7 @@ export function DeskPanel({ portfolioId, book, reloadBook }: DeskPanelProps) {
               <button
                 type="button"
                 className="px-3 py-1 rounded bg-orange-500 text-white disabled:opacity-50"
-                disabled={busy || !overrideReason.trim()}
+                disabled={busy || !overrideReason.trim() || overrideBlockedReason(state) !== null}
                 onClick={() =>
                   act(async () => {
                     const result = await DeskService.requestOverride(portfolioId, overrideReason.trim());

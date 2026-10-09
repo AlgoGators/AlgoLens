@@ -44,8 +44,13 @@ class DeskRepositoryPort(Protocol):
         reason: str,
         requested_by: str,
     ) -> Row:
-        """One transaction: lock the proposal, plan the changes from the
-        current quantities, upsert them and insert the save row."""
+        """One transaction under the day lock: refuse a published day or an
+        open publish (DeskConflict), lock the proposal, plan the changes from
+        the current quantities (the plan may raise DeskStaleError), upsert
+        them and insert the save row."""
+
+    def proposal_rows(self, portfolio_id: str, day: date) -> Sequence[Row]:
+        """Every qt_proposal row of the day: strategy_name, symbol, quantity."""
 
     def symbol_choices(self, asset_class: str) -> Sequence[Row]:
         ...
@@ -56,16 +61,14 @@ class DeskRepositoryPort(Protocol):
     def commands(self, portfolio_id: str, day: date) -> Sequence[Row]:
         ...
 
-    def insert_command(
-        self,
-        portfolio_id: str,
-        day: date,
-        kind: str,
-        requested_by: str,
-        reason: str | None = None,
-        payload: Mapping[str, Any] | None = None,
+    def insert_publish(self, portfolio_id: str, day: date, requested_by: str) -> Row:
+        """Under the day lock: refuse a published day or an open publish."""
+
+    def insert_override_request(
+        self, portfolio_id: str, day: date, requested_by: str, reason: str
     ) -> Row:
-        ...
+        """Under the day lock: refuse a published day, an open publish or an
+        open request; insert with the proposal snapshot and its hash (C1)."""
 
     def find_request_by_token_hash(self, token_hash: str) -> Row | None:
         ...
@@ -78,7 +81,9 @@ class DeskRepositoryPort(Protocol):
         approver_role: str,
         reason: str | None,
     ) -> Row:
-        """Lock the request, refuse a second decision (DeskConflict), insert."""
+        """Under the day lock: refuse (DeskConflict) a decided request, one
+        not done, a published day, and an approval whose snapshot no longer
+        matches the proposal; insert."""
 
     def publish_state(self, portfolio_id: str, day: date) -> Row | None:
         ...

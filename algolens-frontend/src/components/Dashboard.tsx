@@ -174,6 +174,8 @@ export function Dashboard({ onLogout }: DashboardProps) {
           )}
           {selectedPortfolio ? (
             <PortfolioBookView
+              // Remount per portfolio: nothing of the previous one survives a switch.
+              key={selectedPortfolio.portfolio_id}
               portfolio={selectedPortfolio}
               onBack={() => setSelectedPortfolioId(null)}
               renderDesk={
@@ -181,7 +183,12 @@ export function Dashboard({ onLogout }: DashboardProps) {
                 // for desk users. The server enforces all three again.
                 portfolioList?.deskEnabled && selectedPortfolio.desk_editable && isInternalMember
                   ? ({ portfolio, book, reload }) => (
-                      <DeskPanel portfolioId={portfolio.portfolio_id} book={book} reloadBook={reload} />
+                      <DeskPanel
+                        key={portfolio.portfolio_id}
+                        portfolioId={portfolio.portfolio_id}
+                        book={book}
+                        reloadBook={reload}
+                      />
                     )
                   : undefined
               }

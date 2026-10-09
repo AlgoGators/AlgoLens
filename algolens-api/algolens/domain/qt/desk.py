@@ -5,7 +5,10 @@ the master rulings 13, 14 and 16. No database, no HTTP.
 """
 
 import hashlib
+import json
+import re
 from collections.abc import Iterable, Mapping
+from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from numbers import Integral
 from typing import Any
@@ -33,8 +36,27 @@ MAX_ABS_CONTRACTS = 100_000
 MAX_REASON_LENGTH = 2000
 
 
+# A typed quantity: ASCII digits with an optional sign. str.isdigit() also
+# accepts "²" and other Unicode digits that int() then refuses; the length cap
+# keeps int() far from its digit limit.
+_WHOLE_CONTRACTS = re.compile(r"[+-]?[0-9]{1,15}")
+
+
 class DeskRuleError(ValueError):
     """A desk request breaks a rule; the message says which, for the user."""
+
+
+class DeskStaleError(Exception):
+    """The proposal changed since the desk loaded it (optimistic concurrency).
+    `symbols` lists the symbols whose quantity is no longer what was shown."""
+
+    def __init__(self, symbols: list[str]):
+        self.symbols = list(symbols)
+        super().__init__(
+            "The proposal changed since you loaded it ("
+            + ", ".join(self.symbols)
+            + "); reload and edit again"
+        )
 
 
 def require_reason(reason: Any) -> str:
@@ -57,12 +79,8 @@ def parse_contracts(value: Any) -> int:
         if not value.is_integer():
             raise DeskRuleError("Quantity must be a whole number of contracts")
         quantity = int(value)
-    elif isinstance(value, str) and value.strip():
-        text = value.strip()
-        sign = text[0] in "+-"
-        if not text[1 if sign else 0:].isdigit():
-            raise DeskRuleError("Quantity must be a whole number of contracts")
-        quantity = int(text)
+    elif isinstance(value, str) and _WHOLE_CONTRACTS.fullmatch(value.strip()):
+        quantity = int(value.strip())
     else:
         raise DeskRuleError("Quantity must be a whole number of contracts")
     if abs(quantity) > MAX_ABS_CONTRACTS:
@@ -111,6 +129,136 @@ def plan_changes(
     if not changes:
         raise DeskRuleError("No quantity changed")
     return changes
+
+
+def _shown_quantity(symbol: str, value: Any) -> Decimal:
+    if value is None:
+        return Decimal(0)
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise DeskRuleError(f"{symbol}: expected must be the quantity shown (a number) or null")
+    return Decimal(str(value))
+
+
+def stale_symbols(current: Mapping[str, Any], edits: Iterable[Mapping[str, Any]]) -> list[str]:
+    """Symbols whose proposal quantity is no longer the one the desk was shown.
+
+    Every edit carries `expected`: the quantity the form showed for that
+    symbol (null, or 0, for a symbol not in the proposal). A symbol missing
+    from `current` counts as 0.
+    """
+    stale = []
+    for edit in edits:
+        if not isinstance(edit, Mapping) or not isinstance(edit.get("symbol"), str):
+            continue  # plan_changes reports the shape error
+        symbol = edit["symbol"].strip()
+        if "expected" not in edit:
+            raise DeskRuleError(f"{symbol}: the quantity shown (expected) is required")
+        shown = _shown_quantity(symbol, edit["expected"])
+        now = Decimal(str(current.get(symbol, 0)))
+        if now != shown:
+            stale.append(symbol)
+    return stale
+
+
+def plan_desk_edit(
+    current: Mapping[str, Any], edits: Iterable[Mapping[str, Any]]
+) -> list[dict[str, Any]]:
+    """plan_changes, after refusing (DeskStaleError) an edit made against
+    quantities that have changed since the desk loaded them."""
+    if edits is None or isinstance(edits, (str, bytes, Mapping)):
+        raise DeskRuleError("changes must be a list of {symbol, quantity, expected}")
+    edits = list(edits)
+    stale = stale_symbols(current, edits)
+    if stale:
+        raise DeskStaleError(stale)
+    return plan_changes(current, edits)
+
+
+# --- the override snapshot (contract C1) --------------------------------------
+
+
+def proposal_snapshot(rows: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """Every qt_proposal row of a day (zero rows included) as
+    {"strategy_name", "symbol", "quantity"}, keys in that order, quantity an
+    integer, sorted by (strategy_name, symbol) (quantity breaks a tie, which
+    the table's key otherwise allows across strategy_ids)."""
+    snapshot = []
+    for row in rows:
+        try:
+            quantity = Decimal(str(row["quantity"]))
+        except (InvalidOperation, ValueError):
+            raise DeskRuleError(f"{row['symbol']} has no numeric quantity") from None
+        if not quantity.is_finite() or quantity != quantity.to_integral_value():
+            raise DeskRuleError(f"{row['symbol']} holds a fractional quantity ({row['quantity']})")
+        snapshot.append(
+            {
+                "strategy_name": str(row["strategy_name"]),
+                "symbol": str(row["symbol"]),
+                "quantity": int(quantity),
+            }
+        )
+    snapshot.sort(key=lambda r: (r["strategy_name"], r["symbol"], r["quantity"]))
+    return snapshot
+
+
+def snapshot_bytes(snapshot: list[dict[str, Any]]) -> bytes:
+    """The exact bytes the engine hashes too: no spaces, ASCII-escaped."""
+    return json.dumps(snapshot, separators=(",", ":"), ensure_ascii=True).encode("ascii")
+
+
+def snapshot_sha256(snapshot: list[dict[str, Any]]) -> str:
+    return hashlib.sha256(snapshot_bytes(snapshot)).hexdigest()
+
+
+def override_payload(rows: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
+    """payload of an override_request: the snapshot and its hash."""
+    snapshot = proposal_snapshot(rows)
+    return {"proposal": snapshot, "proposal_sha256": snapshot_sha256(snapshot)}
+
+
+def request_matches(request: Mapping[str, Any], current_sha256: str | None) -> bool:
+    """Whether a request's snapshot is the proposal as it is now. A request
+    without a snapshot (made before C1) never matches."""
+    payload = request.get("payload")
+    recorded = payload.get("proposal_sha256") if isinstance(payload, Mapping) else None
+    return isinstance(recorded, str) and recorded == current_sha256
+
+
+# A decision in one of these states settles its request (C2).
+DECIDING_STATUSES = (PENDING, RUNNING, DONE)
+
+
+def open_override_request(
+    commands: Iterable[Mapping[str, Any]], now: datetime, current_sha256: str | None
+) -> Mapping[str, Any] | None:
+    """The day's override request still in play, or None (C2).
+
+    A request is open while it is pending or running, and once e-mailed
+    (done) while its link is valid, nobody has decided it and it still
+    describes the current proposal. A request whose snapshot no longer
+    matches the proposal can never be approved, so it does not block a new one.
+    """
+    commands = list(commands)
+    deciding = {
+        c.get("parent_id")
+        for c in commands
+        if c["kind"] == OVERRIDE_DECISION and c["status"] in DECIDING_STATUSES
+    }
+    for command in commands:
+        if command["kind"] != OVERRIDE_REQUEST:
+            continue
+        if command["status"] in OPEN_STATUSES:
+            return command
+        expires = command.get("token_expires_at")
+        if (
+            command["status"] == DONE
+            and command["id"] not in deciding
+            and expires is not None
+            and expires > now
+            and request_matches(command, current_sha256)
+        ):
+            return command
+    return None
 
 
 def token_hash(token: str) -> str:

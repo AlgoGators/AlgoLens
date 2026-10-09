@@ -21,7 +21,8 @@ from algolens.application.qt.use_cases import (
     RequestOverride,
     SaveDeskEdit,
 )
-from algolens.domain.qt.desk import DeskRuleError, token_hash
+from algolens.domain.qt import desk as rules
+from algolens.domain.qt.desk import DeskRuleError, DeskStaleError, token_hash
 
 DAY = date(2026, 10, 8)
 NOW = datetime(2026, 10, 8, 15, tzinfo=timezone.utc)
@@ -47,6 +48,7 @@ class FakeRepo:
         }
         self.rows = []
         self.published = None
+        self.now = NOW
 
     def _insert(self, **row):
         row = {
@@ -75,9 +77,42 @@ class FakeRepo:
     def book_rows(self, portfolio_id, day, book):
         return self.books[book]
 
+    # The Postgres repository's checks, made under its day lock.
+
+    def _is_published(self, portfolio_id):
+        return bool(self.published and self.published.get("published_at")) or any(
+            r["kind"] == "publish" and r["status"] == "done" for r in self.rows
+        )
+
+    def _guard(self, portfolio_id, refuse_open_publish=True):
+        if self._is_published(portfolio_id):
+            raise DeskConflict("already published")
+        if refuse_open_publish and any(
+            r["kind"] == "publish" and r["status"] in ("pending", "running") for r in self.rows
+        ):
+            raise DeskConflict("publish open")
+
+    def proposal_rows(self, portfolio_id, day):
+        return [
+            {"strategy_name": "TF", "symbol": r["symbol"], "quantity": r["quantity"]}
+            for r in self.books["qt_proposal"]
+        ]
+
+    def _sha(self):
+        return rules.snapshot_sha256(rules.proposal_snapshot(self.proposal_rows(None, None)))
+
     def save_proposal(self, portfolio_id, day, plan, reason, requested_by):
+        self._guard(portfolio_id)
         current = {r["symbol"]: r["quantity"] for r in self.books["qt_proposal"]}
         changes = plan(current)
+        for change in changes:
+            row = next((r for r in self.books["qt_proposal"] if r["symbol"] == change["symbol"]), None)
+            if row is None:
+                self.books["qt_proposal"].append(
+                    {"symbol": change["symbol"], "quantity": change["to"], "average_price": 1,
+                     "moved_by": None})
+            else:
+                row["quantity"] = change["to"]
         return self._insert(
             portfolio_id=portfolio_id, kind="save", requested_by=requested_by,
             reason=reason, payload={"changes": changes},
@@ -94,16 +129,35 @@ class FakeRepo:
         return [r for r in self.rows if r["portfolio_id"] == portfolio_id]
 
     def insert_command(self, portfolio_id, day, kind, requested_by, reason=None, payload=None):
+        """Test helper: a raw row, no checks."""
         return self._insert(portfolio_id=portfolio_id, kind=kind, requested_by=requested_by,
                             reason=reason, payload=payload or {})
+
+    def insert_publish(self, portfolio_id, day, requested_by):
+        self._guard(portfolio_id)
+        return self._insert(portfolio_id=portfolio_id, kind="publish", requested_by=requested_by)
+
+    def insert_override_request(self, portfolio_id, day, requested_by, reason):
+        self._guard(portfolio_id)
+        payload = rules.override_payload(self.proposal_rows(portfolio_id, day))
+        if rules.open_override_request(self.rows, self.now, payload["proposal_sha256"]):
+            raise DeskConflict("a request is open")
+        return self._insert(portfolio_id=portfolio_id, kind="override_request",
+                            requested_by=requested_by, reason=reason, payload=payload)
 
     def find_request_by_token_hash(self, h):
         return next((r for r in self.rows if r["token_hash"] == h), None)
 
     def insert_decision(self, request_id, approved, approver, approver_role, reason):
-        if any(r["parent_id"] == request_id for r in self.rows):
+        if any(r["parent_id"] == request_id and r["status"] in rules.DECIDING_STATUSES
+               for r in self.rows):
             raise DeskConflict("already decided")
         request = self.get_command(request_id)
+        if request["status"] != "done":
+            raise DeskConflict("not e-mailed")
+        self._guard(request["portfolio_id"], refuse_open_publish=False)
+        if approved and not rules.request_matches(request, self._sha()):
+            raise DeskConflict("the proposal changed after the override was requested")
         return self._insert(portfolio_id=request["portfolio_id"], kind="override_decision",
                             requested_by=approver, reason=reason,
                             payload={"approved": approved}, parent_id=request_id,
@@ -142,7 +196,7 @@ def test_save_inserts_the_save_row_then_calls_run_desk():
     repo, agent = FakeRepo(), FakeAgent()
 
     result = SaveDeskEdit(repo, agent).execute(
-        QT, [{"symbol": "ZC.v.0", "quantity": 0}], " flatten corn ", "desk@x.com"
+        QT, [{"symbol": "ZC.v.0", "quantity": 0, "expected": 3}], " flatten corn ", "desk@x.com"
     )
 
     command = result["command"]
@@ -157,7 +211,7 @@ def test_save_succeeds_when_the_engine_cannot_be_reached():
     repo, agent = FakeRepo(), FakeAgent(fail=True)
 
     result = SaveDeskEdit(repo, agent).execute(
-        QT, [{"symbol": "ZC.v.0", "quantity": 1}], "r", "desk@x.com"
+        QT, [{"symbol": "ZC.v.0", "quantity": 1, "expected": 3}], "r", "desk@x.com"
     )
 
     assert result["command"]["status"] == "pending"
@@ -167,8 +221,8 @@ def test_save_succeeds_when_the_engine_cannot_be_reached():
 def test_saves_are_repeatable():
     repo, agent = FakeRepo(), FakeAgent()
     use_case = SaveDeskEdit(repo, agent)
-    use_case.execute(QT, [{"symbol": "ZC.v.0", "quantity": 1}], "a", "d@x.com")
-    use_case.execute(QT, [{"symbol": "ZC.v.0", "quantity": 2}], "b", "d@x.com")
+    use_case.execute(QT, [{"symbol": "ZC.v.0", "quantity": 1, "expected": 3}], "a", "d@x.com")
+    use_case.execute(QT, [{"symbol": "ZC.v.0", "quantity": 2, "expected": 1}], "b", "d@x.com")
     assert [r["kind"] for r in repo.rows] == ["save", "save"]
 
 
@@ -176,14 +230,14 @@ def test_saves_are_repeatable():
 def test_save_is_refused_on_a_portfolio_the_desk_may_not_edit(entry):
     with pytest.raises(DeskForbidden):
         SaveDeskEdit(FakeRepo(), FakeAgent()).execute(
-            entry, [{"symbol": "ZC.v.0", "quantity": 1}], "r", "d@x.com"
+            entry, [{"symbol": "ZC.v.0", "quantity": 1, "expected": 3}], "r", "d@x.com"
         )
 
 
 def test_save_requires_a_reason():
     with pytest.raises(DeskRuleError):
         SaveDeskEdit(FakeRepo(), FakeAgent()).execute(
-            QT, [{"symbol": "ZC.v.0", "quantity": 1}], "  ", "d@x.com"
+            QT, [{"symbol": "ZC.v.0", "quantity": 1, "expected": 3}], "  ", "d@x.com"
         )
 
 
@@ -192,7 +246,7 @@ def test_save_before_the_proposal_is_seeded_is_409():
     for repo in (FakeRepo(day=None), FakeRepo(proposal=[])):
         with pytest.raises(DeskNotSeeded):
             SaveDeskEdit(repo, agent).execute(
-                QT, [{"symbol": "ZC.v.0", "quantity": 1}], "r", "d@x.com"
+                QT, [{"symbol": "ZC.v.0", "quantity": 1, "expected": 3}], "r", "d@x.com"
             )
     assert agent.calls == []
 
@@ -202,7 +256,7 @@ def test_save_after_publish_is_refused():
     repo.insert_command(QT["portfolio_id"], DAY, "publish", "d@x.com")["status"] = "done"
     with pytest.raises(DeskConflict):
         SaveDeskEdit(repo, FakeAgent()).execute(
-            QT, [{"symbol": "ZC.v.0", "quantity": 1}], "r", "d@x.com"
+            QT, [{"symbol": "ZC.v.0", "quantity": 1, "expected": 3}], "r", "d@x.com"
         )
 
 
@@ -218,7 +272,7 @@ def test_symbol_choices_only_for_editable_books():
 def test_state_shows_books_comparison_and_latest_save():
     repo = FakeRepo()
     repo.books["qt"] = [{"symbol": "ZC.v.0", "quantity": 2, "average_price": 400, "moved_by": "cap"}]
-    SaveDeskEdit(repo, FakeAgent()).execute(QT, [{"symbol": "ZC.v.0", "quantity": 5}], "r", "d@x.com")
+    SaveDeskEdit(repo, FakeAgent()).execute(QT, [{"symbol": "ZC.v.0", "quantity": 5, "expected": 3}], "r", "d@x.com")
     repo.rows[-1].update(status="done", message="cap bound", result={"book_source": "desk"})
 
     state = GetDeskState(repo).execute(QT)
@@ -341,3 +395,57 @@ def test_publish_state_comes_from_live_run_metadata():
     repo.published = {"published_by": "d@x.com", "published_at": NOW}
     state = GetDeskState(repo).execute(QT)
     assert state["published"] == {"published_by": "d@x.com", "published_at": NOW.isoformat()}
+
+
+# --- hardening (2026-10-09 spec) ---------------------------------------------
+
+
+def test_a_published_day_refuses_save_override_and_publish():
+    repo = FakeRepo()
+    repo.published = {"published_by": "system:non-trading-day", "published_at": NOW}
+    with pytest.raises(DeskConflict):
+        SaveDeskEdit(repo, FakeAgent()).execute(
+            QT, [{"symbol": "ZC.v.0", "quantity": 1, "expected": 3}], "r", "d@x.com")
+    with pytest.raises(DeskConflict):
+        RequestOverride(repo, FakeAgent()).execute(QT, "r", "d@x.com")
+    with pytest.raises(DeskConflict):
+        PublishDesk(repo, FakeAgent()).execute(QT, "d@x.com")
+    assert repo.rows == []
+    state = GetDeskState(repo, now=lambda: NOW).execute(QT)
+    assert state["locked"] == "published"
+
+
+def test_the_override_request_carries_the_snapshot():
+    repo = FakeRepo()
+    command = RequestOverride(repo, FakeAgent()).execute(QT, "r", "d@x.com")["command"]
+    assert command["payload"]["proposal"] == [
+        {"strategy_name": "TF", "symbol": "ZC.v.0", "quantity": 3}]
+    assert len(command["payload"]["proposal_sha256"]) == 64
+
+
+def test_an_approval_of_a_changed_proposal_is_refused():
+    repo = FakeRepo()
+    _emailed_request(repo)
+    SaveDeskEdit(repo, FakeAgent()).execute(
+        QT, [{"symbol": "ZC.v.0", "quantity": 1, "expected": 3}], "r", "d@x.com")
+    page = LookupApproval(repo, now=lambda: NOW).execute("tok")
+    assert page["snapshotMatches"] is False and page["snapshot"][0]["quantity"] == 3
+    with pytest.raises(DeskConflict):
+        DecideOverride(repo, FakeAgent(), now=lambda: NOW).execute("tok", True, "p@x.com", "president")
+
+
+def test_state_shows_the_open_request_and_the_publishing_lock():
+    repo = FakeRepo()
+    request = _emailed_request(repo)
+    state = GetDeskState(repo, now=lambda: NOW).execute(QT)
+    assert state["openOverrideRequestId"] == request["id"] and state["locked"] is None
+    PublishDesk(repo, FakeAgent()).execute(QT, "d@x.com")
+    assert GetDeskState(repo, now=lambda: NOW).execute(QT)["locked"] == "publishing"
+
+
+def test_a_stale_save_names_the_symbols():
+    repo = FakeRepo()
+    with pytest.raises(DeskStaleError) as stale:
+        SaveDeskEdit(repo, FakeAgent()).execute(
+            QT, [{"symbol": "ZC.v.0", "quantity": 1, "expected": 2}], "r", "d@x.com")
+    assert stale.value.symbols == ["ZC.v.0"] and repo.rows == []

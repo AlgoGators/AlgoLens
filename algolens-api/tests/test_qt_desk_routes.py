@@ -66,7 +66,7 @@ def test_every_desk_route_is_404_while_the_flag_is_off(client, desk, monkeypatch
     for path in ("save", "override-request", "publish"):
         response = client.post(
             f"/portfolio/desk/QT_CONSERVATIVE_PORTFOLIO/{path}",
-            json={"reason": "r", "changes": [{"symbol": "ZC.v.0", "quantity": 1}]},
+            json={"reason": "r", "changes": [{"symbol": "ZC.v.0", "quantity": 1, "expected": 3}]},
             headers=headers,
         )
         assert response.status_code == 404, path
@@ -96,7 +96,7 @@ def test_save_returns_201_with_the_pending_row(client, desk):
 
     response = client.post(
         "/portfolio/desk/QT_CONSERVATIVE_PORTFOLIO/save",
-        json={"changes": [{"symbol": "ZC.v.0", "quantity": 0}], "reason": "flatten"},
+        json={"changes": [{"symbol": "ZC.v.0", "quantity": 0, "expected": 3}], "reason": "flatten"},
         headers=headers,
     )
 
@@ -113,8 +113,8 @@ def test_save_returns_201_with_the_pending_row(client, desk):
 @pytest.mark.parametrize(
     "payload, status",
     [
-        ({"changes": [{"symbol": "ZC.v.0", "quantity": 1}]}, 400),  # no reason
-        ({"changes": [{"symbol": "ZC.v.0", "quantity": 1.5}], "reason": "r"}, 400),
+        ({"changes": [{"symbol": "ZC.v.0", "quantity": 1, "expected": 3}]}, 400),  # no reason
+        ({"changes": [{"symbol": "ZC.v.0", "quantity": 1.5, "expected": 3}], "reason": "r"}, 400),
         ({"changes": [], "reason": "r"}, 400),
         ([1, 2], 400),
     ],
@@ -133,7 +133,7 @@ def test_save_before_seeding_is_409(client, desk):
     headers = _login(client)
     response = client.post(
         "/portfolio/desk/QT_CONSERVATIVE_PORTFOLIO/save",
-        json={"changes": [{"symbol": "ZC.v.0", "quantity": 1}], "reason": "r"},
+        json={"changes": [{"symbol": "ZC.v.0", "quantity": 1, "expected": 3}], "reason": "r"},
         headers=headers,
     )
     assert response.status_code == 409
@@ -143,7 +143,7 @@ def test_model_portfolio_is_not_editable(client, desk):
     headers = _login(client)
     response = client.post(
         "/portfolio/desk/QT_CONSERVATIVE_MODEL_PORTFOLIO/save",
-        json={"changes": [{"symbol": "ZC.v.0", "quantity": 1}], "reason": "r"},
+        json={"changes": [{"symbol": "ZC.v.0", "quantity": 1, "expected": 3}], "reason": "r"},
         headers=headers,
     )
     assert response.status_code == 403
@@ -172,7 +172,8 @@ def _request_with_token(client, desk, requested_by="desk@x.com"):
     )
     assert response.status_code == 201
     row = repo.get_command(response.get_json()["command"]["id"])
-    row.update(token_hash=token_hash("secret-token"), token_expires_at=NOW + timedelta(days=3650))
+    row.update(token_hash=token_hash("secret-token"), token_expires_at=NOW + timedelta(days=3650),
+               status="done")
     return row
 
 
@@ -227,3 +228,89 @@ def test_expired_link_is_410(client, desk):
     row["token_expires_at"] = NOW - timedelta(days=3650)
     headers = _login(client, email="p@x.com")
     assert client.post("/portfolio/desk/approval", json={"token": "secret-token"}, headers=headers).status_code == 410
+
+
+# --- hardening (2026-10-09 spec) ---------------------------------------------
+
+
+def test_a_stale_save_is_409_listing_the_changed_symbols(client, desk):
+    headers = _login(client)
+    response = client.post(
+        "/portfolio/desk/QT_CONSERVATIVE_PORTFOLIO/save",
+        json={"changes": [{"symbol": "ZC.v.0", "quantity": 1, "expected": 2}], "reason": "r"},
+        headers=headers,
+    )
+    assert response.status_code == 409
+    assert response.get_json()["changed"] == ["ZC.v.0"]
+
+
+def test_a_save_without_the_quantity_shown_is_400(client, desk):
+    headers = _login(client)
+    response = client.post(
+        "/portfolio/desk/QT_CONSERVATIVE_PORTFOLIO/save",
+        json={"changes": [{"symbol": "ZC.v.0", "quantity": 1}], "reason": "r"},
+        headers=headers,
+    )
+    assert response.status_code == 400
+
+
+def test_a_unicode_digit_quantity_is_400_not_500(client, desk):
+    headers = _login(client)
+    response = client.post(
+        "/portfolio/desk/QT_CONSERVATIVE_PORTFOLIO/save",
+        json={"changes": [{"symbol": "ZC.v.0", "quantity": "²", "expected": 3}], "reason": "r"},
+        headers=headers,
+    )
+    assert response.status_code == 400
+
+
+def test_a_second_open_override_request_is_409(client, desk):
+    headers = _login(client)
+    path = "/portfolio/desk/QT_CONSERVATIVE_PORTFOLIO/override-request"
+    assert client.post(path, json={"reason": "a"}, headers=headers).status_code == 201
+    assert client.post(path, json={"reason": "b"}, headers=headers).status_code == 409
+
+
+def test_override_requests_are_rate_limited_per_user(client, desk):
+    repo, _agent = desk
+    path = "/portfolio/desk/QT_CONSERVATIVE_PORTFOLIO/override-request"
+    headers = _login(client, email="a@x.com")
+    for _ in range(5):
+        response = client.post(path, json={"reason": "r"}, headers=headers)
+        assert response.status_code == 201
+        repo.rows[-1]["status"] = "failed"  # frees the day for the next one
+    assert client.post(path, json={"reason": "r"}, headers=headers).status_code == 429
+    # Another user has a budget of their own.
+    with app.app_context():
+        token = create_access_token(identity="8", additional_claims={"role": "admin", "email": "b@x.com"})
+        csrf = get_csrf_token(token)
+    client.set_cookie("access_token_cookie", token)
+    assert client.post(path, json={"reason": "r"}, headers={"X-CSRF-TOKEN": csrf}).status_code == 201
+
+
+def test_refused_override_requests_do_not_use_the_budget(client, desk):
+    path = "/portfolio/desk/QT_CONSERVATIVE_PORTFOLIO/override-request"
+    headers = _login(client)
+    assert client.post(path, json={"reason": "r"}, headers=headers).status_code == 201
+    for _ in range(6):
+        assert client.post(path, json={"reason": "r"}, headers=headers).status_code == 409
+
+
+def test_a_stale_approval_is_409(client, desk):
+    repo, _agent = desk
+    _request_with_token(client, desk)
+    repo.books["qt_proposal"][0]["quantity"] = 9  # the desk saved meanwhile
+    headers = _login(client, email="p@x.com", role="investor")
+    page = client.post("/portfolio/desk/approval", json={"token": "secret-token"}, headers=headers)
+    assert page.get_json()["snapshotMatches"] is False
+    decided = client.post(
+        "/portfolio/desk/approval/decide",
+        json={"token": "secret-token", "approved": True},
+        headers=headers,
+    )
+    assert decided.status_code == 409
+
+
+def test_liveness_needs_no_database(client):
+    response = client.get("/health/live")
+    assert response.status_code == 200 and response.get_json() == {"status": "ok"}

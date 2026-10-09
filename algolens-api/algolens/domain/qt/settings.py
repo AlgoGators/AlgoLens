@@ -14,12 +14,29 @@ files at the next live run.
 
 Paths are lists of keys (["risk", "max_leverage"]) so a key holding a dot
 cannot be misread.
+
+Values (check_value):
+  * the type stays the running value's type; an integer stays an integer
+    (20.5 is refused where the engine runs 20; 20.0 is stored as 20), and a
+    float may be given as an integer (stored as a float, which the engine
+    reads as a double);
+  * where the running value is null AlgoLens cannot know the type, so only
+    a scalar (boolean, number, string) is accepted, and the change is logged;
+  * a heuristic on the key name refuses negative numbers where a negative
+    value is never meant: the key (its last path element, lowercased) ends
+    in "leverage", "drawdown", "capital" or "limit", or contains "vol"
+    (volatility targets and windows). It is a guard against a typo, not a
+    schema; the engine stays the judge of what it can run.
 """
 
 import copy
+import logging
+import math
 from collections.abc import Mapping
-from numbers import Real
+from numbers import Integral, Real
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 # Never shown, never editable (the engine also refuses them).
 HIDDEN_SECTIONS = frozenset({"database", "email"})
@@ -27,6 +44,9 @@ FORBIDDEN_KEYS = frozenset({"portfolio_id", "host", "port", "user", "username", 
 FORBIDDEN_MARKERS = ("password", "secret", "token", "api_key", "apikey", "private_key", "credential")
 
 MAX_PATH_DEPTH = 12
+
+NON_NEGATIVE_SUFFIXES = ("leverage", "drawdown", "capital", "limit")
+NON_NEGATIVE_MARKERS = ("vol",)
 
 
 class SettingsRuleError(ValueError):
@@ -99,6 +119,54 @@ def _types_match(new: Any, old: Any) -> bool:
     return True
 
 
+def _is_int(value: Any) -> bool:
+    return isinstance(value, Integral) and not isinstance(value, bool)
+
+
+def must_not_be_negative(key: str) -> bool:
+    """The key-name heuristic of the module docstring."""
+    lowered = str(key).lower()
+    return lowered.endswith(NON_NEGATIVE_SUFFIXES) or any(m in lowered for m in NON_NEGATIVE_MARKERS)
+
+
+def _numbers(value: Any) -> list[Any]:
+    if isinstance(value, list):
+        return [v for v in value if value_type(v) == "number"]
+    return [value] if value_type(value) == "number" else []
+
+
+def check_value(path: list[str], new: Any, old: Any) -> Any:
+    """The value to store for `path`, given the running value `old`, or a
+    SettingsRuleError. See the module docstring."""
+    name = ".".join(path)
+    if new is None:
+        raise SettingsRuleError(f"{name} cannot be set to null")
+    if any(not math.isfinite(v) for v in _numbers(new)):
+        raise SettingsRuleError(f"{name} must be a finite number")
+    if old is None:
+        if value_type(new) not in ("boolean", "number", "string"):
+            raise SettingsRuleError(
+                f"{name} runs as null, so only a plain value (number, text, true/false) "
+                "can be set"
+            )
+        logger.info("[SETTINGS] %s runs as null; setting it to a %s", name, value_type(new))
+    elif not _types_match(new, old):
+        raise SettingsRuleError(f"{name} must stay a {value_type(old)} (got {value_type(new)})")
+    if _is_int(old) and value_type(new) == "number" and not _is_int(new):
+        if not float(new).is_integer():
+            raise SettingsRuleError(f"{name} must stay a whole number (got {new})")
+        new = int(new)
+    elif isinstance(old, float) and _is_int(new):
+        new = float(new)  # the engine reads a double
+    if isinstance(old, list) and old and all(_is_int(v) for v in old):
+        if not all(_is_int(v) or float(v).is_integer() for v in new):
+            raise SettingsRuleError(f"{name} must hold whole numbers")
+        new = [int(v) for v in new]
+    if must_not_be_negative(path[-1]) and any(v < 0 for v in _numbers(new)):
+        raise SettingsRuleError(f"{name} cannot be negative")
+    return new
+
+
 def _check_path(path: Any) -> list[str]:
     if (
         not isinstance(path, list)
@@ -144,13 +212,7 @@ def changes_to_overrides(running: Mapping[str, Any], changes: Any) -> dict[str, 
             )
         if isinstance(old, Mapping) and old:
             raise SettingsRuleError(f"{name} is a section, not a setting")
-        new = change["value"]
-        if new is None:
-            raise SettingsRuleError(f"{name} cannot be set to null")
-        if old is not None and not _types_match(new, old):
-            raise SettingsRuleError(
-                f"{name} must stay a {value_type(old)} (got {value_type(new)})"
-            )
+        new = check_value(path, change["value"], old)
         # A value equal to the running one is kept: it may undo a pending
         # change. Whether anything changes at all is judged against the desk
         # layer by the caller.
@@ -187,8 +249,13 @@ def check_overrides_apply(running: Mapping[str, Any], overrides: Mapping[str, An
                 )
             if isinstance(value, Mapping) and isinstance(old, Mapping):
                 walk(value, path)
-            elif value is None or (old is not None and not _types_match(value, old)):
-                raise SettingsRuleError(f"{'.'.join(path)} has a value the engine would refuse")
+                continue
+            try:
+                check_value(path, value, old)
+            except SettingsRuleError as exc:
+                raise SettingsRuleError(
+                    f"{'.'.join(path)} has a value the engine would refuse ({exc})"
+                ) from None
 
     if not isinstance(overrides, Mapping):
         raise SettingsRuleError("A settings version must be an object")

@@ -12,7 +12,7 @@ from functools import wraps
 
 import psycopg2
 from flask import Blueprint, current_app, jsonify, request
-from flask_jwt_extended import jwt_required
+from flask_jwt_extended import get_jwt_identity, jwt_required
 
 from algolens.adapters.http.portfolio import (
     can_use_qt_desk,
@@ -43,7 +43,7 @@ from algolens.application.qt.settings_use_cases import (
 )
 from algolens.domain.portfolio.registry import portfolio_entries
 from algolens.domain.qt.approvers import APPROVER_ROLES
-from algolens.domain.qt.desk import DeskRuleError
+from algolens.domain.qt.desk import DeskRuleError, DeskStaleError
 from algolens.domain.qt.settings import SettingsRuleError
 from algolens.infrastructure.config.dependencies import (
     create_desk_dependencies,
@@ -61,8 +61,18 @@ _ERRORS = (
     (DeskNotFound, 404),
     (DeskNotSeeded, 409),
     (DeskConflict, 409),
+    (DeskStaleError, 409),
     (DeskGone, 410),
 )
+
+# Override requests e-mail the VP and the President: at most this many per
+# user (JWT identity). Counted per gunicorn worker (in-memory limiter), and
+# only for requests that were accepted (201).
+OVERRIDE_REQUEST_LIMIT = "5 per hour"
+
+
+def _user_key():
+    return f"desk-user:{get_jwt_identity()}"
 
 
 def _desk_dependencies():
@@ -102,7 +112,10 @@ def handled(fn):
             return fn(*args, **kwargs)
         except tuple(e for e, _ in _ERRORS) as exc:
             status = next(code for error, code in _ERRORS if isinstance(exc, error))
-            return jsonify({"error": str(exc)}), status
+            body = {"error": str(exc)}
+            if isinstance(exc, DeskStaleError):
+                body["changed"] = exc.symbols
+            return jsonify(body), status
         except psycopg2.IntegrityError as exc:
             current_app.logger.warning("[DESK] refused by the database: %s", exc)
             return jsonify({"error": "The command log refused this request"}), 409
@@ -184,6 +197,11 @@ def desk_command(command_id):
 @jwt_required()
 @desk_enabled
 @desk_user
+@limiter.limit(
+    OVERRIDE_REQUEST_LIMIT,
+    key_func=_user_key,
+    deduct_when=lambda response: response.status_code == 201,
+)
 @handled
 def desk_override_request(portfolio_id):
     payload = _body()

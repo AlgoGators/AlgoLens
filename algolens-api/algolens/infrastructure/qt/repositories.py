@@ -2,7 +2,12 @@
 
 Tables (trade-ngin migrations, new_algo_data):
   trading.positions            portfolio_type system / qt_proposal / qt (021)
-  trading.position_overrides   the command log (023); AlgoLens only inserts
+  trading.position_overrides   the command log (023, 025). AlgoLens only
+                               inserts, always `pending` with the engine's
+                               columns NULL (the 025 insert trigger). After 025
+                               it holds no UPDATE there, so no SELECT ... FOR
+                               UPDATE either: writers serialise on a
+                               transaction advisory lock per (portfolio, day).
   trading.live_run_metadata    published_by / published_at / settings_used (022)
   trading.strategy_config      the desk's settings versions (022)
   metadata.contract_metadata   the instruments the desk may add
@@ -10,11 +15,33 @@ Tables (trade-ngin migrations, new_algo_data):
                                broken by the engine's keep order)
 """
 
+from contextlib import contextmanager
+
+import psycopg2.errors
 from psycopg2.extras import Json
 
 from algolens.application.qt.ports import DeskConflict, DeskNotFound, DeskNotSeeded
-from algolens.domain.qt.desk import OVERRIDE_DECISION, PENDING, SAVE, DeskRuleError
+from algolens.domain.qt.desk import (
+    DECIDING_STATUSES,
+    DONE,
+    OPEN_STATUSES,
+    OVERRIDE_DECISION,
+    OVERRIDE_REQUEST,
+    PENDING,
+    PUBLISH,
+    SAVE,
+    DeskRuleError,
+    open_override_request,
+    override_payload,
+    proposal_snapshot,
+    request_matches,
+    snapshot_sha256,
+)
 from algolens.infrastructure.db.postgres import get_db_connection
+
+STALE_OVERRIDE = (
+    "The proposal changed after the override was requested; request a new override"
+)
 
 # trade-ngin market_data_utils::kFuturesBarKeepOrder: which copy of a
 # duplicated (symbol, time) bar the engine keeps.
@@ -71,6 +98,142 @@ class PostgresDeskRepository:
         )
         return cursor.fetchone() is not None
 
+    @contextmanager
+    def _transaction(self):
+        """A cursor in one transaction, committed on success and rolled back
+        on any error. A unique violation (the 025 partial indexes: one open
+        publish, one open override request, one decision per request) is a
+        409, like the checks this code makes under the lock first."""
+        conn = self.connection_factory()
+        try:
+            with conn.cursor() as cursor:
+                yield cursor
+            conn.commit()
+        except psycopg2.errors.UniqueViolation as exc:
+            conn.rollback()
+            raise DeskConflict(
+                "Another command of this kind is already open for this day; reload to see it"
+            ) from exc
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+    @staticmethod
+    def _lock_day(cursor, portfolio_id, day):
+        """Serialise AlgoLens' writers of one portfolio's book day (save,
+        override request, decision, publish) until the transaction ends. An
+        advisory lock needs no table privilege."""
+        cursor.execute(
+            "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
+            (f"algolens.qt_desk|{portfolio_id}|{day.isoformat()}",),
+        )
+
+    def _published(self, cursor, portfolio_id, day):
+        """C3: a day is published once live_run_metadata.published_at is set
+        for it, which also covers the engine's own non-trading-day publish. A
+        done publish row counts too, should the two ever disagree.
+
+        No information_schema guard here: if this role cannot read the column
+        the write must fail, not proceed as if the day were open."""
+        cursor.execute(
+            """
+            SELECT 1 FROM trading.live_run_metadata
+            WHERE portfolio_id = %s AND date = %s AND published_at IS NOT NULL
+            LIMIT 1
+            """,
+            (portfolio_id, day),
+        )
+        if cursor.fetchone() is not None:
+            return True
+        cursor.execute(
+            """
+            SELECT 1 FROM trading.position_overrides
+            WHERE portfolio_id = %s AND date = %s AND kind = %s AND status = %s
+            LIMIT 1
+            """,
+            (portfolio_id, day, PUBLISH, DONE),
+        )
+        return cursor.fetchone() is not None
+
+    @staticmethod
+    def _open_publish(cursor, portfolio_id, day):
+        cursor.execute(
+            """
+            SELECT id, status FROM trading.position_overrides
+            WHERE portfolio_id = %s AND date = %s AND kind = %s AND status = ANY(%s)
+            ORDER BY id
+            LIMIT 1
+            """,
+            (portfolio_id, day, PUBLISH, list(OPEN_STATUSES)),
+        )
+        return cursor.fetchone()
+
+    def _guard_day(self, cursor, portfolio_id, day, refuse_open_publish=True):
+        """Under the day lock: refuse a published day (C3) and, unless told
+        otherwise, a day whose publish is pending or running."""
+        if self._published(cursor, portfolio_id, day):
+            raise DeskConflict(f"The {day.isoformat()} book is already published")
+        if refuse_open_publish:
+            publish = self._open_publish(cursor, portfolio_id, day)
+            if publish is not None:
+                raise DeskConflict(
+                    f"A publish of the {day.isoformat()} book is already "
+                    f"{publish['status']} (#{publish['id']})"
+                )
+
+    @staticmethod
+    def _snapshot_rows(cursor, portfolio_id, day, lock=True):
+        """Every qt_proposal row of the day (zero rows included), locked FOR
+        SHARE (C1) so no save changes them before the transaction ends."""
+        cursor.execute(
+            """
+            SELECT strategy_name, symbol, quantity
+            FROM trading.positions
+            WHERE portfolio_id = %s AND date = %s AND portfolio_type = 'qt_proposal'
+            ORDER BY strategy_name, symbol, strategy_id
+            """
+            + (" FOR SHARE" if lock else ""),
+            (portfolio_id, day),
+        )
+        return cursor.fetchall()
+
+    @staticmethod
+    def _day_commands(cursor, portfolio_id, day):
+        cursor.execute(
+            """
+            SELECT * FROM trading.position_overrides
+            WHERE portfolio_id = %s AND date = %s
+            ORDER BY id
+            """,
+            (portfolio_id, day),
+        )
+        return cursor.fetchall()
+
+    @staticmethod
+    def _now(cursor):
+        cursor.execute("SELECT now() AS now")
+        return cursor.fetchone()["now"]
+
+    @staticmethod
+    def _insert(cursor, portfolio_id, day, kind, requested_by, reason=None, payload=None,
+                parent_id=None, approver_role=None):
+        # Always pending with the engine-owned columns NULL: the 025 insert
+        # trigger refuses anything else.
+        cursor.execute(
+            """
+            INSERT INTO trading.position_overrides
+                (portfolio_id, date, kind, status, requested_by, reason, payload,
+                 parent_id, approver_role)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            RETURNING *
+            """,
+            (portfolio_id, day, kind, PENDING, requested_by, reason,
+             Json(dict(payload or {})), parent_id, approver_role),
+        )
+        return cursor.fetchone()
+
     # --- books ---------------------------------------------------------------
 
     def desk_date(self, portfolio_id):
@@ -106,6 +269,15 @@ class PostgresDeskRepository:
             (portfolio_id, day, book),
         )
 
+    def proposal_rows(self, portfolio_id, day):
+        """The day's qt_proposal rows as the override snapshot sees them, unlocked."""
+        conn = self.connection_factory()
+        try:
+            with conn.cursor() as cursor:
+                return self._snapshot_rows(cursor, portfolio_id, day, lock=False)
+        finally:
+            conn.close()
+
     def symbol_choices(self, asset_class):
         if asset_class != "futures":
             return []  # ruling 13: no equity desk editing in the first release
@@ -115,106 +287,95 @@ class PostgresDeskRepository:
         )
 
     def save_proposal(self, portfolio_id, day, plan, reason, requested_by):
-        conn = self.connection_factory()
-        try:
-            with conn.cursor() as cursor:
-                cursor.execute(
-                    """
-                    SELECT symbol, quantity, strategy_id, strategy_name
-                    FROM trading.positions
-                    WHERE portfolio_id = %s AND date = %s AND portfolio_type = 'qt_proposal'
-                    ORDER BY symbol, strategy_id, strategy_name
-                    FOR UPDATE
-                    """,
-                    (portfolio_id, day),
+        """One transaction under the day lock: refuse a published day or one
+        whose publish is open (C3), lock the proposal, plan the changes from
+        the locked quantities (the plan refuses an edit made against
+        quantities that changed meanwhile), upsert them, log the save."""
+        with self._transaction() as cursor:
+            self._lock_day(cursor, portfolio_id, day)
+            self._guard_day(cursor, portfolio_id, day)
+            cursor.execute(
+                """
+                SELECT symbol, quantity, strategy_id, strategy_name
+                FROM trading.positions
+                WHERE portfolio_id = %s AND date = %s AND portfolio_type = 'qt_proposal'
+                ORDER BY symbol, strategy_id, strategy_name
+                FOR UPDATE
+                """,
+                (portfolio_id, day),
+            )
+            rows = cursor.fetchall()
+            if not rows:
+                raise DeskNotSeeded(
+                    f"No QT proposal is seeded for {portfolio_id} on {day.isoformat()}"
                 )
-                rows = cursor.fetchall()
-                if not rows:
-                    raise DeskNotSeeded(
-                        f"No QT proposal is seeded for {portfolio_id} on {day.isoformat()}"
-                    )
-                by_symbol = {}
-                for row in rows:
-                    by_symbol.setdefault(row["symbol"], []).append(row)
-                current = {
-                    symbol: sum(r["quantity"] for r in held)
-                    for symbol, held in by_symbol.items()
-                }
-                changes = plan(current)
-                sleeves = {(r["strategy_id"], r["strategy_name"]) for r in rows}
+            by_symbol = {}
+            for row in rows:
+                by_symbol.setdefault(row["symbol"], []).append(row)
+            current = {
+                symbol: sum(r["quantity"] for r in held) for symbol, held in by_symbol.items()
+            }
+            changes = plan(current)
+            sleeves = {(r["strategy_id"], r["strategy_name"]) for r in rows}
 
-                for change in changes:
-                    symbol, to = change["symbol"], change["to"]
-                    held = by_symbol.get(symbol)
-                    if held and len(held) > 1:
-                        raise DeskRuleError(
-                            f"{symbol} is held in several sleeves; the desk edits a "
-                            "symbol held in one sleeve only"
-                        )
-                    if held:
-                        cursor.execute(
-                            """
-                            UPDATE trading.positions
-                            SET quantity = %s, daily_unrealized_pnl = 0,
-                                daily_realized_pnl = 0, last_update = now(), updated_at = now()
-                            WHERE portfolio_id = %s AND strategy_id = %s AND strategy_name = %s
-                              AND date = %s AND symbol = %s AND portfolio_type = 'qt_proposal'
-                            """,
-                            (to, portfolio_id, held[0]["strategy_id"],
-                             held[0]["strategy_name"], day, symbol),
-                        )
-                        continue
-                    if len(sleeves) != 1:
-                        raise DeskRuleError(
-                            "The proposal holds several sleeves; a new symbol cannot be "
-                            "placed in one of them from here"
-                        )
-                    (strategy_id, strategy_name), = sleeves
-                    cursor.execute(
-                        _CHOICES_SQL + ' AND cm."Databento Symbol" || \'.v.0\' = %s',
-                        (list(_EXCLUDED_FUTURES), symbol),
+            for change in changes:
+                symbol, to = change["symbol"], change["to"]
+                held = by_symbol.get(symbol)
+                if held and len(held) > 1:
+                    raise DeskRuleError(
+                        f"{symbol} is held in several sleeves; the desk edits a "
+                        "symbol held in one sleeve only"
                     )
-                    choice = cursor.fetchone()
-                    if choice is None:
-                        raise DeskRuleError(
-                            f"{symbol} is not a futures contract with market data; "
-                            "pick a symbol from the list"
-                        )
+                if held:
                     cursor.execute(
                         """
-                        INSERT INTO trading.positions
-                            (symbol, quantity, average_price, daily_unrealized_pnl,
-                             daily_realized_pnl, last_update, updated_at, strategy_id,
-                             strategy_name, date, portfolio_id, portfolio_type)
-                        VALUES (%s, %s, %s, 0, 0, now(), now(), %s, %s, %s, %s, 'qt_proposal')
-                        ON CONFLICT (portfolio_id, strategy_id, strategy_name, date, symbol,
-                                     portfolio_type)
-                        DO UPDATE SET quantity = EXCLUDED.quantity,
-                                      daily_unrealized_pnl = 0, daily_realized_pnl = 0,
-                                      last_update = now(), updated_at = now()
+                        UPDATE trading.positions
+                        SET quantity = %s, daily_unrealized_pnl = 0,
+                            daily_realized_pnl = 0, last_update = now(), updated_at = now()
+                        WHERE portfolio_id = %s AND strategy_id = %s AND strategy_name = %s
+                          AND date = %s AND symbol = %s AND portfolio_type = 'qt_proposal'
                         """,
-                        (symbol, to, choice["price"], strategy_id, strategy_name, day,
-                         portfolio_id),
+                        (to, portfolio_id, held[0]["strategy_id"],
+                         held[0]["strategy_name"], day, symbol),
                     )
-
+                    continue
+                if len(sleeves) != 1:
+                    raise DeskRuleError(
+                        "The proposal holds several sleeves; a new symbol cannot be "
+                        "placed in one of them from here"
+                    )
+                (strategy_id, strategy_name), = sleeves
+                cursor.execute(
+                    _CHOICES_SQL + ' AND cm."Databento Symbol" || \'.v.0\' = %s',
+                    (list(_EXCLUDED_FUTURES), symbol),
+                )
+                choice = cursor.fetchone()
+                if choice is None:
+                    raise DeskRuleError(
+                        f"{symbol} is not a futures contract with market data; "
+                        "pick a symbol from the list"
+                    )
                 cursor.execute(
                     """
-                    INSERT INTO trading.position_overrides
-                        (portfolio_id, date, kind, status, requested_by, reason, payload)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s)
-                    RETURNING *
+                    INSERT INTO trading.positions
+                        (symbol, quantity, average_price, daily_unrealized_pnl,
+                         daily_realized_pnl, last_update, updated_at, strategy_id,
+                         strategy_name, date, portfolio_id, portfolio_type)
+                    VALUES (%s, %s, %s, 0, 0, now(), now(), %s, %s, %s, %s, 'qt_proposal')
+                    ON CONFLICT (portfolio_id, strategy_id, strategy_name, date, symbol,
+                                 portfolio_type)
+                    DO UPDATE SET quantity = EXCLUDED.quantity,
+                                  daily_unrealized_pnl = 0, daily_realized_pnl = 0,
+                                  last_update = now(), updated_at = now()
                     """,
-                    (portfolio_id, day, SAVE, PENDING, requested_by, reason,
-                     Json({"changes": changes})),
+                    (symbol, to, choice["price"], strategy_id, strategy_name, day,
+                     portfolio_id),
                 )
-                command = cursor.fetchone()
-            conn.commit()
-            return command
-        except Exception:
-            conn.rollback()
-            raise
-        finally:
-            conn.close()
+
+            return self._insert(
+                cursor, portfolio_id, day, SAVE, requested_by, reason=reason,
+                payload={"changes": changes},
+            )
 
     # --- command log ---------------------------------------------------------
 
@@ -233,29 +394,6 @@ class PostgresDeskRepository:
             (portfolio_id, day),
         )
 
-    def insert_command(self, portfolio_id, day, kind, requested_by, reason=None, payload=None):
-        conn = self.connection_factory()
-        try:
-            with conn.cursor() as cursor:
-                cursor.execute(
-                    """
-                    INSERT INTO trading.position_overrides
-                        (portfolio_id, date, kind, status, requested_by, reason, payload)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s)
-                    RETURNING *
-                    """,
-                    (portfolio_id, day, kind, PENDING, requested_by, reason,
-                     Json(dict(payload or {}))),
-                )
-                row = cursor.fetchone()
-            conn.commit()
-            return row
-        except Exception:
-            conn.rollback()
-            raise
-        finally:
-            conn.close()
-
     def find_request_by_token_hash(self, token_hash):
         return self._read(
             """
@@ -266,53 +404,85 @@ class PostgresDeskRepository:
             one=True,
         )
 
+    def insert_publish(self, portfolio_id, day, requested_by):
+        """Under the day lock: refuse a published day and an open publish."""
+        with self._transaction() as cursor:
+            self._lock_day(cursor, portfolio_id, day)
+            self._guard_day(cursor, portfolio_id, day)
+            return self._insert(cursor, portfolio_id, day, PUBLISH, requested_by)
+
+    def insert_override_request(self, portfolio_id, day, requested_by, reason):
+        """Under the day lock: refuse a published day, an open publish and a
+        second open request (C2), and snapshot the proposal, locked FOR
+        SHARE, into the payload (C1)."""
+        with self._transaction() as cursor:
+            self._lock_day(cursor, portfolio_id, day)
+            self._guard_day(cursor, portfolio_id, day)
+            rows = self._snapshot_rows(cursor, portfolio_id, day)
+            if not rows:
+                raise DeskNotSeeded(
+                    f"No QT proposal is seeded for {portfolio_id} on {day.isoformat()}"
+                )
+            payload = override_payload(rows)
+            open_request = open_override_request(
+                self._day_commands(cursor, portfolio_id, day),
+                self._now(cursor),
+                payload["proposal_sha256"],
+            )
+            if open_request is not None:
+                raise DeskConflict(
+                    f"Override request #{open_request['id']} for this book is still open "
+                    f"({open_request['status']}); wait for its decision or for its link "
+                    "to expire"
+                )
+            return self._insert(
+                cursor, portfolio_id, day, OVERRIDE_REQUEST, requested_by,
+                reason=reason, payload=payload,
+            )
+
     def insert_decision(self, request_id, approved, approver, approver_role, reason):
-        conn = self.connection_factory()
-        try:
-            with conn.cursor() as cursor:
-                # Serialises two approvers clicking at once: the second waits
-                # here, then sees the first one's decision.
-                cursor.execute(
-                    """
-                    SELECT * FROM trading.position_overrides
-                    WHERE id = %s AND kind = 'override_request'
-                    FOR UPDATE
-                    """,
-                    (request_id,),
+        """Under the request's day lock: refuse a request already decided
+        (C2), one not e-mailed yet (not done), a published day (C3) and, on
+        an approval, a proposal that changed since the request (C1)."""
+        with self._transaction() as cursor:
+            cursor.execute(
+                "SELECT portfolio_id, date FROM trading.position_overrides "
+                "WHERE id = %s AND kind = %s",
+                (request_id, OVERRIDE_REQUEST),
+            )
+            found = cursor.fetchone()
+            if found is None:
+                raise DeskNotFound(f"No override request {request_id}")
+            portfolio_id, day = found["portfolio_id"], found["date"]
+            # Two approvers clicking at once: the second waits here, then
+            # sees the first one's decision.
+            self._lock_day(cursor, portfolio_id, day)
+            commands = self._day_commands(cursor, portfolio_id, day)
+            request = next(c for c in commands if c["id"] == request_id)
+            if any(
+                c["kind"] == OVERRIDE_DECISION
+                and c["parent_id"] == request_id
+                and c["status"] in DECIDING_STATUSES
+                for c in commands
+            ):
+                raise DeskConflict("This override request has already been decided")
+            if request["status"] != DONE:
+                raise DeskConflict(
+                    f"This override request is {request['status']}, not e-mailed yet; "
+                    "it cannot be decided"
                 )
-                request = cursor.fetchone()
-                if request is None:
-                    raise DeskNotFound(f"No override request {request_id}")
-                cursor.execute(
-                    """
-                    SELECT id FROM trading.position_overrides
-                    WHERE parent_id = %s AND kind = %s
-                    LIMIT 1
-                    """,
-                    (request_id, OVERRIDE_DECISION),
+            self._guard_day(cursor, portfolio_id, day, refuse_open_publish=False)
+            if approved:
+                current = snapshot_sha256(
+                    proposal_snapshot(self._snapshot_rows(cursor, portfolio_id, day))
                 )
-                if cursor.fetchone() is not None:
-                    raise DeskConflict("This override request has already been decided")
-                cursor.execute(
-                    """
-                    INSERT INTO trading.position_overrides
-                        (portfolio_id, date, kind, status, requested_by, reason, payload,
-                         parent_id, approver_role)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    RETURNING *
-                    """,
-                    (request["portfolio_id"], request["date"], OVERRIDE_DECISION, PENDING,
-                     approver, reason, Json({"approved": approved}), request_id,
-                     approver_role),
-                )
-                row = cursor.fetchone()
-            conn.commit()
-            return row
-        except Exception:
-            conn.rollback()
-            raise
-        finally:
-            conn.close()
+                if not request_matches(request, current):
+                    raise DeskConflict(STALE_OVERRIDE)
+            return self._insert(
+                cursor, portfolio_id, day, OVERRIDE_DECISION, approver,
+                reason=reason, payload={"approved": approved}, parent_id=request_id,
+                approver_role=approver_role,
+            )
 
     def publish_state(self, portfolio_id, day):
         """published_by / published_at from live_run_metadata (022), or None."""
