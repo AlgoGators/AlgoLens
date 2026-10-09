@@ -514,3 +514,96 @@ def test_command_rows_cannot_be_deleted(qt_db):
     PublishDesk(desk_repo(qt_db), NullAgent()).execute(entry(qt_db), "desk@x.com")
     with pytest.raises(psycopg2.Error):
         _exec(qt_db, "DELETE FROM trading.position_overrides")
+
+
+# --- A7: desk settings as strategy_config versions ---------------------------
+
+RUN_CONFIG = {
+    "capital": 500000,
+    "risk": {"max_leverage": 2.0, "max_drawdown": 0.3},
+    "strategies": {"tf": {"lookbacks": [16, 32]}},
+}
+
+
+def report_settings(factory, day, version, config=RUN_CONFIG, portfolio=QT):
+    """A live run of the 022 binary writing settings_used."""
+    _exec(
+        factory,
+        "INSERT INTO trading.live_run_metadata (date, strategy_id, portfolio_id, settings_used) "
+        "VALUES (%s, %s, %s, %s)",
+        (day, STRATEGY, portfolio,
+         psycopg2.extras.Json({"strategy_config_version": version, "config": config})),
+    )
+
+
+def config_rows(factory, portfolio=QT):
+    return _exec(
+        factory,
+        "SELECT version, overrides, is_active, reason, created_by FROM trading.strategy_config "
+        "WHERE portfolio_id = %s ORDER BY version",
+        (portfolio,),
+    )
+
+
+def test_settings_versions_keep_exactly_one_active(qt_db):
+    from algolens.application.qt.settings_use_cases import (
+        GetSettings,
+        RevertSettings,
+        SaveSettings,
+    )
+
+    report_settings(qt_db, D1, None)
+    repo = desk_repo(qt_db)
+
+    SaveSettings(repo).execute(
+        entry(qt_db), [{"path": ["risk", "max_leverage"], "value": 1.5}], "less risk", "d@x.com"
+    )
+    SaveSettings(repo).execute(
+        entry(qt_db), [{"path": ["strategies", "tf", "lookbacks"], "value": [8, 16]}], "faster", "d@x.com"
+    )
+
+    rows = config_rows(qt_db)
+    assert [(r["version"], r["is_active"]) for r in rows] == [(1, False), (2, True)]
+    assert rows[1]["overrides"] == {"risk": {"max_leverage": 1.5}, "strategies": {"tf": {"lookbacks": [8, 16]}}}
+    assert (rows[1]["reason"], rows[1]["created_by"]) == ("faster", "d@x.com")
+
+    view = GetSettings(repo).execute(entry(qt_db))
+    assert view["running"]["version"] is None and view["pending"] is True
+    lev = next(f for f in view["fields"] if f["path"] == ["risk", "max_leverage"])
+    assert (lev["value"], lev["pending"]) == (2.0, 1.5)
+
+    # The next run picked version 2 up: running == active, nothing pending.
+    report_settings(qt_db, D2, 2, config={**RUN_CONFIG, "risk": {"max_leverage": 1.5, "max_drawdown": 0.3}})
+    assert GetSettings(repo).execute(entry(qt_db))["pending"] is False
+
+    RevertSettings(repo).execute(entry(qt_db), 1, "undo faster", "d@x.com")
+    rows = config_rows(qt_db)
+    assert [(r["version"], r["is_active"]) for r in rows] == [(1, False), (2, False), (3, True)]
+    assert rows[2]["overrides"] == {"risk": {"max_leverage": 1.5}}
+
+    # The database itself refuses a second active version.
+    with pytest.raises(psycopg2.errors.UniqueViolation):
+        _exec(qt_db, "UPDATE trading.strategy_config SET is_active = true WHERE version = 1")
+
+
+def test_settings_refuse_unknown_keys_and_hidden_sections(qt_db):
+    from algolens.application.qt.settings_use_cases import SaveSettings
+    from algolens.domain.qt.settings import SettingsRuleError
+
+    report_settings(qt_db, D1, None)
+    for change in (
+        {"path": ["risk", "invented"], "value": 1.0},
+        {"path": ["database", "host"], "value": "x"},
+    ):
+        with pytest.raises(SettingsRuleError):
+            SaveSettings(desk_repo(qt_db)).execute(entry(qt_db), [change], "r", "d@x.com")
+    assert config_rows(qt_db) == []
+
+
+def test_settings_save_detects_a_concurrent_change(qt_db):
+    report_settings(qt_db, D1, None)
+    repo = desk_repo(qt_db)
+    repo.insert_config_version(QT, {"capital": 1}, "first", "a@x.com", None)
+    with pytest.raises(DeskConflict):
+        repo.insert_config_version(QT, {"capital": 2}, "stale", "b@x.com", None)
+    assert [r["version"] for r in config_rows(qt_db)] == [1]
