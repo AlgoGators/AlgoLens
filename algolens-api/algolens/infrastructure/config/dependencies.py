@@ -38,3 +38,14 @@ def create_portfolio_dependencies(connection_factory=None):
 
 def create_dev_auth_config():
     return EnvironmentDevAuthConfig()
+
+
+def create_desk_dependencies(connection_factory=None):
+    """(desk repository, desk-agent client, QT settings) for the desk routes."""
+    from algolens.infrastructure.qt.desk_agent import GrpcDeskAgent
+    from algolens.infrastructure.qt.repositories import PostgresDeskRepository
+
+    settings = load_qt_settings()
+    repo = PostgresDeskRepository(connection_factory=connection_factory)
+    agent = GrpcDeskAgent(settings.desk_agent_addr)
+    return repo, agent, settings
