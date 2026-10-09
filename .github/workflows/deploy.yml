@@ -1,64 +1,158 @@
 name: Deploy AlgoLens
 
-# Gated on CI: this runs only after the "AlgoLens CI" workflow completes
-# successfully on main, so a failing test/build never reaches production.
-# workflow_dispatch is kept for manual, on-demand deploys.
+# A push to `prod` is a production deploy of AlgoLens on the trade-ngin box
+# (ubuntu@ec2-18-118-225-224, private IP 172.31.23.190). Modelled on
+# AlgoGators/algogators svc-data-ngin.deploy.yml + _deploy-ssh.yml:
+#
+#   quality  -> the existing AlgoLens CI (backend pytest, frontend build+vitest)
+#   backend-image / frontend-image -> build and push to GHCR, output digests
+#   deploy   -> SSH in, fast-forward the sparse checkout of deployment/ at
+#               /home/ubuntu/algolens to the built SHA, and run
+#               deployment/deploy.sh <backend-ref> <frontend-ref>
+#   health   -> SSH in again and curl http://localhost:8088/health on the box
+#               (port 8088 is not reachable from GitHub runners)
+#
+# The box never builds anything; it pulls images by digest. See
+# deployment/DEPLOYMENT.md.
+
 on:
-  workflow_run:
-    workflows: ["AlgoLens CI"]
-    types: [completed]
-    branches: [main]
+  push:
+    branches: [prod]
   workflow_dispatch:
+    inputs:
+      dry-run:
+        description: Build the images without pushing or deploying.
+        type: boolean
+        default: true
+      deploy:
+        description: Deploy after building (only honoured on the prod branch).
+        type: boolean
+        default: false
+
+# One prod deploy at a time, and never cancel one mid-roll.
+concurrency:
+  group: algolens-deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  REMOTE_PATH: /home/ubuntu/algolens
 
 jobs:
-  deploy:
-    runs-on: ubuntu-24.04
-    # Deploy on a green CI run, or when manually triggered.
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+  quality:
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
 
+  backend-image:
+    needs: quality
+    uses: ./.github/workflows/_publish-container.yml
+    with:
+      path: algolens-api
+      image: algogators/algolens-backend
+      push: ${{ !(inputs.dry-run || false) }}
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+
+  frontend-image:
+    needs: quality
+    uses: ./.github/workflows/_publish-container.yml
+    with:
+      path: algolens-frontend
+      image: algogators/algolens-frontend
+      # Baked into the static build; the site is same-origin behind the old
+      # host's nginx, so this is the public URL.
+      build-args: |
+        VITE_API_URL=${{ vars.ALGOLENS_PUBLIC_URL || 'https://algolens.algogators.com' }}
+      push: ${{ !(inputs.dry-run || false) }}
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+
+  deploy:
+    if: >-
+      ${{ github.ref == 'refs/heads/prod'
+          && !(inputs.dry-run || false)
+          && (github.event_name == 'push' || inputs.deploy) }}
+    needs: [backend-image, frontend-image]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: read
     steps:
-      - name: Deploy to EC2
+      - name: Roll
         uses: appleboy/ssh-action@v1
         with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USER }}
-          key: ${{ secrets.EC2_SSH_KEY }}
-          command_timeout: 30m
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          command_timeout: 20m
+          envs: BACKEND_REF,FRONTEND_REF,REMOTE_PATH,GHCR_ACTOR,GHCR_TOKEN,REPO_URL,DEPLOY_REF,DEPLOY_SHA
           script: |
-            set -e
+            set -euo pipefail
 
-            cd /home/ec2-user/AlgoLens
+            echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_ACTOR" --password-stdin
+            trap 'docker logout ghcr.io >/dev/null' EXIT
 
-            echo "Pulling latest code..."
-            git pull origin main
-
-            if [ ! -f algolens-frontend/.env ] && [ -f .env ]; then
-              echo "Migrating root frontend .env into algolens-frontend/.env..."
-              cp .env algolens-frontend/.env
+            # The checkout carries only deployment/ (compose file, edge config,
+            # deploy script); the images carry the code.
+            if [ ! -d "$REMOTE_PATH/.git" ]; then
+              git clone --filter=blob:none --no-checkout --branch "$DEPLOY_REF" "$REPO_URL" "$REMOTE_PATH"
+              git -C "$REMOTE_PATH" sparse-checkout set deployment
             fi
+            cd "$REMOTE_PATH"
+            git fetch origin "$DEPLOY_REF"
+            git checkout -q "$DEPLOY_REF"
+            # Exactly the commit CI built, never a newer push that raced it.
+            git merge --ff-only "$DEPLOY_SHA"
 
-            echo "Installing frontend dependencies..."
-            cd algolens-frontend
-            npm ci
+            bash deployment/deploy.sh "$BACKEND_REF" "$FRONTEND_REF"
+        env:
+          BACKEND_REF: ghcr.io/algogators/algolens-backend@${{ needs.backend-image.outputs.digest }}
+          FRONTEND_REF: ghcr.io/algogators/algolens-frontend@${{ needs.frontend-image.outputs.digest }}
+          GHCR_ACTOR: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO_URL: https://github.com/${{ github.repository }}.git
+          DEPLOY_REF: ${{ github.ref_name }}
+          DEPLOY_SHA: ${{ github.sha }}
 
-            echo "Building frontend..."
-            npm run build
-            cd ..
+      - name: Health check (on the box)
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          command_timeout: 5m
+          script: |
+            set -euo pipefail
+            for attempt in $(seq 1 12); do
+              code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 http://localhost:8088/health || echo 000)
+              if [ "$code" = "200" ]; then
+                echo "healthy after ${attempt} attempt(s)"
+                exit 0
+              fi
+              echo "attempt ${attempt}: HTTP ${code}"
+              sleep 5
+            done
+            echo "::error::http://localhost:8088/health never returned 200; deploy is live but unhealthy"
+            echo "rollback: $(cat ~/.config/algogators/algolens.previous-images 2>/dev/null || echo 'see deployment/DEPLOYMENT.md')"
+            exit 1
 
-            echo "Installing backend dependencies..."
-            pip3 install -r algolens-api/requirements.txt --quiet
-
-            echo "Updating service and nginx config..."
-            sudo cp deployment/algolens-backend.service /etc/systemd/system/
-            sudo cp deployment/algolens.service /etc/systemd/system/
-            sudo cp deployment/algolens.conf /etc/nginx/conf.d/algolens.conf
-            sudo systemctl daemon-reload
-            sudo nginx -t
-            sudo systemctl reload nginx
-
-            echo "Restarting services..."
-            sudo systemctl restart algolens-backend
-            sudo systemctl restart algolens
-
-            echo "Deployment complete!"
-            echo "Site: https://algolens.algogators.com"
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### AlgoLens deployed to the trade-ngin box"
+            echo "- backend: \`ghcr.io/algogators/algolens-backend@${{ needs.backend-image.outputs.digest }}\`"
+            echo "- frontend: \`ghcr.io/algogators/algolens-frontend@${{ needs.frontend-image.outputs.digest }}\`"
+            echo "- host path: \`${{ env.REMOTE_PATH }}\`"
+            echo "- rollback: \`${{ env.REMOTE_PATH }}/deployment/deploy.sh \$(cat ~/.config/algogators/algolens.previous-images)\` on the box"
+          } >> "$GITHUB_STEP_SUMMARY"

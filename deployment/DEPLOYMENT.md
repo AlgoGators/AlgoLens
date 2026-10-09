@@ -1,214 +1,211 @@
-# Deployment Guide
+# AlgoLens Deployment
 
-This guide explains how to set up and deploy both the frontend and backend services on your EC2 instance.
+AlgoLens runs as Docker containers on the **trade-ngin box**
+(`ubuntu@ec2-18-118-225-224`, private IP `172.31.23.190`, Ubuntu), next to
+trade-ngin and the data-ngin Airflow stack. The **old host** (`ec2-user`,
+Amazon Linux) keeps one job: terminating TLS for `algolens.algogators.com`
+and forwarding everything to the box, the same way it already forwards
+`airflow.algogators.com` to `172.31.23.190:8080`.
 
-## Initial EC2 Setup (One-time)
+The setup mirrors data-ngin's deploy in AlgoGators/algogators
+(`_publish-container.yml`, `_deploy-ssh.yml`, `services/data-ngin/deploy/`).
 
-### 1. Install Required Software
+## Topology
+
+```
+browser --https--> old host nginx (TLS, certbot)
+                     |  proxy_pass http://172.31.23.190:8088   (VPC-private)
+                     v
+  trade-ngin box (1 vCPU, ~1 GiB RAM)
+  +-------------------------------------------------------------+
+  | algolens-edge      nginx, publishes 8088            32m     |
+  |   /            -> algolens-frontend:80                      |
+  |   /auth/*      -> algolens-backend:5000                     |
+  |   /portfolio/* -> algolens-backend:5000                     |
+  |   /health      -> algolens-backend:5000                     |
+  |   /edge-health -> edge itself                               |
+  | algolens-frontend  static React build behind nginx  64m     |
+  | algolens-backend   Flask/gunicorn, 2 workers        256m    |
+  |                    networks: default + external `qt`        |
+  | (trade-ngin, airflow-*: not managed here)                   |
+  +-------------------------------------------------------------+
+```
+
+- `/auth`, `/portfolio` and `/health` are every backend path the frontend
+  calls. A new backend path prefix needs a `location` in `deployment/edge.conf`.
+  Nothing on the old host changes.
+- The backend also joins the external Docker network `qt` (alias
+  `algolens-backend`), which the trade-ngin desk-agent will share later.
+- **Memory.** The box has 1 vCPU, 957 MiB RAM and about 200 MiB free, and
+  trade-ngin's live run (cron inside its container, 09:30 daily) must never be
+  OOM-killed. Every AlgoLens container has a hard `mem_limit` (with no extra
+  swap) and `oom_score_adj: 800`, so under pressure the kernel kills AlgoLens
+  first. `deploy.sh` stops the old AlgoLens containers before it starts the
+  new ones, so two copies never run side by side. Avoid deploying around 09:30.
+
+Files:
+
+| File | Purpose |
+|---|---|
+| `deployment/docker-compose.prod.yml` | the stack; images come in as `BACKEND_IMAGE` / `FRONTEND_IMAGE` digests |
+| `deployment/edge.conf` | edge routing |
+| `deployment/deploy.sh` | the roll, run on the box |
+| `deployment/algolens.env.example` | backend variable names |
+| `deployment/old-host-nginx-algolens.conf` | the old host's new server block |
+| `deployment/algolens.conf` | the old host's previous server block, kept for reference and rollback |
+
+## How a deploy works
+
+Push to the `prod` branch (for example `git push origin main:prod`).
+`.github/workflows/deploy.yml` then:
+
+1. **quality**: runs AlgoLens CI (`ci.yml`, called as a reusable workflow):
+   backend pytest, frontend build and vitest.
+2. **backend-image / frontend-image**: `_publish-container.yml` builds
+   `algolens-api` and `algolens-frontend` and pushes
+   `ghcr.io/algogators/algolens-{backend,frontend}` tagged `latest`,
+   `sha-<short>`, the full SHA and `prod`, and outputs the **digest**. The
+   frontend is built with `VITE_API_URL=https://algolens.algogators.com`
+   (override with the repo variable `ALGOLENS_PUBLIC_URL`).
+3. **deploy**: SSHes to the box, logs in to GHCR with the run's token,
+   clones `/home/ubuntu/algolens` on first use (sparse: `deployment/` only),
+   fast-forwards it to the exact commit that was built, and runs
+   `deployment/deploy.sh <backend@sha256:...> <frontend@sha256:...>`.
+4. **health**: a second SSH step curls `http://localhost:8088/health` on the
+   box and fails the job unless it returns 200. Port 8088 is not reachable
+   from GitHub runners.
+
+`deploy.sh`:
+- dies if `/home/ubuntu/.config/algogators/algolens.env` is missing;
+- `docker network create qt || true`;
+- pulls both images;
+- records the running image refs;
+- stops `algolens-edge`, `algolens-frontend` and `algolens-backend`;
+- runs `docker compose up -d --remove-orphans`;
+- waits up to 3 minutes for `localhost:8088/health`;
+- writes `algolens.previous-images` and `algolens.current-images` to
+  `/home/ubuntu/.config/algogators/`;
+- prints the exact rollback command;
+- prunes images older than 168h.
+
+`/health` returns 503 when the backend cannot reach the database, so a broken
+env file fails the deploy.
+
+Manual runs: *Actions > Deploy AlgoLens > Run workflow*. `dry-run` (default on)
+builds without pushing. Untick it and tick `deploy` on the `prod` branch to
+redeploy.
+
+### Repository secrets
+
+| Secret | Value |
+|---|---|
+| `SSH_HOST` | the trade-ngin box, reachable from GitHub runners |
+| `SSH_USER` | `ubuntu` |
+| `SSH_KEY` | private key authorized for that user |
+
+These have the same names as the data-ngin deploy secrets in
+AlgoGators/algogators, but GitHub secrets are per repo, so set them on
+AlgoGators/AlgoLens. The old `EC2_HOST`, `EC2_USER` and `EC2_SSH_KEY`
+secrets are no longer used.
+
+GHCR pushes use `GITHUB_TOKEN`. If `algolens-backend` and `algolens-frontend`
+were first pushed by hand, grant AlgoGators/AlgoLens **Write** under each
+package's *Package settings > Manage Actions access*, or the push returns 403.
+
+## First-time bootstrap (trade-ngin box)
 
 ```bash
-# Update system
-sudo yum update -y
+ssh ubuntu@ec2-18-118-225-224
 
-# Install Node.js
-curl -sL https://rpm.nodesource.com/setup_18.x | sudo bash -
-sudo yum install -y nodejs
+# 1. Docker and the compose plugin (trade-ngin and airflow already use them)
+docker --version && docker compose version
+groups | grep -qw docker || echo "add ubuntu to the docker group"
+git --version
 
-# Install Python 3 and pip
-sudo yum install -y python3 python3-pip
+# 2. Env file, outside any checkout so a git pull can never touch it.
+#    Names: deployment/algolens.env.example. Copy the values the old host's
+#    backend container uses, with FLASK_ENV=production, FLASK_DEBUG=False,
+#    CORS_ORIGINS=https://algolens.algogators.com
+mkdir -p ~/.config/algogators
+nano ~/.config/algogators/algolens.env
+chmod 600 ~/.config/algogators/algolens.env
 
-# Install Git (if not already installed)
-sudo yum install -y git
+# 3. Shared network for the desk-agent (deploy.sh also does this)
+docker network create qt || true
 ```
 
-### 2. Clone the Repository
+`/home/ubuntu/algolens` is created by the first deploy. Do not create it by
+hand.
+
+**Security group** (trade-ngin box): add an inbound rule for **TCP 8088 from
+the old host's private IP /32 only**. Never open it to `0.0.0.0/0`. The edge
+publishes on `0.0.0.0:8088` and trusts the `X-Forwarded-*` headers it
+receives, which is safe only because the old host is its sole client.
+
+Then create the `prod` branch and push to it (`git push origin main:prod`),
+and watch the workflow.
+
+## Cutover (old host)
+
+1. From the old host, check the stack over the private network:
+   ```bash
+   curl -fsS http://172.31.23.190:8088/health
+   curl -fsS -o /dev/null -w '%{http_code}\n' http://172.31.23.190:8088/
+   ```
+2. Back up the current config:
+   ```bash
+   sudo cp /etc/nginx/conf.d/algolens.conf /etc/nginx/conf.d/algolens.conf.pre-docker
+   ```
+3. Install `deployment/old-host-nginx-algolens.conf` as
+   `/etc/nginx/conf.d/algolens.conf`.
+4. `sudo nginx -t && sudo systemctl reload nginx`
+5. Check `https://algolens.algogators.com`: the page loads, login works, and
+   the strategy list loads.
+6. After a few quiet days, stop the old-host app processes: the bare
+   `python3 backend/app.py` on 5001, the frontend container on 3000, the
+   unrouted backend container on 5000, any systemd units, and the old cron
+   deploy script. Until then they are the rollback target.
+
+## Rollback
+
+**Traffic back to the old host.** This works while its processes still run:
 
 ```bash
-cd /home/ec2-user
-git clone https://github.com/YOUR_USERNAME/AlgoLens.git
-cd AlgoLens
+sudo cp /etc/nginx/conf.d/algolens.conf.pre-docker /etc/nginx/conf.d/algolens.conf && sudo nginx -t && sudo systemctl reload nginx
 ```
 
-### 3. Install Dependencies
+That restores `/` -> `localhost:3000` and `/auth`, `/portfolio` ->
+`localhost:5001`.
+
+**Previous AlgoLens version on the box.** `deploy.sh` prints the exact command
+at the end of every deploy. In general:
 
 ```bash
-# Frontend dependencies
-cd algolens-frontend
-npm install
-cd ..
-
-# Backend dependencies
-cd algolens-api
-pip3 install -r requirements.txt
-cd ..
+cd ~/algolens && bash deployment/deploy.sh $(cat ~/.config/algogators/algolens.previous-images)
 ```
 
-### 4. Configure Environment Variables
+You can also re-run an earlier successful Deploy AlgoLens run.
 
-Create a `.env` file in the `algolens-api` directory:
+## Operations
 
 ```bash
-cd /home/ec2-user/AlgoLens/algolens-api
-nano .env
+cat ~/.config/algogators/algolens.current-images
+docker ps --filter name=algolens
+docker stats --no-stream algolens-backend algolens-frontend algolens-edge
+docker logs -f algolens-backend
+# After editing algolens.env, re-run deploy.sh with the current images:
+cd ~/algolens && bash deployment/deploy.sh $(cat ~/.config/algogators/algolens.current-images)
 ```
 
-Add your configuration:
+## Retired
 
-```env
-DB_HOST=13.58.153.216
-DB_PORT=5432
-DB_USER=postgres
-DB_PASSWORD=algogators
-DB_NAME=algo_data
-JWT_SECRET_KEY=your-super-secret-jwt-key-change-this
-```
+These are no longer part of the deployment. Do not reinstall them:
 
-For the frontend, create `/home/ec2-user/AlgoLens/algolens-frontend/.env` if you need to override `VITE_API_URL` or enable `VITE_DEV_MODE`.
-
-**Important**: Generate a secure random JWT secret key. You can use:
-```bash
-python3 -c "import secrets; print(secrets.token_hex(32))"
-```
-
-### 5. Set Up Systemd Services
-
-```bash
-# Copy service files to systemd directory
-sudo cp deployment/algolens-backend.service /etc/systemd/system/
-sudo cp deployment/algolens.service /etc/systemd/system/
-
-# Edit the backend service to set a secure JWT secret
-sudo nano /etc/systemd/system/algolens-backend.service
-# Change: Environment="JWT_SECRET_KEY=your-secure-secret-key-change-this"
-# To: Environment="JWT_SECRET_KEY=<generate-a-random-secure-key>"
-
-# Reload systemd to recognize new services
-sudo systemctl daemon-reload
-
-# Enable services to start on boot
-sudo systemctl enable algolens-backend
-sudo systemctl enable algolens
-
-# Start the services
-sudo systemctl start algolens-backend
-sudo systemctl start algolens
-```
-
-### 6. Verify Services are Running
-
-```bash
-# Check backend status
-sudo systemctl status algolens-backend
-
-# Check frontend status
-sudo systemctl status algolens
-
-# View backend logs
-sudo journalctl -u algolens-backend -f
-
-# View frontend logs
-sudo journalctl -u algolens -f
-```
-
-## Service Management Commands
-
-```bash
-# Start services
-sudo systemctl start algolens-backend
-sudo systemctl start algolens
-
-# Stop services
-sudo systemctl stop algolens-backend
-sudo systemctl stop algolens
-
-# Restart services
-sudo systemctl restart algolens-backend
-sudo systemctl restart algolens
-
-# View logs
-sudo journalctl -u algolens-backend -f
-sudo journalctl -u algolens -f
-```
-
-## Automatic Deployment
-
-Once set up, the GitHub Actions workflow in `.github/workflows/deploy.yml` will automatically:
-
-1. Pull the latest code from the main branch
-2. Install frontend dependencies from `algolens-frontend/`
-3. Build the frontend from `algolens-frontend/`
-4. Install backend dependencies
-5. Restart both services
-
-This happens automatically on every push to the main branch.
-
-## Port Configuration
-
-- **Backend API**: Runs on port 5000
-- **Frontend**: Runs on port 3000
-
-Make sure these ports are open in your EC2 security group:
-- Port 5000 (Backend API)
-- Port 3000 (Frontend)
-- Port 22 (SSH)
-
-## Nginx Configuration (Optional but Recommended)
-
-For production, it's recommended to use Nginx as a reverse proxy:
-
-```nginx
-server {
-    listen 80;
-    server_name your-domain.com;
-
-    # Frontend
-    location / {
-        proxy_pass http://localhost:3000;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection 'upgrade';
-        proxy_set_header Host $host;
-        proxy_cache_bypass $http_upgrade;
-    }
-
-    # Backend API
-    location /auth/ {
-        proxy_pass http://localhost:5000/auth/;
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-    }
-}
-```
-
-## Troubleshooting
-
-### Backend won't start
-```bash
-# Check logs
-sudo journalctl -u algolens-backend -n 50
-
-# Common issues:
-# - Missing config.json file
-# - Database connection failure
-# - Missing Python dependencies
-```
-
-### Frontend won't start
-```bash
-# Check logs
-sudo journalctl -u algolens -n 50
-
-# Common issues:
-# - Build failed
-# - Missing node_modules
-# - Port already in use
-```
-
-### Database connection issues
-```bash
-# Test database connection
-cd /home/ec2-user/AlgoLens/algolens-api
-python3 -c "from database import get_db_connection; print(get_db_connection())"
-```
+- systemd units `algolens.service` (frontend via `npx serve`) and
+  `algolens-backend.service` (bare Flask on 5001). Removed from the repo.
+- the old deploy (GitHub Actions SSH plus the cron deploy script on the old
+  host) that ran `git pull`, `npm ci && npm run build` and `pip3 install`,
+  then restarted systemd. The server checkout had diverged, so it was failing
+  anyway.
+- the server-side git checkout in `/home/ec2-user/AlgoLens` and the
+  `:latest` containers started from the repo-root `docker-compose.prod.yml`.
