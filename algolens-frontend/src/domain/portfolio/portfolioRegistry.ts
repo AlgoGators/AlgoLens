@@ -67,3 +67,15 @@ export function findPortfolio(
   }
   return null;
 }
+
+/**
+ * A plain sentence for a book that could not be loaded. A 404 from the
+ * portfolio endpoint means no run has written the portfolio yet (e.g. a new
+ * QT portfolio before its first model run), not a fault.
+ */
+export function describeBookLoadError(message: string): string {
+  if (/\b404\b/.test(message)) {
+    return 'No run has written this portfolio yet. Its books appear after its first model run.';
+  }
+  return `Could not load this book: ${message}`;
+}

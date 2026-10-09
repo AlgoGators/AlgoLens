@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   BOOK_TOGGLE_OPTIONS,
+  describeBookLoadError,
   activeToggleBook,
   bookQuery,
   findPortfolio,
@@ -66,5 +67,15 @@ describe('switcher', () => {
     expect(switcherLabel(groups[1].portfolios[0])).toBe('QT TF (desk)');
     expect(switcherLabel(groups[1].portfolios[1])).toBe('QT TF (model)');
     expect(switcherLabel(groups[0].portfolios[0])).toBe('Trend');
+  });
+});
+
+describe('describeBookLoadError', () => {
+  it('explains a portfolio with no run yet', () => {
+    expect(describeBookLoadError('API request failed: 404 NOT FOUND. Body: {}')).toMatch(/No run has written/);
+  });
+
+  it('passes other failures through', () => {
+    expect(describeBookLoadError('API request failed: 500')).toBe('Could not load this book: API request failed: 500');
   });
 });
