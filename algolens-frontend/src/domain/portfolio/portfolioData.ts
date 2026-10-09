@@ -1,3 +1,5 @@
+import type { PositionBook } from './bookLabel';
+
 export interface Position {
   symbol: string;
   name: string;
@@ -86,6 +88,13 @@ export interface Strategy {
   finalizedPositions: FinalizedPosition[];
   managers: string[];
   lastUpdate: string;
+  /**
+   * Position book the positions and headline curve were read from. Absent on
+   * older API versions, so always guard on it.
+   */
+  book?: PositionBook;
+  /** True when the default QT book had no rows and the system book was served. */
+  fellBack?: boolean;
 }
 
 export interface PortfolioData {
