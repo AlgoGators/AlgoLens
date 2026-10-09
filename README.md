@@ -16,6 +16,26 @@ The original Figma design is available at https://www.figma.com/design/ZeqHCUFlW
 
 **Database:** PostgreSQL at `13.58.153.216:5432`, database `new_algo_data`
 
+### QT desk: AlgoLens and trade-ngin call each other
+
+AlgoLens and the engine (trade-ngin) **talk directly over gRPC**, and Postgres stays the record of everything they do.
+
+| Direction | How | What |
+|---|---|---|
+| AlgoLens → engine | gRPC to `desk-agent:50051` on the private Docker network `qt` (env `DESK_AGENT_ADDR`, 3 s timeout) | `RunDesk` (a save), `RequestOverride`, `RecordDecision`, `Publish`, `GetRunStatus`. Contract: `algolens-api/proto/qt/v1/desk.proto`, vendored from trade-ngin `proto/qt/v1/desk.proto` |
+| Engine → AlgoLens | Postgres (`new_algo_data`) | The three books in `trading.positions` (`system`, `qt_proposal`, `qt`), the command log `trading.position_overrides` (status and result of every command), and `live_run_metadata.published_by` / `published_at` and `settings_used` |
+
+**How a command works:**
+1. AlgoLens writes the command row to `trading.position_overrides` first, then calls the matching RPC with the row's id.
+2. The engine answers `ACCEPTED`, does the work, and moves the row to `done`, `refused` or `failed`.
+3. The page polls the row.
+4. If the gRPC call fails, nothing is lost: the desk-agent re-drives every `pending` row every 60 s.
+
+**The rest of the setup:**
+- **E-mail:** override approval links go to the VP and the President (env `QT_APPROVERS`, set on both sides). Publish e-mails come from the engine.
+- **Feature flag:** the desk UI and its write routes sit behind `QT_DESK_ENABLED`.
+- **Spec:** trade-ngin `docs/design/qt-contract.md` and `docs/design/qt-master-rulings.md`. The gRPC channel amends the master document's original "never call each other" (decided 2026-10-09).
+
 ---
 
 ## Local Development
@@ -52,36 +72,25 @@ Topology, host bootstrap, cutover and rollback: [deployment/DEPLOYMENT.md](deplo
 
 ## SSH Access
 
-Key file: `dominick-pem.pem` — **not in the repo**, get it from a team member.
+AlgoLens runs on the trade-ngin box. The key is `prod-deploy.pem`; it is **not in the repo**, so get it from a team member.
 
 ```bash
-ssh -i "/path/to/dominick-pem.pem" ec2-user@ec2-18-226-98-126.us-east-2.compute.amazonaws.com
+ssh -i "/path/to/prod-deploy.pem" ubuntu@ec2-18-118-225-224.us-east-2.compute.amazonaws.com
 ```
+
+TLS for `algolens.algogators.com` stays on the old host (`ec2-user@ec2-18-226-98-126`, `dominick-pem.pem`), in `/etc/nginx/conf.d/algolens.conf`.
 
 On Windows, restrict the key file permissions first:
 ```powershell
-icacls "C:\path\to\dominick-pem.pem" /inheritance:r /grant:r "$($env:USERNAME):R"
+icacls "C:\path	o\prod-deploy.pem" /inheritance:r /grant:r "$($env:USERNAME):R"
 ```
 
-### Useful server commands
+### Useful server commands (trade-ngin box)
 
 ```bash
-# Nginx
-sudo systemctl status nginx
-sudo nginx -t && sudo systemctl reload nginx
-sudo journalctl -u nginx -n 50
-
-# Frontend service
-sudo systemctl status algolens
-sudo systemctl restart algolens
-
-# Backend Docker container
-docker ps
-docker logs algolens-docker-backend-1 --tail 50
-docker restart algolens-docker-backend-1
-
-# Memory / swap
-free -h
+docker ps --filter name=algolens          # edge, frontend, backend
+docker logs algolens-backend --tail 50
+curl -s localhost:8088/health             # through the edge
+cat ~/.config/algogators/algolens.previous-images   # what a rollback would restore
+docker ps --filter name=desk-agent        # the engine side of the QT desk (/home/ubuntu/qt-engine)
 ```
-
-> **Note:** The 2 GB swapfile (`/swapfile`) was added manually to prevent OOM during builds. It is enabled at boot via `/etc/fstab`. Do not remove it.
