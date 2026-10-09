@@ -1,7 +1,7 @@
 name: AlgoLens CI
 
 # Runs the backend and frontend test/build gates on every PR and on pushes to main.
-# The Deploy workflow is chained to this via workflow_run, so a red build here
+# deploy.yml calls this as its quality job (workflow_call), so a red build here
 # blocks the production deploy.
 
 on:
@@ -9,6 +9,7 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+  workflow_call:
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}

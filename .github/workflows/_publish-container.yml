@@ -1,0 +1,121 @@
+name: publish / container
+
+# Reusable. Mirrors AlgoGators/algogators .github/workflows/_publish-container.yml.
+#
+# Emits a digest, and the deploy job consumes the DIGEST, not a tag, so what
+# runs in production is exactly what was built here and a rollback names an
+# immutable image. :latest and :sha-<short> are also pushed for humans.
+
+on:
+  workflow_call:
+    inputs:
+      path:
+        description: Build context, e.g. algolens-api
+        type: string
+        required: true
+      image:
+        description: Image name without registry, e.g. algogators/algolens-backend
+        type: string
+        required: true
+      dockerfile:
+        type: string
+        default: Dockerfile
+      build-args:
+        description: Newline-separated KEY=value build args.
+        type: string
+        default: ''
+      platforms:
+        type: string
+        default: linux/amd64
+      push:
+        description: Set false to build without publishing (dry run).
+        type: boolean
+        default: true
+    outputs:
+      digest:
+        description: Immutable image digest; pass this to deploy.sh.
+        value: ${{ jobs.build.outputs.digest }}
+      tags:
+        value: ${{ jobs.build.outputs.tags }}
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: build and push
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+      tags: ${{ steps.meta.outputs.tags }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        if: ${{ inputs.push }}
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Derive tags and labels
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ inputs.image }}
+          tags: |
+            type=raw,value=latest
+            type=sha,prefix=sha-,format=short
+            type=sha,format=long
+            type=ref,event=branch
+          labels: |
+            org.opencontainers.image.title=${{ inputs.image }}
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ inputs.path }}
+          file: ${{ inputs.path }}/${{ inputs.dockerfile }}
+          platforms: ${{ inputs.platforms }}
+          push: ${{ inputs.push }}
+          build-args: ${{ inputs.build-args }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ inputs.image }}
+          cache-to: type=gha,mode=max,scope=${{ inputs.image }}
+          provenance: true
+          sbom: true
+
+      - name: Attest build provenance
+        if: ${{ inputs.push }}
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-name: ghcr.io/${{ inputs.image }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+
+      - name: Summary
+        if: ${{ inputs.push }}
+        run: |
+          {
+            echo "### ghcr.io/${{ inputs.image }}"
+            echo '```'
+            echo "digest: ${{ steps.build.outputs.digest }}"
+            echo "tags:"
+            echo "${{ steps.meta.outputs.tags }}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

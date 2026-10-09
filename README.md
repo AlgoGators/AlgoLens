@@ -7,12 +7,12 @@ The original Figma design is available at https://www.figma.com/design/ZeqHCUFlW
 
 ## Architecture
 
-| Component | Port | How it runs |
+| Component | Where | How it runs |
 |---|---|---|
-| Frontend (React/Vite) | 3000 | `algolens.service` via `npx serve ./algolens-frontend/build` |
-| Backend API (Flask/gunicorn) | 5000 | Docker container `algolens-docker-backend-1` |
-| ~~Legacy backend~~ | ~~5001~~ | `algolens-backend.service` — **do not use**, has no DB credentials |
-| Nginx (public) | 80 / 443 | Reverse proxy: `/` → 3000, `/auth` + `/portfolio` → 5000 |
+| Frontend (React/Vite) | trade-ngin host | `algolens-frontend` container (static build behind nginx) |
+| Backend API (Flask/gunicorn) | trade-ngin host | `algolens-backend` container on :5000, also on the `qt` network |
+| Edge router | trade-ngin host, :8088 | nginx container: `/` -> frontend, `/auth` `/portfolio` `/health` -> backend |
+| TLS | old EC2 host, 443 | nginx proxies `algolens.algogators.com` to the edge on the private IP |
 
 **Database:** PostgreSQL at `13.58.153.216:5432`, database `new_algo_data`
 
@@ -38,33 +38,15 @@ python app.py     # runs at http://localhost:5000
 
 ## Production Deployment
 
-Pushing to `main` triggers the GitHub Actions workflow (`.github/workflows/deploy.yml`), which:
+A push to the `prod` branch runs `.github/workflows/deploy.yml`: the CI gate, then both images are built and pushed to GHCR, then the trade-ngin box fast-forwards its sparse checkout of `deployment/` and runs `deployment/deploy.sh` with the two image digests. The job fails unless `http://localhost:8088/health` on the box returns 200.
 
-1. SSHes into the EC2 instance
-2. Runs `git pull origin main`
-3. Runs `cd algolens-frontend && npm ci && npm run build` on EC2 (2 GB swap is provisioned to handle this)
-4. Copies `deployment/` service and nginx configs, reloads nginx
-5. Restarts `algolens` (frontend) and `algolens-backend` (legacy systemd backend) services
-
-> The Docker backend container (`algolens-docker-backend-1`) is **not** restarted by CI/CD — restart it manually if you change backend env vars or the Docker image.
-
-### Environment files on EC2 (not in git)
-
-| File | Purpose |
-|---|---|
-| `/home/ec2-user/AlgoLens/algolens-frontend/.env` | `VITE_API_URL=https://algolens.algogators.com` — baked into the frontend build |
-| `/home/ec2-user/algolens-docker/.env` | DB credentials and JWT secret for the backend Docker container |
-
-If you need to change DB credentials or the DB name, update `/home/ec2-user/algolens-docker/.env` and run:
-```bash
-docker restart algolens-docker-backend-1
-```
+Topology, host bootstrap, cutover and rollback: [deployment/DEPLOYMENT.md](deployment/DEPLOYMENT.md).
 
 ### Adding new API routes
 
 1. Add the route to the Flask backend
-2. Add a `location` block in `deployment/algolens.conf` pointing to `http://localhost:5000/<route>`
-3. Push to `main` — CI/CD will deploy the new nginx config automatically
+2. If it uses a new path prefix, add a `location` block for it in `deployment/edge.conf`
+3. Merge to `main`, then push `main` to `prod`; the deploy ships the updated edge config
 
 ---
 
