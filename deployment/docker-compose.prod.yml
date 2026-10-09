@@ -9,7 +9,8 @@
 # (default /home/ubuntu/.config/algogators/algolens.env) so a `git pull` can
 # never touch it. Variable names: deployment/algolens.env.example.
 #
-# Memory: the box has 1 vCPU and ~1 GiB RAM, and trade-ngin's 09:30 live run
+# Memory: the box (t2.medium, 2 vCPU, 4 GiB RAM) is shared with Postgres,
+# trade-ngin and data-ngin's Airflow, and trade-ngin's 09:30 live run
 # must never be OOM-killed. Every container here has a hard memory limit and
 # oom_score_adj 800, so under pressure the kernel kills AlgoLens first.
 #
