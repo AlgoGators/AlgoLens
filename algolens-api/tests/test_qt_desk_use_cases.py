@@ -11,6 +11,7 @@ from algolens.application.qt.ports import (
     DeskNotFound,
     DeskNotSeeded,
 )
+import algolens.application.qt.use_cases as use_cases
 from algolens.application.qt.use_cases import (
     DecideOverride,
     GetCommand,
@@ -25,7 +26,8 @@ from algolens.domain.qt import desk as rules
 from algolens.domain.qt.desk import DeskRuleError, DeskStaleError, token_hash
 
 DAY = date(2026, 10, 8)
-NOW = datetime(2026, 10, 8, 15, tzinfo=timezone.utc)
+# 08:00 New York (EDT) on DAY: the desk is open until 09:30, approvals until 10:00.
+NOW = datetime(2026, 10, 8, 12, tzinfo=timezone.utc)
 QT = {
     "portfolio_id": "QT_CONSERVATIVE_PORTFOLIO",
     "strategy_type": "LIVE_TREND_FOLLOWING",
@@ -34,6 +36,13 @@ QT = {
 }
 MODEL = {**QT, "portfolio_id": "QT_CONSERVATIVE_MODEL_PORTFOLIO", "desk_editable": False}
 EQUITY = {**QT, "portfolio_id": "EQ", "strategy_type": "LIVE_EQUITY_MEAN_REVERSION"}
+
+
+@pytest.fixture(autouse=True)
+def _desk_clock(monkeypatch):
+    """The use cases' default clock is NOW (before the 09:30 cutoff) unless a
+    test passes its own."""
+    monkeypatch.setattr(use_cases, "_utcnow", lambda: NOW)
 
 
 class FakeRepo:
@@ -49,6 +58,7 @@ class FakeRepo:
         self.rows = []
         self.published = None
         self.now = NOW
+        self.tracks_sends = True
 
     def _insert(self, **row):
         row = {
@@ -165,6 +175,9 @@ class FakeRepo:
 
     def publish_state(self, portfolio_id, day):
         return self.published
+
+    def send_tracking(self):
+        return self.tracks_sends
 
 
 class FakeAgent:
@@ -394,7 +407,12 @@ def test_publish_state_comes_from_live_run_metadata():
     repo = FakeRepo()
     repo.published = {"published_by": "d@x.com", "published_at": NOW}
     state = GetDeskState(repo).execute(QT)
-    assert state["published"] == {"published_by": "d@x.com", "published_at": NOW.isoformat()}
+    assert state["published"] == {
+        "published_by": "d@x.com",
+        "published_at": NOW.isoformat(),
+        "publish_source": "desk",
+        "sent_at": None,
+    }
 
 
 # --- hardening (2026-10-09 spec) ---------------------------------------------
@@ -449,3 +467,174 @@ def test_a_stale_save_names_the_symbols():
         SaveDeskEdit(repo, FakeAgent()).execute(
             QT, [{"symbol": "ZC.v.0", "quantity": 1, "expected": 2}], "r", "d@x.com")
     assert stale.value.symbols == ["ZC.v.0"] and repo.rows == []
+
+
+# --- the daily approval cutoff (2026-10-09: approve by 09:30, fallback at 10:00) --
+
+
+def _ny(day, hour, minute=0, second=0):
+    """An instant given as New York wall-clock time on `day`."""
+    from zoneinfo import ZoneInfo
+
+    return datetime(day.year, day.month, day.day, hour, minute, second,
+                    tzinfo=ZoneInfo("America/New_York"))
+
+
+def _approve_at(now, day=DAY):
+    repo, agent = FakeRepo(day=day), FakeAgent()
+    return repo, agent, PublishDesk(repo, agent, now=lambda: now)
+
+
+@pytest.mark.parametrize("hour, minute", [(7, 0), (9, 29), (9, 30), (9, 59)])
+def test_approve_is_accepted_until_10_new_york(hour, minute):
+    repo, agent, approve = _approve_at(_ny(DAY, hour, minute))
+    command = approve.execute(QT, "d@x.com")["command"]
+    assert command["kind"] == "publish" and agent.calls == [("Publish", command["id"])]
+
+
+@pytest.mark.parametrize("hour, minute", [(10, 0), (10, 7), (23, 59)])
+def test_approve_from_10_new_york_is_refused_without_a_row(hour, minute):
+    repo, agent, approve = _approve_at(_ny(DAY, hour, minute))
+    with pytest.raises(DeskConflict, match="closed at 10:00 New York"):
+        approve.execute(QT, "d@x.com")
+    assert repo.rows == [] and agent.calls == []
+
+
+def test_approve_after_10_on_a_published_day_says_published():
+    repo, agent, approve = _approve_at(_ny(DAY, 10, 7))
+    repo.published = {"published_by": "system:fallback-10am", "published_at": _ny(DAY, 10, 1),
+                      "publish_source": "fallback", "sent_at": _ny(DAY, 10, 1)}
+    with pytest.raises(DeskConflict, match="already published .by system:fallback-10am"):
+        approve.execute(QT, "d@x.com")
+
+
+def test_a_past_book_date_is_closed_at_any_hour():
+    # The desk still shows yesterday's book (today's model run is not in yet).
+    repo, agent, approve = _approve_at(_ny(DAY + timedelta(days=1), 7, 0))
+    with pytest.raises(DeskConflict, match="closed"):
+        approve.execute(QT, "d@x.com")
+
+
+@pytest.mark.parametrize(
+    "day, utc_hour, utc_minute, accepted",
+    [
+        # 2026-11-01: clocks go back at 02:00, so 10:00 New York is 15:00 UTC (EST).
+        (date(2026, 11, 1), 14, 30, True),   # 09:30 EST (10:30 at EDT's offset)
+        (date(2026, 11, 1), 14, 59, True),
+        (date(2026, 11, 1), 15, 0, False),
+        # 2026-03-08: clocks go forward at 02:00, so 10:00 New York is 14:00 UTC (EDT).
+        (date(2026, 3, 8), 13, 59, True),
+        (date(2026, 3, 8), 14, 0, False),   # 10:00 EDT (09:00 at EST's offset)
+    ],
+)
+def test_the_cutoff_follows_new_york_across_dst(day, utc_hour, utc_minute, accepted):
+    now = datetime(day.year, day.month, day.day, utc_hour, utc_minute, tzinfo=timezone.utc)
+    repo, agent, approve = _approve_at(now, day=day)
+    if accepted:
+        approve.execute(QT, "d@x.com")
+        assert len(repo.rows) == 1
+    else:
+        with pytest.raises(DeskConflict):
+            approve.execute(QT, "d@x.com")
+        assert repo.rows == []
+
+
+@pytest.mark.parametrize("day", [date(2026, 10, 10), date(2026, 10, 11)])  # Sat, Sun
+def test_weekends_follow_the_same_cutoff(day):
+    _repo, _agent, approve = _approve_at(_ny(day, 9, 45), day=day)
+    approve.execute(QT, "d@x.com")
+    _repo, _agent, approve = _approve_at(_ny(day, 10, 0), day=day)
+    with pytest.raises(DeskConflict):
+        approve.execute(QT, "d@x.com")
+
+
+def test_save_override_request_and_decision_are_closed_from_10_new_york():
+    repo = FakeRepo()
+    _emailed_request(repo, expires=_ny(DAY, 23))
+    late = lambda: _ny(DAY, 10, 0)  # noqa: E731
+    with pytest.raises(DeskConflict, match="Editing of the 2026-10-08 book closed"):
+        SaveDeskEdit(repo, FakeAgent(), now=late).execute(
+            QT, [{"symbol": "ZC.v.0", "quantity": 1, "expected": 3}], "r", "d@x.com")
+    with pytest.raises(DeskConflict, match="closed at 10:00"):
+        RequestOverride(repo, FakeAgent(), now=late).execute(QT, "r", "d@x.com")
+    with pytest.raises(DeskConflict, match="closed at 10:00"):
+        DecideOverride(repo, FakeAgent(), now=late).execute("tok", True, "p@x.com", "president")
+    assert [r["kind"] for r in repo.rows] == ["override_request"]
+    # Until 10:00 they are open, as before.
+    early = lambda: _ny(DAY, 9, 59)  # noqa: E731
+    SaveDeskEdit(repo, FakeAgent(), now=early).execute(
+        QT, [{"symbol": "ZC.v.0", "quantity": 1, "expected": 3}], "r", "d@x.com")
+    DecideOverride(repo, FakeAgent(), now=early).execute("tok", False, "p@x.com", "president")
+    assert [r["kind"] for r in repo.rows] == ["override_request", "save", "override_decision"]
+
+
+def test_desk_state_carries_the_server_time_and_new_york_deadlines():
+    state = GetDeskState(FakeRepo(), now=lambda: _ny(DAY, 9, 0)).execute(QT)
+    assert state["serverTime"] == "2026-10-08T13:00:00+00:00"
+    assert state["deadlines"] == {
+        "timezone": "America/New_York",
+        "today": "2026-10-08",
+        "bookDate": "2026-10-08",
+        "approveBy": "2026-10-08T09:30:00-04:00",
+        "fallbackAt": "2026-10-08T10:00:00-04:00",
+        "todayApproveBy": "2026-10-08T09:30:00-04:00",
+        "todayFallbackAt": "2026-10-08T10:00:00-04:00",
+        "approvalClosed": False,
+    }
+    assert state["sendTracked"] is True
+
+
+def test_desk_state_deadlines_on_a_dst_day_a_weekend_and_before_the_first_book():
+    nov1 = GetDeskState(FakeRepo(day=date(2026, 11, 1)),
+                        now=lambda: _ny(date(2026, 11, 1), 10, 0)).execute(QT)
+    assert nov1["deadlines"]["approveBy"] == "2026-11-01T09:30:00-05:00"
+    assert nov1["deadlines"]["approvalClosed"] is True
+    # No book yet (a Saturday): the deadlines are today's.
+    none = GetDeskState(FakeRepo(day=None), now=lambda: _ny(date(2026, 10, 10), 6, 0)).execute(QT)
+    assert none["deadlines"]["bookDate"] == "2026-10-10"
+    assert none["deadlines"]["approveBy"] == "2026-10-10T09:30:00-04:00"
+    assert none["deadlines"]["approvalClosed"] is False
+    # The desk still shows yesterday's book: today's deadlines come separately.
+    old = GetDeskState(FakeRepo(), now=lambda: _ny(DAY + timedelta(days=1), 6, 0)).execute(QT)
+    assert old["deadlines"]["bookDate"] == "2026-10-08"
+    assert old["deadlines"]["today"] == "2026-10-09"
+    assert old["deadlines"]["todayApproveBy"] == "2026-10-09T09:30:00-04:00"
+    assert old["deadlines"]["approvalClosed"] is True
+
+
+def test_desk_state_reads_publish_source_and_sent_at():
+    repo = FakeRepo()
+    repo.published = {"published_by": "d@x.com", "published_at": _ny(DAY, 9, 0),
+                      "publish_source": "desk", "sent_at": _ny(DAY, 9, 30, 4)}
+    published = GetDeskState(repo, now=lambda: _ny(DAY, 9, 31)).execute(QT)["published"]
+    assert published["publish_source"] == "desk"
+    assert published["sent_at"] == "2026-10-08T09:30:04-04:00"
+
+
+@pytest.mark.parametrize(
+    "published_by, source",
+    [
+        ("system:fallback-10am", "fallback"),
+        ("system:fallback-catchup", "fallback"),
+        ("system:model-only", "model-only"),
+        ("system:non-trading-day", "system"),
+        ("desk@x.com", "desk"),
+    ],
+)
+def test_without_the_026_columns_the_source_is_read_from_published_by(published_by, source):
+    repo = FakeRepo()
+    repo.tracks_sends = False
+    repo.published = {"published_by": published_by, "published_at": _ny(DAY, 10, 1)}
+    state = GetDeskState(repo, now=lambda: _ny(DAY, 10, 5)).execute(QT)
+    assert state["published"]["publish_source"] == source
+    assert state["published"]["sent_at"] is None
+    assert state["sendTracked"] is False
+
+
+def test_the_approval_page_shows_the_deadline():
+    repo = FakeRepo()
+    _emailed_request(repo)
+    page = LookupApproval(repo, now=lambda: _ny(DAY, 9, 0)).execute("tok")
+    assert page["deadlines"]["approveBy"] == "2026-10-08T09:30:00-04:00"
+    assert page["deadlines"]["fallbackAt"] == "2026-10-08T10:00:00-04:00"
+    assert page["serverTime"] == "2026-10-08T13:00:00+00:00"

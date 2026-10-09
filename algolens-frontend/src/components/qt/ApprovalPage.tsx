@@ -2,7 +2,37 @@ import React, { useEffect, useState } from 'react';
 import { useTheme } from '../../adapters/react/ThemeContext';
 import { useCommandPoll } from '../../adapters/react/useCommandPoll';
 import { DeskService, type ApprovalPage as ApprovalData } from '../../application/qt/deskService';
-import { approvalTokenFrom, describeCommand, type DeskCommand } from '../../domain/qt/desk';
+import {
+  approvalTokenFrom,
+  describeCommand,
+  formatCountdown,
+  serverClockOffsetMs,
+  type DeskCommand,
+  type DeskDeadlines,
+} from '../../domain/qt/desk';
+
+/**
+ * The request day's deadline: the desk approves by 09:30 New York; from 10:00
+ * the model's book is sent and the request can no longer be decided. Counts
+ * down on the server's clock.
+ */
+function Deadline({ date, deadlines, nowMs }: { date: string; deadlines: DeskDeadlines; nowMs: number }) {
+  const approveBy = Date.parse(deadlines.approveBy);
+  const fallbackAt = Date.parse(deadlines.fallbackAt);
+  let text: string;
+  if (nowMs < approveBy) {
+    text = `The desk must approve the ${date} book by 09:30 New York (${formatCountdown(approveBy - nowMs)} left). Decide before then so the desk can approve the book you decide.`;
+  } else if (nowMs < fallbackAt) {
+    text = `09:30 New York has passed. The ${date} book can still be approved until 10:00 (${formatCountdown(fallbackAt - nowMs)} left); from then the model's book is sent and this request can no longer be decided.`;
+  } else {
+    text = `Closed: from 10:00 New York on ${date} the model's book is sent, so this request can no longer be decided.`;
+  }
+  return (
+    <p data-testid="approval-deadline" className="mt-3 rounded border border-amber-400 px-3 py-2 text-sm">
+      {text}
+    </p>
+  );
+}
 
 /**
  * /qt/approve?token=... (A5). The engine e-mails this link to the VP and the
@@ -24,6 +54,13 @@ export function ApprovalPage({ onDone }: { onDone: () => void }) {
   const [busy, setBusy] = useState(false);
   const [decision, setDecision] = useState<DeskCommand | null>(null);
   const polled = useCommandPoll(decision);
+  const [clockOffset, setClockOffset] = useState(0);
+  const [browserNow, setBrowserNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    const tick = window.setInterval(() => setBrowserNow(Date.now()), 1_000);
+    return () => window.clearInterval(tick);
+  }, []);
 
   const load = () => {
     if (!token) {
@@ -32,6 +69,9 @@ export function ApprovalPage({ onDone }: { onDone: () => void }) {
     }
     DeskService.approval(token)
       .then(data => {
+        const received = Date.now();
+        setClockOffset(serverClockOffsetMs(data.serverTime, received));
+        setBrowserNow(received);
         setPage(data);
         if (data.decision) setDecision(data.decision);
       })
@@ -57,8 +97,16 @@ export function ApprovalPage({ onDone }: { onDone: () => void }) {
 
   const muted = dark ? 'text-gray-400' : 'text-gray-500';
   const viewer = page?.viewer;
+  const serverNow = browserNow + clockOffset;
+  const closed = Boolean(page?.deadlines && serverNow >= Date.parse(page.deadlines.fallbackAt));
   const canDecide =
-    viewer && viewer.approver_role && !viewer.is_requester && !page?.decision && !decision && !page?.published;
+    viewer &&
+    viewer.approver_role &&
+    !viewer.is_requester &&
+    !page?.decision &&
+    !decision &&
+    !page?.published &&
+    !closed;
   const canApprove = Boolean(page?.snapshot && page.snapshotMatches);
 
   return (
@@ -83,6 +131,9 @@ export function ApprovalPage({ onDone }: { onDone: () => void }) {
             <blockquote className={`mt-3 border-l-4 pl-3 ${dark ? 'border-orange-700' : 'border-orange-300'}`}>
               {page.request.reason}
             </blockquote>
+            {page.deadlines && !page.published && (
+              <Deadline date={page.request.date} deadlines={page.deadlines} nowMs={serverNow} />
+            )}
 
             <h2 className="text-lg mt-6">The book an approval trades</h2>
             <p className={`text-xs ${muted}`}>
@@ -124,8 +175,12 @@ export function ApprovalPage({ onDone }: { onDone: () => void }) {
             )}
             {page.published && (
               <p className={`mt-3 text-sm ${muted}`}>
-                The {page.request.date} book was published
-                {page.published.published_by ? ` by ${page.published.published_by}` : ''}; it can no longer be decided.
+                The {page.request.date} book was{' '}
+                {page.published.publish_source === 'fallback' ||
+                (page.published.published_by ?? '').startsWith('system:fallback')
+                  ? "not approved by 10:00 New York, so the engine sent the model's book"
+                  : `approved${page.published.published_by ? ` by ${page.published.published_by}` : ''}`}
+                ; this request can no longer be decided.
               </p>
             )}
 

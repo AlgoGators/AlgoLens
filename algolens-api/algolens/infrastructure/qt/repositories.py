@@ -8,13 +8,15 @@ Tables (trade-ngin migrations, new_algo_data):
                                it holds no UPDATE there, so no SELECT ... FOR
                                UPDATE either: writers serialise on a
                                transaction advisory lock per (portfolio, day).
-  trading.live_run_metadata    published_by / published_at / settings_used (022)
+  trading.live_run_metadata    published_by / published_at / settings_used (022);
+                               publish_source / sent_at (026, read when present)
   trading.strategy_config      the desk's settings versions (022)
   metadata.contract_metadata   the instruments the desk may add
   futures_data.ohlcv_1d        latest close of a new symbol (no key: ties
                                broken by the engine's keep order)
 """
 
+import time
 from contextlib import contextmanager
 
 import psycopg2.errors
@@ -70,6 +72,24 @@ _CHOICES_SQL = f"""
     WHERE lower(cm."Asset Type") = 'futures'
       AND cm."Databento Symbol" || '.v.0' <> ALL(%s)
 """
+
+
+# trade-ngin migration 026 adds live_run_metadata.publish_source and sent_at.
+# AlgoLens reads them when they exist and treats them as NULL before. The
+# information_schema answer is cached: for good once both are there, and for
+# _CUTOFF_COLUMNS_TTL_SECONDS while they are not, so 026 is picked up without
+# a restart.
+CUTOFF_COLUMNS = ("publish_source", "sent_at")
+_CUTOFF_COLUMNS_TTL_SECONDS = 300
+_cutoff_columns_cache: frozenset | None = None
+_cutoff_columns_expires_at = 0.0
+
+
+def reset_cutoff_columns_cache():
+    """Forget the cached 026 column check (tests rebuild the schema)."""
+    global _cutoff_columns_cache, _cutoff_columns_expires_at
+    _cutoff_columns_cache = None
+    _cutoff_columns_expires_at = 0.0
 
 
 class PostgresDeskRepository:
@@ -484,19 +504,60 @@ class PostgresDeskRepository:
                 approver_role=approver_role,
             )
 
+    @staticmethod
+    def _cutoff_columns(cursor):
+        """Which of 026's columns live_run_metadata has (cached, see above)."""
+        global _cutoff_columns_cache, _cutoff_columns_expires_at
+        now = time.monotonic()
+        if _cutoff_columns_cache is not None and (
+            len(_cutoff_columns_cache) == len(CUTOFF_COLUMNS) or now < _cutoff_columns_expires_at
+        ):
+            return _cutoff_columns_cache
+        cursor.execute(
+            """
+            SELECT column_name FROM information_schema.columns
+            WHERE table_schema = 'trading' AND table_name = 'live_run_metadata'
+              AND column_name = ANY(%s)
+            """,
+            (list(CUTOFF_COLUMNS),),
+        )
+        _cutoff_columns_cache = frozenset(row["column_name"] for row in cursor.fetchall())
+        _cutoff_columns_expires_at = now + _CUTOFF_COLUMNS_TTL_SECONDS
+        return _cutoff_columns_cache
+
+    def send_tracking(self):
+        """Whether live_run_metadata has 026's publish_source and sent_at."""
+        conn = self.connection_factory()
+        try:
+            with conn.cursor() as cursor:
+                return len(self._cutoff_columns(cursor)) == len(CUTOFF_COLUMNS)
+        finally:
+            conn.close()
+
     def publish_state(self, portfolio_id, day):
-        """published_by / published_at from live_run_metadata (022), or None."""
+        """published_by / published_at (022) and publish_source / sent_at
+        (026; NULL without the columns) of a published day, or None. sent_at
+        is the latest over the day's rows of the portfolio."""
         conn = self.connection_factory()
         try:
             with conn.cursor() as cursor:
                 if not self._has_column(cursor, "live_run_metadata", "published_at"):
                     return None
+                present = self._cutoff_columns(cursor)
+                source = "m.publish_source" if "publish_source" in present else "NULL::text"
+                sent = (
+                    """(SELECT max(s.sent_at) FROM trading.live_run_metadata s
+                        WHERE s.portfolio_id = m.portfolio_id AND s.date = m.date)"""
+                    if "sent_at" in present
+                    else "NULL::timestamptz"
+                )
                 cursor.execute(
-                    """
-                    SELECT published_by, published_at
-                    FROM trading.live_run_metadata
-                    WHERE portfolio_id = %s AND date = %s AND published_at IS NOT NULL
-                    ORDER BY published_at DESC
+                    f"""
+                    SELECT m.published_by, m.published_at,
+                           {source} AS publish_source, {sent} AS sent_at
+                    FROM trading.live_run_metadata m
+                    WHERE m.portfolio_id = %s AND m.date = %s AND m.published_at IS NOT NULL
+                    ORDER BY m.published_at DESC
                     LIMIT 1
                     """,
                     (portfolio_id, day),

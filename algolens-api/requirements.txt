@@ -8,3 +8,4 @@ python-dotenv==1.2.3
 gunicorn==26.2.0
 grpcio==1.84.0
 protobuf==7.36.2
+tzdata==2025.2

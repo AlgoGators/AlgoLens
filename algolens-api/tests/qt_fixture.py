@@ -26,6 +26,9 @@ Shapes:
     "025" (after it, with UPDATE, DELETE and TRUNCATE on position_overrides
     revoked from the application role: 025 revokes them only from a role
     named svc_algolens, so the fixture does it for APP_ROLE).
+  * 026 (the daily approval cutoff: live_run_metadata.publish_source and
+    sent_at) is emulated as the spec states it until trade-ngin's file can be
+    vendored; "026" runs every qt_db test once more, after 025.
 
 The repositories under test connect as APP_ROLE, a role holding only what
 svc_algolens holds (SET ROLE from the setup superuser), so a statement that
@@ -236,7 +239,15 @@ GRANT INSERT, UPDATE, DELETE, TRUNCATE ON trading.position_overrides TO {APP_ROL
 # 025: AlgoLens only inserts into the command log.
 REVOKE_025 = f"REVOKE UPDATE, DELETE, TRUNCATE ON trading.position_overrides FROM {APP_ROLE};"
 
-SCHEMA_VERSIONS = ("023", "025")
+# 026 as docs/design (2026-10-09 cutoff spec) states it; additive.
+EMULATED_026 = """
+ALTER TABLE trading.live_run_metadata
+    ADD COLUMN publish_source TEXT NULL
+        CHECK (publish_source IN ('desk', 'fallback', 'model-only')),
+    ADD COLUMN sent_at TIMESTAMPTZ NULL;
+"""
+
+SCHEMA_VERSIONS = ("023", "025", "026")
 
 
 def build_schema(cursor, version="023"):
@@ -245,9 +256,11 @@ def build_schema(cursor, version="023"):
     cursor.execute((SQL_DIR / "022_strategy_config.sql").read_text(encoding="utf-8"))
     cursor.execute((SQL_DIR / "023_qt_command_log.sql").read_text(encoding="utf-8"))
     cursor.execute(APP_GRANTS)
-    if version == "025":
+    if version in ("025", "026"):
         cursor.execute((SQL_DIR / "025_qt_command_log_hardening.sql").read_text(encoding="utf-8"))
         cursor.execute(REVOKE_025)
+    if version == "026":
+        cursor.execute(EMULATED_026)
 
 
 def drop_schema(cursor):
@@ -266,10 +279,12 @@ def qt_db(request):
     from psycopg2.extras import RealDictCursor
 
     import algolens.infrastructure.portfolio.repositories as repo_module
+    from algolens.infrastructure.qt.repositories import reset_cutoff_columns_cache
 
     assert_local(DB_URL)
     repo_module._has_portfolio_type_cache = None
     repo_module._has_portfolio_type_expires_at = 0
+    reset_cutoff_columns_cache()
 
     setup = psycopg2.connect(DB_URL, cursor_factory=RealDictCursor)
     setup.autocommit = True
@@ -291,3 +306,4 @@ def qt_db(request):
         drop_schema(cur)
     setup.close()
     repo_module._has_portfolio_type_cache = None
+    reset_cutoff_columns_cache()

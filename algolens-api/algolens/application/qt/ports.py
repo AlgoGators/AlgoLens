@@ -86,7 +86,11 @@ class DeskRepositoryPort(Protocol):
         matches the proposal; insert."""
 
     def publish_state(self, portfolio_id: str, day: date) -> Row | None:
-        ...
+        """published_by, published_at, publish_source and sent_at of a
+        published day (the last two NULL before migration 026), or None."""
+
+    def send_tracking(self) -> bool:
+        """Whether live_run_metadata has 026's publish_source and sent_at."""
 
 
 class SettingsRepositoryPort(Protocol):
