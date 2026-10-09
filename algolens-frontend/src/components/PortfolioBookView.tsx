@@ -39,8 +39,11 @@ export function PortfolioBookView({ portfolio, onBack, renderDesk }: PortfolioBo
   const [loading, setLoading] = useState(true);
   const [reloadKey, setReloadKey] = useState(0);
 
+  // On a switch, show nothing of the previous portfolio while the next loads.
   useEffect(() => {
     setRequested(null);
+    setStrategy(null);
+    setError(null);
   }, [portfolio.portfolio_id]);
 
   useEffect(() => {

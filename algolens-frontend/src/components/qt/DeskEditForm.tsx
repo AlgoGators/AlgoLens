@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useTheme } from '../../adapters/react/ThemeContext';
-import { DeskService } from '../../application/qt/deskService';
+import { DeskApiError, DeskService } from '../../application/qt/deskService';
 import {
   validateEdit,
   type BookPosition,
@@ -13,6 +13,8 @@ interface DeskEditFormProps {
   proposal: BookPosition[];
   onSaved: (command: DeskCommand, agent: string) => void;
   onCancel: () => void;
+  /** The proposal changed under the draft (409 listing symbols): the panel reloads it. */
+  onStale?: (message: string) => void;
 }
 
 /**
@@ -20,8 +22,12 @@ interface DeskEditFormProps {
  * 0 = flatten, new symbols from the contract list at their latest close, and
  * a reason. Save writes the proposal and the save row in one transaction,
  * then asks the engine to run its one pass.
+ *
+ * Each change carries the quantity the form showed (`expected`); the server
+ * refuses the save if the proposal moved meanwhile. The parent keys this form
+ * on the proposal, so the draft is rebuilt whenever the proposal changes.
  */
-export function DeskEditForm({ portfolioId, proposal, onSaved, onCancel }: DeskEditFormProps) {
+export function DeskEditForm({ portfolioId, proposal, onSaved, onCancel, onStale }: DeskEditFormProps) {
   const { theme } = useTheme();
   const dark = theme === 'dark';
   const [draft, setDraft] = useState<Record<string, string>>(() =>
@@ -61,6 +67,13 @@ export function DeskEditForm({ portfolioId, proposal, onSaved, onCancel }: DeskE
       const result = await DeskService.save(portfolioId, validation.changes, reason.trim());
       onSaved(result.command, result.agent);
     } catch (err) {
+      if (err instanceof DeskApiError && err.status === 409 && err.changed.length > 0 && onStale) {
+        onStale(
+          `Not saved: ${err.changed.join(', ')} changed since you loaded the proposal. ` +
+            'The form now shows the current proposal; edit again.',
+        );
+        return;
+      }
       setSaveError(err instanceof Error ? err.message : String(err));
     } finally {
       setSaving(false);

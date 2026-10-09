@@ -2,6 +2,7 @@ import type {
   DeskCommand,
   DeskState,
   QuantityChange,
+  SnapshotRow,
   SymbolChoice,
 } from '../../domain/qt/desk';
 import type { SettingChange, SettingsState, SettingsVersion } from '../../domain/qt/settings';
@@ -9,7 +10,12 @@ import { API_BASE_URL } from './httpClient';
 
 /** An API error with its HTTP status (409 = not seeded / conflict, ...). */
 export class DeskApiError extends Error {
-  constructor(public status: number, message: string) {
+  constructor(
+    public status: number,
+    message: string,
+    /** On a stale save (409): the symbols whose quantity changed meanwhile. */
+    public changed: string[] = [],
+  ) {
     super(message);
     this.name = 'DeskApiError';
   }
@@ -39,7 +45,8 @@ async function request<T>(method: 'GET' | 'POST', path: string, body?: unknown):
   if (!response.ok) {
     const message =
       (data && (data.error || data.msg)) || `${response.status} ${response.statusText}`;
-    throw new DeskApiError(response.status, message);
+    const changed = Array.isArray(data?.changed) ? data.changed.map(String) : [];
+    throw new DeskApiError(response.status, message, changed);
   }
   return data as T;
 }
@@ -56,6 +63,11 @@ export interface ApprovalPage {
   request: DeskCommand;
   decision: DeskCommand | null;
   table: { symbol: string; model: number | null; asked: number | null; given: number | null; moved_by: string | null }[];
+  /** The book an approval trades exactly, as it stood at the request (C1); null on an old request. */
+  snapshot: SnapshotRow[] | null;
+  /** False once the desk changed the proposal: the request can then only be rejected. */
+  snapshotMatches: boolean;
+  published: { published_by: string | null; published_at: string | null } | null;
   viewer: { email: string; approver_role: 'vp' | 'president' | null; is_requester: boolean };
 }
 

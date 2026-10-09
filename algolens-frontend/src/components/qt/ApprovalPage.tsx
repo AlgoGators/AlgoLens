@@ -6,8 +6,11 @@ import { approvalTokenFrom, describeCommand, type DeskCommand } from '../../doma
 
 /**
  * /qt/approve?token=... (A5). The engine e-mails this link to the VP and the
- * President. The page shows the model book (system) next to the desk's
- * request (qt_proposal) and the current qt book; either approver decides.
+ * President. The page shows the book the request snapshotted (C1): exactly
+ * what an approval trades. Below it, the model book (system) next to the
+ * desk's current proposal and the current qt book; either approver decides.
+ * Once the desk changes the proposal the snapshot no longer matches and the
+ * request can only be rejected (the server and the engine refuse an approval).
  * AlgoLens never sees the token's plain value outside this request: the API
  * hashes it to find the override request.
  */
@@ -54,7 +57,9 @@ export function ApprovalPage({ onDone }: { onDone: () => void }) {
 
   const muted = dark ? 'text-gray-400' : 'text-gray-500';
   const viewer = page?.viewer;
-  const canDecide = viewer && viewer.approver_role && !viewer.is_requester && !page?.decision && !decision;
+  const canDecide =
+    viewer && viewer.approver_role && !viewer.is_requester && !page?.decision && !decision && !page?.published;
+  const canApprove = Boolean(page?.snapshot && page.snapshotMatches);
 
   return (
     <div className={`min-h-screen ${dark ? 'bg-black text-white' : 'bg-white text-black'}`}>
@@ -79,12 +84,58 @@ export function ApprovalPage({ onDone }: { onDone: () => void }) {
               {page.request.reason}
             </blockquote>
 
-            <table className="w-full text-sm mt-6" data-testid="approval-books">
+            <h2 className="text-lg mt-6">The book an approval trades</h2>
+            <p className={`text-xs ${muted}`}>
+              The desk's proposal as it stood when the request was made. Approving books exactly this.
+            </p>
+            {page.snapshot ? (
+              <table className="w-full text-sm mt-2" data-testid="approval-snapshot">
+                <thead>
+                  <tr className={muted}>
+                    <th className="text-left font-normal py-1 pr-4">Sleeve</th>
+                    <th className="text-left font-normal py-1 pr-4">Symbol</th>
+                    <th className="text-right font-normal py-1">Contracts</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {page.snapshot.map(r => (
+                    <tr
+                      key={`${r.strategy_name}|${r.symbol}`}
+                      className={dark ? 'border-t border-gray-800' : 'border-t border-gray-200'}
+                    >
+                      <td className="py-1 pr-4">{r.strategy_name}</td>
+                      <td className="py-1 pr-4">{r.symbol}</td>
+                      <td className="py-1 text-right">{r.quantity}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ) : (
+              <p className="mt-2 text-sm text-red-500">
+                This request was made before requests recorded their book; it cannot be approved. Ask the desk for a new
+                request.
+              </p>
+            )}
+            {page.snapshot && !page.snapshotMatches && (
+              <p className="mt-3 rounded border border-red-400 px-3 py-2 text-sm text-red-500" role="alert">
+                The desk has changed the proposal since this request, so it can no longer be approved. Reject it, or ask
+                the desk for a new request.
+              </p>
+            )}
+            {page.published && (
+              <p className={`mt-3 text-sm ${muted}`}>
+                The {page.request.date} book was published
+                {page.published.published_by ? ` by ${page.published.published_by}` : ''}; it can no longer be decided.
+              </p>
+            )}
+
+            <h2 className="text-lg mt-6">The books now</h2>
+            <table className="w-full text-sm mt-2" data-testid="approval-books">
               <thead>
                 <tr className={muted}>
                   <th className="text-left font-normal py-1 pr-4">Symbol</th>
                   <th className="text-right font-normal py-1 pr-4">Model (system)</th>
-                  <th className="text-right font-normal py-1 pr-4">Desk request (QT proposal)</th>
+                  <th className="text-right font-normal py-1 pr-4">Desk proposal now</th>
                   <th className="text-right font-normal py-1 pr-4">Current QT</th>
                   <th className="text-left font-normal py-1">Moved by</th>
                 </tr>
@@ -106,7 +157,13 @@ export function ApprovalPage({ onDone }: { onDone: () => void }) {
               <p role="status" className="mt-6 rounded border px-3 py-2 text-sm">
                 {(polled.command.payload as { approved?: boolean }).approved ? 'Approved' : 'Rejected'} by the{' '}
                 {polled.command.approver_role} ({polled.command.requested_by}).{' '}
-                {describeCommand(polled.command, polled.timedOut)}
+                {describeCommand(polled.command, polled.phase)}
+                {polled.error && <span className="block text-red-500">{polled.error}</span>}
+                {(polled.phase !== 'normal' || polled.error) && (
+                  <button type="button" className="ml-2 underline" onClick={polled.refresh}>
+                    Refresh
+                  </button>
+                )}
               </p>
             )}
 
@@ -135,7 +192,8 @@ export function ApprovalPage({ onDone }: { onDone: () => void }) {
                 <div className="mt-3 flex gap-2">
                   <button
                     type="button"
-                    disabled={busy}
+                    disabled={busy || !canApprove}
+                    title={canApprove ? undefined : 'The proposal changed since the request; it can only be rejected'}
                     onClick={() => decide(true)}
                     className="px-4 py-2 rounded bg-green-600 text-white disabled:opacity-50"
                   >
