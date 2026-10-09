@@ -1,4 +1,5 @@
-"""A throwaway Postgres schema in the shape of new_algo_data after 021-023.
+"""A throwaway Postgres schema in the shape of new_algo_data after 021-023,
+and again after 025.
 
 Opt-in: used only when ALGOLENS_TEST_DATABASE_URL points at a THROWAWAY
 Postgres on localhost (it DROPs and recreates the trading, metadata and
@@ -17,6 +18,17 @@ Shapes:
     ('system','qt_proposal','qt'); portfolio_type on executions and
     live_results, last in their keys; positions.moved_by (qt rows only).
   * 022 and 023 are the engine's own files, vendored under fixtures/sql.
+  * 025 is emulated (fixtures/sql/025_emulated.sql) from the hardening spec:
+    unique partial indexes, the insert and transition triggers and the
+    truncate block. Every qt_db test runs twice: "023" (before 025) and
+    "025" (after it, with UPDATE, DELETE and TRUNCATE on position_overrides
+    revoked from the application role).
+
+The repositories under test connect as APP_ROLE, a role holding only what
+svc_algolens holds (SET ROLE from the setup superuser), so a statement that
+needs a privilege AlgoLens lacks (e.g. SELECT ... FOR UPDATE on the command
+log after 025) fails here as it would in production. Test setup and the
+simulated engine use the superuser connection.
 """
 
 import os
@@ -201,11 +213,38 @@ def assert_local(url):
     )
 
 
-def build_schema(cursor):
+APP_ROLE = "algolens_test_app"
+
+APP_GRANTS = f"""
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '{APP_ROLE}') THEN
+        CREATE ROLE {APP_ROLE} NOLOGIN;
+    END IF;
+END $$;
+GRANT USAGE ON SCHEMA trading, metadata, futures_data TO {APP_ROLE};
+GRANT SELECT ON ALL TABLES IN SCHEMA trading, metadata, futures_data TO {APP_ROLE};
+GRANT USAGE ON ALL SEQUENCES IN SCHEMA trading TO {APP_ROLE};
+GRANT INSERT, UPDATE ON trading.positions TO {APP_ROLE};
+GRANT INSERT, UPDATE ON trading.strategy_config TO {APP_ROLE};
+GRANT INSERT, UPDATE, DELETE, TRUNCATE ON trading.position_overrides TO {APP_ROLE};
+"""
+
+# 025: AlgoLens only inserts into the command log.
+REVOKE_025 = f"REVOKE UPDATE, DELETE, TRUNCATE ON trading.position_overrides FROM {APP_ROLE};"
+
+SCHEMA_VERSIONS = ("023", "025")
+
+
+def build_schema(cursor, version="023"):
     cursor.execute(BASE_SCHEMA)
     cursor.execute(EMULATED_021)
     cursor.execute((SQL_DIR / "022_strategy_config.sql").read_text(encoding="utf-8"))
     cursor.execute((SQL_DIR / "023_qt_command_log.sql").read_text(encoding="utf-8"))
+    cursor.execute(APP_GRANTS)
+    if version == "025":
+        cursor.execute((SQL_DIR / "025_emulated.sql").read_text(encoding="utf-8"))
+        cursor.execute(REVOKE_025)
 
 
 def drop_schema(cursor):
@@ -216,9 +255,10 @@ def drop_schema(cursor):
     )
 
 
-@pytest.fixture
-def qt_db():
-    """(connection factory, autocommit setup connection) on a fresh schema."""
+@pytest.fixture(params=SCHEMA_VERSIONS)
+def qt_db(request):
+    """A connection factory (as APP_ROLE) with .setup, an autocommit
+    superuser connection, and .version, on a fresh schema."""
     import psycopg2
     from psycopg2.extras import RealDictCursor
 
@@ -231,12 +271,17 @@ def qt_db():
     setup = psycopg2.connect(DB_URL, cursor_factory=RealDictCursor)
     setup.autocommit = True
     with setup.cursor() as cur:
-        build_schema(cur)
+        build_schema(cur, request.param)
 
     def factory():
-        return psycopg2.connect(DB_URL, cursor_factory=RealDictCursor)
+        conn = psycopg2.connect(DB_URL, cursor_factory=RealDictCursor)
+        with conn.cursor() as cur:
+            cur.execute(f"SET ROLE {APP_ROLE}")
+        conn.commit()
+        return conn
 
     factory.setup = setup
+    factory.version = request.param
     yield factory
 
     with setup.cursor() as cur:

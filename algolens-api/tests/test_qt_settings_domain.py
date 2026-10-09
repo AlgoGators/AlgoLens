@@ -123,3 +123,69 @@ def test_view_shows_running_and_pending():
     assert by_path[("risk", "max_drawdown")]["pending_from_files"] is True
     assert by_path[("capital",)]["pending"] is None
     assert by_path[("risk", "max_leverage")]["overridden"] is True
+
+
+# --- value rules (hardening spec, AlgoLens item 7) ---------------------------
+
+TYPED = {
+    "capital": 500000,
+    "risk": {
+        "max_leverage": 2.0,
+        "max_drawdown": 0.3,
+        "position_limit": 10,
+        "vol_target": 0.2,
+        "skew": -0.5,
+        "unset": None,
+    },
+    "strategies": {"tf": {"lookbacks": [16, 32, 64]}},
+}
+
+
+@pytest.mark.parametrize(
+    "path, value",
+    [
+        (["capital"], 500000.5),  # an integer stays an integer
+        (["risk", "position_limit"], 20.5),
+        (["strategies", "tf", "lookbacks"], [8, 16.5]),
+        (["risk", "max_leverage"], -1.0),  # *leverage
+        (["risk", "max_drawdown"], -0.1),  # *drawdown
+        (["capital"], -1),  # *capital
+        (["risk", "position_limit"], -3),  # *limit
+        (["risk", "vol_target"], -0.2),  # contains vol
+        (["risk", "unset"], [1, 2]),  # null running value: scalars only
+        (["risk", "unset"], {"a": 1}),
+        (["risk", "max_leverage"], float("nan")),
+        (["risk", "max_leverage"], float("inf")),
+    ],
+)
+def test_value_rules_refuse(path, value):
+    with pytest.raises(SettingsRuleError):
+        changes_to_overrides(TYPED, [{"path": path, "value": value}])
+
+
+@pytest.mark.parametrize(
+    "path, value, stored",
+    [
+        (["capital"], 600000.0, 600000),  # a whole float is stored as the int it is
+        (["risk", "max_leverage"], 3, 3.0),  # a float may be given as an int
+        (["risk", "skew"], -0.7, -0.7),  # no heuristic on this key
+        (["risk", "unset"], 5, 5),
+        (["risk", "unset"], "text", "text"),
+        (["strategies", "tf", "lookbacks"], [8.0, 16], [8, 16]),
+        (["risk", "position_limit"], 0, 0),
+    ],
+)
+def test_value_rules_accept(path, value, stored):
+    overrides = changes_to_overrides(TYPED, [{"path": path, "value": value}])
+    node = overrides
+    for key in path:
+        node = node[key]
+    assert node == stored and type(node) is type(stored)
+
+
+def test_restoring_a_version_applies_the_value_rules():
+    with pytest.raises(SettingsRuleError):
+        check_overrides_apply(TYPED, {"risk": {"max_leverage": -2.0}})
+    with pytest.raises(SettingsRuleError):
+        check_overrides_apply(TYPED, {"capital": 1.5})
+    check_overrides_apply(TYPED, {"risk": {"max_leverage": 1}})
