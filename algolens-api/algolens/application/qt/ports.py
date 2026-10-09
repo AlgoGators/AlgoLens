@@ -84,6 +84,28 @@ class DeskRepositoryPort(Protocol):
         ...
 
 
+class SettingsRepositoryPort(Protocol):
+    def latest_settings_used(self, portfolio_id: str) -> Row | None:
+        """{date, settings_used} of the newest live run that reported them."""
+
+    def config_versions(self, portfolio_id: str, limit: int = 50) -> Sequence[Row]:
+        """trading.strategy_config rows, newest version first."""
+
+    def config_version(self, portfolio_id: str, version: int) -> Row | None:
+        ...
+
+    def insert_config_version(
+        self,
+        portfolio_id: str,
+        overrides: Mapping[str, Any],
+        reason: str,
+        created_by: str,
+        expected_active_version: int | None,
+    ) -> Row:
+        """One transaction: refuse (DeskConflict) if the active version is no
+        longer `expected_active_version`, deactivate it, insert max+1 active."""
+
+
 class DeskAgentPort(Protocol):
     """The engine's desk-agent (gRPC). Best effort: never raises.
 

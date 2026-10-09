@@ -11,6 +11,7 @@ import {
   type DeskState,
 } from '../../domain/qt/desk';
 import { DeskEditForm } from './DeskEditForm';
+import { SettingsEditor } from './SettingsEditor';
 
 interface DeskPanelProps {
   portfolioId: string;
@@ -104,6 +105,7 @@ export function DeskPanel({ portfolioId, book, reloadBook }: DeskPanelProps) {
   const [overrideOpen, setOverrideOpen] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -283,6 +285,22 @@ export function DeskPanel({ portfolioId, book, reloadBook }: DeskPanelProps) {
                 Cancel
               </button>
             </div>
+          </div>
+        )}
+      </div>
+
+      <div className="mt-6">
+        <button
+          type="button"
+          className={`text-xs uppercase tracking-wider ${muted} hover:underline`}
+          onClick={() => setShowSettings(v => !v)}
+          aria-expanded={showSettings}
+        >
+          {showSettings ? 'Hide' : 'Show'} desk settings
+        </button>
+        {showSettings && (
+          <div className="mt-3">
+            <SettingsEditor portfolioId={portfolioId} />
           </div>
         )}
       </div>

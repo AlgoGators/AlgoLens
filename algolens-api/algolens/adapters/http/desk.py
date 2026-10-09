@@ -36,9 +36,15 @@ from algolens.application.qt.use_cases import (
     RequestOverride,
     SaveDeskEdit,
 )
+from algolens.application.qt.settings_use_cases import (
+    GetSettings,
+    RevertSettings,
+    SaveSettings,
+)
 from algolens.domain.portfolio.registry import portfolio_entries
 from algolens.domain.qt.approvers import APPROVER_ROLES
 from algolens.domain.qt.desk import DeskRuleError
+from algolens.domain.qt.settings import SettingsRuleError
 from algolens.infrastructure.config.dependencies import (
     create_desk_dependencies,
     create_portfolio_dependencies,
@@ -50,6 +56,7 @@ desk_bp = Blueprint("desk", __name__)
 
 _ERRORS = (
     (DeskRuleError, 400),
+    (SettingsRuleError, 400),
     (DeskForbidden, 403),
     (DeskNotFound, 404),
     (DeskNotSeeded, 409),
@@ -244,3 +251,50 @@ def approval_decide():
         payload.get("reason"),
     )
     return jsonify(result), 201
+
+
+# --- desk settings (A7): strategy_config versions over the config files -------
+
+
+@desk_bp.route("/<portfolio_id>/settings", methods=["GET"])
+@jwt_required()
+@desk_enabled
+@desk_user
+@handled
+def settings_get(portfolio_id):
+    repo, _agent, _settings = _desk_dependencies()
+    return jsonify(GetSettings(repo).execute(_portfolio(portfolio_id))), 200
+
+
+@desk_bp.route("/<portfolio_id>/settings", methods=["POST"])
+@jwt_required()
+@desk_enabled
+@desk_user
+@handled
+def settings_save(portfolio_id):
+    payload = _body()
+    repo, _agent, _settings = _desk_dependencies()
+    version = SaveSettings(repo).execute(
+        _portfolio(portfolio_id),
+        payload.get("changes"),
+        payload.get("reason"),
+        current_user()["email"],
+    )
+    return jsonify({"version": version}), 201
+
+
+@desk_bp.route("/<portfolio_id>/settings/revert", methods=["POST"])
+@jwt_required()
+@desk_enabled
+@desk_user
+@handled
+def settings_revert(portfolio_id):
+    payload = _body()
+    repo, _agent, _settings = _desk_dependencies()
+    version = RevertSettings(repo).execute(
+        _portfolio(portfolio_id),
+        payload.get("version"),
+        payload.get("reason"),
+        current_user()["email"],
+    )
+    return jsonify({"version": version}), 201

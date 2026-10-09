@@ -334,3 +334,98 @@ class PostgresDeskRepository:
                 return cursor.fetchone()
         finally:
             conn.close()
+
+    # --- settings (022) ------------------------------------------------------
+
+    def latest_settings_used(self, portfolio_id):
+        conn = self.connection_factory()
+        try:
+            with conn.cursor() as cursor:
+                if not self._has_column(cursor, "live_run_metadata", "settings_used"):
+                    return None
+                cursor.execute(
+                    """
+                    SELECT date, settings_used
+                    FROM trading.live_run_metadata
+                    WHERE portfolio_id = %s AND settings_used IS NOT NULL
+                    ORDER BY date DESC
+                    LIMIT 1
+                    """,
+                    (portfolio_id,),
+                )
+                return cursor.fetchone()
+        finally:
+            conn.close()
+
+    def config_versions(self, portfolio_id, limit=50):
+        return self._read(
+            """
+            SELECT id, portfolio_id, version, overrides, reason, created_by, created_at, is_active
+            FROM trading.strategy_config
+            WHERE portfolio_id = %s
+            ORDER BY version DESC
+            LIMIT %s
+            """,
+            (portfolio_id, limit),
+        )
+
+    def config_version(self, portfolio_id, version):
+        return self._read(
+            """
+            SELECT id, portfolio_id, version, overrides, reason, created_by, created_at, is_active
+            FROM trading.strategy_config
+            WHERE portfolio_id = %s AND version = %s
+            """,
+            (portfolio_id, version),
+            one=True,
+        )
+
+    def insert_config_version(
+        self, portfolio_id, overrides, reason, created_by, expected_active_version
+    ):
+        conn = self.connection_factory()
+        try:
+            with conn.cursor() as cursor:
+                # Serialise writers of this portfolio's settings. The lock is on
+                # the portfolio's rows; the first-ever version has none, and the
+                # (portfolio_id, version) key settles that race instead.
+                cursor.execute(
+                    """
+                    SELECT version, is_active FROM trading.strategy_config
+                    WHERE portfolio_id = %s
+                    FOR UPDATE
+                    """,
+                    (portfolio_id,),
+                )
+                rows = cursor.fetchall()
+                active = next((r["version"] for r in rows if r["is_active"]), None)
+                if active != expected_active_version:
+                    raise DeskConflict(
+                        "The settings were changed by someone else meanwhile; reload and retry"
+                    )
+                next_version = max((r["version"] for r in rows), default=0) + 1
+                cursor.execute(
+                    """
+                    UPDATE trading.strategy_config SET is_active = false
+                    WHERE portfolio_id = %s AND is_active
+                    """,
+                    (portfolio_id,),
+                )
+                cursor.execute(
+                    """
+                    INSERT INTO trading.strategy_config
+                        (portfolio_id, version, overrides, reason, created_by, is_active)
+                    VALUES (%s, %s, %s, %s, %s, true)
+                    RETURNING id, portfolio_id, version, overrides, reason, created_by,
+                              created_at, is_active
+                    """,
+                    (portfolio_id, next_version, Json(dict(overrides)), reason, created_by),
+                )
+                row = cursor.fetchone()
+            conn.commit()
+            return row
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
