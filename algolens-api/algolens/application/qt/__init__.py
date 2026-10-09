@@ -1,0 +1,1 @@
+"""QT desk application layer."""

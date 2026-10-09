@@ -13,6 +13,7 @@ import { EmptyPortfolioScreen } from './EmptyPortfolioScreen';
 import { IncubationScreen } from './IncubationScreen';
 import { PortfolioSwitcher } from './PortfolioSwitcher';
 import { PortfolioBookView } from './PortfolioBookView';
+import { DeskPanel } from './qt/DeskPanel';
 import { findPortfolio, type PortfolioList } from '../domain/portfolio/portfolioRegistry';
 import type { PortfolioData } from '../domain/portfolio/portfolioData';
 import { PortfolioApplicationService } from '../application/portfolio/portfolioService';
@@ -175,6 +176,15 @@ export function Dashboard({ onLogout }: DashboardProps) {
             <PortfolioBookView
               portfolio={selectedPortfolio}
               onBack={() => setSelectedPortfolioId(null)}
+              renderDesk={
+                // The desk (QT_DESK_ENABLED) on desk-editable futures books,
+                // for desk users. The server enforces all three again.
+                portfolioList?.deskEnabled && selectedPortfolio.desk_editable && isInternalMember
+                  ? ({ portfolio, book, reload }) => (
+                      <DeskPanel portfolioId={portfolio.portfolio_id} book={book} reloadBook={reload} />
+                    )
+                  : undefined
+              }
             />
           ) : isLoading ? (
             <div className="flex items-center justify-center min-h-[400px]">

@@ -13,6 +13,7 @@ from flask_jwt_extended import JWTManager
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from algolens.adapters.http.auth import auth_bp
+from algolens.adapters.http.desk import desk_bp
 from algolens.adapters.http.portfolio import portfolio_bp
 from algolens.infrastructure.db.postgres import get_db_connection
 from extensions import limiter
@@ -98,10 +99,11 @@ def create_app():
             request.path,
             request.remote_addr,
         )
-        if request.get_json(silent=True):
-            data = request.get_json()
+        data = request.get_json(silent=True)
+        if isinstance(data, dict) and data:
             safe_data = {
-                key: ("***" if key in ["password"] else value)
+                # The approval token is a credential: never logged.
+                key: ("***" if key in ["password", "token"] else value)
                 for key, value in data.items()
             }
             app.logger.debug("Request body: %s", safe_data)
@@ -200,6 +202,7 @@ def create_app():
 
     app.register_blueprint(auth_bp, url_prefix="/auth")
     app.register_blueprint(portfolio_bp, url_prefix="/portfolio")
+    app.register_blueprint(desk_bp, url_prefix="/portfolio/desk")
 
     @app.route("/health", methods=["GET"])
     def health_check():

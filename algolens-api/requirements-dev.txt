@@ -1,0 +1,4 @@
+# Tools for development and CI only (not in the image).
+-r requirements.txt
+pytest
+grpcio-tools==1.84.0

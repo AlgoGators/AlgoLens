@@ -48,8 +48,20 @@ jobs:
       - name: Install backend dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r algolens-api/requirements.txt
-          pip install pytest
+          pip install -r algolens-api/requirements-dev.txt
+
+      - name: Verify the gRPC stubs match the vendored proto
+        # proto/qt/v1/desk.proto is vendored from trade-ngin; the committed
+        # qt/v1/*_pb2*.py must be exactly what grpcio-tools generates from it.
+        run: |
+          cd algolens-api
+          sh scripts/gen_proto.sh
+          if [ -n "$(git status --porcelain -- qt proto)" ]; then
+            git status --porcelain -- qt proto
+            git diff -- qt
+            echo "::error::qt/v1 stubs are stale: run algolens-api/scripts/gen_proto.sh and commit"
+            exit 1
+          fi
 
       - name: Run backend tests
         # The suites are designed to run without a database (fail-closed guards run
