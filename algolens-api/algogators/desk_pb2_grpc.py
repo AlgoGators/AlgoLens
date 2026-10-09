@@ -3,7 +3,7 @@
 import grpc
 import warnings
 
-from qt.v1 import desk_pb2 as qt_dot_v1_dot_desk__pb2
+from algogators import desk_pb2 as algogators_dot_desk__pb2
 
 GRPC_GENERATED_VERSION = '1.84.0'
 GRPC_VERSION = grpc.__version__
@@ -18,7 +18,7 @@ except ImportError:
 if _version_not_supported:
     raise RuntimeError(
         f'The grpc package installed is at version {GRPC_VERSION},'
-        + ' but the generated code in qt/v1/desk_pb2_grpc.py depends on'
+        + ' but the generated code in algogators/desk_pb2_grpc.py depends on'
         + f' grpcio>={GRPC_GENERATED_VERSION}.'
         + f' Please upgrade your grpc module to grpcio>={GRPC_GENERATED_VERSION}'
         + f' or downgrade your generated code using grpcio-tools<={GRPC_VERSION}.'
@@ -27,8 +27,12 @@ if _version_not_supported:
 
 class DeskServiceStub:
     """The health service is the standard grpc.health.v1.Health (grpc_health/v1/health.proto),
-    registered by the server next to DeskService. Service name for a targeted check:
-    "algogators.qt.v1.DeskService"; "" checks the server as a whole.
+    registered by the shared server next to every service. Service name for a targeted check:
+    "algogators.desk.DeskService"; "" checks the server as a whole.
+
+    Version history (bump Version above; a major bump is a breaking change, see docs/design/rpc.md):
+    1.0.0  2026-10-09  first versioned release. Same messages and field numbers as the earlier
+    unversioned algogators.qt.v1 package, so the wire format is unchanged.
 
     """
 
@@ -39,36 +43,40 @@ class DeskServiceStub:
             channel: A grpc.Channel.
         """
         self.RunDesk = channel.unary_unary(
-                '/algogators.qt.v1.DeskService/RunDesk',
-                request_serializer=qt_dot_v1_dot_desk__pb2.RunDeskRequest.SerializeToString,
-                response_deserializer=qt_dot_v1_dot_desk__pb2.RunDeskReply.FromString,
+                '/algogators.desk.DeskService/RunDesk',
+                request_serializer=algogators_dot_desk__pb2.RunDeskRequest.SerializeToString,
+                response_deserializer=algogators_dot_desk__pb2.RunDeskReply.FromString,
                 _registered_method=True)
         self.RequestOverride = channel.unary_unary(
-                '/algogators.qt.v1.DeskService/RequestOverride',
-                request_serializer=qt_dot_v1_dot_desk__pb2.OverrideRequest.SerializeToString,
-                response_deserializer=qt_dot_v1_dot_desk__pb2.CommandReply.FromString,
+                '/algogators.desk.DeskService/RequestOverride',
+                request_serializer=algogators_dot_desk__pb2.OverrideRequest.SerializeToString,
+                response_deserializer=algogators_dot_desk__pb2.CommandReply.FromString,
                 _registered_method=True)
         self.RecordDecision = channel.unary_unary(
-                '/algogators.qt.v1.DeskService/RecordDecision',
-                request_serializer=qt_dot_v1_dot_desk__pb2.DecisionRequest.SerializeToString,
-                response_deserializer=qt_dot_v1_dot_desk__pb2.CommandReply.FromString,
+                '/algogators.desk.DeskService/RecordDecision',
+                request_serializer=algogators_dot_desk__pb2.DecisionRequest.SerializeToString,
+                response_deserializer=algogators_dot_desk__pb2.CommandReply.FromString,
                 _registered_method=True)
         self.Publish = channel.unary_unary(
-                '/algogators.qt.v1.DeskService/Publish',
-                request_serializer=qt_dot_v1_dot_desk__pb2.PublishRequest.SerializeToString,
-                response_deserializer=qt_dot_v1_dot_desk__pb2.CommandReply.FromString,
+                '/algogators.desk.DeskService/Publish',
+                request_serializer=algogators_dot_desk__pb2.PublishRequest.SerializeToString,
+                response_deserializer=algogators_dot_desk__pb2.CommandReply.FromString,
                 _registered_method=True)
         self.GetRunStatus = channel.unary_unary(
-                '/algogators.qt.v1.DeskService/GetRunStatus',
-                request_serializer=qt_dot_v1_dot_desk__pb2.RunStatusRequest.SerializeToString,
-                response_deserializer=qt_dot_v1_dot_desk__pb2.RunStatus.FromString,
+                '/algogators.desk.DeskService/GetRunStatus',
+                request_serializer=algogators_dot_desk__pb2.RunStatusRequest.SerializeToString,
+                response_deserializer=algogators_dot_desk__pb2.RunStatus.FromString,
                 _registered_method=True)
 
 
 class DeskServiceServicer:
     """The health service is the standard grpc.health.v1.Health (grpc_health/v1/health.proto),
-    registered by the server next to DeskService. Service name for a targeted check:
-    "algogators.qt.v1.DeskService"; "" checks the server as a whole.
+    registered by the shared server next to every service. Service name for a targeted check:
+    "algogators.desk.DeskService"; "" checks the server as a whole.
+
+    Version history (bump Version above; a major bump is a breaking change, see docs/design/rpc.md):
+    1.0.0  2026-10-09  first versioned release. Same messages and field numbers as the earlier
+    unversioned algogators.qt.v1 package, so the wire format is unchanged.
 
     """
 
@@ -118,41 +126,45 @@ def add_DeskServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
             'RunDesk': grpc.unary_unary_rpc_method_handler(
                     servicer.RunDesk,
-                    request_deserializer=qt_dot_v1_dot_desk__pb2.RunDeskRequest.FromString,
-                    response_serializer=qt_dot_v1_dot_desk__pb2.RunDeskReply.SerializeToString,
+                    request_deserializer=algogators_dot_desk__pb2.RunDeskRequest.FromString,
+                    response_serializer=algogators_dot_desk__pb2.RunDeskReply.SerializeToString,
             ),
             'RequestOverride': grpc.unary_unary_rpc_method_handler(
                     servicer.RequestOverride,
-                    request_deserializer=qt_dot_v1_dot_desk__pb2.OverrideRequest.FromString,
-                    response_serializer=qt_dot_v1_dot_desk__pb2.CommandReply.SerializeToString,
+                    request_deserializer=algogators_dot_desk__pb2.OverrideRequest.FromString,
+                    response_serializer=algogators_dot_desk__pb2.CommandReply.SerializeToString,
             ),
             'RecordDecision': grpc.unary_unary_rpc_method_handler(
                     servicer.RecordDecision,
-                    request_deserializer=qt_dot_v1_dot_desk__pb2.DecisionRequest.FromString,
-                    response_serializer=qt_dot_v1_dot_desk__pb2.CommandReply.SerializeToString,
+                    request_deserializer=algogators_dot_desk__pb2.DecisionRequest.FromString,
+                    response_serializer=algogators_dot_desk__pb2.CommandReply.SerializeToString,
             ),
             'Publish': grpc.unary_unary_rpc_method_handler(
                     servicer.Publish,
-                    request_deserializer=qt_dot_v1_dot_desk__pb2.PublishRequest.FromString,
-                    response_serializer=qt_dot_v1_dot_desk__pb2.CommandReply.SerializeToString,
+                    request_deserializer=algogators_dot_desk__pb2.PublishRequest.FromString,
+                    response_serializer=algogators_dot_desk__pb2.CommandReply.SerializeToString,
             ),
             'GetRunStatus': grpc.unary_unary_rpc_method_handler(
                     servicer.GetRunStatus,
-                    request_deserializer=qt_dot_v1_dot_desk__pb2.RunStatusRequest.FromString,
-                    response_serializer=qt_dot_v1_dot_desk__pb2.RunStatus.SerializeToString,
+                    request_deserializer=algogators_dot_desk__pb2.RunStatusRequest.FromString,
+                    response_serializer=algogators_dot_desk__pb2.RunStatus.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
-            'algogators.qt.v1.DeskService', rpc_method_handlers)
+            'algogators.desk.DeskService', rpc_method_handlers)
     server.add_generic_rpc_handlers((generic_handler,))
-    server.add_registered_method_handlers('algogators.qt.v1.DeskService', rpc_method_handlers)
+    server.add_registered_method_handlers('algogators.desk.DeskService', rpc_method_handlers)
 
 
  # This class is part of an EXPERIMENTAL API.
 class DeskService:
     """The health service is the standard grpc.health.v1.Health (grpc_health/v1/health.proto),
-    registered by the server next to DeskService. Service name for a targeted check:
-    "algogators.qt.v1.DeskService"; "" checks the server as a whole.
+    registered by the shared server next to every service. Service name for a targeted check:
+    "algogators.desk.DeskService"; "" checks the server as a whole.
+
+    Version history (bump Version above; a major bump is a breaking change, see docs/design/rpc.md):
+    1.0.0  2026-10-09  first versioned release. Same messages and field numbers as the earlier
+    unversioned algogators.qt.v1 package, so the wire format is unchanged.
 
     """
 
@@ -170,9 +182,9 @@ class DeskService:
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/algogators.qt.v1.DeskService/RunDesk',
-            qt_dot_v1_dot_desk__pb2.RunDeskRequest.SerializeToString,
-            qt_dot_v1_dot_desk__pb2.RunDeskReply.FromString,
+            '/algogators.desk.DeskService/RunDesk',
+            algogators_dot_desk__pb2.RunDeskRequest.SerializeToString,
+            algogators_dot_desk__pb2.RunDeskReply.FromString,
             options,
             channel_credentials,
             insecure,
@@ -197,9 +209,9 @@ class DeskService:
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/algogators.qt.v1.DeskService/RequestOverride',
-            qt_dot_v1_dot_desk__pb2.OverrideRequest.SerializeToString,
-            qt_dot_v1_dot_desk__pb2.CommandReply.FromString,
+            '/algogators.desk.DeskService/RequestOverride',
+            algogators_dot_desk__pb2.OverrideRequest.SerializeToString,
+            algogators_dot_desk__pb2.CommandReply.FromString,
             options,
             channel_credentials,
             insecure,
@@ -224,9 +236,9 @@ class DeskService:
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/algogators.qt.v1.DeskService/RecordDecision',
-            qt_dot_v1_dot_desk__pb2.DecisionRequest.SerializeToString,
-            qt_dot_v1_dot_desk__pb2.CommandReply.FromString,
+            '/algogators.desk.DeskService/RecordDecision',
+            algogators_dot_desk__pb2.DecisionRequest.SerializeToString,
+            algogators_dot_desk__pb2.CommandReply.FromString,
             options,
             channel_credentials,
             insecure,
@@ -251,9 +263,9 @@ class DeskService:
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/algogators.qt.v1.DeskService/Publish',
-            qt_dot_v1_dot_desk__pb2.PublishRequest.SerializeToString,
-            qt_dot_v1_dot_desk__pb2.CommandReply.FromString,
+            '/algogators.desk.DeskService/Publish',
+            algogators_dot_desk__pb2.PublishRequest.SerializeToString,
+            algogators_dot_desk__pb2.CommandReply.FromString,
             options,
             channel_credentials,
             insecure,
@@ -278,9 +290,9 @@ class DeskService:
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/algogators.qt.v1.DeskService/GetRunStatus',
-            qt_dot_v1_dot_desk__pb2.RunStatusRequest.SerializeToString,
-            qt_dot_v1_dot_desk__pb2.RunStatus.FromString,
+            '/algogators.desk.DeskService/GetRunStatus',
+            algogators_dot_desk__pb2.RunStatusRequest.SerializeToString,
+            algogators_dot_desk__pb2.RunStatus.FromString,
             options,
             channel_credentials,
             insecure,

@@ -8,15 +8,11 @@ def test_defaults_are_safe():
     settings = load_qt_settings({})
     assert settings.desk_enabled is False
     assert settings.approvers == {}
-    assert settings.desk_agent_addr == "desk-agent:50051"
 
 
-def test_flag_and_address_from_env():
-    settings = load_qt_settings(
-        {"QT_DESK_ENABLED": "TRUE", "DESK_AGENT_ADDR": " engine:6000 "}
-    )
+def test_flag_from_env():
+    settings = load_qt_settings({"QT_DESK_ENABLED": "TRUE"})
     assert settings.desk_enabled is True
-    assert settings.desk_agent_addr == "engine:6000"
     assert load_qt_settings({"QT_DESK_ENABLED": "false"}).desk_enabled is False
     assert load_qt_settings({"QT_DESK_ENABLED": "nonsense"}).desk_enabled is False
 

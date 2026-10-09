@@ -50,16 +50,25 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r algolens-api/requirements-dev.txt
 
-      - name: Verify the gRPC stubs match the vendored proto
-        # proto/qt/v1/desk.proto is vendored from trade-ngin; the committed
-        # qt/v1/*_pb2*.py must be exactly what grpcio-tools generates from it.
+      - name: Verify the vendored protos match trade-ngin at the pinned commit
+        # proto/algogators/*.proto and scripts/gen_versions.py must be
+        # byte-identical to AlgoGators/trade-ngin at the commit recorded in
+        # proto/algogators/SOURCE.
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: sh algolens-api/scripts/sync_protos.sh --check
+
+      - name: Verify the gRPC stubs and API versions match the vendored protos
+        # The committed algogators/*_pb2*.py must be exactly what grpcio-tools
+        # generates, and algogators/versions.py exactly what the "Version:"
+        # header of each .proto says (the constant the client sends).
         run: |
           cd algolens-api
           sh scripts/gen_proto.sh
-          if [ -n "$(git status --porcelain -- qt proto)" ]; then
-            git status --porcelain -- qt proto
-            git diff -- qt
-            echo "::error::qt/v1 stubs are stale: run algolens-api/scripts/gen_proto.sh and commit"
+          if [ -n "$(git status --porcelain -- algogators proto)" ]; then
+            git status --porcelain -- algogators proto
+            git diff -- algogators
+            echo "::error::algogators/ stubs or versions.py are stale: run algolens-api/scripts/gen_proto.sh and commit"
             exit 1
           fi
 
