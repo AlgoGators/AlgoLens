@@ -3,7 +3,11 @@ import { useTheme } from '../adapters/react/ThemeContext';
 import { PortfolioApplicationService } from '../application/portfolio/portfolioService';
 import type { PositionBook } from '../domain/portfolio/bookLabel';
 import type { Strategy } from '../domain/portfolio/portfolioData';
-import { activeToggleBook, type PortfolioEntry } from '../domain/portfolio/portfolioRegistry';
+import {
+  activeToggleBook,
+  describeBookLoadError,
+  type PortfolioEntry,
+} from '../domain/portfolio/portfolioRegistry';
 import { BookToggle } from './BookToggle';
 import { StrategyDetail } from './StrategyDetail';
 
@@ -73,7 +77,7 @@ export function PortfolioBookView({ portfolio, onBack, renderDesk }: PortfolioBo
           {toggle}
         </div>
         <p className={theme === 'dark' ? 'text-gray-400' : 'text-gray-600'}>
-          {loading ? 'Loading portfolio...' : error ? `Could not load this book: ${error}` : 'No data.'}
+          {loading ? 'Loading portfolio...' : error ? describeBookLoadError(error) : 'No data.'}
         </p>
       </div>
     );
