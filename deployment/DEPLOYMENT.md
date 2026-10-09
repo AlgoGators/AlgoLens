@@ -37,7 +37,8 @@ browser --https--> old host nginx (TLS, certbot)
 - The backend also joins the external Docker network `qt` (alias
   `algolens-backend`), which the trade-ngin desk-agent will share later.
 - **Memory.** The box is a t2.medium (2 vCPU, 4 GiB RAM) shared with
-  Postgres, trade-ngin and the data-ngin Airflow stack, and trade-ngin's live run (cron inside its container, 09:30 daily) must never be
+  Postgres, trade-ngin and the data-ngin Airflow stack, and trade-ngin's
+  live run (cron inside its container, 09:30 daily) must never be
   OOM-killed. Every AlgoLens container has a hard `mem_limit` (with no extra
   swap) and `oom_score_adj: 800`, so under pressure the kernel kills AlgoLens
   first. `deploy.sh` stops the old AlgoLens containers before it starts the
