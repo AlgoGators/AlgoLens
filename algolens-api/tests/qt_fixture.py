@@ -17,12 +17,15 @@ Shapes:
     was not pushed when this was written): portfolio_type CHECK widened to
     ('system','qt_proposal','qt'); portfolio_type on executions and
     live_results, last in their keys; positions.moved_by (qt rows only).
-  * 022 and 023 are the engine's own files, vendored under fixtures/sql.
-  * 025 is emulated (fixtures/sql/025_emulated.sql) from the hardening spec:
-    unique partial indexes, the insert and transition triggers and the
-    truncate block. Every qt_db test runs twice: "023" (before 025) and
+  * 022, 023 and 025 are the engine's own files, vendored under fixtures/sql.
+    025 adds the unique partial indexes, the insert and transition triggers
+    (running -> pending only with algogators.recovery = 'on', as the desk
+    service's recovery sets it) and the truncate block, and moves
+    live_run_metadata off PUBLIC (APP_ROLE keeps its explicit SELECT, all
+    AlgoLens reads). Every qt_db test runs twice: "023" (before 025) and
     "025" (after it, with UPDATE, DELETE and TRUNCATE on position_overrides
-    revoked from the application role).
+    revoked from the application role: 025 revokes them only from a role
+    named svc_algolens, so the fixture does it for APP_ROLE).
 
 The repositories under test connect as APP_ROLE, a role holding only what
 svc_algolens holds (SET ROLE from the setup superuser), so a statement that
@@ -243,7 +246,7 @@ def build_schema(cursor, version="023"):
     cursor.execute((SQL_DIR / "023_qt_command_log.sql").read_text(encoding="utf-8"))
     cursor.execute(APP_GRANTS)
     if version == "025":
-        cursor.execute((SQL_DIR / "025_emulated.sql").read_text(encoding="utf-8"))
+        cursor.execute((SQL_DIR / "025_qt_command_log_hardening.sql").read_text(encoding="utf-8"))
         cursor.execute(REVOKE_025)
 
 
