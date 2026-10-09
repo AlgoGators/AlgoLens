@@ -1,5 +1,8 @@
 import type { Strategy, PortfolioData, HistoricalDataPoint } from '../../domain/portfolio/portfolioData';
 import type { IncubatingStrategy, IncubationPerformance } from '../../domain/portfolio/incubationData';
+import type { PortfolioList } from '../../domain/portfolio/portfolioRegistry';
+import type { PositionBook } from '../../domain/portfolio/bookLabel';
+import { bookQuery } from '../../domain/portfolio/portfolioRegistry';
 import { API_BASE_URL, log } from './httpClient';
 
 export class PortfolioApiService {
@@ -164,6 +167,20 @@ export class PortfolioApiService {
     });
 
     return data;
+  }
+
+  /** The portfolio switcher: live portfolios grouped by portfolio_group. */
+  static async listPortfolios(): Promise<PortfolioList> {
+    const response = await this.fetchWithAuth(`${API_BASE_URL}/portfolio/portfolios`);
+    const data = await response.json();
+    return { groups: data.groups || [], deskEnabled: Boolean(data.deskEnabled) };
+  }
+
+  /** One portfolio's book by portfolio id; no book = qt with system fallback. */
+  static async getPortfolio(portfolioId: string, book: PositionBook | null): Promise<Strategy> {
+    const url = `${API_BASE_URL}/portfolio/portfolios/${encodeURIComponent(portfolioId)}${bookQuery(book)}`;
+    const response = await this.fetchWithAuth(url);
+    return response.json();
   }
 
   static async getAllStrategies(): Promise<Strategy[]> {

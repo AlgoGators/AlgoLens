@@ -39,6 +39,9 @@ class StrategyRegistryPort(Protocol):
     def get(self, strategy_id: str) -> dict[str, Any] | None:
         ...
 
+    def get_portfolio(self, portfolio_id: str) -> dict[str, Any] | None:
+        ...
+
 
 class PortfolioReaderPort(Protocol):
     def fetch_summary_row(
@@ -49,6 +52,14 @@ class PortfolioReaderPort(Protocol):
     def fetch_detail_rows(
         self,
         strategy_type: str,
+        portfolio_id: str,
+        book: str = DEFAULT_BOOK,
+        allow_fallback: bool = True,
+    ) -> PortfolioDetailRows:
+        ...
+
+    def fetch_portfolio_rows(
+        self,
         portfolio_id: str,
         book: str = DEFAULT_BOOK,
         allow_fallback: bool = True,

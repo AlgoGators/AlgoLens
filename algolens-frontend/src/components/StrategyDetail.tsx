@@ -12,9 +12,20 @@ import { describeServedBook } from '../domain/portfolio/bookLabel';
 interface StrategyDetailProps {
   strategy: Strategy;
   onBack: () => void;
+  backLabel?: string;
+  /** Rendered under the title, e.g. the book toggle of a portfolio view. */
+  headerExtra?: React.ReactNode;
+  /** Rendered between the header and the chart, e.g. the QT desk panel. */
+  children?: React.ReactNode;
 }
 
-export function StrategyDetail({ strategy, onBack }: StrategyDetailProps) {
+export function StrategyDetail({
+  strategy,
+  onBack,
+  backLabel = 'Back to Strategies',
+  headerExtra,
+  children,
+}: StrategyDetailProps) {
   const [selectedPeriod, setSelectedPeriod] = useState('1M');
   const [selectedTab, setSelectedTab] = useState<'positions' | 'analysis' | 'activity'>('positions');
   const { theme } = useTheme();
@@ -76,7 +87,7 @@ export function StrategyDetail({ strategy, onBack }: StrategyDetailProps) {
           }`}
       >
         <ArrowLeft className="w-5 h-5" />
-        <span>Back to Strategies</span>
+        <span>{backLabel}</span>
       </button>
 
       <div className="mb-6">
@@ -101,9 +112,12 @@ export function StrategyDetail({ strategy, onBack }: StrategyDetailProps) {
                 </span>
               )}
             </div>
+            {headerExtra && <div className="mt-3">{headerExtra}</div>}
           </div>
         </div>
       </div>
+
+      {children}
 
       <div className="mb-6">
         <div className="text-3xl md:text-4xl mb-2">
@@ -240,7 +254,7 @@ export function StrategyDetail({ strategy, onBack }: StrategyDetailProps) {
             }`}
         >
           <ArrowLeft className="w-5 h-5" />
-          <span>Back to Strategies</span>
+          <span>{backLabel}</span>
         </button>
       </div>
 

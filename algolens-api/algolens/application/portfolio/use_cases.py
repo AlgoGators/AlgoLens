@@ -24,6 +24,11 @@ from algolens.domain.portfolio.calculations import (
     transform_positions,
 )
 from algolens.domain.portfolio.incubation import compute_incubation_window
+from algolens.domain.portfolio.registry import (
+    asset_class_for,
+    desk_edit_allowed,
+    group_portfolios,
+)
 from algolens.domain.portfolio.streams import DEFAULT_BOOK, POSITION_BOOKS
 
 logger = logging.getLogger(__name__)
@@ -31,6 +36,10 @@ logger = logging.getLogger(__name__)
 
 class StrategyDataNotFound(NotFoundError):
     """A known strategy has no live portfolio data yet."""
+
+
+class PortfolioNotFound(NotFoundError):
+    """No live registry entry exists for the requested portfolio id."""
 
 
 class StrategyNotFound(NotFoundError):
@@ -304,3 +313,45 @@ class RetireStrategy:
             reason=_require_reason(reason),
             user_id=user_id,
         )
+
+
+class ListPortfolios:
+    """The switcher: live portfolios grouped by portfolio_group (ruling 20)."""
+
+    def __init__(self, registry: StrategyRegistryPort):
+        self.registry = registry
+
+    def execute(self) -> list[dict[str, Any]]:
+        return group_portfolios(self.registry.list(active_only=True))
+
+
+class GetPortfolioDetail:
+    """One portfolio's book, found by portfolio id (AlgoLens#102)."""
+
+    def __init__(self, registry: StrategyRegistryPort, reader: PortfolioReaderPort):
+        self.registry = registry
+        self.reader = reader
+
+    def execute(self, portfolio_id: str, book: str | None = None) -> dict[str, Any]:
+        requested_book, allow_fallback = resolve_book_request(book)
+
+        cfg = self.registry.get_portfolio(portfolio_id)
+        if cfg is None:
+            raise PortfolioNotFound(portfolio_id)
+
+        rows = self.reader.fetch_portfolio_rows(
+            portfolio_id, book=requested_book, allow_fallback=allow_fallback
+        )
+        detail = build_strategy_detail(cfg, rows)
+        if detail is None:
+            raise StrategyDataNotFound(portfolio_id)
+        detail.update(
+            {
+                "portfolioId": portfolio_id,
+                "portfolioGroup": cfg.get("portfolio_group"),
+                "assetClass": asset_class_for(cfg.get("strategy_type")),
+                "deskEditable": desk_edit_allowed(cfg),
+                "requestedBook": requested_book,
+            }
+        )
+        return detail

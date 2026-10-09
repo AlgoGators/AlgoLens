@@ -39,18 +39,29 @@ def _normalize(row):
         "is_active": bool(row.get("is_active", True)),
         "lifecycle": row.get("lifecycle") or "live",
         "sort_order": int(row.get("sort_order") or 0),
+        # Migration 023 (trade-ngin): grouping for the portfolio switcher and
+        # the desk-editing gate. Absent before 023 -> ungrouped, not editable.
+        "portfolio_group": row.get("portfolio_group"),
+        "desk_editable": bool(row.get("desk_editable") or False),
     }
 
 
-def _has_lifecycle_column(cursor):
+# Columns read when present; each was added by a later migration.
+_OPTIONAL_COLUMNS = ("lifecycle", "portfolio_group", "desk_editable")
+
+
+def _optional_columns(cursor):
     cursor.execute(
         """
-        SELECT 1 FROM information_schema.columns
+        SELECT column_name FROM information_schema.columns
         WHERE table_schema = 'trading' AND table_name = 'strategy_registry'
-          AND column_name = 'lifecycle'
-        """
+          AND column_name = ANY(%s)
+        """,
+        (list(_OPTIONAL_COLUMNS),),
     )
-    return cursor.fetchone() is not None
+    present = {row["column_name"] for row in cursor.fetchall()}
+    # Fixed order, never caller-controlled text, so it is safe to splice in.
+    return [column for column in _OPTIONAL_COLUMNS if column in present]
 
 
 class PostgresStrategyRegistry:
@@ -62,25 +73,13 @@ class PostgresStrategyRegistry:
         try:
             conn = self.connection_factory()
             with conn.cursor() as cursor:
-                has_lifecycle = _has_lifecycle_column(cursor)
-                if has_lifecycle:
-                    cursor.execute(
-                        """
-                        SELECT id, strategy_type, portfolio_id, name, description,
-                               initial_equity, managers, is_active, lifecycle, sort_order
-                        FROM trading.strategy_registry
-                        ORDER BY sort_order ASC, id ASC
-                        """
-                    )
-                else:
-                    cursor.execute(
-                        """
-                        SELECT id, strategy_type, portfolio_id, name, description,
-                               initial_equity, managers, is_active, sort_order
-                        FROM trading.strategy_registry
-                        ORDER BY sort_order ASC, id ASC
-                        """
-                    )
+                extra = "".join(f", {column}" for column in _optional_columns(cursor))
+                cursor.execute(
+                    "SELECT id, strategy_type, portfolio_id, name, description, "
+                    "initial_equity, managers, is_active, sort_order"
+                    + extra
+                    + " FROM trading.strategy_registry ORDER BY sort_order ASC, id ASC"
+                )
                 rows = cursor.fetchall()
 
             registry = [_normalize(row) for row in rows]
@@ -110,6 +109,13 @@ class PostgresStrategyRegistry:
     def get(self, strategy_id):
         for strategy in self.list(active_only=True):
             if strategy["id"] == strategy_id:
+                return strategy
+        return None
+
+    def get_portfolio(self, portfolio_id):
+        """The first live registry entry for a portfolio id, or None."""
+        for strategy in self.list(active_only=True):
+            if strategy["portfolio_id"] == portfolio_id:
                 return strategy
         return None
 
