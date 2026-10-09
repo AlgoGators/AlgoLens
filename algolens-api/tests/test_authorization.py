@@ -42,7 +42,7 @@ def test_non_internal_roles_are_refused_incubation_access(client, role):
     assert response.get_json()["error"] == "Insufficient permissions"
 
 
-@pytest.mark.parametrize("role", ["admin", "general_member"])
+@pytest.mark.parametrize("role", ["admin", "exec_board", "general_member"])
 def test_internal_roles_can_access_incubation(client, role):
     _set_jwt_cookie(client, role)
 
@@ -50,3 +50,17 @@ def test_internal_roles_can_access_incubation(client, role):
 
     assert response.status_code == 200
     assert response.get_json() == {"incubating_strategies": []}
+
+
+@pytest.mark.parametrize("role", ["admin", "exec_board", "general_member"])
+def test_internal_roles_can_use_the_qt_desk(role):
+    from algolens.adapters.http.portfolio import can_use_qt_desk
+
+    assert can_use_qt_desk({"role": role})
+
+
+@pytest.mark.parametrize("role", [None, "", "investor", "viewer"])
+def test_other_roles_cannot_use_the_qt_desk(role):
+    from algolens.adapters.http.portfolio import can_use_qt_desk
+
+    assert not can_use_qt_desk({"role": role})

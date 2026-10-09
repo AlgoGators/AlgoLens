@@ -38,7 +38,9 @@ portfolio_bp = Blueprint("portfolio", __name__)
 
 # Incubation is an internal member-only surface. Default-deny: an unrecognised
 # or absent role is refused, so new roles stay locked out until explicitly added.
-INTERNAL_ROLES = frozenset({"admin", "general_member"})
+# exec_board is exec, and exec equals admin (HD ruling 2026-09-25, AlgoLens #93/#94; the
+# interim #94 map). The QT desk is the quant-trading team plus exec.
+INTERNAL_ROLES = frozenset({"admin", "exec_board", "general_member"})
 
 
 def can_use_qt_desk(user):
