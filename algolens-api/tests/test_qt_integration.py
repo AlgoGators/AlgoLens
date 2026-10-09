@@ -17,6 +17,7 @@ from algolens.application.qt.ports import (
     DeskGone,
     DeskNotSeeded,
 )
+import algolens.application.qt.use_cases as use_cases
 from algolens.application.qt.use_cases import (
     DecideOverride,
     GetDeskState,
@@ -37,6 +38,14 @@ MODEL = "QT_CONSERVATIVE_MODEL_PORTFOLIO"
 STRATEGY = "LIVE_TREND_FOLLOWING"
 SLEEVE = "TREND_FOLLOWING"
 D1, D2 = date(2026, 10, 7), date(2026, 10, 8)
+# 08:00 New York (EDT) on D2: before the 09:30 cutoff.
+CLOCK = datetime(2026, 10, 8, 12, tzinfo=timezone.utc)
+
+
+@pytest.fixture(autouse=True)
+def _desk_clock(monkeypatch):
+    """The use cases run at CLOCK unless a test passes its own clock."""
+    monkeypatch.setattr(use_cases, "_utcnow", lambda: CLOCK)
 
 
 def _exec(factory, sql, params=()):
@@ -455,7 +464,12 @@ def _emailed(factory, requested_by="desk@x.com", expires_in=timedelta(hours=48))
     result = RequestOverride(desk_repo(factory), NullAgent()).execute(
         entry(factory), "breach on purpose", requested_by
     )
-    expires = _exec(factory, "SELECT now() + %s AS at", (expires_in,))[0]["at"]
+    # A live link is valid for the use cases' clock and for the database's
+    # now(); an expired one has expired for both.
+    if expires_in < timedelta(0):
+        expires = CLOCK + expires_in
+    else:
+        expires = _exec(factory, "SELECT now() + %s AS at", (expires_in,))[0]["at"]
     engine_finishes(
         factory,
         result["command"]["id"],
@@ -756,7 +770,7 @@ def test_writers_of_a_day_wait_for_each_other(qt_db):
 
 
 def test_a_unique_violation_from_025_is_a_409(qt_db, monkeypatch):
-    if qt_db.version != "025":
+    if qt_db.version == "023":
         pytest.skip("the unique partial indexes are 025's")
     from algolens.infrastructure.qt.repositories import PostgresDeskRepository
 
@@ -775,7 +789,7 @@ def test_after_025_algolens_only_inserts_into_the_command_log(qt_db):
     conn = qt_db()
     try:
         with conn.cursor() as cur:
-            if qt_db.version == "025":
+            if qt_db.version != "023":
                 with pytest.raises(psycopg2.errors.InsufficientPrivilege):
                     cur.execute("UPDATE trading.position_overrides SET message = 'x'")
             else:
@@ -884,3 +898,62 @@ def test_settings_save_detects_a_concurrent_change(qt_db):
     with pytest.raises(DeskConflict):
         repo.insert_config_version(QT, {"capital": 2}, "stale", "b@x.com", None)
     assert [r["version"] for r in config_rows(qt_db)] == [1]
+
+
+# --- the daily approval cutoff (2026-10-09; migration 026 present or not) ------
+
+
+def test_desk_state_reads_publish_source_and_sent_at_once_026_is_applied(qt_db):
+    seed_day(qt_db)
+    with_026 = qt_db.version == "026"
+    columns = ", publish_source, sent_at" if with_026 else ""
+    values = ", 'desk', '2026-10-08T13:30:05Z'" if with_026 else ""
+    _exec(
+        qt_db,
+        "INSERT INTO trading.live_run_metadata "
+        f"(date, strategy_id, portfolio_id, published_by, published_at{columns}) "
+        f"VALUES (%s, %s, %s, 'desk@x.com', '2026-10-08T13:00:00Z'{values})",
+        (D2, STRATEGY, QT),
+    )
+
+    state = GetDeskState(desk_repo(qt_db)).execute(entry(qt_db))
+
+    assert state["sendTracked"] is with_026
+    assert state["published"]["published_by"] == "desk@x.com"
+    assert state["published"]["publish_source"] == "desk"
+    if with_026:
+        sent = datetime.fromisoformat(state["published"]["sent_at"])
+        assert sent == datetime(2026, 10, 8, 13, 30, 5, tzinfo=timezone.utc)
+    else:
+        assert state["published"]["sent_at"] is None
+    assert state["serverTime"] == CLOCK.isoformat()
+    assert state["deadlines"]["approveBy"] == "2026-10-08T09:30:00-04:00"
+
+
+def test_a_fallback_publish_reads_as_fallback_with_or_without_026(qt_db):
+    seed_day(qt_db)
+    publish_on_live_run_metadata(qt_db, by="system:fallback-10am")
+    if qt_db.version == "026":
+        _exec(qt_db, "UPDATE trading.live_run_metadata SET publish_source = 'fallback', "
+                     "sent_at = now()")
+    state = GetDeskState(desk_repo(qt_db)).execute(entry(qt_db))
+    assert state["published"]["publish_source"] == "fallback"
+    assert (state["published"]["sent_at"] is not None) is (qt_db.version == "026")
+    assert state["locked"] == "published"
+
+
+def test_approve_from_10_new_york_is_refused_and_writes_nothing(qt_db):
+    seed_day(qt_db)
+    late = datetime(2026, 10, 8, 14, 0, tzinfo=timezone.utc)  # 10:00 EDT
+    with pytest.raises(DeskConflict, match="closed at 10:00 New York"):
+        PublishDesk(desk_repo(qt_db), NullAgent(), now=lambda: late).execute(
+            entry(qt_db), "desk@x.com")
+    with pytest.raises(DeskConflict, match="closed at 10:00 New York"):
+        SaveDeskEdit(desk_repo(qt_db), NullAgent(), now=lambda: late).execute(
+            entry(qt_db), [{"symbol": "ZC.v.0", "quantity": 1, "expected": 3}], "r", "d@x.com")
+    assert commands(qt_db) == []
+    assert float(proposal_rows(qt_db)["ZC.v.0"]["quantity"]) == 3
+    # 09:59 New York the same day is still open.
+    early = datetime(2026, 10, 8, 13, 59, tzinfo=timezone.utc)
+    PublishDesk(desk_repo(qt_db), NullAgent(), now=lambda: early).execute(entry(qt_db), "desk@x.com")
+    assert [c["kind"] for c in commands(qt_db)] == ["publish"]

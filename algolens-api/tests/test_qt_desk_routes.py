@@ -6,6 +6,7 @@ import pytest
 from flask_jwt_extended import create_access_token, get_csrf_token
 
 import algolens.adapters.http.desk as desk_http
+import algolens.application.qt.use_cases as use_cases
 from algolens.domain.qt.desk import token_hash
 from algolens.infrastructure.config.qt import load_qt_settings
 from app import app
@@ -39,6 +40,7 @@ class FakeRegistry:
 @pytest.fixture
 def desk(monkeypatch):
     repo, agent = FakeRepo(), FakeAgent()
+    monkeypatch.setattr(use_cases, "_utcnow", lambda: NOW)  # before the 09:30 cutoff
     monkeypatch.setenv("QT_DESK_ENABLED", "true")
     monkeypatch.setenv("QT_APPROVERS", "vp=vp@x.com,president=p@x.com")
     monkeypatch.setattr(
@@ -314,3 +316,19 @@ def test_a_stale_approval_is_409(client, desk):
 def test_liveness_needs_no_database(client):
     response = client.get("/health/live")
     assert response.status_code == 200 and response.get_json() == {"status": "ok"}
+
+
+def test_approve_after_10_new_york_is_409_and_state_carries_the_clock(client, desk, monkeypatch):
+    from datetime import datetime, timezone
+
+    late = datetime(2026, 10, 8, 14, 0, tzinfo=timezone.utc)  # 10:00 EDT
+    monkeypatch.setattr(use_cases, "_utcnow", lambda: late)
+    headers = _login(client)
+    response = client.post("/portfolio/desk/QT_CONSERVATIVE_PORTFOLIO/publish", json={}, headers=headers)
+    assert response.status_code == 409
+    assert "closed at 10:00 New York" in response.get_json()["error"]
+    assert desk[0].rows == []
+    state = client.get("/portfolio/desk/QT_CONSERVATIVE_PORTFOLIO").get_json()
+    assert state["serverTime"] == late.isoformat()
+    assert state["deadlines"]["approvalClosed"] is True
+    assert state["deadlines"]["fallbackAt"] == "2026-10-08T10:00:00-04:00"

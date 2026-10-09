@@ -46,8 +46,41 @@ export interface OverrideRequestRow extends DeskCommand {
   decision: DeskCommand | null;
 }
 
+/** Who published the day (live_run_metadata.publish_source, migration 026;
+ * read from published_by before it). 'system' is an older engine publish. */
+export type PublishSource = 'desk' | 'fallback' | 'model-only' | 'system';
+
+export interface PublishedRecord {
+  published_by: string | null;
+  published_at: string | null;
+  publish_source?: PublishSource | null;
+  /** When the engine e-mailed the book (026); null until then, or before 026. */
+  sent_at?: string | null;
+}
+
+/** The day's clock, in America/New_York, computed by the server. */
+export interface DeskDeadlines {
+  timezone: string;
+  /** Today in New York. */
+  today: string;
+  /** The date approveBy/fallbackAt refer to: the desk's book date, or today. */
+  bookDate: string;
+  approveBy: string;
+  fallbackAt: string;
+  /** Today's deadlines (the next book's, while the desk shows an older day). */
+  todayApproveBy: string;
+  todayFallbackAt: string;
+  /** The server's view at serverTime: bookDate's 10:00 New York has passed. */
+  approvalClosed: boolean;
+}
+
 export interface DeskState {
   portfolioId: string;
+  /** The server's clock when it answered (ISO, UTC): the desk counts down from it. */
+  serverTime?: string;
+  deadlines?: DeskDeadlines;
+  /** Whether the database records publish_source and sent_at (migration 026). */
+  sendTracked?: boolean;
   deskEditable: boolean;
   date: string | null;
   seeded: boolean;
@@ -57,8 +90,8 @@ export interface DeskState {
   overrideRequests: OverrideRequestRow[];
   publish: DeskCommand | null;
   /** From live_run_metadata.published_at (C3): the day is frozen once set. */
-  published: { published_by: string | null; published_at: string | null } | null;
-  /** Why save, override request and publish are closed: published, or a publish is open. */
+  published: PublishedRecord | null;
+  /** Why save, override request and approval are closed: published, or an approval is open. */
   locked?: 'published' | 'publishing' | null;
   /** The day's override request still in play (C2), if any. */
   openOverrideRequestId?: number | null;
@@ -211,7 +244,8 @@ const KIND_NAMES: Record<CommandKind, string> = {
   save: 'Save',
   override_request: 'Override request',
   override_decision: 'Override decision',
-  publish: 'Publish',
+  // The desk's approval of the day is the engine's publish command.
+  publish: 'Approval',
 };
 
 /**
@@ -247,42 +281,259 @@ export function describeCommand(command: DeskCommand | null, phase: PollPhase | 
   }
 }
 
+/** Who published the day, from the 026 column or else from published_by. */
+export function publishSourceOf(published: PublishedRecord | null | undefined): PublishSource | null {
+  if (!published) return null;
+  const source = published.publish_source;
+  if (source === 'desk' || source === 'fallback' || source === 'model-only') return source;
+  const by = published.published_by ?? '';
+  if (!by) return null;
+  if (by.startsWith('system:fallback')) return 'fallback';
+  if (by === 'system:model-only') return 'model-only';
+  if (by.startsWith('system:')) return 'system';
+  return 'desk';
+}
+
 /**
- * Why the day's book takes no more desk actions, or null. A day is published
- * when live_run_metadata says so (C3: also the engine's own non-trading-day
- * publish, which has no publish row) or its publish row is done; a pending or
- * running publish closes it too.
+ * Whether the day is closed to desk actions: 'published' when
+ * live_run_metadata says so (C3: also an engine publish with no publish row)
+ * or its publish row is done; 'publishing' while an approval is pending or
+ * running.
  */
-export function deskLockedReason(state: DeskState): 'Published' | 'Publish in progress' | null {
+export function deskLock(state: DeskState): 'published' | 'publishing' | null {
   if (state.locked === 'published' || state.published?.published_at || state.publish?.status === 'done') {
-    return 'Published';
+    return 'published';
   }
   if (
     state.locked === 'publishing' ||
     state.publish?.status === 'pending' ||
     state.publish?.status === 'running'
   ) {
-    return 'Publish in progress';
+    return 'publishing';
   }
   return null;
 }
 
-/** Publishing is open every day, edited or not, unless one is queued or done. */
-export function publishBlockedReason(state: DeskState): string | null {
+export const LOCKED_APPROVED = 'Approved';
+export const LOCKED_FALLBACK = "Not approved: the model's book was sent (fallback)";
+export const LOCKED_ENGINE = 'Published by the engine';
+export const LOCKED_APPROVING = 'Approval in progress';
+
+/** Why the day's book takes no more desk actions, or null. */
+export function deskLockedReason(state: DeskState): string | null {
+  const lock = deskLock(state);
+  if (lock === 'publishing') return LOCKED_APPROVING;
+  if (lock !== 'published') return null;
+  const source = publishSourceOf(state.published) ?? 'desk';
+  if (source === 'fallback') return LOCKED_FALLBACK;
+  if (source === 'desk') return LOCKED_APPROVED;
+  return LOCKED_ENGINE;
+}
+
+// --- the daily cutoff (approve by 09:30 New York; fallback at 10:00) --------
+
+export const CUTOFF_RULE =
+  "Approve by 09:30 New York. Approved books are e-mailed at 09:30. If nothing is approved by 10:00, the model's book is sent.";
+
+/** serverTime minus the browser's clock when the answer arrived: add it to Date.now(). */
+export function serverClockOffsetMs(serverTime: string | undefined | null, receivedAtMs: number): number {
+  const server = serverTime ? Date.parse(serverTime) : Number.NaN;
+  return Number.isFinite(server) ? server - receivedAtMs : 0;
+}
+
+/** "1h 02m 05s", "29m 59s", "0m 09s"; 0 once the moment has passed. */
+export function formatCountdown(ms: number): string {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const sec = total % 60;
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return h > 0 ? `${h}h ${pad(m)}m ${pad(sec)}s` : `${m}m ${pad(sec)}s`;
+}
+
+/** hh:mm in New York (24-hour) of an ISO instant. */
+export function newYorkTime(iso: string | null | undefined): string {
+  if (!iso) return '';
+  const at = new Date(iso);
+  if (Number.isNaN(at.getTime())) return '';
+  return new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).format(at);
+}
+
+function before(nowMs: number, iso: string | undefined): boolean {
+  const at = iso ? Date.parse(iso) : Number.NaN;
+  return Number.isFinite(at) && nowMs < at;
+}
+
+/** Whether 10:00 New York of the book date has passed (or the book is a past day). */
+export function approvalClosed(state: DeskState, nowMs?: number): boolean {
+  const d = state.deadlines;
+  if (!d) return false;
+  if (state.date && state.date < d.today) return true;
+  if (nowMs === undefined) return d.approvalClosed;
+  return !before(nowMs, d.fallbackAt);
+}
+
+export type DayPhase =
+  | 'awaiting-model-run'
+  | 'open'
+  | 'approving'
+  | 'approved'
+  | 'sent'
+  | 'fallback'
+  | 'engine';
+
+export interface DayStatus {
+  phase: DayPhase;
+  title: string;
+  detail: string;
+  /** The instant (ms, server time) the countdown runs to, or null for none. */
+  countdownTo: number | null;
+  /** What the countdown counts down to, e.g. "left to approve". */
+  countdownLabel: string | null;
+}
+
+/**
+ * The desk's day as one of the cutoff's states, at `nowMs` on the server's
+ * clock (Date.now() + serverClockOffsetMs): awaiting the model run, open,
+ * approved (sends at 09:30), approved and sent, or not approved (the model's
+ * book was sent at 10:00).
+ */
+export function deskDayStatus(state: DeskState, nowMs: number): DayStatus {
+  const d = state.deadlines;
+  const at = (iso: string | undefined) => (iso ? Date.parse(iso) : null);
+  const status = (
+    phase: DayPhase,
+    title: string,
+    detail: string,
+    countdownTo: number | null = null,
+    countdownLabel: string | null = null,
+  ): DayStatus => ({
+    phase,
+    title,
+    detail,
+    countdownTo: countdownTo !== null && countdownTo > nowMs ? countdownTo : null,
+    countdownLabel: countdownTo !== null && countdownTo > nowMs ? countdownLabel : null,
+  });
+
+  const today = d?.today;
+  const pastDay = Boolean(state.date && today && state.date < today);
+  if (!state.date || !state.seeded || pastDay) {
+    const forDay = today ?? state.date ?? 'today';
+    const nextApproveBy = at(pastDay || !state.date ? d?.todayApproveBy : d?.approveBy);
+    return status(
+      'awaiting-model-run',
+      'Awaiting model run',
+      `The ${forDay} model run has not seeded the QT proposal yet. Approve by 09:30 New York once it has.`,
+      nextApproveBy,
+      'until 09:30 New York',
+    );
+  }
+
+  const lock = deskLock(state);
+  if (lock === 'published') {
+    const published = state.published;
+    const source = publishSourceOf(published) ?? 'desk';
+    const sentAt = published?.sent_at ?? null;
+    const by = published?.published_by ?? 'unknown';
+    if (source === 'fallback') {
+      return status(
+        'fallback',
+        "Not approved — model book sent at 10:00 (fallback)",
+        sentAt
+          ? `Nothing was approved by 10:00 New York; the engine published the model's book and e-mailed it at ${newYorkTime(sentAt)}.`
+          : "Nothing was approved by 10:00 New York; the engine published the model's book.",
+      );
+    }
+    if (source === 'model-only' || source === 'system') {
+      return status(
+        'engine',
+        sentAt ? `Published by the engine, sent at ${newYorkTime(sentAt)}` : 'Published by the engine',
+        `Published by ${by}.`,
+      );
+    }
+    if (sentAt) {
+      return status('sent', `Approved and sent at ${newYorkTime(sentAt)}`, `Approved by ${by}.`);
+    }
+    if (before(nowMs, d?.approveBy)) {
+      return status(
+        'approved',
+        'Approved — sends at 09:30',
+        `Approved by ${by}. The day is frozen; the engine e-mails it at 09:30 New York.`,
+        at(d?.approveBy),
+        'until the e-mail',
+      );
+    }
+    return status(
+      'approved',
+      state.sendTracked === false ? 'Approved' : 'Approved — sends at 09:30',
+      state.sendTracked === false
+        ? `Approved by ${by}. This database does not record when the e-mail went out (migration 026).`
+        : `Approved by ${by}. Waiting for the engine to e-mail it.`,
+    );
+  }
+
+  const late = d ? !before(nowMs, d.approveBy) : false;
+  const detail = late
+    ? "09:30 New York has passed: an approval now is e-mailed at once. At 10:00 the model's book is sent instead."
+    : CUTOFF_RULE;
+  if (lock === 'publishing') {
+    return status('approving', 'Approving — waiting for the engine', detail);
+  }
+  if (!approvalClosed(state, nowMs)) {
+    return status(
+      'open',
+      'Open — approve by 09:30',
+      detail,
+      at(late ? d?.fallbackAt : d?.approveBy),
+      late ? "until the model's book is sent" : 'left to approve',
+    );
+  }
+
+  return status(
+    'fallback',
+    "Not approved — model book sent at 10:00 (fallback)",
+    "Nothing was approved by 10:00 New York. The engine publishes and sends the model's book; this page updates once it has.",
+  );
+}
+
+/**
+ * Why Approve is closed, or null. Approval is open every day, edited or
+ * not, until 10:00 New York (server time `nowMs`; without it, the server's
+ * view when it answered), unless the day is published or one is in progress.
+ */
+export function approveBlockedReason(state: DeskState, nowMs?: number): string | null {
   if (!state.date) return 'No book for today yet';
-  return deskLockedReason(state);
-}
-
-/** Editing the proposal: closed on a published day and while a publish is open. */
-export function editBlockedReason(state: DeskState): string | null {
-  if (!state.seeded) return 'The proposal is not seeded yet';
-  return deskLockedReason(state);
-}
-
-/** One override request a day is in play at a time (C2). */
-export function overrideBlockedReason(state: DeskState): string | null {
-  if (!state.seeded) return 'The proposal is not seeded yet';
   const locked = deskLockedReason(state);
+  if (locked) return locked;
+  if (approvalClosed(state, nowMs)) {
+    return `Approval of the ${state.date} book closed at 10:00 New York; the model's book is sent instead`;
+  }
+  if (!state.seeded) return 'The proposal is not seeded yet';
+  return null;
+}
+
+/** @deprecated the pre-cutoff name of approveBlockedReason. */
+export const publishBlockedReason = approveBlockedReason;
+
+function closedForEdits(state: DeskState, nowMs?: number): string | null {
+  return approvalClosed(state, nowMs) ? `The ${state.date} book closed at 10:00 New York` : null;
+}
+
+/** Editing the proposal: closed on a published day, while an approval is open, and from 10:00. */
+export function editBlockedReason(state: DeskState, nowMs?: number): string | null {
+  if (!state.seeded) return 'The proposal is not seeded yet';
+  return deskLockedReason(state) ?? closedForEdits(state, nowMs);
+}
+
+/** One override request a day is in play at a time (C2); none from 10:00. */
+export function overrideBlockedReason(state: DeskState, nowMs?: number): string | null {
+  if (!state.seeded) return 'The proposal is not seeded yet';
+  const locked = deskLockedReason(state) ?? closedForEdits(state, nowMs);
   if (locked) return locked;
   if (state.openOverrideRequestId != null) {
     return `Override request #${state.openOverrideRequestId} is still open`;

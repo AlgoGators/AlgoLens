@@ -1,6 +1,8 @@
 import type {
   DeskCommand,
+  DeskDeadlines,
   DeskState,
+  PublishedRecord,
   QuantityChange,
   SnapshotRow,
   SymbolChoice,
@@ -67,7 +69,10 @@ export interface ApprovalPage {
   snapshot: SnapshotRow[] | null;
   /** False once the desk changed the proposal: the request can then only be rejected. */
   snapshotMatches: boolean;
-  published: { published_by: string | null; published_at: string | null } | null;
+  published: PublishedRecord | null;
+  /** The server's clock (ISO, UTC) and the request day's New York deadlines. */
+  serverTime?: string;
+  deadlines?: DeskDeadlines;
   viewer: { email: string; approver_role: 'vp' | 'president' | null; is_requester: boolean };
 }
 
@@ -80,6 +85,7 @@ export const DeskApi = {
   command: (id: number) => request<DeskCommand>('GET', `/portfolio/desk/commands/${id}`),
   requestOverride: (portfolioId: string, reason: string) =>
     request<CommandResult>('POST', `${desk(portfolioId)}/override-request`, { reason }),
+  /** Approve the day's book (the engine's publish command). */
   publish: (portfolioId: string) => request<CommandResult>('POST', `${desk(portfolioId)}/publish`, {}),
   settings: (portfolioId: string) => request<SettingsState>('GET', `${desk(portfolioId)}/settings`),
   saveSettings: async (portfolioId: string, changes: SettingChange[], reason: string) =>

@@ -1,4 +1,5 @@
-"""QT desk use cases (contract sections 4, 6 and 7).
+"""QT desk use cases (contract sections 4, 6 and 7, and the daily approval
+cutoff of domain/qt/cutoff.py).
 
 AlgoLens inserts a trading.position_overrides row, then calls the engine's
 desk service with its id. The call is a fast path only: if it fails the row
@@ -13,6 +14,7 @@ from typing import Any
 
 from algolens.application.qt.ports import (
     DeskAgentPort,
+    DeskConflict,
     DeskForbidden,
     DeskGone,
     DeskNotFound,
@@ -20,6 +22,12 @@ from algolens.application.qt.ports import (
     DeskRepositoryPort,
 )
 from algolens.domain.portfolio.registry import desk_edit_allowed
+from algolens.domain.qt.cutoff import (
+    approval_closed,
+    closed_message,
+    deadlines,
+    publish_source,
+)
 from algolens.domain.qt.desk import (
     DONE,
     OPEN_STATUSES,
@@ -120,20 +128,50 @@ def _current_sha256(repo: DeskRepositoryPort, portfolio_id, day) -> str | None:
 
 def _published_record(repo: DeskRepositoryPort, portfolio_id, day, publishes):
     """C3: published_by/at from live_run_metadata; a done publish row stands
-    in should live_run_metadata not say so (yet)."""
+    in should live_run_metadata not say so (yet). publish_source and sent_at
+    come from migration 026's columns (NULL before it, or before the engine
+    set them); publish_source is otherwise read from published_by."""
     published = repo.publish_state(portfolio_id, day)
     if published and published.get("published_at"):
         return {
             "published_by": published.get("published_by"),
             "published_at": _iso(published.get("published_at")),
+            "publish_source": publish_source(
+                published.get("publish_source"), published.get("published_by")
+            ),
+            "sent_at": _iso(published.get("sent_at")),
         }
     done = [c for c in publishes if c["status"] == DONE]
     if done:
         return {
             "published_by": done[-1]["requested_by"],
             "published_at": _iso(done[-1].get("finished_at")),
+            "publish_source": publish_source(None, done[-1]["requested_by"]),
+            "sent_at": None,
         }
     return None
+
+
+def _refuse_after_cutoff(
+    repo: DeskRepositoryPort, portfolio_id: str, day, now: datetime, action: str
+) -> None:
+    """From 10:00 New York on the book date the day is the engine's: it
+    publishes and sends the model's book (fallback). Refuse (409), saying
+    "already published" when it is."""
+    if not approval_closed(day, now):
+        return
+    published = _published_record(
+        repo,
+        portfolio_id,
+        day,
+        [c for c in repo.commands(portfolio_id, day) if c["kind"] == PUBLISH],
+    )
+    if published:
+        raise DeskConflict(
+            f"The {day.isoformat()} book is already published"
+            + (f" (by {published['published_by']})" if published.get("published_by") else "")
+        )
+    raise DeskConflict(closed_message(day, action))
 
 
 class GetDeskState:
@@ -146,8 +184,15 @@ class GetDeskState:
     def execute(self, entry: Mapping[str, Any]) -> dict[str, Any]:
         portfolio_id = entry["portfolio_id"]
         day = self.repo.desk_date(portfolio_id)
+        now = self.now()
         state: dict[str, Any] = {
             "portfolioId": portfolio_id,
+            # The server's clock and the day's deadlines in New York: the
+            # desk counts down from these, never from the browser's clock.
+            "serverTime": now.astimezone(timezone.utc).isoformat(),
+            "deadlines": deadlines(day, now),
+            # Whether live_run_metadata carries 026's publish_source/sent_at.
+            "sendTracked": self.repo.send_tracking(),
             "deskEditable": desk_edit_allowed(entry),
             "date": _iso(day),
             "seeded": False,
@@ -183,7 +228,7 @@ class GetDeskState:
         published = _published_record(self.repo, portfolio_id, day, publishes)
         publishing = any(c["status"] in OPEN_STATUSES for c in publishes)
         open_request = open_override_request(
-            commands, self.now(), _current_sha256(self.repo, portfolio_id, day)
+            commands, now, _current_sha256(self.repo, portfolio_id, day)
         )
 
         state.update(
@@ -227,9 +272,10 @@ class ListSymbolChoices:
 
 
 class SaveDeskEdit:
-    def __init__(self, repo: DeskRepositoryPort, agent: DeskAgentPort):
+    def __init__(self, repo: DeskRepositoryPort, agent: DeskAgentPort, now=None):
         self.repo = repo
         self.agent = agent
+        self.now = now or _utcnow
 
     def execute(
         self, entry: Mapping[str, Any], edits: Any, reason: Any, requested_by: str
@@ -242,6 +288,7 @@ class SaveDeskEdit:
             raise DeskRuleError("changes must be a non-empty list of {symbol, quantity, expected}")
         portfolio_id = entry["portfolio_id"]
         day = _desk_day(self.repo, portfolio_id)
+        _refuse_after_cutoff(self.repo, portfolio_id, day, self.now(), "Editing")
         # The published/publishing refusal (C3) and the stale-edit check run
         # inside the save transaction, under the day lock.
         command = self.repo.save_proposal(
@@ -267,15 +314,17 @@ class GetCommand:
 
 
 class RequestOverride:
-    def __init__(self, repo: DeskRepositoryPort, agent: DeskAgentPort):
+    def __init__(self, repo: DeskRepositoryPort, agent: DeskAgentPort, now=None):
         self.repo = repo
         self.agent = agent
+        self.now = now or _utcnow
 
     def execute(self, entry: Mapping[str, Any], reason: Any, requested_by: str) -> dict[str, Any]:
         _require_editable(entry)
         reason = require_reason(reason)
         portfolio_id = entry["portfolio_id"]
         day = _desk_day(self.repo, portfolio_id)
+        _refuse_after_cutoff(self.repo, portfolio_id, day, self.now(), "An override request")
         # One transaction: the C3 refusals, one open request a day (C2) and
         # the proposal snapshot with its hash (C1).
         command = self.repo.insert_override_request(portfolio_id, day, requested_by, reason)
@@ -305,7 +354,8 @@ class LookupApproval:
         self.now = now or _utcnow
 
     def execute(self, token: Any) -> dict[str, Any]:
-        request = _request_for_token(self.repo, token, self.now())
+        now = self.now()
+        request = _request_for_token(self.repo, token, now)
         portfolio_id, day = request["portfolio_id"], request["date"]
         books = {
             book: list(self.repo.book_rows(portfolio_id, day, book))
@@ -339,6 +389,10 @@ class LookupApproval:
             and current is not None
             and request_matches(request, current),
             "published": published,
+            # The desk approves the day by 09:30 New York; from 10:00 the
+            # model's book is sent and this request can no longer be decided.
+            "serverTime": now.astimezone(timezone.utc).isoformat(),
+            "deadlines": deadlines(day, now),
         }
 
 
@@ -358,13 +412,17 @@ class DecideOverride:
     ) -> dict[str, Any]:
         if not isinstance(approved, bool):
             raise DeskRuleError("approved must be true or false")
-        request = _request_for_token(self.repo, token, self.now())
+        now = self.now()
+        request = _request_for_token(self.repo, token, now)
         if approver_role is None:
             raise DeskForbidden("Only the VP or the President may decide an override")
         if _same_person(approver_email, request["requested_by"]):
             raise DeskForbidden("You cannot decide your own override request")
         if reason is not None and not isinstance(reason, str):
             raise DeskRuleError("reason must be text")
+        _refuse_after_cutoff(
+            self.repo, request["portfolio_id"], request["date"], now, "Deciding an override"
+        )
         # The repository refuses, under the day lock: a decided request, one
         # not e-mailed, a published day, and an approval of a proposal that
         # changed since the request (409).
@@ -380,14 +438,21 @@ class DecideOverride:
 
 
 class PublishDesk:
-    def __init__(self, repo: DeskRepositoryPort, agent: DeskAgentPort):
+    """The desk's approval of the day (the UI's Approve; command kind
+    'publish'). Before 09:30 New York the engine only freezes the day and
+    e-mails it at 09:30; from 09:30 to 10:00 it also e-mails at once; from
+    10:00 it is refused here (409) and by the engine."""
+
+    def __init__(self, repo: DeskRepositoryPort, agent: DeskAgentPort, now=None):
         self.repo = repo
         self.agent = agent
+        self.now = now or _utcnow
 
     def execute(self, entry: Mapping[str, Any], requested_by: str) -> dict[str, Any]:
         _require_editable(entry)
         portfolio_id = entry["portfolio_id"]
         day = _desk_day(self.repo, portfolio_id)
+        _refuse_after_cutoff(self.repo, portfolio_id, day, self.now(), "Approval")
         # Published (C3) and publish-already-open are refused under the day lock.
         command = self.repo.insert_publish(portfolio_id, day, requested_by)
         outcome = self.agent.publish(command)
