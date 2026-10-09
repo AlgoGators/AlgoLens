@@ -1,1 +1,4 @@
 deployment/*.sh text eol=lf
+# Vendored from trade-ngin byte for byte (scripts/sync_protos.sh checks it); keep LF everywhere.
+algolens-api/proto/algogators/* text eol=lf
+algolens-api/scripts/gen_versions.py text eol=lf

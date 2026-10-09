@@ -1,11 +1,14 @@
-// Vendored into AlgoLens from AlgoGators/trade-ngin proto/qt/v1/desk.proto at commit
-// 84ed75300df0a590168600ed0b37bbffafd1e08c (branch qt/grpc-desk-agent, PR #160). Do not edit here:
-// change it in trade-ngin, re-vendor, and run scripts/gen_proto.sh (CI checks the stubs match).
+// AlgoGators gRPC API
+// API: desk
+// Version: 1.0.0
+// Compatibility: a client must send x-algogators-api-version: desk=<major>.<minor>.<patch>; the
+// server refuses a different major and accepts any minor/patch (docs/design/rpc.md).
 //
-// desk.proto -- the command channel from AlgoLens to the trade-ngin engine.
+// desk.proto -- the QT desk commands from AlgoLens to the trade-ngin engine.
 //
-// Owned by the engine (trade-ngin). AlgoLens vendors the generated Python stubs at a pinned
-// commit. See docs/design/desk-agent.md for the transport, ports and how to regenerate stubs.
+// Owned by the engine (trade-ngin). AlgoLens vendors this file byte-for-byte at a pinned commit
+// and commits the stubs generated from it. See docs/design/rpc.md for the shared layer
+// (versioning, ports, health) and docs/design/desk-service.md for this service.
 //
 // References in the comments below:
 //   "plan 3b"   docs/design/qt-platform-analysis-and-plan.md, section 3b (decisions 2026-10-08)
@@ -25,13 +28,17 @@
 
 syntax = "proto3";
 
-package algogators.qt.v1;
+package algogators.desk;
 
 import "google/protobuf/timestamp.proto";
 
 // The health service is the standard grpc.health.v1.Health (grpc_health/v1/health.proto),
-// registered by the server next to DeskService. Service name for a targeted check:
-// "algogators.qt.v1.DeskService"; "" checks the server as a whole.
+// registered by the shared server next to every service. Service name for a targeted check:
+// "algogators.desk.DeskService"; "" checks the server as a whole.
+//
+// Version history (bump Version above; a major bump is a breaking change, see docs/design/rpc.md):
+//   1.0.0  2026-10-09  first versioned release. Same messages and field numbers as the earlier
+//                      unversioned algogators.qt.v1 package, so the wire format is unchanged.
 
 service DeskService {
   // A desk save: run the desk loop on the whole qt_proposal and book the result as qt with
@@ -132,16 +139,19 @@ message OverrideRequest {
 }
 
 message DecisionRequest {
-  // position_overrides.id of the override REQUEST being decided. AlgoLens records the decision
-  // itself as an insert (the #55 table has an UPDATE ... DO INSTEAD NOTHING rule; plan finding 6).
+  // position_overrides.id of the override_decision row AlgoLens inserted for this click
+  // (contract section 6); its parent_id names the override request. The row, not this message,
+  // is the record: the engine checks the row's approver_role, requested_by and
+  // payload.approved.
   int64 audit_id = 1;
   // The VP or President who clicked the link (D5, D17: roles in AlgoLens, never the requester,
   // no delegate).
   string approver = 2;
   // true = approve, false = reject. Either rejection ends the request (design section 6).
   bool approved = 3;
-  // The signed single-use token from the e-mailed link (D5). Verified by the engine, never
-  // logged.
+  // The single-use token from the e-mailed link (D5). AlgoLens checks sha256(token) against the
+  // request row's token_hash before it inserts the decision row; the agent requires it to be
+  // present and never logs it (a re-driven decision has no token, so the row is the record).
   string token = 4;
 }
 
@@ -151,6 +161,9 @@ message PublishRequest {
   string date = 2;
   // Written to live_run_metadata.published_by (plan A6/E8).
   string published_by = 3;
+  // position_overrides.id of the 'publish' row AlgoLens wrote before calling (contract section
+  // 6). 0 = the newest pending publish row for portfolio_id + date.
+  int64 audit_id = 4;
 }
 
 message CommandReply {

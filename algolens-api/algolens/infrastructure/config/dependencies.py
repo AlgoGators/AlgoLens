@@ -41,11 +41,13 @@ def create_dev_auth_config():
 
 
 def create_desk_dependencies(connection_factory=None):
-    """(desk repository, desk-agent client, QT settings) for the desk routes."""
-    from algolens.infrastructure.qt.desk_agent import GrpcDeskAgent
+    """(desk repository, desk gRPC client, QT settings) for the desk routes."""
+    from algolens.infrastructure.qt.desk_client import DeskClient
     from algolens.infrastructure.qt.repositories import PostgresDeskRepository
+    from algolens.infrastructure.rpc import load_rpc_settings
 
     settings = load_qt_settings()
+    rpc = load_rpc_settings()
     repo = PostgresDeskRepository(connection_factory=connection_factory)
-    agent = GrpcDeskAgent(settings.desk_agent_addr)
+    agent = DeskClient(rpc.engine_addr, timeout=rpc.timeout_seconds)
     return repo, agent, settings

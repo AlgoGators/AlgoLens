@@ -107,7 +107,9 @@ class SettingsRepositoryPort(Protocol):
 
 
 class DeskAgentPort(Protocol):
-    """The engine's desk-agent (gRPC). Best effort: never raises.
+    """The engine's desk service over gRPC (infrastructure/qt/desk_client.py).
+
+    Best effort: never raises.
 
     Each call returns a short outcome for the log ("ACCEPTED", "unavailable",
     ...). The command row is the record; when a call fails the row stays

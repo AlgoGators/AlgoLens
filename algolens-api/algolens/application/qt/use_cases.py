@@ -1,7 +1,7 @@
 """QT desk use cases (contract sections 4, 6 and 7).
 
 AlgoLens inserts a trading.position_overrides row, then calls the engine's
-desk-agent with its id. The call is a fast path only: if it fails the row
+desk service with its id. The call is a fast path only: if it fails the row
 stays pending and the engine re-drives it, so a gRPC failure never fails the
 user's action.
 """

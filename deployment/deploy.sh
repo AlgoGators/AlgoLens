@@ -32,7 +32,7 @@ compose() {
     docker compose -f "$DEPLOY_DIR/docker-compose.prod.yml" "$@"
 }
 
-# The backend joins the network the trade-ngin desk-agent will share.
+# The backend joins the network it shares with the trade-ngin engine-rpc container.
 docker network create qt >/dev/null 2>&1 || true
 
 log "pulling $BACKEND_IMAGE"

@@ -22,14 +22,19 @@ AlgoLens and the engine (trade-ngin) **talk directly over gRPC**, and Postgres s
 
 | Direction | How | What |
 |---|---|---|
-| AlgoLens → engine | gRPC to `desk-agent:50051` on the private Docker network `qt` (env `DESK_AGENT_ADDR`, 3 s timeout) | `RunDesk` (a save), `RequestOverride`, `RecordDecision`, `Publish`, `GetRunStatus`. Contract: `algolens-api/proto/qt/v1/desk.proto`, vendored from trade-ngin `proto/qt/v1/desk.proto` |
+| AlgoLens → engine | gRPC to `engine-rpc:50051` on the private Docker network `qt` (env `ENGINE_RPC_ADDR`; `DESK_AGENT_ADDR` is still read for one release; 3 s timeout) | The desk service `algogators.desk.DeskService`: `RunDesk` (a save), `RequestOverride`, `RecordDecision`, `Publish`, `GetRunStatus`. Contract: `algolens-api/proto/algogators/desk.proto`, vendored byte for byte from trade-ngin `proto/algogators/desk.proto` |
 | Engine → AlgoLens | Postgres (`new_algo_data`) | The three books in `trading.positions` (`system`, `qt_proposal`, `qt`), the command log `trading.position_overrides` (status and result of every command), and `live_run_metadata.published_by` / `published_at` and `settings_used` |
 
 **How a command works:**
 1. AlgoLens writes the command row to `trading.position_overrides` first, then calls the matching RPC with the row's id.
 2. The engine answers `ACCEPTED`, does the work, and moves the row to `done`, `refused` or `failed`.
 3. The page polls the row.
-4. If the gRPC call fails, nothing is lost: the desk-agent re-drives every `pending` row every 60 s.
+4. If the gRPC call fails, nothing is lost: the engine's desk service re-drives every `pending` row every 60 s.
+
+**The gRPC layer (shared by every engine service, not just the desk):**
+- **Client:** `algolens-api/algolens/infrastructure/rpc/` caches one channel per address, sets keepalive and reconnect options, holds the default timeout, maps errors, and adds the version header to every call. The desk client (`infrastructure/qt/desk_client.py`, `DeskClient`) is built on it. A new engine API needs only a client class on top of it.
+- **Versions:** no version in any path or package. Each `.proto` starts with a header block (`API: desk`, `Version: 1.0.0`). `scripts/gen_proto.sh` parses it into `algogators/versions.py`. Every call sends the gRPC metadata `x-algogators-api-version: common=1.0.0,desk=1.0.0`. The engine refuses a missing header or a different major version with `FAILED_PRECONDITION` (logged as an error here; the row still re-drives) and accepts any minor or patch. See trade-ngin `docs/design/rpc.md`.
+- **Vendoring:** `algolens-api/proto/algogators/*.proto` and `scripts/gen_versions.py` are byte-identical copies from trade-ngin at the commit in `proto/algogators/SOURCE`. Re-vendor with `algolens-api/scripts/sync_protos.sh <trade-ngin commit>` and commit the regenerated `algolens-api/algogators/`. CI checks the copies against that commit (`sync_protos.sh --check`) and checks the stubs and `versions.py` against the protos.
 
 **The rest of the setup:**
 - **E-mail:** override approval links go to the VP and the President (env `QT_APPROVERS`, set on both sides). Publish e-mails come from the engine.
