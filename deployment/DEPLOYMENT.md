@@ -16,7 +16,7 @@ The setup mirrors data-ngin's deploy in AlgoGators/algogators
 browser --https--> old host nginx (TLS, certbot)
                      |  proxy_pass http://172.31.23.190:8088   (VPC-private)
                      v
-  trade-ngin box (1 vCPU, ~1 GiB RAM)
+  trade-ngin box (t2.medium: 2 vCPU, 4 GiB RAM)
   +-------------------------------------------------------------+
   | algolens-edge      nginx, publishes 8088            32m     |
   |   /            -> algolens-frontend:80                      |
@@ -36,8 +36,9 @@ browser --https--> old host nginx (TLS, certbot)
   Nothing on the old host changes.
 - The backend also joins the external Docker network `qt` (alias
   `algolens-backend`), which the trade-ngin desk-agent will share later.
-- **Memory.** The box has 1 vCPU, 957 MiB RAM and about 200 MiB free, and
-  trade-ngin's live run (cron inside its container, 09:30 daily) must never be
+- **Memory.** The box is a t2.medium (2 vCPU, 4 GiB RAM) shared with
+  Postgres, trade-ngin and the data-ngin Airflow stack, and trade-ngin's
+  live run (cron inside its container, 09:30 daily) must never be
   OOM-killed. Every AlgoLens container has a hard `mem_limit` (with no extra
   swap) and `oom_score_adj: 800`, so under pressure the kernel kills AlgoLens
   first. `deploy.sh` stops the old AlgoLens containers before it starts the
