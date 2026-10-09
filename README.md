@@ -14,7 +14,7 @@ The original Figma design is available at https://www.figma.com/design/ZeqHCUFlW
 | Edge router | trade-ngin host, :8088 | nginx container: `/` -> frontend, `/auth` `/portfolio` `/health` -> backend |
 | TLS | old EC2 host, 443 | nginx proxies `algolens.algogators.com` to the edge on the private IP |
 
-**Database:** PostgreSQL at `13.58.153.216:5432`, database `new_algo_data`
+**Database:** PostgreSQL at `18.118.225.224:5432`, database `new_algo_data`
 
 ### QT desk: AlgoLens and trade-ngin call each other
 
