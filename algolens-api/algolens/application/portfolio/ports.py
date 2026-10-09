@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Any, Protocol
 
 from algolens.application.shared.errors import ValidationError
+from algolens.domain.portfolio.streams import DEFAULT_BOOK
 
 
 class IncubationError(ValidationError):
@@ -19,6 +20,10 @@ class PortfolioDetailRows:
     positions: Sequence[Mapping[str, Any]]
     executions: Sequence[Mapping[str, Any]]
     yesterday_positions: Sequence[Mapping[str, Any]]
+    # The position book actually served, and whether it differs from the one
+    # requested because the requested default book had no rows.
+    book: str = DEFAULT_BOOK
+    fell_back: bool = False
 
 
 @dataclass(frozen=True)
@@ -41,7 +46,13 @@ class PortfolioReaderPort(Protocol):
     ) -> Mapping[str, Any] | None:
         ...
 
-    def fetch_detail_rows(self, strategy_type: str, portfolio_id: str) -> PortfolioDetailRows:
+    def fetch_detail_rows(
+        self,
+        strategy_type: str,
+        portfolio_id: str,
+        book: str = DEFAULT_BOOK,
+        allow_fallback: bool = True,
+    ) -> PortfolioDetailRows:
         ...
 
     def list_incubating_strategies(self) -> Sequence[Mapping[str, Any]]:

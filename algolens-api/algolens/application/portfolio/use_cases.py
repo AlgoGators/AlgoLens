@@ -12,7 +12,7 @@ from algolens.application.portfolio.ports import (
     PortfolioReaderPort,
     StrategyRegistryPort,
 )
-from algolens.application.shared.errors import NotFoundError
+from algolens.application.shared.errors import NotFoundError, ValidationError
 from algolens.domain.portfolio.calculations import (
     build_historical_data,
     compute_return_stats,
@@ -24,6 +24,7 @@ from algolens.domain.portfolio.calculations import (
     transform_positions,
 )
 from algolens.domain.portfolio.incubation import compute_incubation_window
+from algolens.domain.portfolio.streams import DEFAULT_BOOK, POSITION_BOOKS
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +35,25 @@ class StrategyDataNotFound(NotFoundError):
 
 class StrategyNotFound(NotFoundError):
     """No active strategy exists for the requested public id."""
+
+
+class InvalidBook(ValidationError):
+    """The requested position book is not one AlgoLens serves."""
+
+
+def resolve_book_request(book: str | None) -> tuple[str, bool]:
+    """Return (book to read, whether it may fall back to the system book).
+
+    No book named -> the default (qt), with fallback allowed. A named book is
+    served exactly as asked, even when it has no rows.
+    """
+    if book is None:
+        return DEFAULT_BOOK, True
+    if book not in POSITION_BOOKS:
+        raise InvalidBook(
+            f"Invalid book {book!r}: expected one of {', '.join(POSITION_BOOKS)}"
+        )
+    return book, False
 
 
 def build_strategy_detail(
@@ -79,6 +99,8 @@ def build_strategy_detail(
         "finalizedPositions": transformed_finalized,
         "managers": cfg["managers"],
         "lastUpdate": latest["date"].isoformat(),
+        "book": rows.book,
+        "fellBack": rows.fell_back,
         "metrics": {
             "volatility": volatility,
             "sharpeRatio": sharpe,
@@ -176,12 +198,19 @@ class GetStrategyDetail:
         self.registry = registry
         self.reader = reader
 
-    def execute(self, strategy_id: str) -> dict[str, Any]:
+    def execute(self, strategy_id: str, book: str | None = None) -> dict[str, Any]:
+        requested_book, allow_fallback = resolve_book_request(book)
+
         cfg = self.registry.get(strategy_id)
         if cfg is None:
             raise StrategyNotFound(strategy_id)
 
-        rows = self.reader.fetch_detail_rows(cfg["strategy_type"], cfg["portfolio_id"])
+        rows = self.reader.fetch_detail_rows(
+            cfg["strategy_type"],
+            cfg["portfolio_id"],
+            book=requested_book,
+            allow_fallback=allow_fallback,
+        )
         detail = build_strategy_detail(cfg, rows)
         if detail is None:
             raise StrategyDataNotFound(strategy_id)

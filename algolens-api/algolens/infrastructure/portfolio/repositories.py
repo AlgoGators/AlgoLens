@@ -9,7 +9,11 @@ from algolens.application.portfolio.ports import (
     IncubationPerformanceRows,
     PortfolioDetailRows,
 )
-from algolens.domain.portfolio.streams import PORTFOLIO_STREAMS, PRIMARY_STREAM
+from algolens.domain.portfolio.streams import (
+    DEFAULT_BOOK,
+    FALLBACK_BOOK,
+    PORTFOLIO_STREAMS,
+)
 from algolens.infrastructure.db.postgres import get_db_connection
 
 _PORTFOLIO_TYPE_CACHE_TTL_SECONDS = 300
@@ -127,7 +131,79 @@ class PostgresPortfolioRepository:
                 by_stream[stream] = rows
         return by_stream
 
-    def _fetch_current_positions(self, cursor, strategy_type, portfolio_id):
+    def _book_has_positions(self, cursor, strategy_type, portfolio_id, book):
+        cursor.execute(
+            """
+            SELECT 1 FROM trading.positions
+            WHERE strategy_id = %s
+            AND portfolio_id = %s
+            AND portfolio_type = %s
+            LIMIT 1
+            """,
+            (strategy_type, portfolio_id, book),
+        )
+        return cursor.fetchone() is not None
+
+    def _resolve_served_book(
+        self, cursor, strategy_type, portfolio_id, book, allow_fallback, has_portfolio_type
+    ):
+        """Return (book to serve, fell_back).
+
+        Only a request that did not name a book may fall back, only to the
+        system book, and only when the requested book has no position rows at
+        all for this portfolio.
+        """
+        if not allow_fallback or book == FALLBACK_BOOK:
+            return book, False
+        if not has_portfolio_type:
+            # Unmigrated schema: every row is the system book.
+            return FALLBACK_BOOK, True
+        if self._book_has_positions(cursor, strategy_type, portfolio_id, book):
+            return book, False
+        return FALLBACK_BOOK, True
+
+    def _fetch_current_positions(
+        self, cursor, strategy_type, portfolio_id, book, has_portfolio_type=None
+    ):
+        """Open positions of one book on that book's latest date.
+
+        The zero-quantity filter runs in the OUTER query, after the latest row
+        per symbol is chosen, so a flatten (a quantity-0 row on the latest date)
+        hides the symbol instead of resurrecting an older non-zero row.
+        """
+        if has_portfolio_type is None:
+            has_portfolio_type = self._has_portfolio_type(cursor)
+
+        if has_portfolio_type:
+            cursor.execute(
+                """
+                SELECT * FROM (
+                    SELECT DISTINCT ON (symbol)
+                           symbol, quantity, average_price,
+                           daily_unrealized_pnl, daily_realized_pnl
+                    FROM trading.positions
+                    WHERE strategy_id = %s
+                    AND portfolio_id = %s
+                    AND portfolio_type = %s
+                    AND date = (
+                        SELECT max(date) FROM trading.positions
+                        WHERE strategy_id = %s
+                        AND portfolio_id = %s
+                        AND portfolio_type = %s
+                    )
+                    ORDER BY symbol, updated_at DESC
+                ) AS latest_positions
+                WHERE quantity <> 0
+                ORDER BY ABS(quantity * average_price) DESC
+                """,
+                (strategy_type, portfolio_id, book) * 2,
+            )
+            return cursor.fetchall()
+
+        if book != FALLBACK_BOOK:
+            # Unmigrated schema holds only system rows.
+            return []
+
         cursor.execute(
             """
             SELECT * FROM (
@@ -137,12 +213,17 @@ class PostgresPortfolioRepository:
                 FROM trading.positions
                 WHERE strategy_id = %s
                 AND portfolio_id = %s
-                AND quantity != 0
+                AND date = (
+                    SELECT max(date) FROM trading.positions
+                    WHERE strategy_id = %s
+                    AND portfolio_id = %s
+                )
                 ORDER BY symbol, updated_at DESC
             ) AS latest_positions
+            WHERE quantity <> 0
             ORDER BY ABS(quantity * average_price) DESC
             """,
-            (strategy_type, portfolio_id),
+            (strategy_type, portfolio_id) * 2,
         )
         return cursor.fetchall()
 
@@ -161,7 +242,32 @@ class PostgresPortfolioRepository:
         )
         return cursor.fetchall()
 
-    def _fetch_yesterday_positions(self, cursor, strategy_type, portfolio_id):
+    def _fetch_yesterday_positions(
+        self, cursor, strategy_type, portfolio_id, book=FALLBACK_BOOK, has_portfolio_type=None
+    ):
+        if has_portfolio_type is None:
+            has_portfolio_type = self._has_portfolio_type(cursor)
+
+        if has_portfolio_type:
+            cursor.execute(
+                """
+                SELECT DISTINCT ON (symbol)
+                       symbol, quantity, average_price,
+                       daily_unrealized_pnl, daily_realized_pnl, updated_at
+                FROM trading.positions
+                WHERE strategy_id = %s
+                AND portfolio_id = %s
+                AND portfolio_type = %s
+                AND updated_at::date = (CURRENT_DATE - INTERVAL '1 day')::date
+                ORDER BY symbol, updated_at DESC
+                """,
+                (strategy_type, portfolio_id, book),
+            )
+            return cursor.fetchall()
+
+        if book != FALLBACK_BOOK:
+            return []
+
         cursor.execute(
             """
             SELECT DISTINCT ON (symbol)
@@ -185,7 +291,9 @@ class PostgresPortfolioRepository:
         finally:
             conn.close()
 
-    def fetch_detail_rows(self, strategy_type, portfolio_id):
+    def fetch_detail_rows(
+        self, strategy_type, portfolio_id, book=DEFAULT_BOOK, allow_fallback=True
+    ):
         conn = self.connection_factory()
         try:
             with conn.cursor() as cursor:
@@ -198,16 +306,32 @@ class PostgresPortfolioRepository:
                         positions=[],
                         executions=[],
                         yesterday_positions=[],
+                        book=book,
+                        fell_back=False,
                     )
 
                 has_portfolio_type = self._has_portfolio_type(cursor)
-                equity_curve = self._fetch_equity_curve(
+                served_book, fell_back = self._resolve_served_book(
                     cursor,
                     strategy_type,
                     portfolio_id,
-                    PRIMARY_STREAM,
-                    has_portfolio_type=has_portfolio_type,
+                    book,
+                    allow_fallback,
+                    has_portfolio_type,
                 )
+                if has_portfolio_type or served_book == FALLBACK_BOOK:
+                    # The headline curve follows the served book so the page
+                    # shows one book throughout.
+                    equity_curve = self._fetch_equity_curve(
+                        cursor,
+                        strategy_type,
+                        portfolio_id,
+                        served_book,
+                        has_portfolio_type=has_portfolio_type,
+                    )
+                else:
+                    # Unmigrated schema has no rows for a non-system book.
+                    equity_curve = []
                 equity_by_stream = self._fetch_equity_by_stream(
                     cursor,
                     strategy_type,
@@ -215,13 +339,21 @@ class PostgresPortfolioRepository:
                     has_portfolio_type=has_portfolio_type,
                 )
                 positions = self._fetch_current_positions(
-                    cursor, strategy_type, portfolio_id
+                    cursor,
+                    strategy_type,
+                    portfolio_id,
+                    served_book,
+                    has_portfolio_type=has_portfolio_type,
                 )
                 executions = self._fetch_recent_executions(
                     cursor, strategy_type, portfolio_id
                 )
                 yesterday_positions = self._fetch_yesterday_positions(
-                    cursor, strategy_type, portfolio_id
+                    cursor,
+                    strategy_type,
+                    portfolio_id,
+                    served_book,
+                    has_portfolio_type=has_portfolio_type,
                 )
         finally:
             conn.close()
@@ -233,6 +365,8 @@ class PostgresPortfolioRepository:
             positions=positions,
             executions=executions,
             yesterday_positions=yesterday_positions,
+            book=served_book,
+            fell_back=fell_back,
         )
 
     def list_incubating_strategies(self):
