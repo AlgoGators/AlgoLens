@@ -505,14 +505,21 @@ class PostgresDeskRepository:
             )
 
     @staticmethod
-    def _cutoff_columns(cursor):
-        """Which of 026's columns live_run_metadata has (cached, see above)."""
-        global _cutoff_columns_cache, _cutoff_columns_expires_at
-        now = time.monotonic()
+    def _cached_cutoff_columns():
         if _cutoff_columns_cache is not None and (
-            len(_cutoff_columns_cache) == len(CUTOFF_COLUMNS) or now < _cutoff_columns_expires_at
+            len(_cutoff_columns_cache) == len(CUTOFF_COLUMNS)
+            or time.monotonic() < _cutoff_columns_expires_at
         ):
             return _cutoff_columns_cache
+        return None
+
+    def _cutoff_columns(self, cursor):
+        """Which of 026's columns live_run_metadata has (cached, see above)."""
+        global _cutoff_columns_cache, _cutoff_columns_expires_at
+        cached = self._cached_cutoff_columns()
+        if cached is not None:
+            return cached
+        now = time.monotonic()
         cursor.execute(
             """
             SELECT column_name FROM information_schema.columns
@@ -527,6 +534,9 @@ class PostgresDeskRepository:
 
     def send_tracking(self):
         """Whether live_run_metadata has 026's publish_source and sent_at."""
+        cached = self._cached_cutoff_columns()
+        if cached is not None:
+            return len(cached) == len(CUTOFF_COLUMNS)
         conn = self.connection_factory()
         try:
             with conn.cursor() as cursor:
