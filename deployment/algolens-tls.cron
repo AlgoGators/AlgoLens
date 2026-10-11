@@ -1,0 +1,4 @@
+# Renew the algolens.algogators.com certificate (deployment/tls-renew.sh).
+# Install as /etc/cron.d/algolens-tls (root:root 0644). The host clock is UTC.
+SHELL=/bin/bash
+17 4,16 * * * root /home/ubuntu/algolens/deployment/tls-renew.sh >> /var/log/algolens-tls-renew.log 2>&1
