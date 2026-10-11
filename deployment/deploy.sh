@@ -70,6 +70,14 @@ log "pulling $FRONTEND_IMAGE"
 docker pull "$FRONTEND_IMAGE"
 compose pull edge
 
+# The edge serves TLS from the host's Let's Encrypt certificate and fails to
+# start without it (DEPLOYMENT.md, "TLS", has the one-time certbot command).
+# /etc/letsencrypt/live is root-only, so check the world-readable renewal file.
+[ -f /etc/letsencrypt/renewal/algolens.algogators.com.conf ]     || die "no Let's Encrypt certificate for algolens.algogators.com on this host (see deployment/DEPLOYMENT.md, TLS); nothing was stopped"
+sudo mkdir -p /var/www/certbot
+log "pre-flight: edge nginx config"
+compose run --rm --no-deps -T edge nginx -t     || die "pre-flight failed: the edge nginx config does not load; nothing was stopped"
+
 # Pre-flight readiness of the database, from the new image, before anything
 # running is touched: a short-lived one-off backend container (no edge, no
 # frontend) under the service's memory cap, reading the env file exactly as

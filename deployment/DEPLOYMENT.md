@@ -2,10 +2,10 @@
 
 AlgoLens runs as Docker containers on the **trade-ngin box**
 (`ubuntu@ec2-18-118-225-224`, private IP `172.31.23.190`, Ubuntu), next to
-trade-ngin and the data-ngin Airflow stack. The **old host** (`ec2-user`,
-Amazon Linux) keeps one job: terminating TLS for `algolens.algogators.com`
-and forwarding everything to the box, the same way it already forwards
-`airflow.algogators.com` to `172.31.23.190:8080`.
+trade-ngin and the data-ngin Airflow stack. DNS for `algolens.algogators.com`
+(Wix) points at this box, and `algolens-edge` terminates TLS itself (see
+"TLS" below). The old host's nginx proxy to `:8088` is no longer on the path
+and is kept only as a fallback.
 
 The setup mirrors data-ngin's deploy in AlgoGators/algogators
 (`_publish-container.yml`, `_deploy-ssh.yml`, `services/data-ngin/deploy/`).
@@ -13,15 +13,14 @@ The setup mirrors data-ngin's deploy in AlgoGators/algogators
 ## Topology
 
 ```
-browser --https--> old host nginx (TLS, certbot)
-                     |  proxy_pass http://172.31.23.190:8088   (VPC-private)
-                     v
+browser --https:443--> algolens-edge on the trade-ngin box (Let's Encrypt)
   trade-ngin box (t2.medium: 2 vCPU, 4 GiB RAM)
   +-------------------------------------------------------------+
-  | algolens-edge      nginx, publishes 8088            32m     |
+  | algolens-edge      nginx, publishes 443, 80, 8088   32m     |
   |   /            -> algolens-frontend:80                      |
   |   /auth/*      -> algolens-backend:5000                     |
   |   /portfolio/* -> algolens-backend:5000                     |
+  |   /api/*       -> algolens-backend:5000                     |
   |   /health      -> algolens-backend:5000                     |
   |   /edge-health -> edge itself                               |
   | algolens-frontend  static React build behind nginx  64m     |
@@ -31,9 +30,9 @@ browser --https--> old host nginx (TLS, certbot)
   +-------------------------------------------------------------+
 ```
 
-- `/auth`, `/portfolio` and `/health` are every backend path the frontend
-  calls. A new backend path prefix needs a `location` in `deployment/edge.conf`.
-  Nothing on the old host changes.
+- `/auth`, `/portfolio`, `/api` and `/health` are every backend path the
+  frontend calls. A new backend path prefix needs a `location` in
+  `deployment/edge-routes.conf`.
 - The backend also joins the external Docker network `qt` (alias
   `algolens-backend`), which the trade-ngin desk-agent will share later.
 - **Memory.** The box is a t2.medium (2 vCPU, 4 GiB RAM) shared with
@@ -49,7 +48,9 @@ Files:
 | File | Purpose |
 |---|---|
 | `deployment/docker-compose.prod.yml` | the stack; images come in as `BACKEND_IMAGE` / `FRONTEND_IMAGE` digests |
-| `deployment/edge.conf` | edge routing |
+| `deployment/edge.conf` | edge listeners: 443 TLS, 80 ACME + redirect, 8088 legacy |
+| `deployment/edge-routes.conf` | edge routing, shared by the listeners |
+| `deployment/tls-renew.sh`, `deployment/algolens-tls.cron` | certificate renewal |
 | `deployment/deploy.sh` | the roll, run on the box |
 | `deployment/algolens.env.example` | backend variable names |
 | `deployment/old-host-nginx-algolens.conf` | the old host's new server block |
@@ -154,10 +155,35 @@ docker network create qt || true
 `/home/ubuntu/algolens` is created by the first deploy. Do not create it by
 hand.
 
-**Security group** (trade-ngin box): add an inbound rule for **TCP 8088 from
-the old host's private IP /32 only**. Never open it to `0.0.0.0/0`. The edge
-publishes on `0.0.0.0:8088` and trusts the `X-Forwarded-*` headers it
-receives, which is safe only because the old host is its sole client.
+**Security group** (trade-ngin box):
+- TCP **443** and **80** from `0.0.0.0/0` (and `::/0`): HTTPS, and Let's
+  Encrypt's HTTP-01 challenge plus the redirect to HTTPS.
+- TCP **8088 from the old host's private IP /32 only**. Never open it to
+  `0.0.0.0/0`: the 8088 listener trusts the `X-Forwarded-*` headers it
+  receives, which is safe only because the old host is its sole client.
+
+## TLS
+
+The edge reads `/etc/letsencrypt/live/algolens.algogators.com/` from the host.
+`deploy.sh` refuses to stop anything while that certificate is missing.
+
+One-time issue (before the first deploy that has the TLS edge; port 80 must be
+free, so run it while the edge does not publish 80 yet, or stop
+`algolens-edge` for the minute it takes):
+
+```bash
+sudo mkdir -p /var/www/certbot
+docker run --rm -p 80:80   -v /etc/letsencrypt:/etc/letsencrypt -v /var/lib/letsencrypt:/var/lib/letsencrypt   certbot/certbot:v3.1.0 certonly --standalone --non-interactive --agree-tos   -m <admin e-mail> -d algolens.algogators.com
+# Switch the renewal to the webroot the edge serves on :80.
+sudo sed -i 's/^authenticator = standalone/authenticator = webroot/' /etc/letsencrypt/renewal/algolens.algogators.com.conf
+echo 'webroot_path = /var/www/certbot,' | sudo tee -a /etc/letsencrypt/renewal/algolens.algogators.com.conf
+```
+
+Renewal: install `deployment/algolens-tls.cron` as `/etc/cron.d/algolens-tls`
+(root:root 0644). It runs `tls-renew.sh` twice a day; certbot renews only
+within 30 days of expiry and the edge is reloaded afterwards. Log:
+`/var/log/algolens-tls-renew.log`. Check with
+`echo | openssl s_client -connect algolens.algogators.com:443 2>/dev/null | openssl x509 -noout -enddate`.
 
 Then create the `prod` branch and push to it (`git push origin main:prod`),
 and watch the workflow.
