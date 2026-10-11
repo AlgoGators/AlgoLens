@@ -1,8 +1,9 @@
 """QT desk HTTP routes (contract sections 4, 6 and 7).
 
 Every route here is behind QT_DESK_ENABLED (default off, ruling 22): with the
-flag off they answer 404 as if they did not exist. Desk routes also need
-can_use_qt_desk(user); the approval routes need an approver (QT_APPROVERS).
+flag off they answer 404 as if they did not exist. Desk routes also need the
+qt screen (can_use_qt_desk); the approval routes need an approver
+(QT_APPROVERS) or the qt screen.
 
 Mounted under /portfolio/desk so the edge proxy's /portfolio/ rule serves it;
 the browser page /qt/approve is the frontend's.
@@ -96,7 +97,7 @@ def desk_user(fn):
 
     @wraps(fn)
     def wrapper(*args, **kwargs):
-        if not can_use_qt_desk(current_user()):
+        if not can_use_qt_desk():
             return jsonify({"error": "Insufficient permissions"}), 403
         return fn(*args, **kwargs)
 
@@ -239,7 +240,7 @@ def desk_publish(portfolio_id):
 def approval_lookup():
     user = current_user()
     role = _approver_role(user)
-    if role is None and not can_use_qt_desk(user):
+    if role is None and not can_use_qt_desk():
         return jsonify({"error": "Insufficient permissions"}), 403
     repo, _agent, _settings = _desk_dependencies()
     result = LookupApproval(repo).execute(_body().get("token"))

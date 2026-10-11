@@ -42,6 +42,26 @@ AlgoLens and the engine (trade-ngin) **talk directly over gRPC**, and Postgres s
 - **Feature flag:** the desk UI and its write routes sit behind `QT_DESK_ENABLED`.
 - **Spec:** trade-ngin `docs/design/qt-contract.md` and `docs/design/qt-master-rulings.md`. The gRPC channel amends the master document's original "never call each other" (decided 2026-10-09).
 
+### Screens and access
+
+AlgoLens has three screens, and an admin assigns each user any of them. The roles are unchanged (decided 2026-10-11).
+
+| Screen | Who | What |
+|---|---|---|
+| Member | `member` | Portfolios (read-only), strategies, incubation, news, Strategy Builder |
+| QT | `qt` | The desk: the desk-edited portfolios with edit, override request, Approve and settings |
+| Investor | `investor` | The qt book of the latest **published** day (positions and allocation by sector), plus reports and letters |
+| Admin | role `exec_board` | Assign screens to users; upload, publish or hide investor reports (PDF, up to 10 MB; never deleted) |
+
+**How it works:**
+- **Storage:** `auth.user_screen_access`, with every grant and revoke appended to `auth.screen_access_log`. Reports are in `investor.reports`. All of it is created by `algolens-api/migrations/003_screen_access.sql`.
+- **The server decides.** It reads a user's screens from the database on every request, so a change applies on the user's next request. The desk routes need `qt`. Portfolio, strategy and incubation reads need `member` or `qt`. `/api/investor/*` needs `investor`, and `/api/admin/*` needs the `exec_board` role.
+- **Override approvals:** the approval link still needs only the VP or President address in `QT_APPROVERS`, not a screen.
+- **New sign-ups** get no screen and see "Access pending" until an admin assigns one.
+- **Migration 003's backfill** gives `member` to every existing user and `qt` to `exec_board`.
+- **Before 003 is applied,** the backend falls back to that same map, so deploying ahead of the migration keeps today's access.
+- **Routes:** `GET /api/me/screens`; `GET /api/admin/users`, `PUT /api/admin/users/<id>/screens`; `GET|POST /api/admin/reports`, `PATCH /api/admin/reports/<id>`, `GET /api/admin/reports/<id>/download`; `GET /api/investor/allocation`, `GET /api/investor/reports`, `GET /api/investor/reports/<id>/download`.
+
 ---
 
 ## Local Development

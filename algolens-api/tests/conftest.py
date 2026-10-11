@@ -31,3 +31,53 @@ def client():
         pass
     with app_module.app.test_client() as c:
         yield c
+
+
+class FakeScreenAccess:
+    """Stands in for auth.user_screen_access in route tests.
+
+    `screens` maps a JWT identity (str) to its screens. An identity not in it
+    behaves as before migration 003 (the role-based fallback: internal roles
+    get member, exec_board/admin also get qt), so route tests that only mint a
+    role keep working.
+    """
+
+    def __init__(self):
+        self.screens = {}
+        self.set_calls = []
+
+    def screens_for(self, user_id):
+        from algolens.application.identity.screen_access import ScreenAccessUnavailable
+
+        if str(user_id) not in self.screens:
+            raise ScreenAccessUnavailable("fake: no row")
+        return list(self.screens[str(user_id)])
+
+    def list_users(self):
+        return [
+            {"id": int(uid), "email": f"user{uid}@x.com", "first_name": "U", "last_name": uid,
+             "role": "general_member", "screens": list(screens)}
+            for uid, screens in sorted(self.screens.items())
+        ]
+
+    def set_screens(self, user_id, screens, by_email):
+        from algolens.domain.identity.screens import grant_changes
+
+        key = str(user_id)
+        if key not in self.screens:
+            return None
+        granted, revoked = grant_changes(self.screens[key], screens)
+        self.screens[key] = list(screens)
+        self.set_calls.append((key, tuple(screens), by_email, granted, revoked))
+        return list(screens), granted, revoked
+
+
+@pytest.fixture(autouse=True)
+def screen_access(monkeypatch):
+    import algolens.adapters.http.access as access
+    import algolens.adapters.http.api as api
+
+    fake = FakeScreenAccess()
+    monkeypatch.setattr(access, "create_screen_access_dependencies", lambda: fake)
+    monkeypatch.setattr(api, "create_screen_access_dependencies", lambda: fake)
+    return fake

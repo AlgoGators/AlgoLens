@@ -4,6 +4,7 @@ import {
   describeBookLoadError,
   activeToggleBook,
   bookQuery,
+  deskGroups,
   findPortfolio,
   switcherLabel,
   type PortfolioEntry,
@@ -77,5 +78,21 @@ describe('describeBookLoadError', () => {
 
   it('passes other failures through', () => {
     expect(describeBookLoadError('API request failed: 500')).toBe('Could not load this book: API request failed: 500');
+  });
+});
+
+describe('deskGroups', () => {
+  it('keeps only the groups holding a desk-edited portfolio, twin included', () => {
+    const qt: PortfolioGroup = {
+      group: 'qt_conservative',
+      grouped: true,
+      portfolios: [
+        entry({ portfolio_id: 'QT', portfolio_group: 'qt_conservative', desk_editable: true }),
+        entry({ portfolio_id: 'QTM', portfolio_group: 'qt_conservative' }),
+      ],
+    };
+    const plain: PortfolioGroup = { group: 'P', grouped: false, portfolios: [entry({})] };
+    expect(deskGroups([plain, qt])).toEqual([qt]);
+    expect(deskGroups([plain])).toEqual([]);
   });
 });

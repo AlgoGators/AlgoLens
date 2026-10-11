@@ -1,7 +1,6 @@
 import React from 'react';
 import { Home, TrendingUp, FileText, FlaskConical, User } from 'lucide-react';
-import { isInternalRole } from '../domain/identity/user';
-import { useAuth } from '../adapters/react/AuthContext';
+import { useScreens } from '../adapters/react/ScreenContext';
 import { useTheme } from '../adapters/react/ThemeContext';
 
 interface BottomNavProps {
@@ -11,8 +10,8 @@ interface BottomNavProps {
 
 export function BottomNav({ activeTab = 'portfolio', onTabChange }: BottomNavProps) {
   const { theme } = useTheme();
-  const { user } = useAuth();
-  const isInternalMember = isInternalRole(user?.role);
+  const { hasScreen } = useScreens();
+  const isInternalMember = hasScreen('member') || hasScreen('qt');
   
   const tabs = [
     { id: 'portfolio', label: 'Portfolio', icon: Home },
