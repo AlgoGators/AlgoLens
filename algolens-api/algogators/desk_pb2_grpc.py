@@ -33,6 +33,10 @@ class DeskServiceStub:
     Version history (bump Version above; a major bump is a breaking change, see docs/design/rpc.md):
     1.0.0  2026-10-09  first versioned release. Same messages and field numbers as the earlier
     unversioned algogators.qt.v1 package, so the wire format is unchanged.
+    1.1.0  2026-10-09  the daily cutoff (qt-contract.md C7): RunStatus gains publish_source (8)
+    and sent_at (9). Publish is the desk's approval ("Approve"): before 09:30
+    New York it freezes the day and sends nothing, 09:30-10:00 it also sends,
+    after 10:00 (or on a published day) it is refused. No field changed.
 
     """
 
@@ -77,6 +81,10 @@ class DeskServiceServicer:
     Version history (bump Version above; a major bump is a breaking change, see docs/design/rpc.md):
     1.0.0  2026-10-09  first versioned release. Same messages and field numbers as the earlier
     unversioned algogators.qt.v1 package, so the wire format is unchanged.
+    1.1.0  2026-10-09  the daily cutoff (qt-contract.md C7): RunStatus gains publish_source (8)
+    and sent_at (9). Publish is the desk's approval ("Approve"): before 09:30
+    New York it freezes the day and sends nothing, 09:30-10:00 it also sends,
+    after 10:00 (or on a published day) it is refused. No field changed.
 
     """
 
@@ -106,8 +114,12 @@ class DeskServiceServicer:
         raise NotImplementedError('Method not implemented!')
 
     def Publish(self, request, context):
-        """Finalise the day's qt book, send the e-mail and CSV, write published_by/published_at on
-        trading.live_run_metadata (D7; plan A6/E8). A missed day is caught up first (ruling 29).
+        """The desk's approval ("Approve" in AlgoLens; contract C7, amending ruling 18): freezes the
+        day's qt book and writes published_by/published_at and publish_source='desk' on
+        trading.live_run_metadata. Before 09:30 America/New_York it sends nothing (the 09:30 send
+        e-mails it); from 09:30 to 10:00 it also sends the e-mail and CSV built from the stored rows.
+        Refused after 10:00 on the book date (the row's created_at decides) and on a published day.
+        An earlier unpublished day refuses it (ruling 29).
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -165,6 +177,10 @@ class DeskService:
     Version history (bump Version above; a major bump is a breaking change, see docs/design/rpc.md):
     1.0.0  2026-10-09  first versioned release. Same messages and field numbers as the earlier
     unversioned algogators.qt.v1 package, so the wire format is unchanged.
+    1.1.0  2026-10-09  the daily cutoff (qt-contract.md C7): RunStatus gains publish_source (8)
+    and sent_at (9). Publish is the desk's approval ("Approve"): before 09:30
+    New York it freezes the day and sends nothing, 09:30-10:00 it also sends,
+    after 10:00 (or on a published day) it is refused. No field changed.
 
     """
 
