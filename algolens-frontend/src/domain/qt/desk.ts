@@ -5,7 +5,7 @@
  * whole contracts, 0 = flatten, a reason on every change.
  */
 
-export type CommandKind = 'save' | 'override_request' | 'override_decision' | 'publish';
+export type CommandKind = 'save' | 'override_request' | 'override_decision' | 'publish' | 'rescind';
 export type CommandStatus = 'pending' | 'running' | 'done' | 'refused' | 'failed';
 
 export interface DeskCommand {
@@ -89,6 +89,8 @@ export interface DeskState {
   latestSave: DeskCommand | null;
   overrideRequests: OverrideRequestRow[];
   publish: DeskCommand | null;
+  /** The day's latest rescind (C8: the desk takes back its approval before 09:30). */
+  rescind?: DeskCommand | null;
   /** From live_run_metadata.published_at (C3): the day is frozen once set. */
   published: PublishedRecord | null;
   /** Why save, override request and approval are closed: published, or an approval is open. */
@@ -246,6 +248,8 @@ const KIND_NAMES: Record<CommandKind, string> = {
   override_decision: 'Override decision',
   // The desk's approval of the day is the engine's publish command.
   publish: 'Approval',
+  // The desk taking its approval back before the 09:30 send (C8).
+  rescind: 'Rescind',
 };
 
 /**
@@ -384,6 +388,7 @@ export type DayPhase =
   | 'awaiting-model-run'
   | 'open'
   | 'approving'
+  | 'rescinding'
   | 'approved'
   | 'sent'
   | 'fallback'
@@ -462,10 +467,20 @@ export function deskDayStatus(state: DeskState, nowMs: number): DayStatus {
       return status('sent', `Approved and sent at ${newYorkTime(sentAt)}`, `Approved by ${by}.`);
     }
     if (before(nowMs, d?.approveBy)) {
+      if (rescindOpen(state)) {
+        return status(
+          'rescinding',
+          'Rescinding — waiting for the engine',
+          `Approved by ${by}. The approval is being taken back; once the engine confirms, the day reopens for edits and must be approved again by 09:30 New York.`,
+          at(d?.approveBy),
+          'until the e-mail',
+        );
+      }
       return status(
         'approved',
         'Approved — sends at 09:30',
-        `Approved by ${by}. The day is frozen; the engine e-mails it at 09:30 New York.`,
+        `Approved by ${by}. The day is frozen; the engine e-mails it at 09:30 New York.` +
+          (state.sendTracked === false ? '' : ' Until then the approval can be taken back (Rescind approval).'),
         at(d?.approveBy),
         'until the e-mail',
       );
@@ -517,6 +532,38 @@ export function approveBlockedReason(state: DeskState, nowMs?: number): string |
   }
   if (!state.seeded) return 'The proposal is not seeded yet';
   return null;
+}
+
+/** Whether the day's rescind is pending or running. */
+export function rescindOpen(state: DeskState): boolean {
+  return state.rescind?.status === 'pending' || state.rescind?.status === 'running';
+}
+
+/**
+ * Why "Rescind approval" is unavailable, or null (C8). The desk may take back
+ * its own approval (publish_source 'desk') while it is unsent, and only before
+ * 09:30 New York on the book date, on the server's clock `nowMs`. The server
+ * and the engine check all of it again.
+ */
+export function rescindBlockedReason(state: DeskState, nowMs: number): string | null {
+  if (!state.date) return 'No book for today yet';
+  if (deskLock(state) !== 'published') return 'The day is not approved';
+  if (publishSourceOf(state.published) !== 'desk') return 'Only a desk approval can be taken back';
+  if (state.published?.sent_at) return 'The book has already been e-mailed';
+  if (state.sendTracked === false) {
+    return 'This database does not record when the e-mail goes out (migration 026); the approval cannot be taken back';
+  }
+  if (rescindOpen(state)) return 'Taking the approval back is in progress';
+  const d = state.deadlines;
+  if (!d || state.date < d.today || !before(nowMs, d.approveBy)) {
+    return `The approval of the ${state.date} book can no longer be taken back: it is e-mailed at 09:30 New York`;
+  }
+  return null;
+}
+
+/** The inline confirmation shown before a rescind is sent. */
+export function rescindConfirmText(date: string | null): string {
+  return `Take back the approval of ${date ?? 'this book'}? The day reopens for edits and must be approved again by 09:30, or the model's book is sent at 10:00.`;
 }
 
 /** @deprecated the pre-cutoff name of approveBlockedReason. */

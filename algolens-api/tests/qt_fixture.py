@@ -1,5 +1,5 @@
 """A throwaway Postgres schema in the shape of new_algo_data after 021-023,
-and again after 025.
+and again after 025, 026 and 029.
 
 Opt-in: used only when ALGOLENS_TEST_DATABASE_URL points at a THROWAWAY
 Postgres on localhost (it DROPs and recreates the trading, metadata and
@@ -29,6 +29,9 @@ Shapes:
   * 026 (the daily approval cutoff: live_run_metadata.publish_source and
     sent_at) is emulated as the spec states it until trade-ngin's file can be
     vendored; "026" runs every qt_db test once more, after 025.
+  * 029 (rescind: kind 'rescind', no one-done-publish index, one open
+    rescind a day) is the engine's own file, vendored under fixtures/sql;
+    "029" runs every qt_db test once more, after 025 and 026.
 
 The repositories under test connect as APP_ROLE, a role holding only what
 svc_algolens holds (SET ROLE from the setup superuser), so a statement that
@@ -247,7 +250,12 @@ ALTER TABLE trading.live_run_metadata
     ADD COLUMN sent_at TIMESTAMPTZ NULL;
 """
 
-SCHEMA_VERSIONS = ("023", "025", "026")
+SCHEMA_VERSIONS = ("023", "025", "026", "029")
+
+
+def has_026(version):
+    """Whether live_run_metadata has publish_source and sent_at."""
+    return version in ("026", "029")
 
 
 def build_schema(cursor, version="023"):
@@ -256,11 +264,13 @@ def build_schema(cursor, version="023"):
     cursor.execute((SQL_DIR / "022_strategy_config.sql").read_text(encoding="utf-8"))
     cursor.execute((SQL_DIR / "023_qt_command_log.sql").read_text(encoding="utf-8"))
     cursor.execute(APP_GRANTS)
-    if version in ("025", "026"):
+    if version in ("025", "026", "029"):
         cursor.execute((SQL_DIR / "025_qt_command_log_hardening.sql").read_text(encoding="utf-8"))
         cursor.execute(REVOKE_025)
-    if version == "026":
+    if has_026(version):
         cursor.execute(EMULATED_026)
+    if version == "029":
+        cursor.execute((SQL_DIR / "029_qt_rescind.sql").read_text(encoding="utf-8"))
 
 
 def drop_schema(cursor):
