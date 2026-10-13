@@ -197,9 +197,16 @@ describe('approve (the publish command)', () => {
     expect(approveBlockedReason(state({ publish: command({ kind: 'publish', status: 'pending' }) }))).toBe(
       LOCKED_APPROVING,
     );
-    expect(approveBlockedReason(state({ publish: command({ kind: 'publish', status: 'done' }) }))).toBe(
-      LOCKED_APPROVED,
-    );
+    expect(
+      approveBlockedReason(
+        state({
+          publish: command({ kind: 'publish', status: 'done' }),
+          published: { published_by: 'd@x.com', published_at: '2026-10-13T10:24:24Z', publish_source: 'desk' },
+        }),
+      ),
+    ).toBe(LOCKED_APPROVED);
+    // A rescinded approval: the row stays done, live_run_metadata no longer says published.
+    expect(approveBlockedReason(state({ publish: command({ kind: 'publish', status: 'done' }) }))).toBeNull();
     expect(approveBlockedReason(state({ date: null }))).toBe('No book for today yet');
   });
 

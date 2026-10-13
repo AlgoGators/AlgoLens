@@ -90,9 +90,7 @@ class FakeRepo:
     # The Postgres repository's checks, made under its day lock.
 
     def _is_published(self, portfolio_id):
-        return bool(self.published and self.published.get("published_at")) or any(
-            r["kind"] == "publish" and r["status"] == "done" for r in self.rows
-        )
+        return bool(self.published and self.published.get("published_at"))
 
     def _guard(self, portfolio_id, refuse_open_publish=True):
         if self._is_published(portfolio_id):
@@ -267,10 +265,25 @@ def test_save_before_the_proposal_is_seeded_is_409():
 def test_save_after_publish_is_refused():
     repo = FakeRepo()
     repo.insert_command(QT["portfolio_id"], DAY, "publish", "d@x.com")["status"] = "done"
+    repo.published = {"published_by": "d@x.com", "published_at": NOW}
     with pytest.raises(DeskConflict):
         SaveDeskEdit(repo, FakeAgent()).execute(
             QT, [{"symbol": "ZC.v.0", "quantity": 1, "expected": 3}], "r", "d@x.com"
         )
+
+
+def test_a_rescinded_approval_reopens_the_day():
+    # The approval's row stays done; live_run_metadata.published_at is cleared again.
+    repo = FakeRepo()
+    repo.insert_command(QT["portfolio_id"], DAY, "publish", "d@x.com")["status"] = "done"
+    repo.published = None
+    state = GetDeskState(repo).execute(QT)
+    assert state["published"] is None
+    assert state["locked"] is None
+    SaveDeskEdit(repo, FakeAgent()).execute(
+        QT, [{"symbol": "ZC.v.0", "quantity": 1, "expected": 3}], "r", "d@x.com"
+    )
+    assert PublishDesk(repo, FakeAgent()).execute(QT, "d@x.com")["command"]["kind"] == "publish"
 
 
 def test_symbol_choices_only_for_editable_books():
@@ -399,6 +412,7 @@ def test_publish_refuses_a_second_open_or_done_publish_but_allows_a_retry():
     repo.get_command(first["id"])["status"] = "failed"
     second = publish.execute(QT, "d@x.com")["command"]
     repo.get_command(second["id"])["status"] = "done"
+    repo.published = {"published_by": "d@x.com", "published_at": NOW}
     with pytest.raises(DeskConflict):
         publish.execute(QT, "d@x.com")
 

@@ -301,7 +301,9 @@ export function publishSourceOf(published: PublishedRecord | null | undefined): 
  * running.
  */
 export function deskLock(state: DeskState): 'published' | 'publishing' | null {
-  if (state.locked === 'published' || state.published?.published_at || state.publish?.status === 'done') {
+  // live_run_metadata (state.published) is the approval; a done publish row alone is
+  // history (a rescinded approval leaves it done).
+  if (state.locked === 'published' || state.published?.published_at) {
     return 'published';
   }
   if (

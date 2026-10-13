@@ -29,7 +29,6 @@ from algolens.domain.qt.cutoff import (
     publish_source,
 )
 from algolens.domain.qt.desk import (
-    DONE,
     OPEN_STATUSES,
     OVERRIDE_DECISION,
     OVERRIDE_REQUEST,
@@ -126,11 +125,12 @@ def _current_sha256(repo: DeskRepositoryPort, portfolio_id, day) -> str | None:
         return None
 
 
-def _published_record(repo: DeskRepositoryPort, portfolio_id, day, publishes):
-    """C3: published_by/at from live_run_metadata; a done publish row stands
-    in should live_run_metadata not say so (yet). publish_source and sent_at
-    come from migration 026's columns (NULL before it, or before the engine
-    set them); publish_source is otherwise read from published_by."""
+def _published_record(repo: DeskRepositoryPort, portfolio_id, day):
+    """C3: published_by/at from live_run_metadata, the only record of an
+    approval (a done publish row is history: a rescinded approval clears
+    published_at and leaves its row done). publish_source and sent_at come
+    from migration 026's columns (NULL before it, or before the engine set
+    them); publish_source is otherwise read from published_by."""
     published = repo.publish_state(portfolio_id, day)
     if published and published.get("published_at"):
         return {
@@ -140,14 +140,6 @@ def _published_record(repo: DeskRepositoryPort, portfolio_id, day, publishes):
                 published.get("publish_source"), published.get("published_by")
             ),
             "sent_at": _iso(published.get("sent_at")),
-        }
-    done = [c for c in publishes if c["status"] == DONE]
-    if done:
-        return {
-            "published_by": done[-1]["requested_by"],
-            "published_at": _iso(done[-1].get("finished_at")),
-            "publish_source": publish_source(None, done[-1]["requested_by"]),
-            "sent_at": None,
         }
     return None
 
@@ -160,12 +152,7 @@ def _refuse_after_cutoff(
     "already published" when it is."""
     if not approval_closed(day, now):
         return
-    published = _published_record(
-        repo,
-        portfolio_id,
-        day,
-        [c for c in repo.commands(portfolio_id, day) if c["kind"] == PUBLISH],
-    )
+    published = _published_record(repo, portfolio_id, day)
     if published:
         raise DeskConflict(
             f"The {day.isoformat()} book is already published"
@@ -225,7 +212,7 @@ class GetDeskState:
             for c in commands
             if c["kind"] == OVERRIDE_REQUEST
         ]
-        published = _published_record(self.repo, portfolio_id, day, publishes)
+        published = _published_record(self.repo, portfolio_id, day)
         publishing = any(c["status"] in OPEN_STATUSES for c in publishes)
         open_request = open_override_request(
             commands, now, _current_sha256(self.repo, portfolio_id, day)
@@ -372,12 +359,7 @@ class LookupApproval:
         payload = request.get("payload") if isinstance(request.get("payload"), Mapping) else {}
         snapshot = payload.get("proposal") if isinstance(payload.get("proposal"), list) else None
         current = _current_sha256(self.repo, portfolio_id, day)
-        published = _published_record(
-            self.repo,
-            portfolio_id,
-            day,
-            [c for c in self.repo.commands(portfolio_id, day) if c["kind"] == PUBLISH],
-        )
+        published = _published_record(self.repo, portfolio_id, day)
         return {
             "request": public_command(request),
             "decision": public_command(decision),
