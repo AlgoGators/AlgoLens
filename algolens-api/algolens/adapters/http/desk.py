@@ -34,6 +34,7 @@ from algolens.application.qt.use_cases import (
     LookupApproval,
     PublishDesk,
     RequestOverride,
+    RescindDesk,
     SaveDeskEdit,
 )
 from algolens.application.qt.settings_use_cases import (
@@ -220,6 +221,19 @@ def desk_override_request(portfolio_id):
 def desk_publish(portfolio_id):
     repo, agent, _settings = _desk_dependencies()
     result = PublishDesk(repo, agent).execute(
+        _portfolio(portfolio_id), current_user()["email"]
+    )
+    return jsonify(result), 201
+
+
+@desk_bp.route("/<portfolio_id>/rescind", methods=["POST"])
+@jwt_required()
+@desk_enabled
+@desk_user
+@handled
+def desk_rescind(portfolio_id):
+    repo, agent, _settings = _desk_dependencies()
+    result = RescindDesk(repo, agent).execute(
         _portfolio(portfolio_id), current_user()["email"]
     )
     return jsonify(result), 201

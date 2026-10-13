@@ -10,7 +10,9 @@ Every calendar day D (weekends and holidays included):
 
 Approval is the desk's publish command (position_overrides kind 'publish').
 From 10:00 New York on D, AlgoLens refuses to approve, save or override D:
-the engine's fallback would discard any of it.
+the engine's fallback would discard any of it. A desk approval may be taken
+back (kind 'rescind', contract C8) only before 09:30 New York on D, while it
+is unsent.
 
 Pure rules: no database, no HTTP. Times are timezone-aware.
 """
@@ -63,6 +65,20 @@ def closed_message(day: date, action: str = "Approval") -> str:
     return (
         f"{action} of the {day.isoformat()} book closed at 10:00 New York on "
         f"{day.isoformat()}; the model's book is sent instead (fallback)"
+    )
+
+
+def rescind_closed(day: date, now: datetime) -> bool:
+    """A desk approval can be taken back only before 09:30 New York on `day`,
+    when the engine e-mails it (contract C8)."""
+    return now >= approve_by(day)
+
+
+def rescind_closed_message(day: date) -> str:
+    """Why a rescind of `day` is refused from 09:30 New York (HTTP 409)."""
+    return (
+        f"The approval of the {day.isoformat()} book can no longer be taken back: "
+        f"it is e-mailed at 09:30 New York on {day.isoformat()}"
     )
 
 

@@ -64,6 +64,11 @@ class DeskRepositoryPort(Protocol):
     def insert_publish(self, portfolio_id: str, day: date, requested_by: str) -> Row:
         """Under the day lock: refuse a published day or an open publish."""
 
+    def insert_rescind(self, portfolio_id: str, day: date, requested_by: str) -> Row:
+        """Under the day lock: refuse (DeskConflict) unless live_run_metadata
+        says the day is published by the desk (publish_source 'desk') and not
+        sent, and while a publish or a rescind is open (C8)."""
+
     def insert_override_request(
         self, portfolio_id: str, day: date, requested_by: str, reason: str
     ) -> Row:
@@ -135,4 +140,7 @@ class DeskAgentPort(Protocol):
         ...
 
     def publish(self, command: Row) -> str:
+        ...
+
+    def rescind(self, command: Row) -> str:
         ...

@@ -87,6 +87,8 @@ export const DeskApi = {
     request<CommandResult>('POST', `${desk(portfolioId)}/override-request`, { reason }),
   /** Approve the day's book (the engine's publish command). */
   publish: (portfolioId: string) => request<CommandResult>('POST', `${desk(portfolioId)}/publish`, {}),
+  /** Take back the desk's approval of the day before the 09:30 send (the engine's rescind command). */
+  rescind: (portfolioId: string) => request<CommandResult>('POST', `${desk(portfolioId)}/rescind`, {}),
   settings: (portfolioId: string) => request<SettingsState>('GET', `${desk(portfolioId)}/settings`),
   saveSettings: async (portfolioId: string, changes: SettingChange[], reason: string) =>
     (await request<{ version: SettingsVersion }>('POST', `${desk(portfolioId)}/settings`, { changes, reason }))

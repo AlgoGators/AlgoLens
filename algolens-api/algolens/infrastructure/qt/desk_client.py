@@ -103,3 +103,13 @@ class DeskClient:
             published_by=command["requested_by"],
         )
         return self._call("Publish", request, command["id"])
+
+    def rescind(self, command):
+        # audit_id is required here (desk.proto 1.2.0 RescindRequest): the
+        # engine runs exactly the 'rescind' row AlgoLens wrote.
+        request = desk_pb2.RescindRequest(
+            portfolio_id=command["portfolio_id"],
+            date=_day(command["date"]),
+            audit_id=int(command["id"]),
+        )
+        return self._call("Rescind", request, command["id"])

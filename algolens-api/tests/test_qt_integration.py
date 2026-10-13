@@ -25,11 +25,12 @@ from algolens.application.qt.use_cases import (
     LookupApproval,
     PublishDesk,
     RequestOverride,
+    RescindDesk,
     SaveDeskEdit,
 )
 from algolens.domain.portfolio.registry import portfolio_entries
 from algolens.domain.qt.desk import DeskRuleError, token_hash
-from qt_fixture import qt_db, requires_db  # noqa: F401  (fixture)
+from qt_fixture import has_026, qt_db, requires_db  # noqa: F401  (fixture)
 
 pytestmark = requires_db
 
@@ -226,6 +227,9 @@ class NullAgent:
         return self._lost(command)
 
     def publish(self, command):
+        return self._lost(command)
+
+    def rescind(self, command):
         return self._lost(command)
 
     def record_decision(self, decision, token):
@@ -905,7 +909,7 @@ def test_settings_save_detects_a_concurrent_change(qt_db):
 
 def test_desk_state_reads_publish_source_and_sent_at_once_026_is_applied(qt_db):
     seed_day(qt_db)
-    with_026 = qt_db.version == "026"
+    with_026 = has_026(qt_db.version)
     columns = ", publish_source, sent_at" if with_026 else ""
     values = ", 'desk', '2026-10-08T13:30:05Z'" if with_026 else ""
     _exec(
@@ -933,12 +937,12 @@ def test_desk_state_reads_publish_source_and_sent_at_once_026_is_applied(qt_db):
 def test_a_fallback_publish_reads_as_fallback_with_or_without_026(qt_db):
     seed_day(qt_db)
     publish_on_live_run_metadata(qt_db, by="system:fallback-10am")
-    if qt_db.version == "026":
+    if has_026(qt_db.version):
         _exec(qt_db, "UPDATE trading.live_run_metadata SET publish_source = 'fallback', "
                      "sent_at = now()")
     state = GetDeskState(desk_repo(qt_db)).execute(entry(qt_db))
     assert state["published"]["publish_source"] == "fallback"
-    assert (state["published"]["sent_at"] is not None) is (qt_db.version == "026")
+    assert (state["published"]["sent_at"] is not None) is has_026(qt_db.version)
     assert state["locked"] == "published"
 
 
@@ -956,4 +960,121 @@ def test_approve_from_10_new_york_is_refused_and_writes_nothing(qt_db):
     # 09:59 New York the same day is still open.
     early = datetime(2026, 10, 8, 13, 59, tzinfo=timezone.utc)
     PublishDesk(desk_repo(qt_db), NullAgent(), now=lambda: early).execute(entry(qt_db), "desk@x.com")
+    assert [c["kind"] for c in commands(qt_db)] == ["publish"]
+
+
+# --- rescind (C8, migration 029) -----------------------------------------------
+
+
+def _needs_029(factory):
+    if factory.version != "029":
+        pytest.skip("kind 'rescind' is 029's")
+
+
+def engine_publishes(factory, publish_id, source="desk", sent_at=None, by="desk@x.com"):
+    """The engine runs a publish: the row done, live_run_metadata published."""
+    engine_finishes(factory, publish_id)
+    _exec(
+        factory,
+        "INSERT INTO trading.live_run_metadata "
+        "(date, strategy_id, portfolio_id, published_by, published_at, publish_source, sent_at) "
+        "VALUES (%s, %s, %s, %s, now(), %s, %s) "
+        "ON CONFLICT (date, strategy_id, portfolio_id) DO UPDATE SET "
+        "published_by = EXCLUDED.published_by, published_at = EXCLUDED.published_at, "
+        "publish_source = EXCLUDED.publish_source, sent_at = EXCLUDED.sent_at",
+        (D2, STRATEGY, QT, by, source, sent_at),
+    )
+
+
+def engine_rescinds(factory, rescind_id):
+    """The engine runs a rescind: clears the approval, finishes the row done."""
+    _exec(
+        factory,
+        "UPDATE trading.live_run_metadata SET published_by = NULL, published_at = NULL, "
+        "publish_source = NULL WHERE portfolio_id = %s AND date = %s",
+        (QT, D2),
+    )
+    engine_finishes(factory, rescind_id, message="approval of 2026-10-08 rescinded")
+
+
+def _approve(factory, **published):
+    seed_day(factory)
+    command = PublishDesk(desk_repo(factory), NullAgent()).execute(entry(factory), "desk@x.com")
+    engine_publishes(factory, command["command"]["id"], **published)
+
+
+def test_rescind_reopens_the_day_for_edits_and_a_second_approval(qt_db):
+    _needs_029(qt_db)
+    _approve(qt_db)
+    repo = desk_repo(qt_db)
+    rescind = RescindDesk(repo, NullAgent())
+
+    command = rescind.execute(entry(qt_db), "desk@x.com")["command"]
+    assert (command["kind"], command["status"], command["date"]) == ("rescind", "pending", "2026-10-08")
+    with pytest.raises(DeskConflict, match="rescind of the 2026-10-08 book is already pending"):
+        rescind.execute(entry(qt_db), "desk@x.com")
+    state = GetDeskState(repo).execute(entry(qt_db))
+    assert state["locked"] == "published" and state["rescind"]["id"] == command["id"]
+
+    engine_rescinds(qt_db, command["id"])
+    state = GetDeskState(repo).execute(entry(qt_db))
+    assert state["locked"] is None and state["published"] is None
+    assert state["rescind"]["status"] == "done"
+
+    # The day takes edits and a new approval; 029 dropped the one-done-publish index.
+    SaveDeskEdit(repo, NullAgent()).execute(
+        entry(qt_db), [{"symbol": "ZC.v.0", "quantity": 1, "expected": 3}], "r", "desk@x.com")
+    second = PublishDesk(repo, NullAgent()).execute(entry(qt_db), "desk@x.com")["command"]
+    engine_publishes(qt_db, second["id"])
+    assert [(c["kind"], c["status"]) for c in commands(qt_db)] == [
+        ("publish", "done"), ("rescind", "done"), ("save", "pending"), ("publish", "done")]
+
+
+def test_rescind_refuses_what_is_not_an_unsent_desk_approval(qt_db):
+    _needs_029(qt_db)
+    seed_day(qt_db)
+    repo = desk_repo(qt_db)
+    with pytest.raises(DeskConflict, match="not approved"):
+        RescindDesk(repo, NullAgent()).execute(entry(qt_db), "desk@x.com")
+
+    publish_on_live_run_metadata(qt_db, by="system:fallback-10am")
+    _exec(qt_db, "UPDATE trading.live_run_metadata SET publish_source = 'fallback'")
+    with pytest.raises(DeskConflict, match=r"published by the engine \(fallback\)"):
+        RescindDesk(repo, NullAgent()).execute(entry(qt_db), "desk@x.com")
+
+    _exec(qt_db, "UPDATE trading.live_run_metadata SET publish_source = 'desk', "
+                 "published_by = 'desk@x.com', sent_at = now()")
+    with pytest.raises(DeskConflict, match="already been e-mailed"):
+        RescindDesk(repo, NullAgent()).execute(entry(qt_db), "desk@x.com")
+    assert commands(qt_db) == []
+
+
+def test_rescind_from_0930_new_york_writes_nothing(qt_db):
+    _needs_029(qt_db)
+    _approve(qt_db)
+    at = datetime(2026, 10, 8, 13, 30, tzinfo=timezone.utc)  # 09:30 EDT
+    with pytest.raises(DeskConflict, match="can no longer be taken back"):
+        RescindDesk(desk_repo(qt_db), NullAgent(), now=lambda: at).execute(
+            entry(qt_db), "desk@x.com")
+    assert [c["kind"] for c in commands(qt_db)] == ["publish"]
+
+
+def test_a_second_open_rescind_is_refused_by_the_029_index(qt_db, monkeypatch):
+    _needs_029(qt_db)
+    from algolens.infrastructure.qt.repositories import PostgresDeskRepository
+
+    _approve(qt_db)
+    RescindDesk(desk_repo(qt_db), NullAgent()).execute(entry(qt_db), "a@x.com")
+    monkeypatch.setattr(PostgresDeskRepository, "_open_command", lambda *a, **k: None)
+    with pytest.raises(DeskConflict, match="already open"):
+        RescindDesk(desk_repo(qt_db), NullAgent()).execute(entry(qt_db), "b@x.com")
+    assert [c["kind"] for c in commands(qt_db)] == ["publish", "rescind"]
+
+
+def test_before_029_the_command_log_refuses_a_rescind_row(qt_db):
+    if qt_db.version != "026":
+        pytest.skip("026 has the send tracking rescind reads, but not 029's kind")
+    _approve(qt_db)
+    with pytest.raises(psycopg2.IntegrityError):
+        RescindDesk(desk_repo(qt_db), NullAgent()).execute(entry(qt_db), "desk@x.com")
     assert [c["kind"] for c in commands(qt_db)] == ["publish"]

@@ -25,6 +25,9 @@ import {
   proposalKey,
   publishBlockedReason,
   publishSourceOf,
+  rescindBlockedReason,
+  rescindConfirmText,
+  rescindOpen,
   serverClockOffsetMs,
   shouldKeepPolling,
   snapshotBySymbol,
@@ -158,6 +161,18 @@ describe('describeCommand', () => {
     );
     expect(describeCommand(command({ status: 'failed' }))).toBe('Save FAILED (no reason given)');
     expect(describeCommand(command({ kind: 'publish', status: 'done' }))).toBe('Approval done');
+  });
+
+  it('describes a rescind', () => {
+    expect(describeCommand(command({ kind: 'rescind' }))).toBe('Rescind sent; waiting for the engine');
+    expect(
+      describeCommand(
+        command({ kind: 'rescind', status: 'done', message: 'approval of 2026-10-08 rescinded' }),
+      ),
+    ).toBe('Rescind done: approval of 2026-10-08 rescinded');
+    expect(describeCommand(command({ kind: 'rescind', status: 'refused', message: 'already sent' }))).toBe(
+      'Rescind REFUSED by the engine: already sent',
+    );
   });
 
   it('says a slow command is still running on the engine, not failed', () => {
@@ -388,6 +403,92 @@ describe('the daily cutoff state machine', () => {
     };
     expect(deskDayStatus(state, at(EDT(D, '09:40'))).title).toBe('Approved');
     expect(deskDayStatus(state, at(EDT(D, '09:20'))).title).toBe('Approved — sends at 09:30');
+  });
+});
+
+describe('rescind (the desk takes back its approval, C8)', () => {
+  const approved = deskState({
+    deadlines: deadlinesFor(D),
+    sendTracked: true,
+    publish: command({ kind: 'publish', status: 'done' }),
+    published: { published_by: 'd@x.com', published_at: EDT(D, '09:10'), publish_source: 'desk', sent_at: null },
+  });
+
+  it('is open on an unsent desk approval until 09:30 New York', () => {
+    expect(rescindBlockedReason(approved, at(EDT(D, '09:12')))).toBeNull();
+    expect(rescindBlockedReason(approved, at(EDT(D, '09:29')) + 59_999)).toBeNull();
+    expect(rescindBlockedReason(approved, at(EDT(D, '09:30')))).toMatch(/can no longer be taken back/);
+    expect(rescindBlockedReason(approved, at(EDT(D, '09:45')))).toMatch(/e-mailed at 09:30 New York/);
+  });
+
+  it('follows the server clock across a DST change', () => {
+    const day = '2026-11-01';
+    const state = {
+      ...approved,
+      date: day,
+      deadlines: deadlinesFor(day, day, EST),
+      published: { ...approved.published!, published_at: EST(day, '09:00') },
+    };
+    expect(rescindBlockedReason(state, at('2026-11-01T14:29:00Z'))).toBeNull(); // 09:29 EST
+    expect(rescindBlockedReason(state, at('2026-11-01T14:30:00Z'))).not.toBeNull(); // 09:30 EST
+  });
+
+  it('is closed on a day that is not a desk approval', () => {
+    const now = at(EDT(D, '09:00'));
+    expect(rescindBlockedReason(deskState({ deadlines: deadlinesFor(D) }), now)).toBe('The day is not approved');
+    expect(rescindBlockedReason({ ...approved, date: null }, now)).toBe('No book for today yet');
+    const engine = {
+      ...approved,
+      published: { published_by: 'system:non-trading-day', published_at: EDT(D, '01:00') },
+    };
+    expect(rescindBlockedReason(engine, now)).toBe('Only a desk approval can be taken back');
+    const fallback = {
+      ...approved,
+      published: { published_by: 'system:fallback-10am', published_at: EDT(D, '10:00'), publish_source: 'fallback' as const },
+    };
+    expect(rescindBlockedReason(fallback, now)).toBe('Only a desk approval can be taken back');
+    // An approval still in progress is not yet an approval to take back.
+    const publishing = deskState({ deadlines: deadlinesFor(D), publish: command({ kind: 'publish', status: 'running' }) });
+    expect(rescindBlockedReason(publishing, now)).toBe('The day is not approved');
+  });
+
+  it('is closed once sent, without send tracking, on a past day and while one is open', () => {
+    const now = at(EDT(D, '09:00'));
+    const sent = { ...approved, published: { ...approved.published!, sent_at: EDT(D, '09:05') } };
+    expect(rescindBlockedReason(sent, now)).toBe('The book has already been e-mailed');
+    expect(rescindBlockedReason({ ...approved, sendTracked: false }, now)).toMatch(/migration 026/);
+    const pastDay = { ...approved, date: '2026-10-07', deadlines: deadlinesFor('2026-10-07', D) };
+    expect(rescindBlockedReason(pastDay, now)).toMatch(/can no longer be taken back/);
+    expect(rescindBlockedReason({ ...approved, deadlines: undefined }, now)).toMatch(/can no longer be taken back/);
+    const rescinding = { ...approved, rescind: command({ kind: 'rescind', status: 'pending' }) };
+    expect(rescindOpen(rescinding)).toBe(true);
+    expect(rescindBlockedReason(rescinding, now)).toBe('Taking the approval back is in progress');
+    // A refused rescind leaves the approval in place: it may be tried again.
+    const refused = { ...approved, rescind: command({ kind: 'rescind', status: 'refused' }) };
+    expect(rescindOpen(refused)).toBe(false);
+    expect(rescindBlockedReason(refused, now)).toBeNull();
+  });
+
+  it('shows the rescind in the banner and reopens the day once the engine cleared the approval', () => {
+    const now = at(EDT(D, '09:12'));
+    expect(deskDayStatus(approved, now).detail).toMatch(/can be taken back/);
+    const rescinding = { ...approved, rescind: command({ kind: 'rescind', status: 'running' }) };
+    const status = deskDayStatus(rescinding, now);
+    expect(status.phase).toBe('rescinding');
+    expect(status.title).toBe('Rescinding — waiting for the engine');
+    expect(status.countdownTo).toBe(at(EDT(D, '09:30')));
+    // The engine cleared published_at: the publish row stays done, the day is open again.
+    const reopened = { ...approved, published: null, rescind: command({ kind: 'rescind', status: 'done' }) };
+    expect(deskDayStatus(reopened, now).phase).toBe('open');
+    expect(approveBlockedReason(reopened, now)).toBeNull();
+    expect(editBlockedReason(reopened, now)).toBeNull();
+    expect(rescindBlockedReason(reopened, now)).toBe('The day is not approved');
+  });
+
+  it('asks for confirmation in plain words', () => {
+    expect(rescindConfirmText('2026-10-08')).toBe(
+      "Take back the approval of 2026-10-08? The day reopens for edits and must be approved again by 09:30, or the model's book is sent at 10:00.",
+    );
   });
 });
 

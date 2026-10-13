@@ -37,6 +37,8 @@ class DeskServiceStub:
     and sent_at (9). Publish is the desk's approval ("Approve"): before 09:30
     New York it freezes the day and sends nothing, 09:30-10:00 it also sends,
     after 10:00 (or on a published day) it is refused. No field changed.
+    1.2.0  2026-10-13  Rescind (contract C8): the desk takes back its own approval before the
+    09:30 send. New RPC and message only; no field changed.
 
     """
 
@@ -66,6 +68,11 @@ class DeskServiceStub:
                 request_serializer=algogators_dot_desk__pb2.PublishRequest.SerializeToString,
                 response_deserializer=algogators_dot_desk__pb2.CommandReply.FromString,
                 _registered_method=True)
+        self.Rescind = channel.unary_unary(
+                '/algogators.desk.DeskService/Rescind',
+                request_serializer=algogators_dot_desk__pb2.RescindRequest.SerializeToString,
+                response_deserializer=algogators_dot_desk__pb2.CommandReply.FromString,
+                _registered_method=True)
         self.GetRunStatus = channel.unary_unary(
                 '/algogators.desk.DeskService/GetRunStatus',
                 request_serializer=algogators_dot_desk__pb2.RunStatusRequest.SerializeToString,
@@ -85,6 +92,8 @@ class DeskServiceServicer:
     and sent_at (9). Publish is the desk's approval ("Approve"): before 09:30
     New York it freezes the day and sends nothing, 09:30-10:00 it also sends,
     after 10:00 (or on a published day) it is refused. No field changed.
+    1.2.0  2026-10-13  Rescind (contract C8): the desk takes back its own approval before the
+    09:30 send. New RPC and message only; no field changed.
 
     """
 
@@ -125,6 +134,19 @@ class DeskServiceServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def Rescind(self, request, context):
+        """Since 1.2.0 (contract C8). Takes back the desk's approval ("Rescind approval" in AlgoLens):
+        clears published_by, published_at and publish_source on the day's trading.live_run_metadata
+        rows, so the day takes edits and a new approval again. Only a desk approval
+        (publish_source 'desk'), only before 09:30 America/New_York on the book date (the time the
+        engine runs it decides, not the row's created_at) and only while the day is unsent; refused
+        otherwise. The approval's publish row stays done as history (C4); the rescind row's result
+        records the approval it took back.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
     def GetRunStatus(self, request, context):
         """The model run's state for one book and day, read from trading.live_run_metadata, for the
         desk pages (AlgoLens #97). Read-only; D18: no desk window opens unless the run succeeded.
@@ -156,6 +178,11 @@ def add_DeskServiceServicer_to_server(servicer, server):
                     request_deserializer=algogators_dot_desk__pb2.PublishRequest.FromString,
                     response_serializer=algogators_dot_desk__pb2.CommandReply.SerializeToString,
             ),
+            'Rescind': grpc.unary_unary_rpc_method_handler(
+                    servicer.Rescind,
+                    request_deserializer=algogators_dot_desk__pb2.RescindRequest.FromString,
+                    response_serializer=algogators_dot_desk__pb2.CommandReply.SerializeToString,
+            ),
             'GetRunStatus': grpc.unary_unary_rpc_method_handler(
                     servicer.GetRunStatus,
                     request_deserializer=algogators_dot_desk__pb2.RunStatusRequest.FromString,
@@ -181,6 +208,8 @@ class DeskService:
     and sent_at (9). Publish is the desk's approval ("Approve"): before 09:30
     New York it freezes the day and sends nothing, 09:30-10:00 it also sends,
     after 10:00 (or on a published day) it is refused. No field changed.
+    1.2.0  2026-10-13  Rescind (contract C8): the desk takes back its own approval before the
+    09:30 send. New RPC and message only; no field changed.
 
     """
 
@@ -281,6 +310,33 @@ class DeskService:
             target,
             '/algogators.desk.DeskService/Publish',
             algogators_dot_desk__pb2.PublishRequest.SerializeToString,
+            algogators_dot_desk__pb2.CommandReply.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def Rescind(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/algogators.desk.DeskService/Rescind',
+            algogators_dot_desk__pb2.RescindRequest.SerializeToString,
             algogators_dot_desk__pb2.CommandReply.FromString,
             options,
             channel_credentials,
