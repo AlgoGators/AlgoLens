@@ -151,9 +151,11 @@ class PostgresDeskRepository:
         )
 
     def _published(self, cursor, portfolio_id, day):
-        """C3: a day is published once live_run_metadata.published_at is set
-        for it, which also covers the engine's own non-trading-day publish. A
-        done publish row counts too, should the two ever disagree.
+        """C3: a day is published while live_run_metadata.published_at is set
+        for it, which also covers the engine's own non-trading-day publish. The
+        engine sets it and finishes the publish row in one statement; a done
+        publish row alone does not lock the day, so a rescinded approval
+        (published_at cleared again) reopens it.
 
         No information_schema guard here: if this role cannot read the column
         the write must fail, not proceed as if the day were open."""
@@ -164,16 +166,6 @@ class PostgresDeskRepository:
             LIMIT 1
             """,
             (portfolio_id, day),
-        )
-        if cursor.fetchone() is not None:
-            return True
-        cursor.execute(
-            """
-            SELECT 1 FROM trading.position_overrides
-            WHERE portfolio_id = %s AND date = %s AND kind = %s AND status = %s
-            LIMIT 1
-            """,
-            (portfolio_id, day, PUBLISH, DONE),
         )
         return cursor.fetchone() is not None
 
