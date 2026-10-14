@@ -20,6 +20,9 @@ RUNNING = {
     "email": {"smtp": "x"},
     "broker": {"api_key": "k", "account": "U1"},
     "portfolio_id": "QT_CONSERVATIVE_PORTFOLIO",
+    "backtest": {"lookback_years": 2},
+    "execution": {"position_limit_live": 500, "position_limit_backtest": 1000},
+    "live": {"historical_days": 730, "_note": "documentation"},
 }
 
 
@@ -28,6 +31,14 @@ def test_hidden_sections_and_credentials_are_never_shown():
     assert "database" not in visible and "email" not in visible
     assert "portfolio_id" not in visible
     assert visible["broker"] == {"account": "U1"}
+
+
+def test_backtest_settings_and_config_comments_are_never_shown():
+    visible = visible_config(RUNNING)
+    assert "backtest" not in visible
+    # execution and live are kept from the desk whole (platform and ops switches).
+    assert "execution" not in visible and "live" not in visible
+    assert visible_config({"general": {"x": 1, "_note": "doc"}}) == {"general": {"x": 1}}
 
 
 def test_flatten_lists_leaves_with_types():
@@ -62,6 +73,9 @@ def test_changes_become_a_nested_overrides_object():
         {"path": ["email", "smtp"], "value": "x"},
         {"path": ["broker", "api_key"], "value": "k2"},
         {"path": ["portfolio_id"], "value": "OTHER"},
+        {"path": ["backtest", "lookback_years"], "value": 3},
+        {"path": ["execution", "position_limit_backtest"], "value": 5},
+        {"path": ["live", "_note"], "value": "x"},
         {"path": ["risk", "max_leverage"], "value": None},
         {"path": ["risk", "max_leverage"], "value": "2"},
         {"path": ["risk", "use_overlay"], "value": 1},
@@ -189,3 +203,56 @@ def test_restoring_a_version_applies_the_value_rules():
     with pytest.raises(SettingsRuleError):
         check_overrides_apply(TYPED, {"capital": 1.5})
     check_overrides_apply(TYPED, {"risk": {"max_leverage": 1}})
+
+
+# -- what the desk may not change (Dom, 2026-10-14) ------------------------------
+
+FULL = {
+    "qt": {"desk_editable": True},
+    "live": {"historical_days": 730},
+    "execution": {"slippage_bps": 1, "position_limit_live": 500},
+    "strategy_defaults": {"fdm": [[1, 1]]},
+    "optimization": {"max_iterations": 100},
+    "general": {"initial_capital": 500000, "use_optimization": True,
+                "covariance_stale_dates": 5, "covariance_history_prices": 756},
+    "strategies": {"TREND": {"type": "TrendFollowingStrategy", "enabled_live": True,
+                             "default_allocation": 1, "config": {"idm": 2.5, "risk_target": 0.2}}},
+    "risk": {"max_drawdown": 0.3},
+    "equity_slow_rule": {"pairs": [[32, 128]]},
+}
+
+
+def test_platform_ops_and_model_structure_are_kept_from_the_desk():
+    visible = visible_config(FULL)
+    assert set(visible) == {"general", "strategies", "risk", "equity_slow_rule"}
+    assert visible["general"] == {"initial_capital": 500000}
+    assert visible["strategies"] == {"TREND": {"config": {"idm": 2.5, "risk_target": 0.2}}}
+    assert visible["risk"] == {"max_drawdown": 0.3}
+
+
+@pytest.mark.parametrize("path", [
+    ["qt", "desk_editable"], ["live", "historical_days"], ["execution", "position_limit_live"],
+    ["strategy_defaults", "fdm"], ["optimization", "max_iterations"],
+    ["general", "use_optimization"], ["general", "covariance_stale_dates"],
+    ["strategies", "TREND", "type"], ["strategies", "TREND", "enabled_live"],
+    ["strategies", "TREND", "default_allocation"],
+])
+def test_a_locked_setting_cannot_be_changed(path):
+    with pytest.raises(SettingsRuleError, match="may not be changed from AlgoLens"):
+        changes_to_overrides(FULL, [{"path": path, "value": 1}])
+
+
+def test_the_desk_still_changes_risk_capital_and_signal_settings():
+    overrides = changes_to_overrides(FULL, [
+        {"path": ["risk", "max_drawdown"], "value": 0.25},
+        {"path": ["general", "initial_capital"], "value": 400000},
+        {"path": ["strategies", "TREND", "config", "idm"], "value": 2.0},
+        {"path": ["equity_slow_rule", "pairs"], "value": [[16, 64]]},
+    ])
+    assert overrides["strategies"] == {"TREND": {"config": {"idm": 2.0}}}
+
+
+def test_an_old_version_touching_a_locked_setting_cannot_be_restored():
+    with pytest.raises(SettingsRuleError):
+        check_overrides_apply(FULL, {"optimization": {"max_iterations": 50}})
+
