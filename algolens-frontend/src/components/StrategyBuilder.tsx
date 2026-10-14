@@ -2,6 +2,7 @@ import { useState, useMemo } from 'react';
 import { useTheme } from '../adapters/react/ThemeContext';
 import type { Strategy } from '../domain/portfolio/portfolioData';
 import { computeCombinedMetrics } from '../domain/portfolio/computeCombinedMetrics';
+import { countsInFundTotal } from '../domain/portfolio/fundTotals';
 import { StrategySelection } from './strategy-builder/StrategySelection';
 import { PerformanceOverview } from './strategy-builder/PerformanceOverview';
 import { PerformanceCharts } from './strategy-builder/PerformanceCharts';
@@ -18,7 +19,10 @@ interface StrategyBuilderProps {
 
 export function StrategyBuilder({ strategies, onClose }: StrategyBuilderProps) {
   const { theme } = useTheme();
-  const [selectedStrategies, setSelectedStrategies] = useState<string[]>(strategies.map(s => s.id));
+  // Starts on the books in the fund total; the QT desk book and its model twin can be ticked in.
+  const [selectedStrategies, setSelectedStrategies] = useState<string[]>(
+    strategies.filter(countsInFundTotal).map(s => s.id),
+  );
   const [showHoldingsModal, setShowHoldingsModal] = useState(false);
   const [expandedSections, setExpandedSections] = useState<ExpandedSections>({
     diversification: false,

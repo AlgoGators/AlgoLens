@@ -1,4 +1,5 @@
-import type { Strategy, PortfolioData, HistoricalDataPoint } from '../../domain/portfolio/portfolioData';
+import type { Strategy, PortfolioData } from '../../domain/portfolio/portfolioData';
+import { fundTotals } from '../../domain/portfolio/fundTotals';
 import type { IncubatingStrategy, IncubationPerformance } from '../../domain/portfolio/incubationData';
 import type { PortfolioList } from '../../domain/portfolio/portfolioRegistry';
 import type { PositionBook } from '../../domain/portfolio/bookLabel';
@@ -235,16 +236,11 @@ export class PortfolioApiService {
     );
     log('info', `All ${strategies.length} strategies fetched`);
 
-    // Calculate portfolio totals
+    // The fund's totals: every strategy is listed, but the QT desk book and its
+    // model twin are not added up (fundTotals.ts).
     log('info', 'Calculating portfolio totals...');
-    const totalInvested = strategies.reduce((sum, s) => sum + s.invested, 0);
-    const totalValue = strategies.reduce((sum, s) => sum + s.currentValue, 0);
-    const totalReturn = totalValue - totalInvested;
-    const totalReturnPercent = totalInvested > 0 ? (totalReturn / totalInvested) * 100 : 0;
-
-    // Aggregate historical data
-    log('info', 'Aggregating historical data...');
-    const historicalData = this.aggregateHistoricalData(strategies);
+    const { totalValue, totalInvested, totalReturn, totalReturnPercent, historicalData } =
+      fundTotals(strategies);
 
     const result = {
       totalValue,
@@ -265,27 +261,5 @@ export class PortfolioApiService {
     });
 
     return result;
-  }
-
-  private static aggregateHistoricalData(strategies: Strategy[]): HistoricalDataPoint[] {
-    if (strategies.length === 0) return [];
-
-    // Create a map of dates to total values
-    const dateMap = new Map<string, number>();
-
-    // For each strategy, add its historical values to the corresponding dates
-    strategies.forEach(strategy => {
-      strategy.historicalData.forEach(point => {
-        const currentValue = dateMap.get(point.date) || 0;
-        dateMap.set(point.date, currentValue + point.value);
-      });
-    });
-
-    // Convert map to array and sort by date
-    const aggregated: HistoricalDataPoint[] = Array.from(dateMap.entries())
-      .map(([date, value]) => ({ date, value }))
-      .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-
-    return aggregated;
   }
 }

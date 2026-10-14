@@ -150,6 +150,8 @@ def test_portfolio_detail_defaults_to_qt_with_fallback(client, reader):
     assert body["deskEditable"] is True
     assert body["assetClass"] == "futures"
     assert body["portfolioGroup"] == "qt_conservative"
+    # A paper book: listed, not added to the fund total.
+    assert body["inFundTotal"] is False
 
 
 @pytest.mark.parametrize("book", ["system", "qt_proposal", "qt"])

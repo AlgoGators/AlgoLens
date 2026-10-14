@@ -2,6 +2,7 @@
 
 from algolens.domain.portfolio.registry import (
     asset_class_for,
+    counts_in_fund_total,
     desk_edit_allowed,
     group_portfolios,
     portfolio_entries,
@@ -63,3 +64,11 @@ def test_groups_follow_portfolio_group_with_editable_book_first():
         "QT_CONSERVATIVE_MODEL_PORTFOLIO",
     ]
     assert [p["desk_editable"] for p in qt["portfolios"]] == [True, False]
+
+
+def test_fund_total_counts_ungrouped_books_only():
+    # trendfollowing counts; the QT desk book and its model twin are paper books.
+    assert counts_in_fund_total(_row("CONSERVATIVE_PORTFOLIO"))
+    assert not counts_in_fund_total(_row("QT_CONSERVATIVE_PORTFOLIO", group="qt_conservative", editable=True))
+    assert not counts_in_fund_total(_row("QT_CONSERVATIVE_MODEL_PORTFOLIO", group="qt_conservative"))
+    assert counts_in_fund_total(_row("P", group=""))

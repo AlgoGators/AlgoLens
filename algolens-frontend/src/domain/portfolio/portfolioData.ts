@@ -101,6 +101,11 @@ export interface Strategy {
   assetClass?: 'futures' | 'equity';
   /** desk_editable and futures (ruling 13). */
   deskEditable?: boolean;
+  /**
+   * Whether the book counts in the fund's total (fundTotals.ts). False for the
+   * QT desk book and its model twin. Absent on older API versions: counted.
+   */
+  inFundTotal?: boolean;
 }
 
 export interface PortfolioData {

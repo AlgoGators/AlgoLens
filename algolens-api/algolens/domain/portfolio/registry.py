@@ -30,6 +30,16 @@ def desk_edit_allowed(entry: Mapping[str, Any]) -> bool:
     )
 
 
+def counts_in_fund_total(entry: Mapping[str, Any]) -> bool:
+    """Whether a book is added to the fund's total on the portfolio page.
+
+    A book in a portfolio group (the QT desk book and its untouched model twin)
+    is a paper book until it sends positions: it is listed but not added up.
+    An ungrouped book (trendfollowing) counts.
+    """
+    return not entry.get("portfolio_group")
+
+
 def portfolio_entries(registry: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:
     """One entry per portfolio id, the first in registry order winning."""
     seen: set[str] = set()
