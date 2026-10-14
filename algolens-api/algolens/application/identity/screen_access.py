@@ -3,7 +3,13 @@
 from typing import Protocol
 
 from algolens.application.shared.errors import NotFoundError
-from algolens.domain.identity.screens import legacy_screens, ordered, validate_screens
+from algolens.domain.identity.screens import (
+    SCREENS,
+    is_admin,
+    legacy_screens,
+    ordered,
+    validate_screens,
+)
 
 
 class ScreenAccessUnavailable(Exception):
@@ -19,6 +25,10 @@ class ScreenAccessRepositoryPort(Protocol):
         """The user's screens; ScreenAccessUnavailable before migration 003."""
         ...
 
+    def role_for(self, user_id) -> str | None:
+        """The user's role as auth.users holds it now (None: no such user)."""
+        ...
+
     def list_users(self) -> list[dict]:
         """Every user as {id, email, first_name, last_name, role, screens}."""
         ...
@@ -31,11 +41,17 @@ class ScreenAccessRepositoryPort(Protocol):
 
 
 class GetUserScreens:
+    """A user's screens. An admin holds every screen (Dom, 2026-10-14: admins
+    switch between member, qt and investor); everyone else the screens granted
+    in auth.user_screen_access."""
+
     def __init__(self, repo: ScreenAccessRepositoryPort, on_fallback=None):
         self.repo = repo
         self.on_fallback = on_fallback
 
     def execute(self, user_id, role):
+        if is_admin(role):
+            return list(SCREENS)
         try:
             return ordered(self.repo.screens_for(user_id))
         except ScreenAccessUnavailable:

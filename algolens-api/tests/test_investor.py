@@ -195,7 +195,7 @@ def _login(client, screens, screen_access, role="general_member", email="inv@x.c
     ["/api/investor/allocation", "/api/investor/reports", "/api/investor/reports/1/download"],
 )
 def test_investor_routes_need_the_investor_screen(client, screen_access, investor_repo, path):
-    _login(client, ["member", "qt"], screen_access, role="exec_board")
+    _login(client, ["member", "qt"], screen_access, role="team_lead")
     assert client.get(path).status_code == 403
     _login(client, ["investor"], screen_access)
     assert client.get(path).status_code == 200

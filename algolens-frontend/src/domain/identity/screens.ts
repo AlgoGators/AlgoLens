@@ -73,3 +73,13 @@ export function screensChanged(saved: Screen[], draft: Screen[]): boolean {
   const held = new Set(saved);
   return draft.some(screen => !held.has(screen));
 }
+
+/**
+ * Whether a role is an admin one (the server's ADMIN_ROLES). For display only:
+ * the server decides, from auth.users on every request, that an admin holds
+ * every screen and is the only one who may use the admin routes.
+ */
+export function isAdminRole(role: string | null | undefined): boolean {
+  return role === 'exec_board' || role === 'admin';
+}
+

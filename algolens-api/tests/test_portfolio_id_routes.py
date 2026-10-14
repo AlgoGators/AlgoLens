@@ -205,7 +205,7 @@ def test_desk_access_is_the_qt_screen(screen_access):
 
 
 def test_portfolio_reads_need_the_member_or_qt_screen(client, reader, screen_access):
-    _login(client)
+    _login(client, role="general_member")
     screen_access.screens["7"] = ["investor"]
     assert client.get("/portfolio/portfolios").status_code == 403
     screen_access.screens["7"] = ["qt"]

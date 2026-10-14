@@ -7,6 +7,7 @@ import {
   screensChanged,
   toggleScreen,
   type ScreenAccess,
+  isAdminRole,
 } from './screens';
 
 describe('parseScreenAccess', () => {
@@ -67,3 +68,13 @@ describe('admin form state', () => {
     expect(screensChanged(['member'], [])).toBe(true);
   });
 });
+
+describe('isAdminRole', () => {
+  it('is exec_board or admin', () => {
+    expect(isAdminRole('exec_board')).toBe(true);
+    expect(isAdminRole('admin')).toBe(true);
+    expect(isAdminRole('team_lead')).toBe(false);
+    expect(isAdminRole(null)).toBe(false);
+  });
+});
+

@@ -362,3 +362,11 @@ def test_allocation_with_nothing_published_is_empty(db):
 
     assert portfolios[0]["as_of"] is None
     assert portfolios[0]["positions"] == [] and portfolios[0]["allocation"] == []
+
+
+def test_role_for_reads_auth_users_now(db):
+    repo = screen_repo(db)
+    assert repo.role_for(_uid(db, "exec@x.com")) == "exec_board"
+    assert repo.role_for(_uid(db, "member@x.com")) == "general_member"
+    assert repo.role_for(999999) is None  # no such user: no role, so no access
+

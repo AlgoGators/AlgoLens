@@ -45,6 +45,16 @@ class FakeScreenAccess:
     def __init__(self):
         self.screens = {}
         self.set_calls = []
+        # identity -> its role in auth.users now (None: the user was deleted). An
+        # identity not in it has the role the test minted into its token.
+        self.roles = {}
+
+    def role_for(self, user_id):
+        if str(user_id) in self.roles:
+            return self.roles[str(user_id)]
+        from flask_jwt_extended import get_jwt
+
+        return get_jwt().get("role")
 
     def screens_for(self, user_id):
         from algolens.application.identity.screen_access import ScreenAccessUnavailable
