@@ -18,7 +18,6 @@ import {
   publishSourceOf,
   rescindBlockedReason,
   rescindConfirmText,
-  riskBreached,
   serverClockOffsetMs,
   type ComparisonRow,
   type DayPhase,
@@ -26,6 +25,8 @@ import {
   type DeskCommand,
   type DeskState,
 } from '../../domain/qt/desk';
+import { readOpenState, writeOpenState } from '../../domain/qt/settings';
+import { ApprovalPipeline } from './ApprovalPipeline';
 import { DeskEditForm } from './DeskEditForm';
 import { RiskReport } from './RiskReport';
 import { SettingsEditor } from './SettingsEditor';
@@ -193,7 +194,16 @@ export function DeskPanel({ portfolioId, book, reloadBook }: DeskPanelProps) {
   const [actionError, setActionError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [reloading, setReloading] = useState(false);
-  const [showSettings, setShowSettings] = useState(false);
+  // Remembered per viewer: whether the desk settings panel is open.
+  const [showSettings, setShowSettingsState] = useState(
+    () => readOpenState('algolens.qt.desk.panels').settings === true,
+  );
+  const setShowSettings = (update: (v: boolean) => boolean) =>
+    setShowSettingsState(v => {
+      const next = update(v);
+      writeOpenState('algolens.qt.desk.panels', { settings: next });
+      return next;
+    });
   // serverTime minus the browser clock at the last answer; the countdown adds it.
   const [clockOffset, setClockOffset] = useState(0);
   const [browserNow, setBrowserNow] = useState(() => Date.now());
@@ -287,9 +297,12 @@ export function DeskPanel({ portfolioId, book, reloadBook }: DeskPanelProps) {
   // ... and only to the user who approved it.
   const rescindAllowed = rescindBlockedReason(state, serverNow, user?.email ?? null) === null;
   const overrideBlocked = overrideBlockedReason(state, serverNow);
-  // C9: Approve is closed by a risk breach (not by a lock, the cutoff or an unreadable check) and an
-  // override may be requested: point the desk at the override form.
-  const riskPrompt = riskBreached(state.risk) && approveBlocked !== null && overrideBlocked === null;
+  const askForB = () => {
+    // C10: the desk insists on its positions (B): the VP or the President approves them.
+    setOverrideReason(r => r || 'Approve my positions (B) as asked; dynamic optimisation changed them.');
+    setOverrideOpen(true);
+    overrideSection.current?.scrollIntoView?.({ behavior: 'smooth', block: 'center' });
+  };
   const act = async (fn: () => Promise<void>) => {
     setBusy(true);
     setActionError(null);
@@ -320,11 +333,12 @@ export function DeskPanel({ portfolioId, book, reloadBook }: DeskPanelProps) {
             disabled={busy || approveBlocked !== null}
             title={
               approveBlocked ??
-              "Freeze the day's qt book. Approved before 09:30 New York it is e-mailed at 09:30; from 09:30 to 10:00, at once."
+              'Approve the proposal as it stands (B). The engine runs it through dynamic optimisation and the risk system; if it keeps your positions within the limits the day is approved (e-mailed at 09:30 New York, or at once from 09:30 to 10:00), otherwise you choose.'
             }
             onClick={() =>
               act(async () => {
-                const result = await DeskService.publish(portfolioId);
+                const result = await DeskService.approve(portfolioId, [], 'Approved as proposed');
+                setLastSave(result.save);
                 setLastPublish(result.command);
                 load();
               })
@@ -337,34 +351,6 @@ export function DeskPanel({ portfolioId, book, reloadBook }: DeskPanelProps) {
             <p className={`mt-1 max-w-xs text-right text-xs ${muted}`} data-testid="approve-blocked">
               {approveBlocked}
             </p>
-          )}
-          {riskPrompt && (
-            <div
-              data-testid="risk-override-prompt"
-              role="alert"
-              className={`mt-2 max-w-xs rounded border px-3 py-2 text-sm ${
-                dark ? 'border-red-800 bg-red-950 text-red-200' : 'border-red-300 bg-red-50 text-red-800'
-              }`}
-            >
-              <p>
-                Positions are outside the risk limits. Request an override to trade them as asked, or edit them back
-                within the limits.
-              </p>
-              {!overrideOpen && (
-                <button
-                  type="button"
-                  data-testid="risk-override-button"
-                  className="mt-2 px-3 py-1 rounded bg-orange-500 text-white disabled:opacity-50"
-                  disabled={busy}
-                  onClick={() => {
-                    setOverrideOpen(true);
-                    overrideSection.current?.scrollIntoView?.({ behavior: 'smooth', block: 'center' });
-                  }}
-                >
-                  Request override
-                </button>
-              )}
-            </div>
           )}
           {rescindAllowed && !confirmRescind && (
             <button
@@ -422,6 +408,22 @@ export function DeskPanel({ portfolioId, book, reloadBook }: DeskPanelProps) {
 
       {dayStatus && state.deadlines && <DayBanner status={dayStatus} nowMs={serverNow} dark={dark} />}
 
+      {state.seeded && (
+        <ApprovalPipeline
+          state={state}
+          nowMs={serverNow}
+          busy={busy}
+          onAskForB={askForB}
+          onApproveC={acknowledged =>
+            act(async () => {
+              const result = await DeskService.acceptC(portfolioId, acknowledged);
+              setLastPublish(result.command);
+              load();
+            })
+          }
+        />
+      )}
+
       {!state.seeded && (
         <p className={`mt-3 rounded border px-3 py-2 text-sm ${tone({ status: 'refused' } as DeskCommand, dark)}`}>
           The day's model run has not seeded the QT proposal yet. Editing opens once it has.
@@ -459,6 +461,14 @@ export function DeskPanel({ portfolioId, book, reloadBook }: DeskPanelProps) {
           onStale={message => {
             setActionError(message);
             load();
+          }}
+          onApproved={(publish, save) => {
+            setEditing(false);
+            setLastSave(save);
+            setLastPublish(publish);
+            setReloading(true);
+            reloadBook();
+            load().finally(() => setReloading(false));
           }}
           onSaved={command => {
             setEditing(false);
@@ -499,10 +509,10 @@ export function DeskPanel({ portfolioId, book, reloadBook }: DeskPanelProps) {
         ) : (
           <div className="mt-2">
             <p className={`text-xs ${muted}`}>
-              Asks the VP and the President (by e-mail) to let the proposal trade exactly as asked. The request
-              records the proposal as it is now; if the desk changes it afterwards, the request can no longer be
-              approved. It must be decided, and the day approved, before 10:00 New York: from then on the model's
-              book is sent.
+              Asks the VP and the President (by e-mail) to approve your positions (B) exactly as asked. Either one
+              decides; an approval books B and approves the day. The request records the proposal as it is now; if
+              the desk changes it afterwards, the request can no longer be approved. It must be decided before 10:00
+              New York: from then on the model's book is sent.
             </p>
             <textarea
               aria-label="Override reason"

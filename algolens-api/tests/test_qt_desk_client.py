@@ -106,7 +106,7 @@ def test_each_rpc_carries_the_command_row(desk_server):
         "QT_CONSERVATIVE_PORTFOLIO", "2026-10-08", 43)
     # Every call carried the version header, built from the vendored protos.
     assert servicer.headers == [f"common={API_VERSIONS['common']},desk={API_VERSIONS['desk']}"] * 5
-    assert API_VERSIONS["desk"] == "1.4.0"
+    assert API_VERSIONS["desk"] == "1.5.0"
 
 
 def test_version_refusal_is_logged_and_swallowed(desk_server, caplog):
@@ -166,6 +166,11 @@ def test_get_desk_risk_maps_the_report(desk_server):
             desk_pb2.RiskCheck(term="R", label="Portfolio risk (R)", max=0.45, unit="percent",
                                status=desk_pb2.RISK_CHECK_STATUS_NOT_MEASURED),
         ],
+        multipliers=[
+            desk_pb2.RiskMultiplier(name="m", label="Risk overlay multiplier (m)", value=0.8,
+                                    detail="gross leverage bound"),
+            desk_pb2.RiskMultiplier(name="idm:TREND", label="IDM, TREND"),
+        ],
     )
 
     report = DeskClient(address).get_desk_risk("QT_CONSERVATIVE_PORTFOLIO", date(2026, 10, 8))
@@ -202,6 +207,11 @@ def test_get_desk_risk_maps_the_report(desk_server):
             # An unset reading is None (not measured), not 0.
             {"term": "R", "label": "Portfolio risk (R)", "value": None, "max": pytest.approx(0.45),
              "unit": "percent", "status": "not_measured", "detail": ""},
+        ],
+        "multipliers": [
+            {"name": "m", "label": "Risk overlay multiplier (m)", "value": pytest.approx(0.8),
+             "detail": "gross leverage bound"},
+            {"name": "idm:TREND", "label": "IDM, TREND", "value": None, "detail": ""},
         ],
     }
 

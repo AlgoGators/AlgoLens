@@ -28,6 +28,7 @@ from algolens.application.qt.ports import (
     DeskNotSeeded,
 )
 from algolens.application.qt.use_cases import (
+    ApproveDesk,
     DecideOverride,
     GetCommand,
     GetDeskState,
@@ -136,8 +137,10 @@ def _portfolio(portfolio_id):
     return portfolio_entries([cfg])[0]
 
 
-def _body():
+def _body(required=True):
     payload = request.get_json(silent=True)
+    if payload is None and not required:
+        return {}
     if not isinstance(payload, dict):
         raise DeskRuleError("Request body must be a JSON object")
     return payload
@@ -185,6 +188,24 @@ def desk_save(portfolio_id):
     return jsonify(result), 201
 
 
+@desk_bp.route("/<portfolio_id>/approve", methods=["POST"])
+@jwt_required()
+@desk_enabled
+@desk_user
+@handled
+def desk_approve(portfolio_id):
+    """C10: save B and approve it; the engine publishes when C equals B."""
+    payload = _body()
+    repo, agent, _settings = _desk_dependencies()
+    result = ApproveDesk(repo, agent).execute(
+        _portfolio(portfolio_id),
+        payload.get("changes") or [],
+        payload.get("reason"),
+        current_user()["email"],
+    )
+    return jsonify(result), 201
+
+
 @desk_bp.route("/commands/<int:command_id>", methods=["GET"])
 @jwt_required()
 @desk_enabled
@@ -220,9 +241,13 @@ def desk_override_request(portfolio_id):
 @desk_user
 @handled
 def desk_publish(portfolio_id):
+    payload = _body(required=False)
     repo, agent, _settings = _desk_dependencies()
     result = PublishDesk(repo, agent).execute(
-        _portfolio(portfolio_id), current_user()["email"]
+        _portfolio(portfolio_id),
+        current_user()["email"],
+        flow=payload.get("flow"),
+        acknowledged=payload.get("acknowledged"),
     )
     return jsonify(result), 201
 

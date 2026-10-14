@@ -211,6 +211,46 @@ def _refuse_outside_risk_limits(
         )
 
 
+def _refuse_c_outside_limits(
+    repo: DeskRepositoryPort, agent: DeskAgentPort, portfolio_id: str, day
+) -> int:
+    """C10, Approve C: the QT approves the engine's book of the latest done
+    save. Refuse (409) while a save is running, without a done save, while
+    the risk check cannot be read or is of another save, and while C itself is
+    over a limit (a check read over, a term over after rounding or through a
+    hold, the overlay refused). A limit that bound is fine: C is the book cut
+    to fit it. Returns the save's id. The engine checks again."""
+    saves = [c for c in repo.commands(portfolio_id, day) if c["kind"] == SAVE]
+    running = next((c for c in reversed(saves) if c["status"] in OPEN_STATUSES), None)
+    if running is not None:
+        raise DeskConflict(
+            f"Dynamic optimisation is still running (#{running['id']}); approve once it has finished"
+        )
+    done = [c for c in saves if c["status"] == DONE]
+    if not done:
+        raise DeskConflict("There is no finished save to approve; approve your positions first")
+    save_id = int(done[-1]["id"])
+    risk = _desk_risk(agent, portfolio_id, day)
+    if "unavailable" in risk:
+        raise DeskConflict(f"The risk check is unavailable ({risk['unavailable']}); try again")
+    if risk.get("state") != "desk" or int(risk.get("auditId") or 0) != save_id:
+        raise DeskConflict(
+            f"The day's book is not the result of save #{save_id} yet; try again"
+        )
+    over = [c["term"] for c in risk.get("checks") or () if c.get("status") == "over"]
+    for text in (risk.get("overLimitAfterRounding"), risk.get("overLimitByHold")):
+        for term in (text or "").replace(" ", ";").split(";"):
+            if term and term not in over:
+                over.append(term)
+    if over or risk.get("refused"):
+        raise DeskConflict(
+            "The engine's book (C) is itself over a limit ("
+            + (", ".join(over) or "the overlay refused")
+            + "): ask the VP or President to approve your positions"
+        )
+    return save_id
+
+
 class GetDeskState:
     """Everything the desk page shows for one portfolio's book date."""
 
@@ -349,6 +389,49 @@ class SaveDeskEdit:
         return {"command": public_command(command), "agent": outcome}
 
 
+class ApproveDesk:
+    """C10, the QT's Approve on B: save the edits (B) and approve them in one
+    go. The engine runs B through dynamic optimisation and the risk system
+    (the save's desk pass, which stores C); when C equals B and is within the
+    limits it publishes, otherwise it refuses the publish row with the
+    differences and the desk chooses: approve C, or ask the VP or President to
+    approve B. The cutoffs are C7's, by the moment Approve was pressed."""
+
+    def __init__(self, repo: DeskRepositoryPort, agent: DeskAgentPort, now=None):
+        self.repo = repo
+        self.agent = agent
+        self.now = now or _utcnow
+
+    def execute(
+        self, entry: Mapping[str, Any], edits: Any, reason: Any, requested_by: str
+    ) -> dict[str, Any]:
+        _require_editable(entry)
+        reason = require_reason(reason)
+        if not isinstance(edits, list):
+            raise DeskRuleError("changes must be a list of {symbol, quantity, expected}")
+        portfolio_id = entry["portfolio_id"]
+        day = _desk_day(self.repo, portfolio_id)
+        _refuse_after_cutoff(self.repo, portfolio_id, day, self.now(), "Approval")
+        # An Approve with no edit approves B as it stands (the model's A, or
+        # the last save): the engine still runs it, so C is checked the same way.
+        save, publish = self.repo.approve_proposal(
+            portfolio_id,
+            day,
+            lambda current: plan_desk_edit(current, edits) if edits else [],
+            reason,
+            requested_by,
+        )
+        # RunDesk first: the publish runs on the portfolio's queue after it.
+        save_outcome = self.agent.run_desk(save)
+        publish_outcome = self.agent.publish(publish)
+        return {
+            "command": public_command(publish),
+            "save": public_command(save),
+            "agent": publish_outcome,
+            "saveAgent": save_outcome,
+        }
+
+
 class GetCommand:
     def __init__(self, repo: DeskRepositoryPort):
         self.repo = repo
@@ -471,7 +554,9 @@ class DecideOverride:
         # The repository refuses, under the day lock: a decided request, one
         # not e-mailed, a published day, and an approval of a proposal that
         # changed since the request (409).
-        decision = self.repo.insert_decision(
+        # C10: an approval also queues the publish of B (requested by the QT
+        # who asked), which runs once the override has booked it.
+        decision, publish = self.repo.decide_override(
             request["id"],
             approved,
             approver_email,
@@ -479,7 +564,11 @@ class DecideOverride:
             (reason or "").strip() or None,
         )
         outcome = self.agent.record_decision(decision, token.strip())
-        return {"command": public_command(decision), "agent": outcome}
+        result = {"command": public_command(decision), "agent": outcome}
+        if publish is not None:
+            result["publish"] = public_command(publish)
+            result["publishAgent"] = self.agent.publish(publish)
+        return result
 
 
 class PublishDesk:
@@ -494,14 +583,31 @@ class PublishDesk:
         self.agent = agent
         self.now = now or _utcnow
 
-    def execute(self, entry: Mapping[str, Any], requested_by: str) -> dict[str, Any]:
+    def execute(
+        self, entry: Mapping[str, Any], requested_by: str, flow: Any = None,
+        acknowledged: Any = None,
+    ) -> dict[str, Any]:
         _require_editable(entry)
         portfolio_id = entry["portfolio_id"]
         day = _desk_day(self.repo, portfolio_id)
         _refuse_after_cutoff(self.repo, portfolio_id, day, self.now(), "Approval")
-        _refuse_outside_risk_limits(self.repo, self.agent, portfolio_id, day)
+        payload = None
+        if flow == "accept_c":
+            # C10: the QT approves the engine's book C, knowing it differs.
+            if not isinstance(acknowledged, list) or not all(
+                isinstance(s, str) for s in acknowledged
+            ):
+                raise DeskRuleError(
+                    "acknowledged must list the symbols the engine changed"
+                )
+            save_id = _refuse_c_outside_limits(self.repo, self.agent, portfolio_id, day)
+            payload = {"flow": "accept_c", "after": save_id, "acknowledged": acknowledged}
+        elif flow is not None:
+            raise DeskRuleError("flow must be accept_c (or absent)")
+        else:
+            _refuse_outside_risk_limits(self.repo, self.agent, portfolio_id, day)
         # Published (C3) and publish-already-open are refused under the day lock.
-        command = self.repo.insert_publish(portfolio_id, day, requested_by)
+        command = self.repo.insert_publish(portfolio_id, day, requested_by, payload)
         outcome = self.agent.publish(command)
         return {"command": public_command(command), "agent": outcome}
 

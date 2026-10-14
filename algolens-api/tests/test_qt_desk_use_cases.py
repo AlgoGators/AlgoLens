@@ -14,6 +14,7 @@ from algolens.application.qt.ports import (
 )
 import algolens.application.qt.use_cases as use_cases
 from algolens.application.qt.use_cases import (
+    ApproveDesk,
     DecideOverride,
     GetCommand,
     GetDeskState,
@@ -143,9 +144,30 @@ class FakeRepo:
         return self._insert(portfolio_id=portfolio_id, kind=kind, requested_by=requested_by,
                             reason=reason, payload=payload or {})
 
-    def insert_publish(self, portfolio_id, day, requested_by):
+    def insert_publish(self, portfolio_id, day, requested_by, payload=None):
         self._guard(portfolio_id)
-        return self._insert(portfolio_id=portfolio_id, kind="publish", requested_by=requested_by)
+        return self._insert(portfolio_id=portfolio_id, kind="publish", requested_by=requested_by,
+                            payload=dict(payload or {}))
+
+    def approve_proposal(self, portfolio_id, day, plan, reason, requested_by):
+        save = self.save_proposal(portfolio_id, day, plan, reason, requested_by)
+        publish = self._insert(portfolio_id=portfolio_id, kind="publish",
+                               requested_by=requested_by,
+                               payload={"flow": "auto", "after": save["id"]})
+        return save, publish
+
+    def decide_override(self, request_id, approved, approver, approver_role, reason):
+        decision = self.insert_decision(request_id, approved, approver, approver_role, reason)
+        if not approved:
+            return decision, None
+        request = self.get_command(request_id)
+        if any(r["kind"] == "publish" and r["status"] in rules.OPEN_STATUSES
+               and r["portfolio_id"] == request["portfolio_id"] for r in self.rows):
+            raise DeskConflict("a publish is open")
+        publish = self._insert(portfolio_id=request["portfolio_id"], kind="publish",
+                               requested_by=request["requested_by"],
+                               payload={"flow": "override_b", "after": decision["id"]})
+        return decision, publish
 
     def insert_rescind(self, portfolio_id, day, requested_by):
         if not self._is_published(portfolio_id):
@@ -432,7 +454,19 @@ def test_decision_inserts_a_row_and_calls_record_decision():
     assert decision["parent_id"] == request["id"]
     assert decision["approver_role"] == "vp"
     assert decision["payload"] == {"approved": True}
-    assert agent.calls == [("RecordDecision", decision["id"], "tok")]
+    # C10: the approval also queues the publish of B, requested by the QT who asked.
+    publish = result["publish"]
+    assert publish["kind"] == "publish" and publish["requested_by"] == request["requested_by"]
+    assert publish["payload"] == {"flow": "override_b", "after": decision["id"]}
+    assert agent.calls == [("RecordDecision", decision["id"], "tok"), ("Publish", publish["id"])]
+
+
+def test_a_rejection_publishes_nothing():
+    repo, agent = FakeRepo(), FakeAgent()
+    _emailed_request(repo)
+    result = DecideOverride(repo, agent, now=lambda: NOW).execute("tok", False, "vp@x.com", "vp")
+    assert "publish" not in result
+    assert [c[0] for c in agent.calls] == ["RecordDecision"]
 
 
 def test_decision_refusals():
@@ -951,3 +985,91 @@ def test_the_approval_page_carries_the_risk_report():
     assert page["risk"] == report
     down = LookupApproval(repo, FakeAgent(risk_down="UNAVAILABLE"), now=lambda: NOW).execute("tok")
     assert down["risk"] == {"unavailable": "UNAVAILABLE"}
+
+
+# -- C10: the A -> B -> C approval ----------------------------------------------------------
+
+def test_approve_saves_b_and_queues_its_publish_after_the_save():
+    repo, agent = FakeRepo(), FakeAgent()
+    result = ApproveDesk(repo, agent, now=lambda: NOW).execute(
+        QT, [{"symbol": "ZC.v.0", "quantity": 4, "expected": 3}], "lean in", "d@x.com")
+    save, publish = result["save"], result["command"]
+    assert save["kind"] == "save" and save["payload"]["changes"]
+    assert publish["kind"] == "publish"
+    assert publish["payload"] == {"flow": "auto", "after": save["id"]}
+    # RunDesk first: the engine queues the publish behind it.
+    assert agent.calls == [("RunDesk", save["id"]), ("Publish", publish["id"])]
+    # No risk gate before the pass: the engine decides.
+    assert agent.risk_calls == []
+
+
+def test_approve_without_edits_approves_b_as_it_stands():
+    repo, agent = FakeRepo(), FakeAgent()
+    result = ApproveDesk(repo, agent, now=lambda: NOW).execute(QT, [], "as is", "d@x.com")
+    assert result["save"]["payload"] == {"changes": []}
+    assert result["command"]["payload"]["flow"] == "auto"
+
+
+def test_approve_is_closed_from_10_and_needs_a_reason():
+    repo = FakeRepo()
+    with pytest.raises(DeskConflict, match="closed at 10:00"):
+        ApproveDesk(repo, FakeAgent(), now=lambda: _ny(DAY, 10, 0)).execute(
+            QT, [], "late", "d@x.com")
+    with pytest.raises(DeskRuleError):
+        ApproveDesk(repo, FakeAgent(), now=lambda: NOW).execute(QT, [], "", "d@x.com")
+    with pytest.raises(DeskRuleError):
+        ApproveDesk(repo, FakeAgent(), now=lambda: NOW).execute(QT, "nope", "r", "d@x.com")
+    assert repo.rows == []
+
+
+def _c_report(save_id, **over):
+    report = risk_report("desk", audit_id=save_id, within_limits=False, breaches=["cap"])
+    report.update(over)
+    return report
+
+
+def test_accept_c_publishes_the_engines_book_of_the_latest_save():
+    repo = FakeRepo()
+    save_id = _saved(repo)
+    agent = FakeAgent(risk=_c_report(save_id))
+    result = PublishDesk(repo, agent, now=lambda: NOW).execute(
+        QT, "d@x.com", flow="accept_c", acknowledged=["ZT.v.0"])
+    assert result["command"]["payload"] == {"flow": "accept_c", "after": save_id,
+                                            "acknowledged": ["ZT.v.0"]}
+
+
+@pytest.mark.parametrize("over, needle", [
+    ({"checks": [{"term": "L_g", "status": "over"}]}, "L_g"),
+    ({"overLimitAfterRounding": "R"}, r"\(R\)"),
+    ({"refused": True}, "the overlay refused"),
+])
+def test_accept_c_refuses_a_c_over_a_limit(over, needle):
+    repo = FakeRepo()
+    save_id = _saved(repo)
+    with pytest.raises(DeskConflict, match=needle):
+        PublishDesk(repo, FakeAgent(risk=_c_report(save_id, **over)), now=lambda: NOW).execute(
+            QT, "d@x.com", flow="accept_c", acknowledged=[])
+
+
+def test_accept_c_needs_a_finished_current_save_and_a_readable_check():
+    repo = FakeRepo()
+    with pytest.raises(DeskConflict, match="no finished save"):
+        PublishDesk(repo, FakeAgent(), now=lambda: NOW).execute(
+            QT, "d@x.com", flow="accept_c", acknowledged=[])
+    running = _saved(repo, status="running")
+    with pytest.raises(DeskConflict, match="still running"):
+        PublishDesk(repo, FakeAgent(), now=lambda: NOW).execute(
+            QT, "d@x.com", flow="accept_c", acknowledged=[])
+    repo.get_command(running)["status"] = "done"
+    with pytest.raises(DeskConflict, match="not the result of save"):
+        PublishDesk(repo, FakeAgent(risk=_c_report(running - 1)), now=lambda: NOW).execute(
+            QT, "d@x.com", flow="accept_c", acknowledged=[])
+    with pytest.raises(DeskConflict, match="unavailable"):
+        PublishDesk(repo, FakeAgent(risk_down="UNAVAILABLE"), now=lambda: NOW).execute(
+            QT, "d@x.com", flow="accept_c", acknowledged=[])
+    with pytest.raises(DeskRuleError):
+        PublishDesk(repo, FakeAgent(), now=lambda: NOW).execute(
+            QT, "d@x.com", flow="accept_c", acknowledged="ZT")
+    with pytest.raises(DeskRuleError):
+        PublishDesk(repo, FakeAgent(), now=lambda: NOW).execute(QT, "d@x.com", flow="bogus")
+

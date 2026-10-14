@@ -12,6 +12,8 @@ interface DeskEditFormProps {
   portfolioId: string;
   proposal: BookPosition[];
   onSaved: (command: DeskCommand, agent: string) => void;
+  /** C10: Approve on B answered with the publish row and its save. */
+  onApproved?: (publish: DeskCommand, save: DeskCommand) => void;
   onCancel: () => void;
   /** The proposal changed under the draft (409 listing symbols): the panel reloads it. */
   onStale?: (message: string) => void;
@@ -27,7 +29,7 @@ interface DeskEditFormProps {
  * refuses the save if the proposal moved meanwhile. The parent keys this form
  * on the proposal, so the draft is rebuilt whenever the proposal changes.
  */
-export function DeskEditForm({ portfolioId, proposal, onSaved, onCancel, onStale }: DeskEditFormProps) {
+export function DeskEditForm({ portfolioId, proposal, onSaved, onApproved, onCancel, onStale }: DeskEditFormProps) {
   const { theme } = useTheme();
   const dark = theme === 'dark';
   const [draft, setDraft] = useState<Record<string, string>>(() =>
@@ -58,14 +60,19 @@ export function DeskEditForm({ portfolioId, proposal, onSaved, onCancel, onStale
   }`;
   const muted = dark ? 'text-gray-400' : 'text-gray-500';
 
-  const save = async () => {
+  const save = async (approve: boolean) => {
     setTouched(true);
     if (!validation.ok) return;
     setSaving(true);
     setSaveError(null);
     try {
-      const result = await DeskService.save(portfolioId, validation.changes, reason.trim());
-      onSaved(result.command, result.agent);
+      if (approve && onApproved) {
+        const result = await DeskService.approve(portfolioId, validation.changes, reason.trim());
+        onApproved(result.command, result.save);
+      } else {
+        const result = await DeskService.save(portfolioId, validation.changes, reason.trim());
+        onSaved(result.command, result.agent);
+      }
     } catch (err) {
       if (err instanceof DeskApiError && err.status === 409 && err.changed.length > 0 && onStale) {
         onStale(
@@ -212,13 +219,33 @@ export function DeskEditForm({ portfolioId, proposal, onSaved, onCancel, onStale
       {saveError && <p className="mt-2 text-sm text-red-500">Save failed: {saveError}</p>}
 
       <div className="mt-4 flex gap-2">
+        {onApproved && (
+          <button
+            type="button"
+            data-testid="approve-edits-button"
+            onClick={() => save(true)}
+            disabled={saving}
+            title="Save these positions (B) and approve them: the engine runs them through dynamic optimisation and the risk system, and approves the day if it keeps them within the limits."
+            className="px-4 py-2 rounded bg-orange-500 text-white hover:bg-orange-600 disabled:opacity-50"
+          >
+            {saving ? 'Sending...' : 'Approve'}
+          </button>
+        )}
         <button
           type="button"
-          onClick={save}
+          data-testid="check-edits-button"
+          onClick={() => save(false)}
           disabled={saving}
-          className="px-4 py-2 rounded bg-orange-500 text-white hover:bg-orange-600 disabled:opacity-50"
+          title="Save and run the engine's check without approving."
+          className={onApproved
+            ? 'px-4 py-2 rounded border disabled:opacity-50'
+            : 'px-4 py-2 rounded bg-orange-500 text-white hover:bg-orange-600 disabled:opacity-50'}
         >
-          {saving ? 'Saving...' : `Save ${validation.changes.length || ''} change${validation.changes.length === 1 ? '' : 's'}`}
+          {saving
+            ? 'Saving...'
+            : onApproved
+              ? 'Check without approving'
+              : `Save ${validation.changes.length || ''} change${validation.changes.length === 1 ? '' : 's'}`}
         </button>
         <button type="button" onClick={onCancel} disabled={saving} className="px-4 py-2 rounded border">
           Cancel

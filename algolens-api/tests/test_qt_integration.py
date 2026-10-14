@@ -19,6 +19,7 @@ from algolens.application.qt.ports import (
 )
 import algolens.application.qt.use_cases as use_cases
 from algolens.application.qt.use_cases import (
+    ApproveDesk,
     DecideOverride,
     GetDeskState,
     ListSymbolChoices,
@@ -29,7 +30,7 @@ from algolens.application.qt.use_cases import (
     SaveDeskEdit,
 )
 from algolens.domain.portfolio.registry import portfolio_entries
-from algolens.domain.qt.desk import DeskRuleError, token_hash
+from algolens.domain.qt.desk import DeskRuleError, DeskStaleError, token_hash
 from qt_fixture import has_026, qt_db, requires_db  # noqa: F401  (fixture)
 
 pytestmark = requires_db
@@ -498,15 +499,53 @@ def test_override_decision_is_recorded_once(qt_db):
     assert {r["symbol"] for r in page["table"]} == {"ZC.v.0", "ZS.v.0"}
 
     DecideOverride(desk_repo(qt_db), agent).execute("tok-123", True, "p@x.com", "president", "fine")
-    decision = commands(qt_db)[-1]
+    decision, publish = commands(qt_db)[-2:]
     assert (decision["kind"], decision["parent_id"], decision["approver_role"], decision["payload"]) == (
         "override_decision", request_id, "president", {"approved": True})
     assert decision["requested_by"] == "p@x.com"
-    assert len(agent.calls) == 1
+    # C10: the approval queues the publish of B in the same transaction, requested by the QT.
+    assert (publish["kind"], publish["requested_by"], publish["payload"]) == (
+        "publish", "desk@x.com", {"flow": "override_b", "after": decision["id"]})
+    assert len(agent.calls) == 2
 
     with pytest.raises(DeskConflict):
         DecideOverride(desk_repo(qt_db), agent).execute("tok-123", False, "vp@x.com", "vp")
+    assert len(commands(qt_db)) == 3
+
+
+def test_approve_saves_b_and_its_publish_in_one_transaction(qt_db):
+    seed_day(qt_db)
+    agent = NullAgent()
+    result = ApproveDesk(desk_repo(qt_db), agent).execute(
+        entry(qt_db), [{"symbol": "ZC.v.0", "quantity": 7, "expected": 3}], "lean", "desk@x.com")
+    save, publish = commands(qt_db)
+    assert save["kind"] == "save" and publish["kind"] == "publish"
+    assert publish["payload"] == {"flow": "auto", "after": save["id"]}
+    assert result["command"]["id"] == publish["id"]
+    assert proposal_rows(qt_db)["ZC.v.0"]["quantity"] == 7
+    # The day is publishing: nothing else is written until the engine answers.
+    with pytest.raises(DeskConflict):
+        ApproveDesk(desk_repo(qt_db), agent).execute(entry(qt_db), [], "again", "desk@x.com")
     assert len(commands(qt_db)) == 2
+
+
+def test_a_refused_approve_leaves_nothing_behind(qt_db):
+    seed_day(qt_db)
+    with pytest.raises(DeskStaleError):
+        ApproveDesk(desk_repo(qt_db), NullAgent()).execute(
+            entry(qt_db), [{"symbol": "ZC.v.0", "quantity": 7, "expected": 99}], "x",
+            "desk@x.com")
+    assert commands(qt_db) == []
+
+
+def test_approve_c_inserts_an_accept_c_publish(qt_db):
+    seed_day(qt_db)
+    repo = desk_repo(qt_db)
+    save = repo.save_proposal(QT, D2, lambda current: [], "check", "desk@x.com")
+    engine_finishes(qt_db, save["id"])
+    publish = repo.insert_publish(QT, D2, "desk@x.com",
+                                  {"flow": "accept_c", "after": save["id"], "acknowledged": []})
+    assert publish["payload"]["flow"] == "accept_c"
 
 
 def test_override_decision_refusals(qt_db):
@@ -666,6 +705,9 @@ def test_a_failed_decision_can_be_retried_but_a_live_one_cannot(qt_db):
     with pytest.raises(DeskConflict):
         decide.execute("tok-123", True, "vp@x.com", "vp")
     engine_finishes(qt_db, first["id"], status="failed", message="smtp down")
+    # C10: the engine then refuses the publish queued behind the failed decision.
+    publish = next(c for c in commands(qt_db) if c["kind"] == "publish")
+    engine_finishes(qt_db, publish["id"], status="refused", message="the override failed")
     decide.execute("tok-123", True, "vp@x.com", "vp")
     assert [c["parent_id"] for c in commands(qt_db) if c["kind"] == "override_decision"] == [
         request_id, request_id]

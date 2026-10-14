@@ -10,6 +10,10 @@ import {
   versionStatus,
   type SettingField,
   type SettingsState,
+  isConfigNote,
+  readOpenState,
+  sectionOpen,
+  writeOpenState,
 } from './settings';
 
 const field = (path: string[], value: unknown, type: SettingField['type'], pending: unknown = null): SettingField => ({
@@ -128,3 +132,58 @@ describe('compact settings view', () => {
     expect(filterFields(fields, 'nothing')).toEqual([]);
   });
 });
+
+describe('remembered open sections', () => {
+  it('opens a section the viewer opened, else one that needs attention', () => {
+    expect(sectionOpen({ risk: true }, 'risk', false)).toBe(true);
+    expect(sectionOpen({ risk: false }, 'risk', true)).toBe(false);
+    expect(sectionOpen({}, 'risk', true)).toBe(true);
+    expect(sectionOpen({}, 'risk', false)).toBe(false);
+  });
+
+  it('round-trips through storage and ignores junk', () => {
+    // The tests run in node: give them a window with an in-memory storage.
+    const store = new Map<string, string>();
+    (globalThis as unknown as { window: unknown }).window = {
+      localStorage: {
+        getItem: (k: string) => store.get(k) ?? null,
+        setItem: (k: string, v: string) => void store.set(k, v),
+      },
+    };
+    writeOpenState('t.open', { risk: true, opt: false });
+    expect(readOpenState('t.open')).toEqual({ risk: true, opt: false });
+    window.localStorage.setItem('t.junk', '{"a": 1, "b": true}');
+    expect(readOpenState('t.junk')).toEqual({ b: true });
+    window.localStorage.setItem('t.bad', 'not json');
+    expect(readOpenState('t.bad')).toEqual({});
+    expect(readOpenState('t.missing')).toEqual({});
+  });
+});
+
+describe('remembered open sections without storage', () => {
+  it('remembers nothing and never throws', () => {
+    (globalThis as unknown as { window: unknown }).window = {
+      localStorage: {
+        getItem: () => {
+          throw new Error('denied');
+        },
+        setItem: () => {
+          throw new Error('denied');
+        },
+      },
+    };
+    expect(readOpenState('x')).toEqual({});
+    expect(() => writeOpenState('x', { a: true })).not.toThrow();
+  });
+});
+
+describe('config comments', () => {
+  const f = (path: string[]): SettingField =>
+    ({ path, type: 'string', value: 'x', overridden: false, pending: null, pending_from_files: false });
+  it('are the keys starting with an underscore, at any depth', () => {
+    expect(isConfigNote(f(['live', '_note']))).toBe(true);
+    expect(isConfigNote(f(['strategies', 'TREND', 'config', '_idm_rationale']))).toBe(true);
+    expect(isConfigNote(f(['risk', 'max_gross_leverage']))).toBe(false);
+  });
+});
+

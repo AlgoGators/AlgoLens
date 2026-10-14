@@ -407,3 +407,32 @@ def test_rescind_from_0930_new_york_is_409(client, desk, monkeypatch):
     assert response.status_code == 409
     assert "can no longer be taken back" in response.get_json()["error"]
     assert repo.rows == []
+
+
+def test_approve_saves_and_queues_the_publish(client, desk):
+    repo, agent = desk
+    headers = _login(client)
+    response = client.post(
+        "/portfolio/desk/QT_CONSERVATIVE_PORTFOLIO/approve",
+        json={"changes": [{"symbol": "ZC.v.0", "quantity": 4, "expected": 3}], "reason": "lean"},
+        headers=headers,
+    )
+    assert response.status_code == 201
+    body = response.get_json()
+    assert body["save"]["kind"] == "save"
+    assert body["command"]["payload"] == {"flow": "auto", "after": body["save"]["id"]}
+    assert [c[0] for c in agent.calls] == ["RunDesk", "Publish"]
+    # The day is now publishing: a second approval waits for this one.
+    again = client.post("/portfolio/desk/QT_CONSERVATIVE_PORTFOLIO/approve",
+                        json={"changes": [], "reason": "again"}, headers=headers)
+    assert again.status_code == 409
+
+
+def test_publish_accept_c_takes_the_flow_from_the_body(client, desk):
+    _repo, _agent = desk
+    headers = _login(client)
+    response = client.post("/portfolio/desk/QT_CONSERVATIVE_PORTFOLIO/publish",
+                           json={"flow": "accept_c", "acknowledged": []}, headers=headers)
+    assert response.status_code == 409  # no finished save yet
+    assert "no finished save" in response.get_json()["error"]
+

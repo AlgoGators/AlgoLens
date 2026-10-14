@@ -16,11 +16,15 @@ import {
   displaySetting,
   filterFields,
   groupBySection,
+  isConfigNote,
   isEditable,
   labelInSection,
   pathKey,
   pathLabel,
+  readOpenState,
+  sectionOpen,
   versionStatus,
+  writeOpenState,
   type SettingField,
   type SettingsState,
 } from '../../domain/qt/settings';
@@ -38,6 +42,13 @@ export function SettingsEditor({ portfolioId }: { portfolioId: string }) {
   const [revertTo, setRevertTo] = useState<number | null>(null);
   const [revertReason, setRevertReason] = useState('');
   const [query, setQuery] = useState('');
+  // Open/closed sections and history, remembered per viewer and portfolio.
+  const openKey = `algolens.qt.settings.open.${portfolioId}`;
+  const [opened, setOpened] = useState<Record<string, boolean>>(() => readOpenState(openKey));
+  const remember = (next: Record<string, boolean>) => {
+    setOpened(next);
+    writeOpenState(openKey, next);
+  };
 
   const load = useCallback(async () => {
     try {
@@ -112,24 +123,30 @@ export function SettingsEditor({ portfolioId }: { portfolioId: string }) {
     const pending = field.pending !== null || field.pending_from_files;
     return (
       <tr key={key} className={`border-t ${rule} align-middle`}>
-        <td className="py-1 pr-2">
-          <label className="text-xs font-mono break-all" htmlFor={`setting-${key}`} title={pathLabel(field.path)}>
+        <td className="py-1.5 pr-4">
+          <label className="block text-xs font-mono break-words" htmlFor={`setting-${key}`} title={pathLabel(field.path)}>
             {labelInSection(field)}
           </label>
         </td>
-        <td className="py-1 pr-2 text-xs font-mono text-right whitespace-nowrap">
-          {displaySetting(field.value) || 'null'}
+        <td className="py-1.5 pr-4 text-xs font-mono text-right">
+          {/* A long value (a list, a table) is cut; the whole of it is in the tooltip. */}
+          <span className="block truncate" title={displaySetting(field.value) || 'null'}>
+            {displaySetting(field.value) || 'null'}
+          </span>
         </td>
-        <td className="py-1 pr-2 text-xs font-mono text-right whitespace-nowrap">
+        <td className="py-1.5 pr-4 text-xs font-mono text-right">
           {pending ? (
-            <span className="text-amber-500" title="Takes effect at the next live run">
+            <span
+              className="block truncate text-amber-500"
+              title={`Takes effect at the next live run: ${field.pending_from_files ? 'file value' : displaySetting(field.pending)}`}
+            >
               {field.pending_from_files ? 'file value' : displaySetting(field.pending)}
             </span>
           ) : (
             <span className={muted}>-</span>
           )}
         </td>
-        <td className="py-1 w-36">
+        <td className="py-1.5">
           {!editable ? (
             <span className={`text-xs ${muted}`}>{isEditable(field) ? '' : 'read-only'}</span>
           ) : field.type === 'boolean' ? (
@@ -159,7 +176,8 @@ export function SettingsEditor({ portfolioId }: { portfolioId: string }) {
     );
   };
 
-  const shown = filterFields(state.fields, query);
+  // Config comments (_note, _description, ...) are documentation, not settings.
+  const shown = filterFields(state.fields.filter(f => !isConfigNote(f)), query);
 
   return (
     <div data-testid="settings-editor">
@@ -190,6 +208,28 @@ export function SettingsEditor({ portfolioId }: { portfolioId: string }) {
         onChange={e => setQuery(e.target.value)}
       />
       {shown.length === 0 && <p className={`text-sm mb-3 ${muted}`}>No setting matches.</p>}
+      <div className="flex gap-3 mb-2 text-xs">
+        <button
+          type="button"
+          data-testid="settings-expand-all"
+          className={`hover:underline ${muted}`}
+          onClick={() =>
+            remember({ ...opened, ...Object.fromEntries(groupBySection(shown).map(([s]) => [s, true])) })
+          }
+        >
+          Expand all
+        </button>
+        <button
+          type="button"
+          data-testid="settings-collapse-all"
+          className={`hover:underline ${muted}`}
+          onClick={() =>
+            remember({ ...opened, ...Object.fromEntries(groupBySection(shown).map(([s]) => [s, false])) })
+          }
+        >
+          Collapse all
+        </button>
+      </div>
       <div className="space-y-2 mb-5">
         {groupBySection(shown).map(([section, fields]) => {
           const pendingCount = fields.filter(f => f.pending !== null || f.pending_from_files).length;
@@ -197,22 +237,39 @@ export function SettingsEditor({ portfolioId }: { portfolioId: string }) {
           return (
             <details
               key={section}
+              data-testid={`settings-section-${section}`}
               className={`rounded-lg border ${dark ? 'border-gray-800 bg-gray-900' : 'border-gray-200 bg-white'}`}
-              open={query.trim() !== '' || pendingCount > 0 || editedCount > 0}
+              open={
+                query.trim() !== '' ||
+                editedCount > 0 ||
+                sectionOpen(opened, section, pendingCount > 0)
+              }
             >
-              <summary className="cursor-pointer select-none px-3 py-2 text-xs font-semibold uppercase tracking-wider flex items-center gap-2">
+              <summary
+                onClick={e => {
+                  e.preventDefault();
+                  const isOpen = query.trim() !== '' || editedCount > 0 || sectionOpen(opened, section, pendingCount > 0);
+                  remember({ ...opened, [section]: !isOpen });
+                }}
+                className="cursor-pointer select-none px-3 py-2 text-xs font-semibold uppercase tracking-wider flex items-center gap-2">
                 <span>{section}</span>
                 <span className={`normal-case font-normal ${muted}`}>{fields.length}</span>
                 {pendingCount > 0 && <span className="normal-case font-normal text-amber-500">{pendingCount} pending</span>}
                 {editedCount > 0 && <span className="normal-case font-normal text-orange-500">{editedCount} edited</span>}
               </summary>
               <div className="px-3 pb-2 overflow-x-auto">
-                <table className="w-full">
+                <table className="w-full table-fixed">
+                  <colgroup>
+                    <col className="w-[38%]" />
+                    <col className="w-[22%]" />
+                    <col className="w-[16%]" />
+                    <col className="w-[24%]" />
+                  </colgroup>
                   <thead>
                     <tr className={`text-[11px] uppercase tracking-wider ${muted}`}>
-                      <th className="text-left font-normal py-1 pr-2">Setting</th>
-                      <th className="text-right font-normal py-1 pr-2">Running</th>
-                      <th className="text-right font-normal py-1 pr-2">Pending</th>
+                      <th className="text-left font-normal py-1 pr-4">Setting</th>
+                      <th className="text-right font-normal py-1 pr-4">Running</th>
+                      <th className="text-right font-normal py-1 pr-4">Pending</th>
                       <th className="text-left font-normal py-1">{state.editable ? 'New value' : ''}</th>
                     </tr>
                   </thead>
@@ -264,9 +321,19 @@ export function SettingsEditor({ portfolioId }: { portfolioId: string }) {
       )}
       {submitError && <p className="mt-3 text-sm text-red-500">{submitError}</p>}
 
-      <h5 className={`text-xs font-semibold uppercase tracking-wider mt-6 mb-2 ${muted}`}>History</h5>
-      {state.history.length === 0 && <p className={`text-sm ${muted}`}>No desk settings saved yet: the config files apply.</p>}
-      <ul className="space-y-2">
+      <button
+        type="button"
+        data-testid="settings-history-toggle"
+        aria-expanded={opened.__history === true}
+        className={`text-xs font-semibold uppercase tracking-wider mt-6 mb-2 hover:underline ${muted}`}
+        onClick={() => remember({ ...opened, __history: !(opened.__history === true) })}
+      >
+        {opened.__history === true ? '▾' : '▸'} History ({state.history.length})
+      </button>
+      {opened.__history === true && state.history.length === 0 && (
+        <p className={`text-sm ${muted}`}>No desk settings saved yet: the config files apply.</p>
+      )}
+      {opened.__history === true && <ul className="space-y-2">
         {state.history.map(v => (
           <li key={v.version} className={card}>
             <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
@@ -298,7 +365,7 @@ export function SettingsEditor({ portfolioId }: { portfolioId: string }) {
             </button>
           </li>
         )}
-      </ul>
+      </ul>}
 
       {revertTo !== null && (
         <div className={`${card} mt-3`}>

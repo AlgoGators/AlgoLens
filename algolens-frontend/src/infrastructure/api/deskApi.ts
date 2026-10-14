@@ -62,6 +62,11 @@ export interface CommandResult {
   agent: string;
 }
 
+/** C10: Approve on B answers with the publish row and the save it runs after. */
+export interface ApproveResult extends CommandResult {
+  save: DeskCommand;
+}
+
 export interface ApprovalPage {
   request: DeskCommand;
   decision: DeskCommand | null;
@@ -88,8 +93,14 @@ export const DeskApi = {
   command: (id: number) => request<DeskCommand>('GET', `/portfolio/desk/commands/${id}`),
   requestOverride: (portfolioId: string, reason: string) =>
     request<CommandResult>('POST', `${desk(portfolioId)}/override-request`, { reason }),
+  /** C10: save the edits (B) and approve them; the engine publishes when its book (C) equals B. */
+  approve: (portfolioId: string, changes: QuantityChange[], reason: string) =>
+    request<ApproveResult>('POST', `${desk(portfolioId)}/approve`, { changes, reason }),
   /** Approve the day's book (the engine's publish command). */
   publish: (portfolioId: string) => request<CommandResult>('POST', `${desk(portfolioId)}/publish`, {}),
+  /** C10: approve the engine's book (C), acknowledging the symbols it changed. */
+  acceptC: (portfolioId: string, acknowledged: string[]) =>
+    request<CommandResult>('POST', `${desk(portfolioId)}/publish`, { flow: 'accept_c', acknowledged }),
   /** Take back the desk's approval of the day before the 09:30 send (the engine's rescind command). */
   rescind: (portfolioId: string) => request<CommandResult>('POST', `${desk(portfolioId)}/rescind`, {}),
   settings: (portfolioId: string) => request<SettingsState>('GET', `${desk(portfolioId)}/settings`),

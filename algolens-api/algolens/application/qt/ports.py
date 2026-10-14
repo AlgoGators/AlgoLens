@@ -72,8 +72,35 @@ class DeskRepositoryPort(Protocol):
     def commands(self, portfolio_id: str, day: date) -> Sequence[Row]:
         ...
 
-    def insert_publish(self, portfolio_id: str, day: date, requested_by: str) -> Row:
-        """Under the day lock: refuse a published day or an open publish."""
+    def insert_publish(
+        self, portfolio_id: str, day: date, requested_by: str,
+        payload: Mapping[str, Any] | None = None,
+    ) -> Row:
+        """Under the day lock: refuse a published day or an open publish.
+        `payload` names a C10 flow."""
+
+    def approve_proposal(
+        self,
+        portfolio_id: str,
+        day: date,
+        plan: Callable[[Mapping[str, Any]], list[dict[str, Any]]],
+        reason: str,
+        requested_by: str,
+    ) -> tuple[Row, Row]:
+        """C10: save_proposal's save and a publish row {"flow": "auto",
+        "after": <save id>} in one transaction. Returns (save, publish)."""
+
+    def decide_override(
+        self,
+        request_id: int,
+        approved: bool,
+        approver: str,
+        approver_role: str,
+        reason: str | None,
+    ) -> tuple[Row, Row | None]:
+        """C10: insert_decision and, on an approval, a publish row
+        {"flow": "override_b", "after": <decision id>} requested by the QT who
+        asked, in one transaction. Returns (decision, publish or None)."""
 
     def insert_rescind(self, portfolio_id: str, day: date, requested_by: str) -> Row:
         """Under the day lock: refuse (DeskConflict) unless live_run_metadata

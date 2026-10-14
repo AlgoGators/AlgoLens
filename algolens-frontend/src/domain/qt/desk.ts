@@ -145,6 +145,17 @@ export interface DeskRisk {
   /** Every risk check with its reading and max, breach or not (desk.proto 1.4.0).
    * trade-ngin owns the labels, units and maxes; they are rendered as given. */
   checks?: RiskCheck[];
+  /** The multipliers of the day's book (1.5.0): the overlay's m, the risk scale,
+   * each strategy's configured IDM and FDM. Rendered as given. */
+  multipliers?: RiskMultiplier[];
+}
+
+export interface RiskMultiplier {
+  name: string;
+  label: string;
+  /** null when the day has no reading yet. */
+  value: number | null;
+  detail: string;
 }
 
 export type RiskCheckStatus = 'within' | 'bound' | 'over' | 'not_measured';
@@ -158,7 +169,7 @@ export interface RiskCheck {
   /** The limit in force, in the value's unit; null when none applies. */
   max: number | null;
   /** 'percent' (a fraction), 'multiple' (of the sizing capital), 'contracts',
-   * or 'tau' (a multiple of the risk target). */
+   * 'tau' (a multiple of the risk target) or 'usd' (dollars: the fund's cap, C11). */
   unit: string;
   status: RiskCheckStatus;
   detail: string;
@@ -655,9 +666,17 @@ export function formatCheckValue(value: number | null, unit: string): string {
       return String(Math.round(value));
     case 'tau':
       return `${Number(value.toPrecision(4))}x risk target`;
+    case 'usd':
+      return `$${Math.round(value).toLocaleString('en-US')}`;
     default:
       return String(Number(value.toPrecision(4)));
   }
+}
+
+/** How much of its max a check uses (|value| / max), or null when either is missing. */
+export function checkUsage(check: RiskCheck): number | null {
+  if (check.value === null || check.max === null || !Number.isFinite(check.value) || !(check.max > 0)) return null;
+  return Math.abs(check.value) / check.max;
 }
 
 export const RISK_CHECK_STATUS_LABEL: Record<RiskCheckStatus, string> = {
@@ -698,7 +717,9 @@ export function approveBlockedReason(state: DeskState, nowMs?: number): string |
     return `Approval of the ${state.date} book closed at 10:00 New York; the model's book is sent instead`;
   }
   if (!state.seeded) return 'The proposal is not seeded yet';
-  return riskBreachReason(state.risk);
+  // C10: Approve sends B to dynamic optimisation and the risk system; the
+  // engine decides after the pass (auto-approve, or the desk chooses).
+  return null;
 }
 
 /** Whether the day's rescind is pending or running. */
@@ -785,4 +806,121 @@ export function snapshotBySymbol(snapshot: SnapshotRow[] | null | undefined): Ma
 export function approvalTokenFrom(search: string): string | null {
   const token = new URLSearchParams(search).get('token');
   return token && token.trim() ? token.trim() : null;
+}
+
+// -- C10: the A -> B -> C approval ------------------------------------------------------------
+
+export type ApprovalFlow = 'auto' | 'accept_c' | 'override_b';
+
+/** The C10 flow a publish row names, or null for a plain publish. */
+export function flowOf(command: DeskCommand | null | undefined): ApprovalFlow | null {
+  const flow = (command?.payload as { flow?: unknown } | undefined)?.flow;
+  return flow === 'auto' || flow === 'accept_c' || flow === 'override_b' ? flow : null;
+}
+
+/** A symbol dynamic optimisation and the risk system changed: B asked, C given. */
+export interface FlowDifference {
+  symbol: string;
+  asked: number;
+  given: number;
+  moved_by: string;
+  category: string;
+}
+
+export type PipelineStage = 'a' | 'b' | 'checking' | 'choose' | 'approved' | 'sent' | 'fallback';
+
+export interface ApprovalPipeline {
+  stage: PipelineStage;
+  title: string;
+  detail: string;
+  /** On 'choose': the symbols C differs from B in. */
+  differences: FlowDifference[];
+  /** On 'choose': why the engine did not auto-approve. */
+  reason: 'changed' | 'outside_limits' | null;
+}
+
+function differencesOf(command: DeskCommand | null | undefined): FlowDifference[] {
+  const raw = (command?.result as { differs?: unknown } | null | undefined)?.differs;
+  if (!Array.isArray(raw)) return [];
+  return raw.filter(
+    (d): d is FlowDifference => !!d && typeof d === 'object' && typeof (d as FlowDifference).symbol === 'string',
+  );
+}
+
+const OPEN = ['pending', 'running'];
+
+/**
+ * Where the day stands in the A -> B -> C approval (contract C10): the model's
+ * book (A), the desk's edits (B), the engine running B through dynamic
+ * optimisation and the risk system, the desk's choice when the engine's book
+ * (C) differs from B, and the approval.
+ */
+export function approvalPipeline(state: DeskState): ApprovalPipeline {
+  const none = { differences: [], reason: null };
+  const publish = state.publish;
+  const flow = flowOf(publish);
+  const source = publishSourceOf(state.published);
+  if (state.published?.published_at) {
+    if (source === 'fallback') {
+      return { ...none, stage: 'fallback', title: "Not approved: the model's book (A) was sent",
+        detail: 'Nothing was approved by 10:00 New York.' };
+    }
+    const title =
+      flow === 'override_b' ? 'Your positions (B), approved by the VP or President'
+        : flow === 'accept_c' ? "The engine's book (C), approved knowing it differs from B"
+          : flow === 'auto' ? 'Auto-approved: the engine kept your positions (C = B) within the limits'
+            : 'Approved';
+    return { ...none, stage: state.published.sent_at ? 'sent' : 'approved', title,
+      detail: state.published.sent_at ? 'E-mailed.' : 'It is e-mailed at 09:30 New York.' };
+  }
+  if (publish && OPEN.includes(publish.status) && flow) {
+    const title =
+      flow === 'auto' ? 'Running dynamic optimisation and the risk system on your positions (B)...'
+        : flow === 'accept_c' ? "Approving the engine's book (C)..."
+          : 'Booking your positions (B) after the override...';
+    return { ...none, stage: 'checking', title, detail: 'This takes a minute or two.' };
+  }
+  const reason = (publish?.result as { reason?: unknown } | null | undefined)?.reason;
+  const after = (publish?.payload as { after?: unknown } | undefined)?.after;
+  if (
+    publish?.status === 'refused' && flow === 'auto' && (reason === 'changed' || reason === 'outside_limits') &&
+    state.latestSave && after === state.latestSave.id
+  ) {
+    const differences = differencesOf(publish);
+    return {
+      stage: 'choose',
+      differences,
+      reason,
+      title: reason === 'changed'
+        ? `Dynamic optimisation and the risk system changed ${differences.length} position${differences.length === 1 ? '' : 's'} (C differs from B)`
+        : 'Your positions (B) are outside the risk limits',
+      detail: reason === 'changed'
+        ? "Approve the engine's book (C), or ask the VP or President to approve yours (B)."
+        : 'Ask the VP or President to approve them, or edit them back within the limits.',
+    };
+  }
+  if (state.latestSave) {
+    return { ...none, stage: 'b', title: 'Your edits (B) are saved',
+      detail: 'Approve them: the engine runs them through dynamic optimisation and the risk system.' };
+  }
+  return { ...none, stage: 'a', title: "The model's book (A)",
+    detail: 'Edit it into your positions (B), or approve it as it stands.' };
+}
+
+/** Why "Approve C" is unavailable, or null (C10). The server and the engine check again. */
+export function acceptCBlockedReason(state: DeskState, nowMs?: number): string | null {
+  const locked = deskLockedReason(state);
+  if (locked) return locked;
+  if (approvalClosed(state, nowMs)) return `Approval of the ${state.date} book closed at 10:00 New York`;
+  if (approvalPipeline(state).stage !== 'choose') return 'There is no engine book to choose';
+  const risk = state.risk;
+  if (!risk || riskUnavailable(risk)) return 'The risk check is unavailable; try again';
+  const over = (risk.checks ?? []).filter(c => c.status === 'over').map(c => c.term);
+  for (const text of [risk.overLimitAfterRounding, risk.overLimitByHold]) {
+    for (const term of (text ?? '').split(/[;\s]+/)) if (term && !over.includes(term)) over.push(term);
+  }
+  if (over.length || risk.refused) {
+    return `The engine's book (C) is itself over a limit (${over.join(', ') || 'the overlay refused'}): ask the VP or President`;
+  }
+  return null;
 }

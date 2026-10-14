@@ -92,6 +92,12 @@ def risk_report(reply):
             }
             for c in reply.checks
         ],
+        # The multipliers of the day's book (1.5.0): the overlay's m, the risk
+        # scale, and each strategy's configured IDM and FDM.
+        "multipliers": [
+            {"name": x.name, "label": x.label, "value": _optional(x, "value"), "detail": x.detail}
+            for x in reply.multipliers
+        ],
     }
 
 
@@ -166,12 +172,13 @@ class DeskClient:
         return self._call("RecordDecision", request, decision["id"])
 
     def publish(self, command):
-        # audit_id is left 0: the engine takes the newest pending publish row
-        # for the portfolio and date (desk.proto PublishRequest).
+        # audit_id names the publish row (0 would take the newest pending one
+        # for the portfolio and date; desk.proto PublishRequest).
         request = desk_pb2.PublishRequest(
             portfolio_id=command["portfolio_id"],
             date=_day(command["date"]),
             published_by=command["requested_by"],
+            audit_id=int(command["id"]),
         )
         return self._call("Publish", request, command["id"])
 
