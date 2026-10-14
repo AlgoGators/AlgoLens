@@ -1,14 +1,17 @@
 import React from 'react';
 import { useTheme } from '../../adapters/react/ThemeContext';
 import {
-  formatRiskValue,
+  bookReadings,
+  formatCheckValue,
+  RISK_CHECK_STATUS_LABEL,
   riskBadge,
   riskBindingLine,
+  riskChecks,
   riskMovedSymbols,
-  riskReadings,
   riskUnavailable,
   type DeskRiskResult,
   type RiskBadgeTone,
+  type RiskCheckStatus,
 } from '../../domain/qt/desk';
 
 function badgeTone(tone: RiskBadgeTone, dark: boolean): string {
@@ -24,10 +27,17 @@ function badgeTone(tone: RiskBadgeTone, dark: boolean): string {
   }
 }
 
+function statusTone(status: RiskCheckStatus, waived: boolean): RiskBadgeTone {
+  if (status === 'within') return 'ok';
+  if (status === 'not_measured') return 'muted';
+  return waived ? 'waived' : 'breach';
+}
+
 /**
  * The engine's risk check of the day's qt book (contract C9): whether the
  * desk's positions are within the risk limits, which limit bound and by how
- * much, the configured limits next to the stored book, and the symbols a step
+ * much, every limit with the stored book's reading and its max (trade-ngin's
+ * labels, units and maxes, breach or not), and the symbols a step
  * moved. Risk steps (cap, overlay, clip, trim) are breaches; trading rules
  * (sign_close, rounding, buffer, search, hold) are shown but are not.
  */
@@ -59,7 +69,8 @@ export function RiskReport({ risk }: { risk: DeskRiskResult | null | undefined }
   }
 
   const binding = riskBindingLine(risk);
-  const readings = riskReadings(risk).filter(r => r.reading !== null || r.limit !== null);
+  const checks = riskChecks(risk);
+  const readings = bookReadings(risk);
   const moved = riskMovedSymbols(risk);
   const waived = risk.approvedOverride;
 
@@ -79,26 +90,39 @@ export function RiskReport({ risk }: { risk: DeskRiskResult | null | undefined }
         </ul>
       )}
 
-      {readings.length > 0 && (
+      {checks.length > 0 && (
         <div className="mt-3 overflow-x-auto">
           <table className="text-sm" data-testid="risk-limits">
             <thead>
               <tr className={muted}>
-                <th className="text-left font-normal py-1 pr-4">Measure</th>
+                <th className="text-left font-normal py-1 pr-4">Limit</th>
                 <th className="text-right font-normal py-1 pr-4">Stored book</th>
-                <th className="text-right font-normal py-1">Limit</th>
+                <th className="text-right font-normal py-1 pr-4">Max</th>
+                <th className="text-left font-normal py-1 pr-4">Status</th>
+                <th className="text-left font-normal py-1" />
               </tr>
             </thead>
             <tbody>
-              {readings.map(r => (
-                <tr key={r.label} className={`${rule} ${r.over ? (dark ? 'text-red-300' : 'text-red-700') : ''}`}>
-                  <td className="py-1 pr-4">{r.label}</td>
-                  <td className="py-1 pr-4 text-right">{formatRiskValue(r.reading, r.format)}</td>
-                  <td className="py-1 text-right">{formatRiskValue(r.limit, r.format)}</td>
+              {checks.map(c => (
+                <tr key={c.term} className={rule} data-testid={`risk-check-${c.term}`}>
+                  <td className="py-1 pr-4 whitespace-nowrap">{c.label}</td>
+                  <td className="py-1 pr-4 text-right font-mono">{formatCheckValue(c.value, c.unit)}</td>
+                  <td className="py-1 pr-4 text-right font-mono">{formatCheckValue(c.max, c.unit)}</td>
+                  <td className="py-1 pr-4">
+                    <span className={`rounded border px-1 text-xs ${badgeTone(statusTone(c.status, waived), dark)}`}>
+                      {RISK_CHECK_STATUS_LABEL[c.status] ?? c.status}
+                    </span>
+                  </td>
+                  <td className={`py-1 text-xs ${muted}`}>{c.detail}</td>
                 </tr>
               ))}
             </tbody>
           </table>
+          {readings.length > 0 && (
+            <p className={`mt-1 text-xs ${muted}`}>
+              {readings.map(r => `${r.label} ${r.value}`).join(' · ')}
+            </p>
+          )}
         </div>
       )}
 

@@ -106,7 +106,7 @@ def test_each_rpc_carries_the_command_row(desk_server):
         "QT_CONSERVATIVE_PORTFOLIO", "2026-10-08", 43)
     # Every call carried the version header, built from the vendored protos.
     assert servicer.headers == [f"common={API_VERSIONS['common']},desk={API_VERSIONS['desk']}"] * 5
-    assert API_VERSIONS["desk"] == "1.3.0"
+    assert API_VERSIONS["desk"] == "1.4.0"
 
 
 def test_version_refusal_is_logged_and_swallowed(desk_server, caplog):
@@ -159,6 +159,13 @@ def test_get_desk_risk_maps_the_report(desk_server):
         gross_leverage=2.4,
         margin_cushion=0.0,
         limits=[desk_pb2.RiskLimit(name="max_gross_leverage", value=2.0)],
+        checks=[
+            desk_pb2.RiskCheck(term="L_g", label="Gross leverage (L_g)", value=2.4, max=2.0,
+                               unit="multiple", status=desk_pb2.RISK_CHECK_STATUS_BOUND,
+                               detail="the overlay cut the positions to fit this limit"),
+            desk_pb2.RiskCheck(term="R", label="Portfolio risk (R)", max=0.45, unit="percent",
+                               status=desk_pb2.RISK_CHECK_STATUS_NOT_MEASURED),
+        ],
     )
 
     report = DeskClient(address).get_desk_risk("QT_CONSERVATIVE_PORTFOLIO", date(2026, 10, 8))
@@ -188,6 +195,14 @@ def test_get_desk_risk_maps_the_report(desk_server):
         "marginCushion": 0.0,
         "equityToMargin": None,
         "limits": [{"name": "max_gross_leverage", "value": 2.0}],
+        "checks": [
+            {"term": "L_g", "label": "Gross leverage (L_g)", "value": pytest.approx(2.4),
+             "max": pytest.approx(2.0), "unit": "multiple", "status": "bound",
+             "detail": "the overlay cut the positions to fit this limit"},
+            # An unset reading is None (not measured), not 0.
+            {"term": "R", "label": "Portfolio risk (R)", "value": None, "max": pytest.approx(0.45),
+             "unit": "percent", "status": "not_measured", "detail": ""},
+        ],
     }
 
 

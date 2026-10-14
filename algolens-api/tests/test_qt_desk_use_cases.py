@@ -216,6 +216,7 @@ def risk_report(state="model", audit_id=0, within_limits=True, approved_override
         "marginCushion": None,
         "equityToMargin": None,
         "limits": [],
+        "checks": [],
     }
 
 

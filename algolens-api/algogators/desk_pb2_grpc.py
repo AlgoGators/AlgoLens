@@ -42,6 +42,8 @@ class DeskServiceStub:
     1.3.0  2026-10-14  GetDeskRisk (contract C9): the risk report of the day's qt book and
     whether the desk's positions breach a risk limit. New RPC and messages
     only; no field changed.
+    1.4.0  2026-10-14  DeskRisk.checks (17), RiskCheck, RiskCheckStatus: every risk limit with
+    the stored book's reading and its max, breach or not. Additive only.
 
     """
 
@@ -105,6 +107,8 @@ class DeskServiceServicer:
     1.3.0  2026-10-14  GetDeskRisk (contract C9): the risk report of the day's qt book and
     whether the desk's positions breach a risk limit. New RPC and messages
     only; no field changed.
+    1.4.0  2026-10-14  DeskRisk.checks (17), RiskCheck, RiskCheckStatus: every risk limit with
+    the stored book's reading and its max, breach or not. Additive only.
 
     """
 
@@ -242,6 +246,8 @@ class DeskService:
     1.3.0  2026-10-14  GetDeskRisk (contract C9): the risk report of the day's qt book and
     whether the desk's positions breach a risk limit. New RPC and messages
     only; no field changed.
+    1.4.0  2026-10-14  DeskRisk.checks (17), RiskCheck, RiskCheckStatus: every risk limit with
+    the stored book's reading and its max, breach or not. Additive only.
 
     """
 
