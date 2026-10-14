@@ -1,0 +1,414 @@
+#!/usr/bin/env bash
+# simctl: drive the QT desk simulator (sim/README.md). Git Bash on Windows, or any bash.
+#
+#   simctl build                 build the images (AlgoLens from the checked-out branch)
+#   simctl up | down | destroy   start, stop (keep data), stop and delete every volume
+#   simctl load <snapshot-dir|synthetic> [--day YYYY-MM-DD | --keep]
+#                                restore a snapshot (or the synthetic fixture) + the sim users,
+#                                then save it as the template `reset` returns to
+#   simctl reset                 back to the template; clock to 08:00 of the sim day; Mailpit
+#                                emptied; engine-rpc restarted (its scheduler state cleared)
+#   simctl save                  make the current database the template
+#   simctl clock HH:MM[:SS]      set the clock to that New York time on the sim day
+#   simctl clock +5m | -1h | +30s
+#   simctl day YYYY-MM-DD        set the sim day (keeps the New York time of day)
+#   simctl model-run [dir]       the engine's model run of the sim day (dir: qt_conservative)
+#   simctl pass                  one scheduler pass now (what the 1-minute tick would do)
+#   simctl status                clocks, the day's publish state, the latest desk commands
+#   simctl mail                  the Mailpit URL
+#   simctl logs [service...]     follow logs (default: engine-rpc backend)
+#   simctl psql [args]           psql on the sim database
+#
+# The clock: sim/clock/faketime.rc holds an offset in seconds from real time. libfaketime in
+# postgres, engine-rpc and backend reads it, so all three move together and keep ticking.
+set -euo pipefail
+export MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*'
+
+SIM_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# docker.exe needs a Windows path under Git Bash (path conversion is off, see above).
+SIM_DIR_HOST="$(cygpath -m "$SIM_DIR" 2>/dev/null || echo "$SIM_DIR")"
+# sim/.env (optional; sim/.env.example): read by docker compose, and here for PG_IMAGE.
+if [ -f "$SIM_DIR/.env" ]; then set -a; . "$SIM_DIR/.env"; set +a; fi
+CLOCK_FILE="$SIM_DIR/clock/faketime.rc"
+DAY_FILE="$SIM_DIR/clock/day"
+DB=new_algo_data
+TEMPLATE=sim_template
+TZ_NY=America/New_York
+
+compose() { docker compose -f "$SIM_DIR_HOST/docker-compose.sim.yml" --project-directory "$SIM_DIR_HOST" "$@"; }
+die() { echo "simctl: $*" >&2; exit 1; }
+say() { echo "simctl: $*"; }
+
+running() { [ -n "$(compose ps -q --status running "$1" 2>/dev/null)" ]; }
+
+psql_db() {  # psql_db <db> [psql args...]
+    local db="$1"; shift
+    compose exec -T -e PGOPTIONS="-c client_min_messages=warning" postgres \
+        psql -X -q -v ON_ERROR_STOP=1 -U postgres -d "$db" "$@"
+}
+
+wait_postgres() {
+    compose up -d postgres >/dev/null
+    for _ in $(seq 1 60); do
+        if compose exec -T postgres pg_isready -U postgres -q 2>/dev/null; then return 0; fi
+        sleep 1
+    done
+    die "postgres did not become ready"
+}
+
+# Real (un-faked) shell in a container with tzdata: the running postgres with LD_PRELOAD
+# cleared, else a throwaway postgres container.
+real_sh() {
+    if running postgres; then
+        compose exec -T -e LD_PRELOAD= postgres sh -c "$1"
+    else
+        docker run --rm --entrypoint sh "${PG_IMAGE:-postgres:16}" -c "$1"
+    fi
+}
+
+ensure_clock() {
+    mkdir -p "$SIM_DIR/clock" "$SIM_DIR/data"
+    [ -f "$CLOCK_FILE" ] || printf '+0\n' > "$CLOCK_FILE"
+}
+
+sim_day() {
+    if [ -f "$DAY_FILE" ]; then tr -d '\r\n ' < "$DAY_FILE"; else date -u +%Y-%m-%d; fi
+}
+
+current_offset() {
+    ensure_clock
+    local raw; raw="$(tr -d '\r\n ' < "$CLOCK_FILE")"
+    raw="${raw#+}"
+    [[ "$raw" =~ ^-?[0-9]+$ ]] || die "unreadable clock file: $CLOCK_FILE"
+    echo "$raw"
+}
+
+write_offset() {
+    ensure_clock
+    printf '%+d\n' "$1" > "$CLOCK_FILE.tmp"
+    # In place (not a rename): the file is bind-mounted into three containers.
+    cat "$CLOCK_FILE.tmp" > "$CLOCK_FILE"
+    rm -f "$CLOCK_FILE.tmp"
+}
+
+# Seconds from now (real) until <day> <HH:MM:SS> New York.
+offset_to() {
+    real_sh "echo \$(( \$(TZ=$TZ_NY date -d '$1 $2' +%s) - \$(date +%s) ))"
+}
+
+show_clock() {
+    local off; off="$(current_offset)"
+    real_sh "TZ=$TZ_NY date -d @\$(( \$(date +%s) + $off )) '+sim clock: %Y-%m-%d %H:%M:%S %Z (New York)'; date -u -d @\$(( \$(date +%s) + $off )) '+           %Y-%m-%d %H:%M:%S UTC'"
+}
+
+set_clock_hms() {  # HH:MM[:SS] on the sim day
+    local t="$1"
+    [[ "$t" =~ ^[0-9]{1,2}:[0-9]{2}(:[0-9]{2})?$ ]] || die "clock: expected HH:MM, got $t"
+    [[ "$t" =~ ^[0-9]{1,2}:[0-9]{2}$ ]] && t="$t:00"
+    local off; off="$(offset_to "$(sim_day)" "$t")"
+    write_offset "$off"
+    show_clock
+}
+
+cmd_clock() {
+    [ $# -ge 1 ] || { show_clock; return; }
+    local arg="$1"
+    if [[ "$arg" =~ ^([+-])([0-9]+)([smhd]?)$ ]]; then
+        local n="${BASH_REMATCH[2]}" unit="${BASH_REMATCH[3]:-s}" mult=1
+        case "$unit" in m) mult=60 ;; h) mult=3600 ;; d) mult=86400 ;; esac
+        local delta=$(( n * mult ))
+        [ "${BASH_REMATCH[1]}" = "-" ] && delta=$(( -delta ))
+        write_offset $(( $(current_offset) + delta ))
+        show_clock
+    else
+        set_clock_hms "$arg"
+    fi
+}
+
+cmd_day() {
+    local d="${1:-}"
+    [[ "$d" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || die "day: expected YYYY-MM-DD"
+    local hms; hms="$(real_sh "TZ=$TZ_NY date -d @\$(( \$(date +%s) + $(current_offset) )) +%H:%M:%S")"
+    echo "$d" > "$DAY_FILE"
+    say "sim day $d"
+    set_clock_hms "$hms"
+}
+
+cmd_build() {
+    ensure_clock
+    compose --profile build build backend-base
+    compose build "$@"
+}
+
+cmd_up() {
+    ensure_clock
+    if [ -z "$(docker images -q algolens-sim/backend-base:local 2>/dev/null)" ]; then
+        compose --profile build build backend-base
+    fi
+    compose up -d --build
+    say "AlgoLens  http://localhost:8080   (qt@sim.local / vp@sim.local / president@sim.local, password sim)"
+    say "Mailpit   http://localhost:8025"
+    show_clock
+}
+
+stop_apps() { compose stop engine-rpc backend >/dev/null 2>&1 || true; }
+
+clear_engine_state() {
+    # The scheduler's alert and review records and stale flocks live in volumes.
+    compose run --rm --no-deps -T --entrypoint sh engine-rpc \
+        -c 'rm -rf /var/log/qt-engine/* /tmp/qt-locks/*' >/dev/null 2>&1 || true
+}
+
+clear_mail() {
+    if running mailpit; then
+        curl -fsS -X DELETE http://localhost:8025/api/v1/messages >/dev/null 2>&1 \
+            && say "Mailpit emptied" || true
+    fi
+}
+
+fix_sequences() {
+    psql_db "$DB" <<'SQL'
+DO $$
+DECLARE r record; m bigint;
+BEGIN
+    FOR r IN
+        SELECT s.oid::regclass AS seq, c.oid::regclass AS tbl, a.attname AS col
+        FROM pg_class s
+        JOIN pg_depend d ON d.objid = s.oid AND d.deptype IN ('a', 'i')
+        JOIN pg_class c ON c.oid = d.refobjid
+        JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum = d.refobjsubid
+        WHERE s.relkind = 'S'
+    LOOP
+        EXECUTE format('SELECT max(%I)::bigint FROM %s', r.col, r.tbl) INTO m;
+        PERFORM setval(r.seq, COALESCE(m, 0) + 1, false);
+    END LOOP;
+END $$;
+SQL
+}
+
+newest_qt_day() {
+    psql_db "$DB" -At -c "SELECT COALESCE(max(date)::text, '') FROM trading.positions WHERE portfolio_id = 'QT_CONSERVATIVE_PORTFOLIO'"
+}
+
+# Remove everything of the QT portfolios on and after <day>, so the real engine rebuilds it.
+drop_from_day() {
+    psql_db "$DB" -c "SELECT set_config('sim.day', '$1', false)" -f - >/dev/null <<'SQL'
+SET session_replication_role = replica;  -- position_overrides' guard triggers
+DO $$
+DECLARE t text; col text;
+BEGIN
+    FOREACH t IN ARRAY ARRAY['positions', 'executions', 'live_results', 'live_run_metadata',
+                             'position_overrides', 'signals', 'equity_curve']
+    LOOP
+        IF to_regclass('trading.' || t) IS NULL THEN CONTINUE; END IF;
+        col := CASE WHEN t = 'equity_curve'
+                    THEN '("timestamp" AT TIME ZONE ''America/New_York'')::date' ELSE 'date' END;
+        EXECUTE format(
+            'DELETE FROM trading.%I WHERE portfolio_id IN (''QT_CONSERVATIVE_PORTFOLIO'', '
+            '''QT_CONSERVATIVE_MODEL_PORTFOLIO'') AND %s >= %L::date',
+            t, col, current_setting('sim.day'));
+    END LOOP;
+END $$;
+SQL
+}
+
+cmd_load() {
+    local src="${1:-}"; shift || true
+    [ -n "$src" ] || die "load: give a snapshot directory (sim/data/...) or 'synthetic'"
+    local day="" keep=no
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --day) day="${2:-}"; shift 2 ;;
+            --keep) keep=yes; shift ;;
+            *) die "load: unknown option $1" ;;
+        esac
+    done
+    ensure_clock
+
+    local snap=""
+    if [ "$src" != synthetic ]; then
+        local abs; abs="$(cd "$src" 2>/dev/null && pwd)" || die "load: no directory $src"
+        case "$abs" in
+            "$SIM_DIR/data/"*) snap="${abs#"$SIM_DIR/data/"}" ;;
+            *) die "load: the snapshot must be under sim/data/ (mounted at /sim-data)" ;;
+        esac
+        [ -f "$abs/schema.sql.gz" ] || die "load: $abs has no schema.sql.gz"
+        if [ -f "$abs/server_version" ]; then
+            local major; major="$(cut -d. -f1 < "$abs/server_version" | tr -d '\r ')"
+            local want="${PG_IMAGE:-postgres:16}"; want="${want##*:}"; want="${want%%.*}"
+            [ "$major" = "$want" ] || say "WARNING: snapshot from Postgres $major, sim runs $want (set PG_IMAGE=postgres:$major and simctl build)"
+        fi
+    fi
+
+    local apps_were_up=no
+    running backend && apps_were_up=yes
+    stop_apps
+    wait_postgres
+
+    say "recreating $DB"
+    psql_db postgres -c "DROP DATABASE IF EXISTS $TEMPLATE WITH (FORCE)" \
+        -c "DROP DATABASE IF EXISTS $DB WITH (FORCE)" -c "CREATE DATABASE $DB"
+
+    if [ "$src" = synthetic ]; then
+        say "restoring the synthetic fixture (sim/seed/synthetic.sql)"
+        psql_db "$DB" -f /sim-seed/synthetic.sql >/dev/null
+    else
+        local d="/sim-data/$snap" errs=0
+        say "restoring the schema of $snap"
+        # Not ON_ERROR_STOP: objects the sim cannot create (an extension prod has) are reported
+        # and skipped.
+        compose exec -T postgres sh -c "gunzip -c $d/schema.sql.gz | psql -X -q -U postgres -d $DB" \
+            > /dev/null 2> "$SIM_DIR/data/$snap.load.log" || true
+        errs=$(grep -c ERROR "$SIM_DIR/data/$snap.load.log" || true)
+        say "restoring market data and metadata (data.sql.gz)"
+        compose exec -T postgres sh -c "gunzip -c $d/data.sql.gz | psql -X -q -U postgres -d $DB" \
+            > /dev/null 2>> "$SIM_DIR/data/$snap.load.log" || true
+        local f t
+        for f in "$SIM_DIR/data/$snap"/trading.*.csv.gz; do
+            [ -e "$f" ] || continue
+            t="$(basename "$f" .csv.gz)"
+            say "restoring $t (QT portfolios)"
+            compose exec -T postgres psql -X -q -U postgres -d "$DB" \
+                -c "SET session_replication_role = replica" \
+                -c "\\copy $t FROM PROGRAM 'gunzip -c $d/$t.csv.gz' WITH (FORMAT csv, HEADER true)" \
+                >/dev/null 2>> "$SIM_DIR/data/$snap.load.log" || true
+        done
+        errs=$(grep -c ERROR "$SIM_DIR/data/$snap.load.log" || true)
+        [ "$errs" = 0 ] || say "WARNING: $errs errors while restoring; see sim/data/$snap.load.log"
+        fix_sequences
+    fi
+
+    say "seeding the sim users (sim/seed/users.sql)"
+    psql_db "$DB" -f /sim-seed/users.sql >/dev/null
+
+    local newest; newest="$(newest_qt_day)"
+    # The sim day: --day, else the newest QT day of the data. From a snapshot (not --keep) that
+    # day's rows are removed so the real engine rebuilds it (simctl model-run, or the scheduler).
+    [ -n "$day" ] || day="$newest"
+    [ -n "$day" ] || day="$(date -u +%Y-%m-%d)"
+    if [ "$src" != synthetic ] && [ "$keep" = no ]; then
+        say "removing the QT portfolios' rows on and after $day (the engine rebuilds that day)"
+        drop_from_day "$day"
+    fi
+    echo "$day" > "$DAY_FILE"
+    say "sim day $day"
+    set_clock_hms 08:00
+
+    psql_db postgres -c "CREATE DATABASE $TEMPLATE TEMPLATE $DB"
+    say "saved as the template ($TEMPLATE); simctl reset returns here"
+    clear_engine_state
+    if [ "$apps_were_up" = yes ]; then compose up -d >/dev/null; fi
+}
+
+cmd_save() {
+    wait_postgres
+    local was_up=no; running engine-rpc && was_up=yes
+    stop_apps
+    psql_db postgres -c "DROP DATABASE IF EXISTS $TEMPLATE WITH (FORCE)" \
+        -c "CREATE DATABASE $TEMPLATE TEMPLATE $DB"
+    say "the current database is the template now"
+    [ "$was_up" = no ] || compose up -d >/dev/null
+}
+
+cmd_reset() {
+    wait_postgres
+    [ "$(psql_db postgres -At -c "SELECT count(*) FROM pg_database WHERE datname = '$TEMPLATE'")" = 1 ] \
+        || die "reset: no template; run simctl load first"
+    local was_up=no; running engine-rpc && was_up=yes
+    stop_apps
+    # Before the engine starts again: no pass may run at the old clock on the fresh database.
+    set_clock_hms 08:00
+    psql_db postgres -c "DROP DATABASE IF EXISTS $DB WITH (FORCE)" \
+        -c "CREATE DATABASE $DB TEMPLATE $TEMPLATE"
+    clear_engine_state
+    clear_mail
+    say "reset to the template"
+    [ "$was_up" = no ] || compose up -d >/dev/null
+}
+
+portfolio_id_of() {  # qt_conservative -> QT_CONSERVATIVE_PORTFOLIO
+    echo "$(echo "$1" | tr '[:lower:]' '[:upper:]')_PORTFOLIO"
+}
+
+cmd_model_run() {
+    local dir="${1:-qt_conservative}" day; day="$(sim_day)"
+    local pid; pid="$(portfolio_id_of "$dir")"
+    running engine-rpc || die "engine-rpc is not running (simctl up)"
+    say "model run of $pid ($dir) for $day, under its flock, as the scheduler runs it"
+    compose exec -T -w /app engine-rpc flock "/tmp/qt-locks/$pid.lock" \
+        /app/build/bin/Release/live_portfolio_conservative --portfolio-config "$dir" --date "$day"
+}
+
+cmd_pass() {
+    running engine-rpc || die "engine-rpc is not running (simctl up)"
+    compose exec -T -w /opt/rpc/app engine-rpc /opt/rpc/venv/bin/python \
+        -m algogators_rpc.services.desk.catchup run-once || true
+}
+
+cmd_status() {
+    show_clock
+    say "sim day $(sim_day)"
+    echo "--- clocks inside the containers"
+    local s
+    for s in postgres engine-rpc backend; do
+        if running "$s"; then
+            printf '%-11s %s\n' "$s" "$(compose exec -T "$s" date -u '+%Y-%m-%d %H:%M:%S UTC')"
+        else
+            printf '%-11s (not running)\n' "$s"
+        fi
+    done
+    if running postgres; then
+        printf '%-11s %s\n' "now()" "$(psql_db "$DB" -At -c "SELECT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS') || ' UTC = ' || to_char(now() AT TIME ZONE 'America/New_York', 'HH24:MI:SS') || ' New York'" 2>/dev/null || echo '?')"
+        echo "--- publish state of $(sim_day)"
+        psql_db "$DB" -P pager=off -c "
+            SELECT portfolio_id, date, published_by,
+                   to_char(published_at AT TIME ZONE 'America/New_York', 'HH24:MI:SS') AS published_ny,
+                   publish_source,
+                   to_char(sent_at AT TIME ZONE 'America/New_York', 'HH24:MI:SS') AS sent_ny,
+                   to_char(created_at AT TIME ZONE 'America/New_York', 'HH24:MI:SS') AS built_ny
+            FROM trading.live_run_metadata
+            WHERE portfolio_id LIKE 'QT\\_%' AND date = '$(sim_day)'
+            ORDER BY portfolio_id, id" 2>/dev/null || true
+        echo "--- latest desk commands (trading.position_overrides)"
+        psql_db "$DB" -P pager=off -c "
+            SELECT id, date, kind, status, requested_by, approver_role,
+                   to_char(created_at AT TIME ZONE 'America/New_York', 'MM-DD HH24:MI:SS') AS created_ny,
+                   to_char(finished_at AT TIME ZONE 'America/New_York', 'HH24:MI:SS') AS finished_ny,
+                   left(coalesce(message, ''), 60) AS message
+            FROM trading.position_overrides
+            WHERE portfolio_id LIKE 'QT\\_%'
+            ORDER BY id DESC LIMIT 10" 2>/dev/null || true
+    fi
+    echo "--- mail: http://localhost:8025"
+}
+
+cmd_logs() {
+    if [ $# -eq 0 ]; then set -- engine-rpc backend; fi
+    compose logs -f --tail=100 "$@"
+}
+
+main() {
+    local cmd="${1:-help}"; shift || true
+    case "$cmd" in
+        build) cmd_build "$@" ;;
+        up) cmd_up ;;
+        down) compose down ;;
+        destroy) compose down -v ;;
+        load) cmd_load "$@" ;;
+        reset) cmd_reset ;;
+        save) cmd_save ;;
+        clock) cmd_clock "$@" ;;
+        day) cmd_day "$@" ;;
+        model-run) cmd_model_run "$@" ;;
+        pass) cmd_pass ;;
+        status) cmd_status ;;
+        mail) echo "Mailpit: http://localhost:8025" ;;
+        logs) cmd_logs "$@" ;;
+        psql) compose exec postgres psql -U postgres -d "$DB" "$@" ;;
+        compose) compose "$@" ;;
+        help|-h|--help) sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//' ;;
+        *) die "unknown command $cmd (simctl help)" ;;
+    esac
+}
+
+main "$@"

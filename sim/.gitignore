@@ -1,0 +1,5 @@
+# Prod snapshots (snapshot.sh) and the clock state are local only.
+/data/*
+!/data/.gitkeep
+/clock/faketime.rc
+/clock/day

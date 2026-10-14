@@ -7,6 +7,7 @@ import { QtHome } from './components/qt/QtHome';
 import { InvestorHome } from './components/investor/InvestorHome';
 import { AdminHome } from './components/admin/AdminHome';
 import { ScreenFrame } from './components/ScreenFrame';
+import { SimBanner } from './components/SimBanner';
 import { AccessPending } from './components/AccessPending';
 import { ThemeProvider, useTheme } from './adapters/react/ThemeContext';
 import { AuthProvider, useAuth } from './adapters/react/AuthContext';
@@ -93,6 +94,7 @@ export default function App() {
         <ScreenProvider>
           <AppContent />
         </ScreenProvider>
+        <SimBanner />
       </AuthProvider>
     </ThemeProvider>
   );

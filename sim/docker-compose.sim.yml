@@ -1,0 +1,177 @@
+# The QT desk simulator: real AlgoLens, the real engine (engine-rpc) and Postgres, all on one
+# clock you can move. Local only. See sim/README.md; drive it with sim/simctl.
+#
+#   http://localhost:8080   AlgoLens (edge nginx with the production routes)
+#   http://localhost:8025   Mailpit (every e-mail the engine and the desk service send)
+#   localhost:55432         Postgres (user postgres, password sim, database new_algo_data)
+#
+# The clock: libfaketime is preloaded in postgres, engine-rpc and backend. All three read
+# sim/clock/faketime.rc (bind-mounted at /sim-clock), which holds one offset in seconds from real
+# time ("+63000"). simctl writes it; every process picks a change up within a second.
+name: algolens-sim
+
+x-faketime: &faketime
+  LD_PRELOAD: /usr/lib/x86_64-linux-gnu/faketime/libfaketime.so.1
+  FAKETIME_TIMESTAMP_FILE: /sim-clock/faketime.rc
+  # Re-read the file at most once a second (FAKETIME_NO_CACHE=1 re-reads it on every call).
+  FAKETIME_CACHE_DURATION: "1"
+  # Without it a child process started by another user (postgres via gosu) blocks on the
+  # parent's semaphore and hangs.
+  FAKETIME_DISABLE_SHM: "1"
+  # Timers and timeouts (gRPC, gunicorn, postgres) keep real monotonic time, so a clock jump
+  # backwards never stalls them.
+  FAKETIME_DONT_FAKE_MONOTONIC: "1"
+  FAKETIME_DONT_RESET: "1"
+
+x-db-env: &db-env
+  DB_HOST: postgres
+  DB_PORT: "5432"
+  DB_USER: postgres
+  DB_PASSWORD: sim
+  DB_NAME: new_algo_data
+
+x-qt-approvers: &qt-approvers "vp=vp@sim.local,president=president@sim.local"
+
+services:
+  postgres:
+    build:
+      context: ./postgres
+      args:
+        PG_IMAGE: ${PG_IMAGE:-postgres:16}
+    image: algolens-sim/postgres:local
+    environment:
+      <<: *faketime
+      POSTGRES_PASSWORD: sim
+      POSTGRES_DB: new_algo_data
+    ports:
+      - "127.0.0.1:55432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./clock:/sim-clock:ro
+      - ./data:/sim-data:ro
+      - ./seed:/sim-seed:ro
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  mailpit:
+    image: axllent/mailpit:v1.27
+    environment:
+      # The engine's C++ mailer always asks for STARTTLS and logs in, and the desk service's
+      # Python mailer logs in: a throwaway self-signed certificate and any login are accepted.
+      MP_SMTP_TLS_CERT: sans:mailpit
+      MP_SMTP_TLS_KEY: sans:mailpit
+      MP_SMTP_AUTH_ACCEPT_ANY: "true"
+      MP_SMTP_AUTH_ALLOW_INSECURE: "true"
+    ports:
+      - "127.0.0.1:8025:8025"
+      - "127.0.0.1:1025:1025"
+
+  engine-rpc:
+    build:
+      context: ./engine
+      args:
+        ENGINE_IMAGE: ${ENGINE_IMAGE:-trade-ngin:rpc-0b9dbf6e}
+    image: algolens-sim/engine-rpc:local
+    command: rpc
+    init: true
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mailpit:
+        condition: service_started
+    environment:
+      <<: [*faketime, *db-env]
+      QT_APPROVERS: *qt-approvers
+      QT_CATCHUP_ENABLED: ${QT_CATCHUP_ENABLED:-1}
+      # Config directory names under /app/config/portfolios (the scheduler's unit), not ids:
+      # qt_conservative is QT_CONSERVATIVE_PORTFOLIO.
+      QT_CATCHUP_PORTFOLIOS: ${QT_CATCHUP_PORTFOLIOS:-qt_conservative}
+      QT_EVENING_RUN: ${QT_EVENING_RUN:-0}
+      QT_APPROVE_URL_BASE: http://localhost:8080/qt/approve
+      QT_DESK_URL: http://localhost:8080
+      QT_REVIEW_RECIPIENTS: desk@sim.local
+      QT_LOG_DIR: /var/log/qt-engine
+    volumes:
+      - ./clock:/sim-clock:ro
+      - qt-locks:/tmp/qt-locks
+      - qt-logs:/var/log/qt-engine
+    networks:
+      default:
+        aliases: [desk-agent]
+    healthcheck:
+      test: ["CMD", "sh", "-c", "cd /opt/rpc/app && exec /opt/rpc/venv/bin/python -m algogators_rpc.healthcheck"]
+      interval: 30s
+      timeout: 10s
+      start_period: 20s
+      retries: 3
+
+  # AlgoLens backend as CI builds it (algolens-api/Dockerfile of the checked-out branch), then
+  # libfaketime on top (sim/backend/Dockerfile). Rebuild after a checkout: simctl build.
+  backend-base:
+    build:
+      context: ../algolens-api
+    image: algolens-sim/backend-base:local
+    profiles: ["build"]
+
+  backend:
+    build:
+      context: ./backend
+      args:
+        BASE_IMAGE: algolens-sim/backend-base:local
+    image: algolens-sim/backend:local
+    command:
+      - gunicorn
+      - --bind=0.0.0.0:5000
+      - --workers=2
+      - --threads=2
+      - --timeout=60
+      - wsgi:app
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      <<: [*faketime, *db-env]
+      # Production settings (CORS allow-list, JWT secret required, Secure cookies). Browsers
+      # accept Secure cookies on http://localhost; set SIM_FLASK_ENV=development otherwise.
+      FLASK_ENV: ${SIM_FLASK_ENV:-production}
+      CORS_ORIGINS: http://localhost:8080
+      JWT_SECRET_KEY: sim-only-jwt-secret-not-for-production-0000
+      QT_DESK_ENABLED: "1"
+      QT_APPROVERS: *qt-approvers
+      ENGINE_RPC_ADDR: engine-rpc:50051
+      SIM_MODE: "1"
+    volumes:
+      - ./clock:/sim-clock:ro
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "--max-time", "5", "http://localhost:5000/health/live"]
+      interval: 15s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+  frontend:
+    build:
+      context: ../algolens-frontend
+      args:
+        VITE_API_URL: http://localhost:8080
+    image: algolens-sim/frontend:local
+
+  # The production edge routes (deployment/edge-routes.conf) behind plain HTTP on :8080.
+  edge:
+    image: nginx:1.27-alpine
+    depends_on:
+      - backend
+      - frontend
+    ports:
+      - "127.0.0.1:8080:80"
+    volumes:
+      - ./edge/edge.conf:/etc/nginx/conf.d/default.conf:ro
+      - ../deployment/edge-routes.conf:/etc/nginx/snippets/edge-routes.conf:ro
+
+volumes:
+  pgdata:
+  qt-locks:
+  qt-logs:

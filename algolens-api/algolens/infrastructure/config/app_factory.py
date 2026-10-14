@@ -16,6 +16,7 @@ from algolens.adapters.http.api import api_bp
 from algolens.adapters.http.auth import auth_bp
 from algolens.adapters.http.desk import desk_bp
 from algolens.adapters.http.portfolio import portfolio_bp
+from algolens.adapters.http.sim import sim_bp, sim_mode_enabled
 from algolens.infrastructure.db.postgres import get_db_connection
 from extensions import limiter
 
@@ -205,6 +206,10 @@ def create_app():
     app.register_blueprint(portfolio_bp, url_prefix="/portfolio")
     app.register_blueprint(desk_bp, url_prefix="/portfolio/desk")
     app.register_blueprint(api_bp, url_prefix="/api")
+    if sim_mode_enabled():
+        # Local simulator only (sim/): the banner's clock. Absent otherwise.
+        app.logger.warning("[SIM_MODE] SIM_MODE=1: GET /api/sim is on (simulator)")
+        app.register_blueprint(sim_bp, url_prefix="/api/sim")
 
     @app.route("/health/live", methods=["GET"])
     def liveness_check():
