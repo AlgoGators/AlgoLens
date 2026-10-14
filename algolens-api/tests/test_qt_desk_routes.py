@@ -10,7 +10,7 @@ import algolens.application.qt.use_cases as use_cases
 from algolens.domain.qt.desk import token_hash
 from algolens.infrastructure.config.qt import load_qt_settings
 from app import app
-from test_qt_desk_use_cases import NOW, FakeAgent, FakeRepo
+from test_qt_desk_use_cases import NOW, FakeAgent, FakeRepo, risk_report
 
 REGISTRY = {
     "QT_CONSERVATIVE_PORTFOLIO": {
@@ -162,6 +162,27 @@ def test_publish_and_state(client, desk):
     assert client.post("/portfolio/desk/QT_CONSERVATIVE_PORTFOLIO/publish", json={}, headers=headers).status_code == 409
     state = client.get("/portfolio/desk/QT_CONSERVATIVE_PORTFOLIO").get_json()
     assert state["publish"]["kind"] == "publish"
+    assert state["risk"]["state"] == "model"
+
+
+def test_publish_outside_the_risk_limits_is_409_with_the_reason(client, desk):
+    repo, agent = desk
+    agent.risk = risk_report("desk", audit_id=0, within_limits=False, breaches=["L_g"])
+    headers = _login(client)
+    response = client.post("/portfolio/desk/QT_CONSERVATIVE_PORTFOLIO/publish", json={}, headers=headers)
+    assert response.status_code == 409
+    assert response.get_json() == {
+        "error": "The 2026-10-08 positions breach risk limits (L_g): save within the limits or "
+        "request an override"
+    }
+    assert repo.rows == []
+
+    agent.risk_down = "UNAVAILABLE"
+    response = client.post("/portfolio/desk/QT_CONSERVATIVE_PORTFOLIO/publish", json={}, headers=headers)
+    assert response.status_code == 409
+    assert response.get_json()["error"] == "The risk check is unavailable (UNAVAILABLE); try again"
+    state = client.get("/portfolio/desk/QT_CONSERVATIVE_PORTFOLIO").get_json()
+    assert state["risk"] == {"unavailable": "UNAVAILABLE"}
 
 
 def _request_with_token(client, desk, requested_by="desk@x.com"):
@@ -188,6 +209,7 @@ def test_approval_flow_for_an_approver(client, desk):
     body = page.get_json()
     assert body["request"]["id"] == request["id"]
     assert body["viewer"] == {"email": "P@x.com", "approver_role": "president", "is_requester": False}
+    assert body["risk"]["state"] == "model"
 
     decided = client.post(
         "/portfolio/desk/approval/decide",

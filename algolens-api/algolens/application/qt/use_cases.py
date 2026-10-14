@@ -20,6 +20,7 @@ from algolens.application.qt.ports import (
     DeskNotFound,
     DeskNotSeeded,
     DeskRepositoryPort,
+    DeskRiskUnavailable,
 )
 from algolens.domain.portfolio.registry import desk_edit_allowed
 from algolens.domain.qt.cutoff import (
@@ -31,6 +32,7 @@ from algolens.domain.qt.cutoff import (
     rescind_closed_message,
 )
 from algolens.domain.qt.desk import (
+    DONE,
     OPEN_STATUSES,
     OVERRIDE_DECISION,
     OVERRIDE_REQUEST,
@@ -164,11 +166,57 @@ def _refuse_after_cutoff(
     raise DeskConflict(closed_message(day, action))
 
 
+def _desk_risk(agent: DeskAgentPort, portfolio_id: str, day) -> dict[str, Any]:
+    """The engine's risk report of the day's qt book (contract C9), or
+    {"unavailable": <reason>} when it cannot be read."""
+    try:
+        return agent.get_desk_risk(portfolio_id, day)
+    except DeskRiskUnavailable as exc:
+        return {"unavailable": exc.reason}
+
+
+def _refuse_outside_risk_limits(
+    repo: DeskRepositoryPort, agent: DeskAgentPort, portfolio_id: str, day
+) -> None:
+    """C9: the desk may not approve positions that breach a risk limit. Refuse
+    (409) while a save is still running, while the report cannot be read (fail
+    closed), while it is not yet the report of the latest done save, and while
+    it says the desk's positions are outside the limits with no approved
+    override. The model's book, no book and an approved override pass. A
+    published day is left to the repository's refusal (C3)."""
+    if _published_record(repo, portfolio_id, day):
+        return
+    saves = [c for c in repo.commands(portfolio_id, day) if c["kind"] == SAVE]
+    running = next((c for c in reversed(saves) if c["status"] in OPEN_STATUSES), None)
+    if running is not None:
+        raise DeskConflict(
+            f"A save is still running (#{running['id']}); approve once it has finished"
+        )
+    risk = _desk_risk(agent, portfolio_id, day)
+    if "unavailable" in risk:
+        raise DeskConflict(f"The risk check is unavailable ({risk['unavailable']}); try again")
+    if risk.get("state") != "desk":
+        return
+    done = [c for c in saves if c["status"] == DONE]
+    if done and int(done[-1]["id"]) != int(risk.get("auditId") or 0):
+        raise DeskConflict(
+            f"The risk check has not caught up with save #{done[-1]['id']}; try again"
+        )
+    if not risk.get("withinLimits") and not risk.get("approvedOverride"):
+        terms = ", ".join(dict.fromkeys(b["term"] for b in risk.get("breaches") or ()))
+        raise DeskConflict(
+            f"The {day.isoformat()} positions breach risk limits"
+            + (f" ({terms})" if terms else "")
+            + ": save within the limits or request an override"
+        )
+
+
 class GetDeskState:
     """Everything the desk page shows for one portfolio's book date."""
 
-    def __init__(self, repo: DeskRepositoryPort, now=None):
+    def __init__(self, repo: DeskRepositoryPort, agent: DeskAgentPort, now=None):
         self.repo = repo
+        self.agent = agent
         self.now = now or _utcnow
 
     def execute(self, entry: Mapping[str, Any]) -> dict[str, Any]:
@@ -199,6 +247,9 @@ class GetDeskState:
             # "published" (C3) or "publishing" (a publish is pending/running).
             "locked": None,
             "openOverrideRequestId": None,
+            # The engine's risk report of the day's qt book (C9), or
+            # {"unavailable": reason}; None before the first book.
+            "risk": None,
         }
         if day is None:
             return state
@@ -239,6 +290,7 @@ class GetDeskState:
                 "published": published,
                 "locked": "published" if published else "publishing" if publishing else None,
                 "openOverrideRequestId": open_request["id"] if open_request else None,
+                "risk": _desk_risk(self.agent, portfolio_id, day),
             }
         )
         return state
@@ -342,10 +394,12 @@ def _request_for_token(repo: DeskRepositoryPort, token: Any, now: datetime):
 class LookupApproval:
     """The approval page: the request with the book it snapshotted (C1), and
     the model book (system) next to the desk's request (qt_proposal) and the
-    current qt book."""
+    current qt book, and the engine's risk report of the day (C9) so the
+    approvers see what the override waives."""
 
-    def __init__(self, repo: DeskRepositoryPort, now=None):
+    def __init__(self, repo: DeskRepositoryPort, agent: DeskAgentPort, now=None):
         self.repo = repo
+        self.agent = agent
         self.now = now or _utcnow
 
     def execute(self, token: Any) -> dict[str, Any]:
@@ -379,6 +433,7 @@ class LookupApproval:
             and current is not None
             and request_matches(request, current),
             "published": published,
+            "risk": _desk_risk(self.agent, portfolio_id, day),
             # The desk approves the day by 09:30 New York; from 10:00 the
             # model's book is sent and this request can no longer be decided.
             "serverTime": now.astimezone(timezone.utc).isoformat(),
@@ -431,7 +486,8 @@ class PublishDesk:
     """The desk's approval of the day (the UI's Approve; command kind
     'publish'). Before 09:30 New York the engine only freezes the day and
     e-mails it at 09:30; from 09:30 to 10:00 it also e-mails at once; from
-    10:00 it is refused here (409) and by the engine."""
+    10:00 it is refused here (409) and by the engine. Positions outside the
+    risk limits are refused here until an override is approved (C9)."""
 
     def __init__(self, repo: DeskRepositoryPort, agent: DeskAgentPort, now=None):
         self.repo = repo
@@ -443,6 +499,7 @@ class PublishDesk:
         portfolio_id = entry["portfolio_id"]
         day = _desk_day(self.repo, portfolio_id)
         _refuse_after_cutoff(self.repo, portfolio_id, day, self.now(), "Approval")
+        _refuse_outside_risk_limits(self.repo, self.agent, portfolio_id, day)
         # Published (C3) and publish-already-open are refused under the day lock.
         command = self.repo.insert_publish(portfolio_id, day, requested_by)
         outcome = self.agent.publish(command)

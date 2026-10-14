@@ -97,7 +97,59 @@ export interface DeskState {
   locked?: 'published' | 'publishing' | null;
   /** The day's override request still in play (C2), if any. */
   openOverrideRequestId?: number | null;
+  /** The engine's risk check of the day's qt book (C9); null before the first book. */
+  risk?: DeskRiskResult | null;
 }
+
+/** Which run wrote the day's qt book (desk.proto DeskRiskState). */
+export type DeskRiskState = 'no_book' | 'model' | 'desk' | 'override' | 'unspecified';
+
+export interface RiskBreach {
+  /** An overlay term (R, R_jump, R_shock, L_g, L_n, CAP), a step (cap, overlay, clip, trim) or "refused". */
+  term: string;
+  detail: string;
+}
+
+export interface SymbolRisk {
+  symbol: string;
+  asked: number;
+  given: number;
+  movedBy: string;
+  /** "risk" (a breach), "rule" (a trading rule: reported, not a breach) or "none". */
+  category: string;
+}
+
+/** The engine's risk report of the day's qt book (GetDeskRisk, contract C9). */
+export interface DeskRisk {
+  state: DeskRiskState;
+  /** The desk save (or override decision) the report belongs to; 0 on the model's book. */
+  auditId: number;
+  withinLimits: boolean;
+  /** An approved override: the ask trades as asked, the breaches are waived. */
+  approvedOverride: boolean;
+  breaches: RiskBreach[];
+  /** The overlay's multiplier (1: no cut) and the term that bound ("none"). */
+  m: number;
+  bindingTerm: string;
+  overLimitAfterRounding: string;
+  overLimitByHold: string;
+  refused: boolean;
+  symbols: SymbolRisk[];
+  /** Readings of the stored qt book; null when not recorded. */
+  grossLeverage: number | null;
+  netLeverage: number | null;
+  marginCushion: number | null;
+  equityToMargin: number | null;
+  /** The portfolio's configured limits (risk.json). */
+  limits: { name: string; value: number }[];
+}
+
+/** The risk check could not be read (the engine is down): approval is refused. */
+export interface DeskRiskUnavailable {
+  unavailable: string;
+}
+
+export type DeskRiskResult = DeskRisk | DeskRiskUnavailable;
 
 /** One row of the book an override request snapshotted (C1). */
 export interface SnapshotRow {
@@ -518,10 +570,130 @@ export function deskDayStatus(state: DeskState, nowMs: number): DayStatus {
   );
 }
 
+export function riskUnavailable(risk: DeskRiskResult | null | undefined): risk is DeskRiskUnavailable {
+  return !!risk && 'unavailable' in risk;
+}
+
+/** Whether the desk's positions breach a risk limit with no approved override (C9). */
+export function riskBreached(risk: DeskRiskResult | null | undefined): risk is DeskRisk {
+  return !!risk && !riskUnavailable(risk) && risk.state === 'desk' && !risk.withinLimits && !risk.approvedOverride;
+}
+
+/**
+ * Why the risk check blocks Approve, or null (C9). The model's book, no book,
+ * an approved override and positions within the limits pass; a breach, or a
+ * check that cannot be read, block. The server refuses the same (409).
+ */
+export function riskBreachReason(risk: DeskRiskResult | null | undefined): string | null {
+  if (!risk) return null;
+  if (riskUnavailable(risk)) return `The risk check is unavailable: ${risk.unavailable}`;
+  if (!riskBreached(risk)) return null;
+  const terms = [...new Set(risk.breaches.map(b => b.term))];
+  return `The positions breach risk limits${terms.length ? ` (${terms.join(', ')})` : ''}: save within the limits or request an override`;
+}
+
+/** What each overlay term limits, for the report. */
+const RISK_TERMS: Record<string, string> = {
+  R: 'Portfolio risk',
+  R_jump: 'Jump risk',
+  R_shock: 'Shock risk',
+  L_g: 'Gross leverage',
+  L_n: 'Net leverage',
+  CAP: 'Per-name cap',
+};
+
+export function riskTermLabel(term: string): string {
+  return RISK_TERMS[term] ?? term;
+}
+
+export type RiskBadgeTone = 'ok' | 'breach' | 'waived' | 'muted';
+
+/** The risk report's headline. */
+export function riskBadge(risk: DeskRiskResult): { tone: RiskBadgeTone; label: string } {
+  if (riskUnavailable(risk)) return { tone: 'muted', label: `Risk check unavailable (${risk.unavailable})` };
+  if (risk.state === 'model') return { tone: 'ok', label: 'Model book — within limits' };
+  if (risk.state === 'no_book') return { tone: 'muted', label: 'No book for the day yet' };
+  if (risk.state === 'override' || risk.approvedOverride) {
+    return { tone: 'waived', label: 'Override approved — breaches waived' };
+  }
+  return risk.withinLimits
+    ? { tone: 'ok', label: 'Within risk limits' }
+    : { tone: 'breach', label: 'Outside risk limits — override required' };
+}
+
+/** "Gross leverage bound: positions cut to 80%", or null when the overlay did not cut the book. */
+export function riskBindingLine(risk: DeskRisk): string | null {
+  if (!risk.bindingTerm || risk.bindingTerm === 'none' || !(risk.m < 1)) return null;
+  return `${riskTermLabel(risk.bindingTerm)} bound: positions cut to ${Math.round(risk.m * 100)}%`;
+}
+
+export type RiskValueFormat = 'leverage' | 'percent' | 'ratio' | 'number';
+
+export interface RiskReadingRow {
+  label: string;
+  /** The stored qt book's reading; null when not recorded or not a reading. */
+  reading: number | null;
+  /** The configured limit; null when none applies. */
+  limit: number | null;
+  format: RiskValueFormat;
+  over: boolean;
+}
+
+/**
+ * The configured limits next to the stored book's readings: gross and net
+ * leverage against max_gross_leverage and max_net_leverage, then the margin
+ * cushion and equity/margin (readings without a limit), then every other
+ * configured limit (no reading of its own).
+ */
+export function riskReadings(risk: DeskRisk): RiskReadingRow[] {
+  const limits = new Map(risk.limits.map(l => [l.name, l.value]));
+  const row = (label: string, reading: number | null, limit: number | null, format: RiskValueFormat) => ({
+    label,
+    reading,
+    limit,
+    format,
+    over: reading !== null && limit !== null && Math.abs(reading) > limit + 1e-9,
+  });
+  const rows: RiskReadingRow[] = [
+    row('Gross leverage', risk.grossLeverage, limits.get('max_gross_leverage') ?? null, 'leverage'),
+    row('Net leverage', risk.netLeverage, limits.get('max_net_leverage') ?? null, 'leverage'),
+    row('Margin cushion', risk.marginCushion, null, 'percent'),
+    row('Equity / margin', risk.equityToMargin, null, 'ratio'),
+  ];
+  for (const limit of risk.limits) {
+    if (limit.name === 'max_gross_leverage' || limit.name === 'max_net_leverage') continue;
+    rows.push(row(limit.name, null, limit.value, 'number'));
+  }
+  return rows;
+}
+
+export function formatRiskValue(value: number | null, format: RiskValueFormat): string {
+  if (value === null || !Number.isFinite(value)) return '-';
+  switch (format) {
+    case 'leverage':
+    case 'ratio':
+      return `${value.toFixed(2)}x`;
+    case 'percent':
+      return `${(value * 100).toFixed(1)}%`;
+    default:
+      return String(Number(value.toPrecision(4)));
+  }
+}
+
+/** The symbols a step moved (moved_by not "none"), risk steps first. */
+export function riskMovedSymbols(risk: DeskRisk): SymbolRisk[] {
+  const order = (s: SymbolRisk) => (s.category === 'risk' ? 0 : 1);
+  return risk.symbols
+    .filter(s => s.movedBy && s.movedBy !== 'none')
+    .sort((a, b) => order(a) - order(b) || a.symbol.localeCompare(b.symbol));
+}
+
 /**
  * Why Approve is closed, or null. Approval is open every day, edited or
  * not, until 10:00 New York (server time `nowMs`; without it, the server's
- * view when it answered), unless the day is published or one is in progress.
+ * view when it answered), unless the day is published or one is in progress,
+ * or the risk check blocks it (C9: a breach without an approved override, or
+ * a check that cannot be read).
  */
 export function approveBlockedReason(state: DeskState, nowMs?: number): string | null {
   if (!state.date) return 'No book for today yet';
@@ -531,7 +703,7 @@ export function approveBlockedReason(state: DeskState, nowMs?: number): string |
     return `Approval of the ${state.date} book closed at 10:00 New York; the model's book is sent instead`;
   }
   if (!state.seeded) return 'The proposal is not seeded yet';
-  return null;
+  return riskBreachReason(state.risk);
 }
 
 /** Whether the day's rescind is pending or running. */

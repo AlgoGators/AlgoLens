@@ -153,8 +153,8 @@ def _approver_role(user):
 @desk_user
 @handled
 def desk_state(portfolio_id):
-    repo, _agent, _settings = _desk_dependencies()
-    return jsonify(GetDeskState(repo).execute(_portfolio(portfolio_id))), 200
+    repo, agent, _settings = _desk_dependencies()
+    return jsonify(GetDeskState(repo, agent).execute(_portfolio(portfolio_id))), 200
 
 
 @desk_bp.route("/<portfolio_id>/symbols", methods=["GET"])
@@ -256,8 +256,8 @@ def approval_lookup():
     role = _approver_role(user)
     if role is None and not can_use_qt_desk():
         return jsonify({"error": "Insufficient permissions"}), 403
-    repo, _agent, _settings = _desk_dependencies()
-    result = LookupApproval(repo).execute(_body().get("token"))
+    repo, agent, _settings = _desk_dependencies()
+    result = LookupApproval(repo, agent).execute(_body().get("token"))
     result["viewer"] = {
         "email": user["email"],
         "approver_role": role,

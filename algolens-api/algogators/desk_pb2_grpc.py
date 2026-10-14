@@ -39,6 +39,9 @@ class DeskServiceStub:
     after 10:00 (or on a published day) it is refused. No field changed.
     1.2.0  2026-10-13  Rescind (contract C8): the desk takes back its own approval before the
     09:30 send. New RPC and message only; no field changed.
+    1.3.0  2026-10-14  GetDeskRisk (contract C9): the risk report of the day's qt book and
+    whether the desk's positions breach a risk limit. New RPC and messages
+    only; no field changed.
 
     """
 
@@ -78,6 +81,11 @@ class DeskServiceStub:
                 request_serializer=algogators_dot_desk__pb2.RunStatusRequest.SerializeToString,
                 response_deserializer=algogators_dot_desk__pb2.RunStatus.FromString,
                 _registered_method=True)
+        self.GetDeskRisk = channel.unary_unary(
+                '/algogators.desk.DeskService/GetDeskRisk',
+                request_serializer=algogators_dot_desk__pb2.DeskRiskRequest.SerializeToString,
+                response_deserializer=algogators_dot_desk__pb2.DeskRisk.FromString,
+                _registered_method=True)
 
 
 class DeskServiceServicer:
@@ -94,6 +102,9 @@ class DeskServiceServicer:
     after 10:00 (or on a published day) it is refused. No field changed.
     1.2.0  2026-10-13  Rescind (contract C8): the desk takes back its own approval before the
     09:30 send. New RPC and message only; no field changed.
+    1.3.0  2026-10-14  GetDeskRisk (contract C9): the risk report of the day's qt book and
+    whether the desk's positions breach a risk limit. New RPC and messages
+    only; no field changed.
 
     """
 
@@ -155,6 +166,19 @@ class DeskServiceServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def GetDeskRisk(self, request, context):
+        """Since 1.3.0 (contract C9). The risk report of the day's qt book: what the engine's last run of
+        it (the model run, a desk save, an approved override) recorded in trading.live_results
+        risk_detail, the configured limits, and whether the desk's positions breach a risk limit (a
+        symbol moved by cap, overlay, clip or trim; the overlay cutting the book; the book still over
+        a limit). Trading rules (sign_close, rounding, buffer, search, hold) are reported, not
+        breaches. Read-only. AlgoLens refuses the desk's approval while within_limits is false and no
+        override was approved.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_DeskServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -188,6 +212,11 @@ def add_DeskServiceServicer_to_server(servicer, server):
                     request_deserializer=algogators_dot_desk__pb2.RunStatusRequest.FromString,
                     response_serializer=algogators_dot_desk__pb2.RunStatus.SerializeToString,
             ),
+            'GetDeskRisk': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetDeskRisk,
+                    request_deserializer=algogators_dot_desk__pb2.DeskRiskRequest.FromString,
+                    response_serializer=algogators_dot_desk__pb2.DeskRisk.SerializeToString,
+            ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
             'algogators.desk.DeskService', rpc_method_handlers)
@@ -210,6 +239,9 @@ class DeskService:
     after 10:00 (or on a published day) it is refused. No field changed.
     1.2.0  2026-10-13  Rescind (contract C8): the desk takes back its own approval before the
     09:30 send. New RPC and message only; no field changed.
+    1.3.0  2026-10-14  GetDeskRisk (contract C9): the risk report of the day's qt book and
+    whether the desk's positions breach a risk limit. New RPC and messages
+    only; no field changed.
 
     """
 
@@ -365,6 +397,33 @@ class DeskService:
             '/algogators.desk.DeskService/GetRunStatus',
             algogators_dot_desk__pb2.RunStatusRequest.SerializeToString,
             algogators_dot_desk__pb2.RunStatus.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetDeskRisk(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/algogators.desk.DeskService/GetDeskRisk',
+            algogators_dot_desk__pb2.DeskRiskRequest.SerializeToString,
+            algogators_dot_desk__pb2.DeskRisk.FromString,
             options,
             channel_credentials,
             insecure,
