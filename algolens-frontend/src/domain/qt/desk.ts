@@ -169,7 +169,7 @@ export interface RiskCheck {
   /** The limit in force, in the value's unit; null when none applies. */
   max: number | null;
   /** 'percent' (a fraction), 'multiple' (of the sizing capital), 'contracts',
-   * or 'tau' (a multiple of the risk target). */
+   * 'tau' (a multiple of the risk target) or 'usd' (dollars: the fund's cap, C11). */
   unit: string;
   status: RiskCheckStatus;
   detail: string;
@@ -666,6 +666,8 @@ export function formatCheckValue(value: number | null, unit: string): string {
       return String(Math.round(value));
     case 'tau':
       return `${Number(value.toPrecision(4))}x risk target`;
+    case 'usd':
+      return `$${Math.round(value).toLocaleString('en-US')}`;
     default:
       return String(Number(value.toPrecision(4)));
   }

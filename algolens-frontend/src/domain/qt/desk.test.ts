@@ -669,6 +669,7 @@ describe('the risk check (C9)', () => {
     expect(formatCheckValue(3.79, 'multiple')).toBe('3.79x');
     expect(formatCheckValue(5, 'contracts')).toBe('5');
     expect(formatCheckValue(2.25, 'tau')).toBe('2.25x risk target');
+    expect(formatCheckValue(82945.4, 'usd')).toBe('$82,945');
     expect(formatCheckValue(null, 'percent')).toBe('-');
     expect(bookReadings(risk({ marginCushion: 0.42, equityToMargin: 3.1 }))).toEqual([
       { label: 'Margin cushion', value: '42.0%' },
