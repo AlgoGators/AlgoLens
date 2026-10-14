@@ -235,6 +235,12 @@ class NullAgent:
     def record_decision(self, decision, token):
         return self._lost(decision, token)
 
+    def get_desk_risk(self, portfolio_id, day):
+        # Not a command: the risk report of the model's book, inside the limits, so the
+        # approval gate (C9) passes; the gate itself is tested against fakes.
+        return {"state": "model", "auditId": 0, "withinLimits": True, "approvedOverride": False,
+                "breaches": [], "symbols": [], "limits": []}
+
 
 def desk_repo(factory):
     from algolens.infrastructure.qt.repositories import PostgresDeskRepository
@@ -453,7 +459,7 @@ def test_desk_state_compares_asked_and_given_with_moved_by(qt_db):
         result=psycopg2.extras.Json({"book_source": "desk"}),
     )
 
-    state = GetDeskState(desk_repo(qt_db)).execute(entry(qt_db))
+    state = GetDeskState(desk_repo(qt_db), NullAgent()).execute(entry(qt_db))
 
     assert state["date"] == D2.isoformat() and state["seeded"] is True
     zc = next(r for r in state["comparison"] if r["symbol"] == "ZC.v.0")
@@ -487,7 +493,7 @@ def test_override_decision_is_recorded_once(qt_db):
     request_id = _emailed(qt_db)
     agent = NullAgent()
 
-    page = LookupApproval(desk_repo(qt_db)).execute("tok-123")
+    page = LookupApproval(desk_repo(qt_db), NullAgent()).execute("tok-123")
     assert page["request"]["id"] == request_id
     assert {r["symbol"] for r in page["table"]} == {"ZC.v.0", "ZS.v.0"}
 
@@ -516,7 +522,7 @@ def test_override_decision_refusals(qt_db):
 def test_expired_approval_link(qt_db):
     _emailed(qt_db, expires_in=timedelta(seconds=-1))
     with pytest.raises(DeskGone):
-        LookupApproval(desk_repo(qt_db)).execute("tok-123")
+        LookupApproval(desk_repo(qt_db), NullAgent()).execute("tok-123")
     with pytest.raises(DeskGone):
         DecideOverride(desk_repo(qt_db), NullAgent()).execute("tok-123", True, "p@x.com", "president")
 
@@ -538,7 +544,7 @@ def test_publish_row_and_publish_state(qt_db):
         "VALUES (%s, %s, %s, 'desk@x.com', '2026-10-08T21:00:00Z')",
         (D2, STRATEGY, QT),
     )
-    state = GetDeskState(desk_repo(qt_db)).execute(entry(qt_db))
+    state = GetDeskState(desk_repo(qt_db), NullAgent()).execute(entry(qt_db))
     assert state["published"]["published_by"] == "desk@x.com"
     assert state["publish"]["status"] == "done"
 
@@ -636,7 +642,7 @@ def test_approval_of_a_changed_proposal_is_refused_but_rejection_is_not(qt_db):
     SaveDeskEdit(desk_repo(qt_db), NullAgent()).execute(
         entry(qt_db), [{"symbol": "ZC.v.0", "quantity": 9, "expected": 3}], "r", "d@x.com"
     )
-    page = LookupApproval(desk_repo(qt_db)).execute("tok-123")
+    page = LookupApproval(desk_repo(qt_db), NullAgent()).execute("tok-123")
     assert page["snapshotMatches"] is False
     assert page["snapshot"][0]["quantity"] == 3
 
@@ -648,7 +654,7 @@ def test_approval_of_a_changed_proposal_is_refused_but_rejection_is_not(qt_db):
 
 def test_approval_page_shows_the_snapshot(qt_db):
     _emailed(qt_db)
-    page = LookupApproval(desk_repo(qt_db)).execute("tok-123")
+    page = LookupApproval(desk_repo(qt_db), NullAgent()).execute("tok-123")
     assert page["snapshotMatches"] is True
     assert [(r["symbol"], r["quantity"]) for r in page["snapshot"]] == [("ZC.v.0", 3), ("ZS.v.0", -2)]
 
@@ -690,7 +696,7 @@ def test_a_published_day_is_frozen_even_without_a_publish_row(qt_db):
     assert [c["kind"] for c in commands(qt_db)] == ["override_request"]
     assert float(proposal_rows(qt_db)["ZC.v.0"]["quantity"]) == 3
 
-    state = GetDeskState(repo).execute(entry(qt_db))
+    state = GetDeskState(repo, NullAgent()).execute(entry(qt_db))
     assert state["locked"] == "published"
     assert state["published"]["published_by"] == "system:non-trading-day"
 
@@ -704,7 +710,7 @@ def test_save_and_override_are_refused_while_a_publish_is_open(qt_db):
             entry(qt_db), [{"symbol": "ZC.v.0", "quantity": 1, "expected": 3}], "r", "d@x.com")
     with pytest.raises(DeskConflict, match="publish"):
         RequestOverride(repo, NullAgent()).execute(entry(qt_db), "breach", "d@x.com")
-    assert GetDeskState(repo).execute(entry(qt_db))["locked"] == "publishing"
+    assert GetDeskState(repo, NullAgent()).execute(entry(qt_db))["locked"] == "publishing"
 
 
 def test_a_stale_save_is_refused_and_lists_the_changed_symbols(qt_db):
@@ -805,7 +811,7 @@ def test_after_025_algolens_only_inserts_into_the_command_log(qt_db):
 
 def test_desk_state_reports_the_open_override_request(qt_db):
     request_id = _emailed(qt_db)
-    state = GetDeskState(desk_repo(qt_db)).execute(entry(qt_db))
+    state = GetDeskState(desk_repo(qt_db), NullAgent()).execute(entry(qt_db))
     assert state["openOverrideRequestId"] == request_id
     assert state["locked"] is None
     assert state["overrideRequests"][0]["payload"]["proposal_sha256"]
@@ -920,7 +926,7 @@ def test_desk_state_reads_publish_source_and_sent_at_once_026_is_applied(qt_db):
         (D2, STRATEGY, QT),
     )
 
-    state = GetDeskState(desk_repo(qt_db)).execute(entry(qt_db))
+    state = GetDeskState(desk_repo(qt_db), NullAgent()).execute(entry(qt_db))
 
     assert state["sendTracked"] is with_026
     assert state["published"]["published_by"] == "desk@x.com"
@@ -940,7 +946,7 @@ def test_a_fallback_publish_reads_as_fallback_with_or_without_026(qt_db):
     if has_026(qt_db.version):
         _exec(qt_db, "UPDATE trading.live_run_metadata SET publish_source = 'fallback', "
                      "sent_at = now()")
-    state = GetDeskState(desk_repo(qt_db)).execute(entry(qt_db))
+    state = GetDeskState(desk_repo(qt_db), NullAgent()).execute(entry(qt_db))
     assert state["published"]["publish_source"] == "fallback"
     assert (state["published"]["sent_at"] is not None) is has_026(qt_db.version)
     assert state["locked"] == "published"
@@ -1013,21 +1019,25 @@ def test_rescind_reopens_the_day_for_edits_and_a_second_approval(qt_db):
     assert (command["kind"], command["status"], command["date"]) == ("rescind", "pending", "2026-10-08")
     with pytest.raises(DeskConflict, match="rescind of the 2026-10-08 book is already pending"):
         rescind.execute(entry(qt_db), "desk@x.com")
-    state = GetDeskState(repo).execute(entry(qt_db))
+    state = GetDeskState(repo, NullAgent()).execute(entry(qt_db))
     assert state["locked"] == "published" and state["rescind"]["id"] == command["id"]
 
     engine_rescinds(qt_db, command["id"])
-    state = GetDeskState(repo).execute(entry(qt_db))
+    state = GetDeskState(repo, NullAgent()).execute(entry(qt_db))
     assert state["locked"] is None and state["published"] is None
     assert state["rescind"]["status"] == "done"
 
     # The day takes edits and a new approval; 029 dropped the one-done-publish index.
-    SaveDeskEdit(repo, NullAgent()).execute(
+    save = SaveDeskEdit(repo, NullAgent()).execute(
         entry(qt_db), [{"symbol": "ZC.v.0", "quantity": 1, "expected": 3}], "r", "desk@x.com")
+    # C9: no approval while the save is still running.
+    with pytest.raises(DeskConflict, match="A save is still running"):
+        PublishDesk(repo, NullAgent()).execute(entry(qt_db), "desk@x.com")
+    engine_finishes(qt_db, save["command"]["id"])
     second = PublishDesk(repo, NullAgent()).execute(entry(qt_db), "desk@x.com")["command"]
     engine_publishes(qt_db, second["id"])
     assert [(c["kind"], c["status"]) for c in commands(qt_db)] == [
-        ("publish", "done"), ("rescind", "done"), ("save", "pending"), ("publish", "done")]
+        ("publish", "done"), ("rescind", "done"), ("save", "done"), ("publish", "done")]
 
 
 def test_rescind_refuses_what_is_not_an_unsent_desk_approval(qt_db):

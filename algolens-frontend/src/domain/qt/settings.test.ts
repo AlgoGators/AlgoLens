@@ -3,7 +3,9 @@ import {
   buildSettingChanges,
   canSubmitSettings,
   coerceSetting,
+  filterFields,
   groupBySection,
+  labelInSection,
   pathKey,
   versionStatus,
   type SettingField,
@@ -107,5 +109,22 @@ describe('display', () => {
     });
     expect(versionStatus({ ...state, pending: false }).pending).toBeNull();
     expect(versionStatus({ ...state, running: null }).running).toMatch(/no live run/);
+  });
+});
+
+describe('compact settings view', () => {
+  const field = (path: string[]): SettingField => ({ path, type: 'number', value: 1, overridden: false, pending: null, pending_from_files: false });
+
+  it('names a field inside its section', () => {
+    expect(labelInSection(field(['risk', 'max_gross_leverage']))).toBe('max_gross_leverage');
+    expect(labelInSection(field(['strategies', 'TREND', 'weight']))).toBe('TREND.weight');
+    expect(labelInSection(field(['capital']))).toBe('capital');
+  });
+
+  it('filters on every word of the query, any case', () => {
+    const fields = [field(['risk', 'max_gross_leverage']), field(['risk', 'per_name_cap']), field(['opt', 'buffer'])];
+    expect(filterFields(fields, '').length).toBe(3);
+    expect(filterFields(fields, 'RISK leverage').map(f => f.path.join('.'))).toEqual(['risk.max_gross_leverage']);
+    expect(filterFields(fields, 'nothing')).toEqual([]);
   });
 });

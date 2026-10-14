@@ -28,6 +28,12 @@ import {
   rescindBlockedReason,
   rescindConfirmText,
   rescindOpen,
+  formatRiskValue,
+  riskBadge,
+  riskBindingLine,
+  riskBreachReason,
+  riskMovedSymbols,
+  riskReadings,
   serverClockOffsetMs,
   shouldKeepPolling,
   snapshotBySymbol,
@@ -35,6 +41,7 @@ import {
   type BookPosition,
   type DeskCommand,
   type DeskDeadlines,
+  type DeskRisk,
   type DeskState,
 } from './desk';
 
@@ -556,5 +563,124 @@ describe('approvalTokenFrom', () => {
     expect(approvalTokenFrom('?token=abc%2Bdef')).toBe('abc+def');
     expect(approvalTokenFrom('?x=1')).toBeNull();
     expect(approvalTokenFrom('?token=')).toBeNull();
+  });
+});
+
+const risk = (over: Partial<DeskRisk>): DeskRisk => ({
+  state: 'desk',
+  auditId: 7,
+  withinLimits: true,
+  approvedOverride: false,
+  breaches: [],
+  m: 1,
+  bindingTerm: 'none',
+  overLimitAfterRounding: '',
+  overLimitByHold: '',
+  refused: false,
+  symbols: [],
+  grossLeverage: null,
+  netLeverage: null,
+  marginCushion: null,
+  equityToMargin: null,
+  limits: [],
+  ...over,
+});
+
+const breached = risk({
+  withinLimits: false,
+  breaches: [
+    { term: 'L_g', detail: 'gross leverage bound' },
+    { term: 'cap', detail: 'ZC.v.0 capped' },
+    { term: 'L_g', detail: 'again' },
+  ],
+  m: 0.8,
+  bindingTerm: 'L_g',
+});
+
+describe('the risk check (C9)', () => {
+  it('blocks a breach without an approved override', () => {
+    expect(riskBreachReason(breached)).toBe(
+      'The positions breach risk limits (L_g, cap): save within the limits or request an override',
+    );
+  });
+
+  it('passes no report, the model book, no book, an override and positions within the limits', () => {
+    expect(riskBreachReason(null)).toBeNull();
+    expect(riskBreachReason(undefined)).toBeNull();
+    expect(riskBreachReason(risk({ state: 'model' }))).toBeNull();
+    expect(riskBreachReason(risk({ state: 'no_book' }))).toBeNull();
+    expect(riskBreachReason({ ...breached, state: 'override', approvedOverride: true })).toBeNull();
+    expect(riskBreachReason(risk({}))).toBeNull();
+  });
+
+  it('fails closed when the check cannot be read', () => {
+    expect(riskBreachReason({ unavailable: 'UNAVAILABLE' })).toBe('The risk check is unavailable: UNAVAILABLE');
+  });
+
+  it('closes Approve after the lock and cutoff checks', () => {
+    expect(approveBlockedReason(deskState({ risk: breached }))).toMatch(/^The positions breach risk limits/);
+    expect(approveBlockedReason(deskState({ risk: { unavailable: 'UNAVAILABLE' } }))).toMatch(/unavailable/);
+    expect(approveBlockedReason(deskState({ risk: risk({}) }))).toBeNull();
+    // A lock wins over the risk check.
+    expect(
+      approveBlockedReason(deskState({ risk: breached, publish: command({ kind: 'publish', status: 'pending' }) })),
+    ).toBe(LOCKED_APPROVING);
+  });
+
+  it('names the report in its badge', () => {
+    expect(riskBadge(risk({}))).toEqual({ tone: 'ok', label: 'Within risk limits' });
+    expect(riskBadge(breached)).toEqual({ tone: 'breach', label: 'Outside risk limits — override required' });
+    expect(riskBadge({ ...breached, state: 'override', approvedOverride: true })).toEqual({
+      tone: 'waived',
+      label: 'Override approved — breaches waived',
+    });
+    expect(riskBadge(risk({ state: 'model' }))).toEqual({ tone: 'ok', label: 'Model book — within limits' });
+    expect(riskBadge({ unavailable: 'UNAVAILABLE' }).tone).toBe('muted');
+  });
+
+  it('says which limit bound and how far the book was cut', () => {
+    expect(riskBindingLine(breached)).toBe('Gross leverage bound: positions cut to 80%');
+    expect(riskBindingLine(risk({}))).toBeNull();
+    expect(riskBindingLine(risk({ bindingTerm: 'R_jump', m: 0.5 }))).toBe('Jump risk bound: positions cut to 50%');
+  });
+
+  it('puts the configured limits next to the stored book', () => {
+    const rows = riskReadings(
+      risk({
+        grossLeverage: 2.4,
+        netLeverage: -0.5,
+        marginCushion: 0.42,
+        equityToMargin: 3.1,
+        limits: [
+          { name: 'max_gross_leverage', value: 2 },
+          { name: 'max_net_leverage', value: 1 },
+          { name: 'R_max', value: 0.2 },
+        ],
+      }),
+    );
+    expect(rows.map(r => [r.label, r.reading, r.limit, r.over])).toEqual([
+      ['Gross leverage', 2.4, 2, true],
+      ['Net leverage', -0.5, 1, false],
+      ['Margin cushion', 0.42, null, false],
+      ['Equity / margin', 3.1, null, false],
+      ['R_max', null, 0.2, false],
+    ]);
+    expect(formatRiskValue(2.4, 'leverage')).toBe('2.40x');
+    expect(formatRiskValue(0.42, 'percent')).toBe('42.0%');
+    expect(formatRiskValue(null, 'ratio')).toBe('-');
+    expect(formatRiskValue(0.2, 'number')).toBe('0.2');
+  });
+
+  it('lists the moved symbols, risk steps first', () => {
+    const moved = riskMovedSymbols(
+      risk({
+        symbols: [
+          { symbol: 'ZS.v.0', asked: -1, given: 0, movedBy: 'sign_close', category: 'rule' },
+          { symbol: 'ZW.v.0', asked: 2, given: 2, movedBy: 'none', category: 'none' },
+          { symbol: 'ZC.v.0', asked: 10, given: 8, movedBy: 'overlay', category: 'risk' },
+        ],
+      }),
+    );
+    expect(moved.map(s => s.symbol)).toEqual(['ZC.v.0', 'ZS.v.0']);
   });
 });

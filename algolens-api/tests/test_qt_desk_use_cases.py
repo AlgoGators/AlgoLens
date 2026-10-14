@@ -10,6 +10,7 @@ from algolens.application.qt.ports import (
     DeskGone,
     DeskNotFound,
     DeskNotSeeded,
+    DeskRiskUnavailable,
 )
 import algolens.application.qt.use_cases as use_cases
 from algolens.application.qt.use_cases import (
@@ -195,10 +196,45 @@ class FakeRepo:
         return self.tracks_sends
 
 
+def risk_report(state="model", audit_id=0, within_limits=True, approved_override=False,
+                breaches=()):
+    """A GetDeskRisk report as DeskClient.get_desk_risk returns it."""
+    return {
+        "state": state,
+        "auditId": audit_id,
+        "withinLimits": within_limits,
+        "approvedOverride": approved_override,
+        "breaches": [{"term": t, "detail": f"{t} bound"} for t in breaches],
+        "m": 1.0,
+        "bindingTerm": "none",
+        "overLimitAfterRounding": "",
+        "overLimitByHold": "",
+        "refused": False,
+        "symbols": [],
+        "grossLeverage": None,
+        "netLeverage": None,
+        "marginCushion": None,
+        "equityToMargin": None,
+        "limits": [],
+    }
+
+
 class FakeAgent:
-    def __init__(self, fail=False):
+    """The commands record their calls; get_desk_risk returns `risk` (the
+    model's book by default) or raises DeskRiskUnavailable(`risk_down`)."""
+
+    def __init__(self, fail=False, risk=None, risk_down=None):
         self.calls = []
         self.fail = fail
+        self.risk = risk if risk is not None else risk_report()
+        self.risk_down = risk_down
+        self.risk_calls = []
+
+    def get_desk_risk(self, portfolio_id, day):
+        self.risk_calls.append((portfolio_id, day))
+        if self.risk_down:
+            raise DeskRiskUnavailable(self.risk_down)
+        return self.risk
 
     def _record(self, name, *args):
         self.calls.append((name, *args))
@@ -297,13 +333,15 @@ def test_a_rescinded_approval_reopens_the_day():
     repo = FakeRepo()
     repo.insert_command(QT["portfolio_id"], DAY, "publish", "d@x.com")["status"] = "done"
     repo.published = None
-    state = GetDeskState(repo).execute(QT)
+    state = GetDeskState(repo, FakeAgent()).execute(QT)
     assert state["published"] is None
     assert state["locked"] is None
-    SaveDeskEdit(repo, FakeAgent()).execute(
+    save = SaveDeskEdit(repo, FakeAgent()).execute(
         QT, [{"symbol": "ZC.v.0", "quantity": 1, "expected": 3}], "r", "d@x.com"
-    )
-    assert PublishDesk(repo, FakeAgent()).execute(QT, "d@x.com")["command"]["kind"] == "publish"
+    )["command"]
+    repo.get_command(save["id"])["status"] = "done"
+    agent = FakeAgent(risk=risk_report("desk", audit_id=save["id"]))
+    assert PublishDesk(repo, agent).execute(QT, "d@x.com")["command"]["kind"] == "publish"
 
 
 def test_symbol_choices_only_for_editable_books():
@@ -321,7 +359,7 @@ def test_state_shows_books_comparison_and_latest_save():
     SaveDeskEdit(repo, FakeAgent()).execute(QT, [{"symbol": "ZC.v.0", "quantity": 5, "expected": 3}], "r", "d@x.com")
     repo.rows[-1].update(status="done", message="cap bound", result={"book_source": "desk"})
 
-    state = GetDeskState(repo).execute(QT)
+    state = GetDeskState(repo, FakeAgent()).execute(QT)
 
     assert state["date"] == "2026-10-08" and state["seeded"] is True
     assert state["latestSave"]["status"] == "done"
@@ -361,7 +399,7 @@ def test_approval_lookup_by_token_shows_the_three_books():
     repo = FakeRepo()
     request = _emailed_request(repo)
 
-    page = LookupApproval(repo, now=lambda: NOW).execute("tok")
+    page = LookupApproval(repo, FakeAgent(), now=lambda: NOW).execute("tok")
 
     assert page["request"]["id"] == request["id"]
     assert page["decision"] is None
@@ -373,9 +411,9 @@ def test_unknown_or_expired_token():
     repo = FakeRepo()
     _emailed_request(repo, expires=NOW - timedelta(seconds=1))
     with pytest.raises(DeskNotFound):
-        LookupApproval(repo, now=lambda: NOW).execute("other")
+        LookupApproval(repo, FakeAgent(), now=lambda: NOW).execute("other")
     with pytest.raises(DeskGone):
-        LookupApproval(repo, now=lambda: NOW).execute("tok")
+        LookupApproval(repo, FakeAgent(), now=lambda: NOW).execute("tok")
     with pytest.raises(DeskGone):
         DecideOverride(repo, FakeAgent(), now=lambda: NOW).execute("tok", True, "vp@x.com", "vp")
 
@@ -440,7 +478,7 @@ def test_publish_refuses_a_second_open_or_done_publish_but_allows_a_retry():
 def test_publish_state_comes_from_live_run_metadata():
     repo = FakeRepo()
     repo.published = {"published_by": "d@x.com", "published_at": NOW}
-    state = GetDeskState(repo).execute(QT)
+    state = GetDeskState(repo, FakeAgent()).execute(QT)
     assert state["published"] == {
         "published_by": "d@x.com",
         "published_at": NOW.isoformat(),
@@ -463,7 +501,7 @@ def test_a_published_day_refuses_save_override_and_publish():
     with pytest.raises(DeskConflict):
         PublishDesk(repo, FakeAgent()).execute(QT, "d@x.com")
     assert repo.rows == []
-    state = GetDeskState(repo, now=lambda: NOW).execute(QT)
+    state = GetDeskState(repo, FakeAgent(), now=lambda: NOW).execute(QT)
     assert state["locked"] == "published"
 
 
@@ -480,7 +518,7 @@ def test_an_approval_of_a_changed_proposal_is_refused():
     _emailed_request(repo)
     SaveDeskEdit(repo, FakeAgent()).execute(
         QT, [{"symbol": "ZC.v.0", "quantity": 1, "expected": 3}], "r", "d@x.com")
-    page = LookupApproval(repo, now=lambda: NOW).execute("tok")
+    page = LookupApproval(repo, FakeAgent(), now=lambda: NOW).execute("tok")
     assert page["snapshotMatches"] is False and page["snapshot"][0]["quantity"] == 3
     with pytest.raises(DeskConflict):
         DecideOverride(repo, FakeAgent(), now=lambda: NOW).execute("tok", True, "p@x.com", "president")
@@ -489,10 +527,10 @@ def test_an_approval_of_a_changed_proposal_is_refused():
 def test_state_shows_the_open_request_and_the_publishing_lock():
     repo = FakeRepo()
     request = _emailed_request(repo)
-    state = GetDeskState(repo, now=lambda: NOW).execute(QT)
+    state = GetDeskState(repo, FakeAgent(), now=lambda: NOW).execute(QT)
     assert state["openOverrideRequestId"] == request["id"] and state["locked"] is None
     PublishDesk(repo, FakeAgent()).execute(QT, "d@x.com")
-    assert GetDeskState(repo, now=lambda: NOW).execute(QT)["locked"] == "publishing"
+    assert GetDeskState(repo, FakeAgent(), now=lambda: NOW).execute(QT)["locked"] == "publishing"
 
 
 def test_a_stale_save_names_the_symbols():
@@ -603,7 +641,7 @@ def test_save_override_request_and_decision_are_closed_from_10_new_york():
 
 
 def test_desk_state_carries_the_server_time_and_new_york_deadlines():
-    state = GetDeskState(FakeRepo(), now=lambda: _ny(DAY, 9, 0)).execute(QT)
+    state = GetDeskState(FakeRepo(), FakeAgent(), now=lambda: _ny(DAY, 9, 0)).execute(QT)
     assert state["serverTime"] == "2026-10-08T13:00:00+00:00"
     assert state["deadlines"] == {
         "timezone": "America/New_York",
@@ -619,17 +657,17 @@ def test_desk_state_carries_the_server_time_and_new_york_deadlines():
 
 
 def test_desk_state_deadlines_on_a_dst_day_a_weekend_and_before_the_first_book():
-    nov1 = GetDeskState(FakeRepo(day=date(2026, 11, 1)),
+    nov1 = GetDeskState(FakeRepo(day=date(2026, 11, 1)), FakeAgent(),
                         now=lambda: _ny(date(2026, 11, 1), 10, 0)).execute(QT)
     assert nov1["deadlines"]["approveBy"] == "2026-11-01T09:30:00-05:00"
     assert nov1["deadlines"]["approvalClosed"] is True
     # No book yet (a Saturday): the deadlines are today's.
-    none = GetDeskState(FakeRepo(day=None), now=lambda: _ny(date(2026, 10, 10), 6, 0)).execute(QT)
+    none = GetDeskState(FakeRepo(day=None), FakeAgent(), now=lambda: _ny(date(2026, 10, 10), 6, 0)).execute(QT)
     assert none["deadlines"]["bookDate"] == "2026-10-10"
     assert none["deadlines"]["approveBy"] == "2026-10-10T09:30:00-04:00"
     assert none["deadlines"]["approvalClosed"] is False
     # The desk still shows yesterday's book: today's deadlines come separately.
-    old = GetDeskState(FakeRepo(), now=lambda: _ny(DAY + timedelta(days=1), 6, 0)).execute(QT)
+    old = GetDeskState(FakeRepo(), FakeAgent(), now=lambda: _ny(DAY + timedelta(days=1), 6, 0)).execute(QT)
     assert old["deadlines"]["bookDate"] == "2026-10-08"
     assert old["deadlines"]["today"] == "2026-10-09"
     assert old["deadlines"]["todayApproveBy"] == "2026-10-09T09:30:00-04:00"
@@ -640,7 +678,7 @@ def test_desk_state_reads_publish_source_and_sent_at():
     repo = FakeRepo()
     repo.published = {"published_by": "d@x.com", "published_at": _ny(DAY, 9, 0),
                       "publish_source": "desk", "sent_at": _ny(DAY, 9, 30, 4)}
-    published = GetDeskState(repo, now=lambda: _ny(DAY, 9, 31)).execute(QT)["published"]
+    published = GetDeskState(repo, FakeAgent(), now=lambda: _ny(DAY, 9, 31)).execute(QT)["published"]
     assert published["publish_source"] == "desk"
     assert published["sent_at"] == "2026-10-08T09:30:04-04:00"
 
@@ -659,7 +697,7 @@ def test_without_the_026_columns_the_source_is_read_from_published_by(published_
     repo = FakeRepo()
     repo.tracks_sends = False
     repo.published = {"published_by": published_by, "published_at": _ny(DAY, 10, 1)}
-    state = GetDeskState(repo, now=lambda: _ny(DAY, 10, 5)).execute(QT)
+    state = GetDeskState(repo, FakeAgent(), now=lambda: _ny(DAY, 10, 5)).execute(QT)
     assert state["published"]["publish_source"] == source
     assert state["published"]["sent_at"] is None
     assert state["sendTracked"] is False
@@ -668,7 +706,7 @@ def test_without_the_026_columns_the_source_is_read_from_published_by(published_
 def test_the_approval_page_shows_the_deadline():
     repo = FakeRepo()
     _emailed_request(repo)
-    page = LookupApproval(repo, now=lambda: _ny(DAY, 9, 0)).execute("tok")
+    page = LookupApproval(repo, FakeAgent(), now=lambda: _ny(DAY, 9, 0)).execute("tok")
     assert page["deadlines"]["approveBy"] == "2026-10-08T09:30:00-04:00"
     assert page["deadlines"]["fallbackAt"] == "2026-10-08T10:00:00-04:00"
     assert page["serverTime"] == "2026-10-08T13:00:00+00:00"
@@ -778,9 +816,9 @@ def test_rescind_before_the_proposal_is_seeded_is_409():
 def test_desk_state_carries_the_latest_rescind_and_a_done_rescind_reopens_the_day():
     repo, agent = _approved()
     now = lambda: _ny(DAY, 9, 0)  # noqa: E731
-    assert GetDeskState(repo, now=now).execute(QT)["rescind"] is None
+    assert GetDeskState(repo, FakeAgent(), now=now).execute(QT)["rescind"] is None
     command = RescindDesk(repo, agent, now=now).execute(QT, "d@x.com")["command"]
-    state = GetDeskState(repo, now=now).execute(QT)
+    state = GetDeskState(repo, FakeAgent(), now=now).execute(QT)
     assert state["rescind"]["id"] == command["id"] and state["rescind"]["status"] == "pending"
     assert state["locked"] == "published"
     # The engine clears published_at and finishes the row done.
@@ -788,8 +826,127 @@ def test_desk_state_carries_the_latest_rescind_and_a_done_rescind_reopens_the_da
         status="done", message="approval of 2026-10-08 rescinded",
         result={"rescinded": {"published_by": "d@x.com"}})
     repo.published = None
-    state = GetDeskState(repo, now=now).execute(QT)
+    state = GetDeskState(repo, FakeAgent(), now=now).execute(QT)
     assert state["rescind"]["status"] == "done" and state["locked"] is None
     assert state["published"] is None
     second = PublishDesk(repo, FakeAgent(), now=now).execute(QT, "d@x.com")["command"]
     assert second["kind"] == "publish"
+
+
+# --- the risk check (C9) ---------------------------------------------------------
+
+
+def _saved(repo, status="done"):
+    """A desk save of the day, finished with `status`."""
+    current = next(r["quantity"] for r in repo.books["qt_proposal"] if r["symbol"] == "ZC.v.0")
+    save = SaveDeskEdit(repo, FakeAgent()).execute(
+        QT, [{"symbol": "ZC.v.0", "quantity": current + 1, "expected": current}], "r", "d@x.com"
+    )["command"]
+    repo.get_command(save["id"])["status"] = status
+    return save["id"]
+
+
+def test_desk_state_carries_the_risk_report():
+    repo = FakeRepo()
+    agent = FakeAgent(risk=risk_report("desk", audit_id=4, within_limits=False, breaches=["L_g"]))
+    state = GetDeskState(repo, agent).execute(QT)
+    assert state["risk"]["state"] == "desk" and state["risk"]["withinLimits"] is False
+    assert agent.risk_calls == [("QT_CONSERVATIVE_PORTFOLIO", DAY)]
+
+
+def test_desk_state_says_when_the_risk_check_is_unavailable():
+    state = GetDeskState(FakeRepo(), FakeAgent(risk_down="UNAVAILABLE")).execute(QT)
+    assert state["risk"] == {"unavailable": "UNAVAILABLE"}
+    # The rest of the state is unchanged.
+    assert state["seeded"] is True and state["locked"] is None
+
+
+def test_desk_state_has_no_risk_before_the_first_book():
+    agent = FakeAgent()
+    state = GetDeskState(FakeRepo(day=None), agent).execute(QT)
+    assert state["risk"] is None and agent.risk_calls == []
+
+
+def test_approve_is_refused_while_the_positions_breach_a_risk_limit():
+    repo = FakeRepo()
+    save_id = _saved(repo)
+    agent = FakeAgent(risk=risk_report("desk", audit_id=save_id, within_limits=False,
+                                       breaches=["L_g", "cap", "L_g"]))
+    with pytest.raises(DeskConflict) as exc:
+        PublishDesk(repo, agent).execute(QT, "d@x.com")
+    assert str(exc.value) == (
+        "The 2026-10-08 positions breach risk limits (L_g, cap): save within the limits or "
+        "request an override"
+    )
+    assert [r["kind"] for r in repo.rows] == ["save"]
+    assert agent.calls == []
+
+
+def test_an_approved_override_waives_the_breaches():
+    repo = FakeRepo()
+    _saved(repo)
+    agent = FakeAgent(risk=risk_report("override", audit_id=99, within_limits=False,
+                                       approved_override=True, breaches=["L_g"]))
+    assert PublishDesk(repo, agent).execute(QT, "d@x.com")["command"]["kind"] == "publish"
+
+
+@pytest.mark.parametrize("state", ["model", "no_book"])
+def test_the_model_book_and_no_book_pass(state):
+    repo = FakeRepo()
+    agent = FakeAgent(risk=risk_report(state))
+    assert PublishDesk(repo, agent).execute(QT, "d@x.com")["command"]["kind"] == "publish"
+    assert agent.calls == [("Publish", 1)]
+
+
+def test_positions_within_the_limits_pass():
+    repo = FakeRepo()
+    save_id = _saved(repo)
+    agent = FakeAgent(risk=risk_report("desk", audit_id=save_id))
+    assert PublishDesk(repo, agent).execute(QT, "d@x.com")["command"]["kind"] == "publish"
+
+
+def test_approve_fails_closed_when_the_risk_check_is_unavailable():
+    repo = FakeRepo()
+    with pytest.raises(DeskConflict, match=r"The risk check is unavailable \(UNAVAILABLE\); try again"):
+        PublishDesk(repo, FakeAgent(risk_down="UNAVAILABLE")).execute(QT, "d@x.com")
+    assert repo.rows == []
+
+
+def test_a_report_of_an_older_save_is_refused():
+    repo = FakeRepo()
+    first = _saved(repo)
+    second = _saved(repo)
+    agent = FakeAgent(risk=risk_report("desk", audit_id=first))
+    with pytest.raises(DeskConflict, match=f"has not caught up with save #{second}; try again"):
+        PublishDesk(repo, agent).execute(QT, "d@x.com")
+    # A failed later save leaves the last done one as the book.
+    repo.get_command(second)["status"] = "failed"
+    assert PublishDesk(repo, agent).execute(QT, "d@x.com")["command"]["kind"] == "publish"
+
+
+@pytest.mark.parametrize("status", ["pending", "running"])
+def test_approve_is_refused_while_a_save_is_running(status):
+    repo = FakeRepo()
+    save_id = _saved(repo, status)
+    agent = FakeAgent()
+    with pytest.raises(DeskConflict, match=rf"A save is still running \(#{save_id}\)"):
+        PublishDesk(repo, agent).execute(QT, "d@x.com")
+    assert agent.risk_calls == []
+
+
+def test_a_published_day_is_refused_as_published_not_by_the_risk_check():
+    repo = FakeRepo()
+    repo.published = {"published_by": "d@x.com", "published_at": NOW}
+    with pytest.raises(DeskConflict, match="already published"):
+        PublishDesk(repo, FakeAgent(risk_down="UNAVAILABLE")).execute(QT, "d@x.com")
+
+
+def test_the_approval_page_carries_the_risk_report():
+    repo = FakeRepo()
+    request = repo.insert_command(QT["portfolio_id"], DAY, "override_request", "d@x.com", "why")
+    request.update(token_hash=token_hash("tok"), token_expires_at=NOW + timedelta(hours=1))
+    report = risk_report("desk", audit_id=1, within_limits=False, breaches=["L_g"])
+    page = LookupApproval(repo, FakeAgent(risk=report), now=lambda: NOW).execute("tok")
+    assert page["risk"] == report
+    down = LookupApproval(repo, FakeAgent(risk_down="UNAVAILABLE"), now=lambda: NOW).execute("tok")
+    assert down["risk"] == {"unavailable": "UNAVAILABLE"}

@@ -9,6 +9,7 @@ import pytest
 
 from algogators import desk_pb2, desk_pb2_grpc
 from algogators.versions import API_VERSIONS
+from algolens.application.qt.ports import DeskRiskUnavailable
 from algolens.infrastructure.qt.desk_client import DeskClient
 from algolens.infrastructure.rpc import HEADER, reset_channels
 
@@ -19,6 +20,7 @@ class RecordingDesk(desk_pb2_grpc.DeskServiceServicer):
         self.headers = []
         self.delay = delay
         self.refuse = None
+        self.risk = desk_pb2.DeskRisk(state=desk_pb2.DESK_RISK_STATE_MODEL, within_limits=True, m=1.0)
 
     def _reply(self, name, request, reply, context):
         time.sleep(self.delay)
@@ -52,6 +54,9 @@ class RecordingDesk(desk_pb2_grpc.DeskServiceServicer):
         return self._reply(
             "Rescind", request, desk_pb2.CommandReply(status=desk_pb2.COMMAND_STATUS_ACCEPTED), context
         )
+
+    def GetDeskRisk(self, request, context):
+        return self._reply("GetDeskRisk", request, self.risk, context)
 
 
 @pytest.fixture
@@ -101,7 +106,7 @@ def test_each_rpc_carries_the_command_row(desk_server):
         "QT_CONSERVATIVE_PORTFOLIO", "2026-10-08", 43)
     # Every call carried the version header, built from the vendored protos.
     assert servicer.headers == [f"common={API_VERSIONS['common']},desk={API_VERSIONS['desk']}"] * 5
-    assert API_VERSIONS["desk"] == "1.2.0"
+    assert API_VERSIONS["desk"] == "1.3.0"
 
 
 def test_version_refusal_is_logged_and_swallowed(desk_server, caplog):
@@ -129,3 +134,86 @@ def test_slow_engine_times_out_and_is_swallowed(desk_server):
 
 def test_default_timeout_is_three_seconds():
     assert DeskClient("x:1").timeout == 3.0
+
+
+# --- GetDeskRisk (C9): a read, not a command ------------------------------------
+
+
+def test_get_desk_risk_maps_the_report(desk_server):
+    servicer, address = desk_server
+    servicer.risk = desk_pb2.DeskRisk(
+        state=desk_pb2.DESK_RISK_STATE_DESK,
+        audit_id=57,
+        within_limits=False,
+        approved_override=False,
+        breaches=[desk_pb2.RiskBreach(term="L_g", detail="gross leverage bound")],
+        m=0.8,
+        binding_term="L_g",
+        over_limit_after_rounding="R",
+        over_limit_by_hold="",
+        refused=False,
+        symbols=[
+            desk_pb2.SymbolRisk(symbol="ZC.v.0", asked=10, given=8, moved_by="overlay", category="risk"),
+            desk_pb2.SymbolRisk(symbol="ZS.v.0", asked=-1, given=0, moved_by="sign_close", category="rule"),
+        ],
+        gross_leverage=2.4,
+        margin_cushion=0.0,
+        limits=[desk_pb2.RiskLimit(name="max_gross_leverage", value=2.0)],
+    )
+
+    report = DeskClient(address).get_desk_risk("QT_CONSERVATIVE_PORTFOLIO", date(2026, 10, 8))
+
+    name, request = servicer.requests[-1]
+    assert (name, request.portfolio_id, request.date) == (
+        "GetDeskRisk", "QT_CONSERVATIVE_PORTFOLIO", "2026-10-08")
+    assert servicer.headers[-1] == f"common={API_VERSIONS['common']},desk={API_VERSIONS['desk']}"
+    assert report == {
+        "state": "desk",
+        "auditId": 57,
+        "withinLimits": False,
+        "approvedOverride": False,
+        "breaches": [{"term": "L_g", "detail": "gross leverage bound"}],
+        "m": pytest.approx(0.8),
+        "bindingTerm": "L_g",
+        "overLimitAfterRounding": "R",
+        "overLimitByHold": "",
+        "refused": False,
+        "symbols": [
+            {"symbol": "ZC.v.0", "asked": 10.0, "given": 8.0, "movedBy": "overlay", "category": "risk"},
+            {"symbol": "ZS.v.0", "asked": -1.0, "given": 0.0, "movedBy": "sign_close", "category": "rule"},
+        ],
+        # Unset optional readings are None; a recorded 0.0 stays 0.0.
+        "grossLeverage": pytest.approx(2.4),
+        "netLeverage": None,
+        "marginCushion": 0.0,
+        "equityToMargin": None,
+        "limits": [{"name": "max_gross_leverage", "value": 2.0}],
+    }
+
+
+@pytest.mark.parametrize(
+    "state, name",
+    [
+        (desk_pb2.DESK_RISK_STATE_NO_BOOK, "no_book"),
+        (desk_pb2.DESK_RISK_STATE_MODEL, "model"),
+        (desk_pb2.DESK_RISK_STATE_OVERRIDE, "override"),
+    ],
+)
+def test_get_desk_risk_names_each_state(desk_server, state, name):
+    servicer, address = desk_server
+    servicer.risk = desk_pb2.DeskRisk(state=state, within_limits=True)
+    assert DeskClient(address).get_desk_risk("P", date(2026, 10, 8))["state"] == name
+
+
+def test_get_desk_risk_raises_when_the_engine_refuses(desk_server):
+    servicer, address = desk_server
+    servicer.refuse = "API version mismatch"
+    with pytest.raises(DeskRiskUnavailable) as exc:
+        DeskClient(address).get_desk_risk("P", date(2026, 10, 8))
+    assert exc.value.reason == "FAILED_PRECONDITION"
+
+
+def test_get_desk_risk_raises_when_the_engine_is_unreachable():
+    with pytest.raises(DeskRiskUnavailable) as exc:
+        DeskClient("127.0.0.1:1", timeout=0.5).get_desk_risk("P", date(2026, 10, 8))
+    assert exc.value.reason in ("UNAVAILABLE", "DEADLINE_EXCEEDED")

@@ -14,8 +14,10 @@ import {
   buildSettingChanges,
   canSubmitSettings,
   displaySetting,
+  filterFields,
   groupBySection,
   isEditable,
+  labelInSection,
   pathKey,
   pathLabel,
   versionStatus,
@@ -35,6 +37,7 @@ export function SettingsEditor({ portfolioId }: { portfolioId: string }) {
   const [success, setSuccess] = useState<string | null>(null);
   const [revertTo, setRevertTo] = useState<number | null>(null);
   const [revertReason, setRevertReason] = useState('');
+  const [query, setQuery] = useState('');
 
   const load = useCallback(async () => {
     try {
@@ -54,6 +57,10 @@ export function SettingsEditor({ portfolioId }: { portfolioId: string }) {
   const input = `w-full px-3 py-2 rounded border text-sm ${
     dark ? 'border-gray-700 bg-gray-800 text-white' : 'border-gray-300 bg-white text-gray-900'
   }`;
+  const cell = `w-full px-2 py-1 rounded border text-xs font-mono ${
+    dark ? 'border-gray-700 bg-gray-800 text-white' : 'border-gray-300 bg-white text-gray-900'
+  }`;
+  const rule = dark ? 'border-gray-800' : 'border-gray-100';
 
   if (error) return <p className="text-sm text-red-500">Settings unavailable: {error}</p>;
   if (!state) return <p className={`text-sm ${muted}`}>Loading settings...</p>;
@@ -96,61 +103,63 @@ export function SettingsEditor({ portfolioId }: { portfolioId: string }) {
     }
   };
 
-  const fieldCard = (field: SettingField) => {
+  // One compact row per setting: name, running value, pending value, inline edit.
+  const fieldRow = (field: SettingField) => {
     const key = pathKey(field.path);
     const editable = state.editable && isEditable(field);
     const current = key in edits ? edits[key] : displaySetting(field.pending ?? field.value);
     const bad = key in edits && invalid.includes(pathLabel(field.path));
+    const pending = field.pending !== null || field.pending_from_files;
     return (
-      <div key={key} className={card}>
-        <div className="flex items-start justify-between gap-2">
-          <label className="text-sm font-medium break-all" htmlFor={`setting-${key}`}>
-            {pathLabel(field.path)}
+      <tr key={key} className={`border-t ${rule} align-middle`}>
+        <td className="py-1 pr-2">
+          <label className="text-xs font-mono break-all" htmlFor={`setting-${key}`} title={pathLabel(field.path)}>
+            {labelInSection(field)}
           </label>
-          {(field.pending !== null || field.pending_from_files) && (
-            <span className={`text-xs font-semibold px-2 py-0.5 rounded ${dark ? 'bg-amber-950 text-amber-200' : 'bg-amber-100 text-amber-800'}`}>
-              PENDING
+        </td>
+        <td className="py-1 pr-2 text-xs font-mono text-right whitespace-nowrap">
+          {displaySetting(field.value) || 'null'}
+        </td>
+        <td className="py-1 pr-2 text-xs font-mono text-right whitespace-nowrap">
+          {pending ? (
+            <span className="text-amber-500" title="Takes effect at the next live run">
+              {field.pending_from_files ? 'file value' : displaySetting(field.pending)}
             </span>
+          ) : (
+            <span className={muted}>-</span>
           )}
-        </div>
-        <div className={`text-xs mt-1 mb-2 space-y-0.5 ${muted}`}>
-          <div>
-            Running: <span className="font-mono font-semibold">{displaySetting(field.value) || 'null'}</span>
-          </div>
-          {field.pending !== null && (
-            <div>
-              Pending: <span className="font-mono font-semibold text-amber-500">{displaySetting(field.pending)}</span>
-            </div>
+        </td>
+        <td className="py-1 w-36">
+          {!editable ? (
+            <span className={`text-xs ${muted}`}>{isEditable(field) ? '' : 'read-only'}</span>
+          ) : field.type === 'boolean' ? (
+            <select
+              id={`setting-${key}`}
+              className={cell}
+              value={current}
+              disabled={busy}
+              onChange={e => setEdits(prev => ({ ...prev, [key]: e.target.value }))}
+            >
+              <option value="true">true</option>
+              <option value="false">false</option>
+            </select>
+          ) : (
+            <input
+              id={`setting-${key}`}
+              className={`${cell} ${bad ? 'border-red-500' : ''}`}
+              value={current}
+              disabled={busy}
+              title={bad ? `Invalid ${field.type}` : undefined}
+              inputMode={field.type === 'number' ? 'decimal' : undefined}
+              onChange={e => setEdits(prev => ({ ...prev, [key]: e.target.value }))}
+            />
           )}
-          {field.pending_from_files && <div className="text-amber-500">Pending: back to the config file value</div>}
-        </div>
-        {!editable ? (
-          <div className={`text-xs ${muted}`}>{isEditable(field) ? '' : '(read-only)'}</div>
-        ) : field.type === 'boolean' ? (
-          <select
-            id={`setting-${key}`}
-            className={input}
-            value={current}
-            disabled={busy}
-            onChange={e => setEdits(prev => ({ ...prev, [key]: e.target.value }))}
-          >
-            <option value="true">true</option>
-            <option value="false">false</option>
-          </select>
-        ) : (
-          <input
-            id={`setting-${key}`}
-            className={`${input} ${bad ? 'border-red-500' : ''}`}
-            value={current}
-            disabled={busy}
-            inputMode={field.type === 'number' ? 'decimal' : undefined}
-            onChange={e => setEdits(prev => ({ ...prev, [key]: e.target.value }))}
-          />
-        )}
-        {bad && <div className="text-xs text-red-500 mt-1">Invalid {field.type}</div>}
-      </div>
+        </td>
+      </tr>
     );
   };
+
+  const shown = filterFields(state.fields, query);
 
   return (
     <div data-testid="settings-editor">
@@ -172,12 +181,48 @@ export function SettingsEditor({ portfolioId }: { portfolioId: string }) {
         </p>
       )}
 
-      {groupBySection(state.fields).map(([section, fields]) => (
-        <div key={section} className="mb-5">
-          <h5 className={`text-xs font-semibold uppercase tracking-wider mb-2 ${muted}`}>{section}</h5>
-          <div className="grid gap-2 md:grid-cols-2">{fields.map(fieldCard)}</div>
-        </div>
-      ))}
+      <input
+        type="search"
+        aria-label="Filter settings"
+        placeholder="Filter settings (e.g. risk leverage)"
+        className={`${input} mb-3`}
+        value={query}
+        onChange={e => setQuery(e.target.value)}
+      />
+      {shown.length === 0 && <p className={`text-sm mb-3 ${muted}`}>No setting matches.</p>}
+      <div className="space-y-2 mb-5">
+        {groupBySection(shown).map(([section, fields]) => {
+          const pendingCount = fields.filter(f => f.pending !== null || f.pending_from_files).length;
+          const editedCount = fields.filter(f => pathKey(f.path) in edits).length;
+          return (
+            <details
+              key={section}
+              className={`rounded-lg border ${dark ? 'border-gray-800 bg-gray-900' : 'border-gray-200 bg-white'}`}
+              open={query.trim() !== '' || pendingCount > 0 || editedCount > 0}
+            >
+              <summary className="cursor-pointer select-none px-3 py-2 text-xs font-semibold uppercase tracking-wider flex items-center gap-2">
+                <span>{section}</span>
+                <span className={`normal-case font-normal ${muted}`}>{fields.length}</span>
+                {pendingCount > 0 && <span className="normal-case font-normal text-amber-500">{pendingCount} pending</span>}
+                {editedCount > 0 && <span className="normal-case font-normal text-orange-500">{editedCount} edited</span>}
+              </summary>
+              <div className="px-3 pb-2 overflow-x-auto">
+                <table className="w-full">
+                  <thead>
+                    <tr className={`text-[11px] uppercase tracking-wider ${muted}`}>
+                      <th className="text-left font-normal py-1 pr-2">Setting</th>
+                      <th className="text-right font-normal py-1 pr-2">Running</th>
+                      <th className="text-right font-normal py-1 pr-2">Pending</th>
+                      <th className="text-left font-normal py-1">{state.editable ? 'New value' : ''}</th>
+                    </tr>
+                  </thead>
+                  <tbody>{fields.map(fieldRow)}</tbody>
+                </table>
+              </div>
+            </details>
+          );
+        })}
+      </div>
 
       {state.editable && state.running && (
         <>
@@ -240,7 +285,10 @@ export function SettingsEditor({ portfolioId }: { portfolioId: string }) {
               )}
             </div>
             <p className={`text-xs mt-1 ${muted}`}>{v.reason}</p>
-            <pre className={`text-xs mt-1 overflow-x-auto ${muted}`}>{JSON.stringify(v.overrides)}</pre>
+            <details className="mt-1">
+              <summary className={`text-xs cursor-pointer ${muted}`}>Changes</summary>
+              <pre className={`text-xs mt-1 overflow-x-auto ${muted}`}>{JSON.stringify(v.overrides, null, 2)}</pre>
+            </details>
           </li>
         ))}
         {state.editable && state.running && state.active && (

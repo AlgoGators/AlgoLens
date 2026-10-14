@@ -18,6 +18,7 @@ import {
   publishSourceOf,
   rescindBlockedReason,
   rescindConfirmText,
+  riskBreached,
   serverClockOffsetMs,
   type ComparisonRow,
   type DayPhase,
@@ -26,6 +27,7 @@ import {
   type DeskState,
 } from '../../domain/qt/desk';
 import { DeskEditForm } from './DeskEditForm';
+import { RiskReport } from './RiskReport';
 import { SettingsEditor } from './SettingsEditor';
 
 interface DeskPanelProps {
@@ -198,6 +200,7 @@ export function DeskPanel({ portfolioId, book, reloadBook }: DeskPanelProps) {
   // Only the newest state request may land: an older answer (a slow one, or
   // one for the portfolio shown before) is dropped.
   const requestSeq = useRef(0);
+  const overrideSection = useRef<HTMLDivElement>(null);
 
   const load = useCallback(async () => {
     const seq = ++requestSeq.current;
@@ -284,6 +287,9 @@ export function DeskPanel({ portfolioId, book, reloadBook }: DeskPanelProps) {
   // ... and only to the user who approved it.
   const rescindAllowed = rescindBlockedReason(state, serverNow, user?.email ?? null) === null;
   const overrideBlocked = overrideBlockedReason(state, serverNow);
+  // C9: Approve is closed by a risk breach (not by a lock, the cutoff or an unreadable check) and an
+  // override may be requested: point the desk at the override form.
+  const riskPrompt = riskBreached(state.risk) && approveBlocked !== null && overrideBlocked === null;
   const act = async (fn: () => Promise<void>) => {
     setBusy(true);
     setActionError(null);
@@ -331,6 +337,34 @@ export function DeskPanel({ portfolioId, book, reloadBook }: DeskPanelProps) {
             <p className={`mt-1 max-w-xs text-right text-xs ${muted}`} data-testid="approve-blocked">
               {approveBlocked}
             </p>
+          )}
+          {riskPrompt && (
+            <div
+              data-testid="risk-override-prompt"
+              role="alert"
+              className={`mt-2 max-w-xs rounded border px-3 py-2 text-sm ${
+                dark ? 'border-red-800 bg-red-950 text-red-200' : 'border-red-300 bg-red-50 text-red-800'
+              }`}
+            >
+              <p>
+                Positions are outside the risk limits. Request an override to trade them as asked, or edit them back
+                within the limits.
+              </p>
+              {!overrideOpen && (
+                <button
+                  type="button"
+                  data-testid="risk-override-button"
+                  className="mt-2 px-3 py-1 rounded bg-orange-500 text-white disabled:opacity-50"
+                  disabled={busy}
+                  onClick={() => {
+                    setOverrideOpen(true);
+                    overrideSection.current?.scrollIntoView?.({ behavior: 'smooth', block: 'center' });
+                  }}
+                >
+                  Request override
+                </button>
+              )}
+            </div>
           )}
           {rescindAllowed && !confirmRescind && (
             <button
@@ -438,8 +472,9 @@ export function DeskPanel({ portfolioId, book, reloadBook }: DeskPanelProps) {
       )}
 
       <AskedVsGiven rows={state.comparison} dark={dark} />
+      <RiskReport risk={state.risk} />
 
-      <div className="mt-6">
+      <div className="mt-6" ref={overrideSection}>
         <h4 className={`text-xs uppercase tracking-wider mb-2 ${muted}`}>Override</h4>
         {state.overrideRequests.map(r => (
           <p key={r.id} className="text-sm mb-1">

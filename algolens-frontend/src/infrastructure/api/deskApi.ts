@@ -1,6 +1,7 @@
 import type {
   DeskCommand,
   DeskDeadlines,
+  DeskRiskResult,
   DeskState,
   PublishedRecord,
   QuantityChange,
@@ -73,6 +74,8 @@ export interface ApprovalPage {
   /** The server's clock (ISO, UTC) and the request day's New York deadlines. */
   serverTime?: string;
   deadlines?: DeskDeadlines;
+  /** The engine's risk check of the request's day (C9): the breaches an approval waives. */
+  risk?: DeskRiskResult | null;
   viewer: { email: string; approver_role: 'vp' | 'president' | null; is_requester: boolean };
 }
 

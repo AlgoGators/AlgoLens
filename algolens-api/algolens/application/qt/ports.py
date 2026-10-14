@@ -29,6 +29,17 @@ class DeskGone(ApplicationError):
     """The approval link has expired. HTTP 410."""
 
 
+class DeskRiskUnavailable(Exception):
+    """GetDeskRisk failed (the engine is down, timed out, refused the call).
+
+    Not an HTTP error by itself: the desk state shows it, and the approval
+    gate refuses while it lasts (contract C9: fail closed)."""
+
+    def __init__(self, reason: str):
+        super().__init__(reason)
+        self.reason = reason
+
+
 class DeskRepositoryPort(Protocol):
     def desk_date(self, portfolio_id: str) -> date | None:
         """The latest model-run date of the portfolio (system or qt_proposal)."""
@@ -123,11 +134,13 @@ class SettingsRepositoryPort(Protocol):
 class DeskAgentPort(Protocol):
     """The engine's desk service over gRPC (infrastructure/qt/desk_client.py).
 
-    Best effort: never raises.
+    Commands are best effort: they never raise. Each returns a short outcome
+    for the log ("ACCEPTED", "unavailable", ...). The command row is the
+    record; when a call fails the row stays pending and the engine re-drives
+    it (contract section 6).
 
-    Each call returns a short outcome for the log ("ACCEPTED", "unavailable",
-    ...). The command row is the record; when a call fails the row stays
-    pending and the engine re-drives it (contract section 6).
+    get_desk_risk is a read (contract C9): it returns the report or raises
+    DeskRiskUnavailable.
     """
 
     def run_desk(self, command: Row) -> str:
@@ -144,3 +157,12 @@ class DeskAgentPort(Protocol):
 
     def rescind(self, command: Row) -> str:
         ...
+
+    def get_desk_risk(self, portfolio_id: str, day: date) -> dict[str, Any]:
+        """The risk report of the day's qt book (GetDeskRisk, desk.proto
+        1.3.0), JSON-friendly with camelCase keys: state ('no_book', 'model',
+        'desk', 'override'), auditId, withinLimits, approvedOverride,
+        breaches, m, bindingTerm, overLimitAfterRounding, overLimitByHold,
+        refused, symbols, grossLeverage, netLeverage, marginCushion,
+        equityToMargin (None when not recorded) and limits. Raises
+        DeskRiskUnavailable when the call fails."""

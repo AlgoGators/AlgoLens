@@ -7,6 +7,10 @@ The call is the fast path only (contract section 6): AlgoLens has already
 written the trading.position_overrides row, the engine re-drives pending rows
 on startup and every 60 s, so a failed or slow call is logged and swallowed.
 It never fails the user's action. Timeout: 3 s (ENGINE_RPC_TIMEOUT_SECONDS).
+
+GetDeskRisk (contract C9) is a read, not a command: there is no row to fall
+back on, so a failed call raises DeskRiskUnavailable and the caller decides
+(the desk state shows it; the approval gate refuses, failing closed).
 """
 
 import logging
@@ -14,6 +18,7 @@ import logging
 import grpc
 
 from algogators import desk_pb2, desk_pb2_grpc
+from algolens.application.qt.ports import DeskRiskUnavailable
 from algolens.infrastructure.rpc.settings import DEFAULT_TIMEOUT_SECONDS
 from algolens.infrastructure.rpc import describe_rpc_error, get_channel, is_version_mismatch, status_name
 
@@ -22,6 +27,50 @@ logger = logging.getLogger(__name__)
 
 def _day(value):
     return value.isoformat() if hasattr(value, "isoformat") else str(value)
+
+
+# DeskRiskState -> the report's "state".
+RISK_STATES = {
+    desk_pb2.DESK_RISK_STATE_NO_BOOK: "no_book",
+    desk_pb2.DESK_RISK_STATE_MODEL: "model",
+    desk_pb2.DESK_RISK_STATE_DESK: "desk",
+    desk_pb2.DESK_RISK_STATE_OVERRIDE: "override",
+}
+
+
+def _optional(message, field):
+    return getattr(message, field) if message.HasField(field) else None
+
+
+def risk_report(reply):
+    """A DeskRisk message as the JSON-friendly report of DeskAgentPort.get_desk_risk."""
+    return {
+        "state": RISK_STATES.get(reply.state, "unspecified"),
+        "auditId": int(reply.audit_id),
+        "withinLimits": reply.within_limits,
+        "approvedOverride": reply.approved_override,
+        "breaches": [{"term": b.term, "detail": b.detail} for b in reply.breaches],
+        "m": reply.m,
+        "bindingTerm": reply.binding_term,
+        "overLimitAfterRounding": reply.over_limit_after_rounding,
+        "overLimitByHold": reply.over_limit_by_hold,
+        "refused": reply.refused,
+        "symbols": [
+            {
+                "symbol": s.symbol,
+                "asked": s.asked,
+                "given": s.given,
+                "movedBy": s.moved_by,
+                "category": s.category,
+            }
+            for s in reply.symbols
+        ],
+        "grossLeverage": _optional(reply, "gross_leverage"),
+        "netLeverage": _optional(reply, "net_leverage"),
+        "marginCushion": _optional(reply, "margin_cushion"),
+        "equityToMargin": _optional(reply, "equity_to_margin"),
+        "limits": [{"name": limit.name, "value": limit.value} for limit in reply.limits],
+    }
 
 
 class DeskClient:
@@ -113,3 +162,20 @@ class DeskClient:
             audit_id=int(command["id"]),
         )
         return self._call("Rescind", request, command["id"])
+
+    def get_desk_risk(self, portfolio_id, day):
+        request = desk_pb2.DeskRiskRequest(portfolio_id=portfolio_id, date=_day(day))
+        try:
+            stub = desk_pb2_grpc.DeskServiceStub(self.channel_factory(self.address))
+            reply = stub.GetDeskRisk(request, timeout=self.timeout)
+        except grpc.RpcError as exc:
+            # The status name is the reason the desk sees; the details go to the log only.
+            log = logger.error if is_version_mismatch(exc) else logger.warning
+            log("[DESK] GetDeskRisk %s %s failed: %s", portfolio_id, _day(day), describe_rpc_error(exc))
+            raise DeskRiskUnavailable(status_name(exc)) from exc
+        except Exception as exc:
+            logger.error(
+                "[DESK] GetDeskRisk %s %s failed: %s", portfolio_id, _day(day), exc, exc_info=True
+            )
+            raise DeskRiskUnavailable("error") from exc
+        return risk_report(reply)

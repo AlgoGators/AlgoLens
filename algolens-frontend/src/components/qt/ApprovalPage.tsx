@@ -10,6 +10,7 @@ import {
   type DeskCommand,
   type DeskDeadlines,
 } from '../../domain/qt/desk';
+import { RiskReport } from './RiskReport';
 
 /**
  * The request day's deadline: the desk approves by 09:30 New York; from 10:00
@@ -182,6 +183,17 @@ export function ApprovalPage({ onDone }: { onDone: () => void }) {
                   : `approved${page.published.published_by ? ` by ${page.published.published_by}` : ''}`}
                 ; this request can no longer be decided.
               </p>
+            )}
+
+            {page.risk && (
+              <>
+                <h2 className="text-lg mt-6">Risk check of the desk's book</h2>
+                <p className={`text-xs ${muted}`}>
+                  What the engine's risk pass did to the desk's positions on {page.request.date}. An approval trades the
+                  request's book as asked, past these limits.
+                </p>
+                <RiskReport risk={page.risk} />
+              </>
             )}
 
             <h2 className="text-lg mt-6">The books now</h2>
