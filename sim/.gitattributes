@@ -1,0 +1,3 @@
+# Scripts and SQL run inside Linux containers or Git Bash: keep LF on Windows checkouts.
+* text=auto eol=lf
+*.ps1 text eol=crlf
