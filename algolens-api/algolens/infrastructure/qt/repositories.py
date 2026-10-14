@@ -429,7 +429,8 @@ class PostgresDeskRepository:
 
     def insert_rescind(self, portfolio_id, day, requested_by):
         """Under the day lock: refuse (C8) unless live_run_metadata says the
-        day is published by the desk (publish_source 'desk') and sent_at is
+        day is published by the desk (publish_source 'desk') by `requested_by`
+        (only the approver takes an approval back) and sent_at is
         NULL on all its rows, and while a publish or a rescind is open. The
         engine checks the same again, and the 09:30 New York cutoff, when it
         runs the row."""
@@ -460,6 +461,12 @@ class PostgresDeskRepository:
                     f"The {day.isoformat()} book was published by the engine "
                     f"({', '.join(sources)}), not approved by the desk; only a desk "
                     "approval can be taken back"
+                )
+            approver = max(published, key=lambda r: r["published_at"])["published_by"] or ""
+            if approver.strip().lower() != (requested_by or "").strip().lower():
+                raise DeskConflict(
+                    f"The {day.isoformat()} book was approved by {approver}; only they can "
+                    "take the approval back"
                 )
             if any(r["sent_at"] is not None for r in rows):
                 raise DeskConflict(

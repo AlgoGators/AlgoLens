@@ -1049,6 +1049,16 @@ def test_rescind_refuses_what_is_not_an_unsent_desk_approval(qt_db):
     assert commands(qt_db) == []
 
 
+def test_only_the_approver_can_rescind_and_a_refusal_writes_nothing(qt_db):
+    _needs_029(qt_db)
+    _approve(qt_db)  # approved by desk@x.com
+    with pytest.raises(DeskConflict, match="approved by desk@x.com; only they"):
+        RescindDesk(desk_repo(qt_db), NullAgent()).execute(entry(qt_db), "other@x.com")
+    assert [c["kind"] for c in commands(qt_db)] == ["publish"]
+    RescindDesk(desk_repo(qt_db), NullAgent()).execute(entry(qt_db), "Desk@X.com")
+    assert [c["kind"] for c in commands(qt_db)] == ["publish", "rescind"]
+
+
 def test_rescind_from_0930_new_york_writes_nothing(qt_db):
     _needs_029(qt_db)
     _approve(qt_db)
@@ -1064,10 +1074,10 @@ def test_a_second_open_rescind_is_refused_by_the_029_index(qt_db, monkeypatch):
     from algolens.infrastructure.qt.repositories import PostgresDeskRepository
 
     _approve(qt_db)
-    RescindDesk(desk_repo(qt_db), NullAgent()).execute(entry(qt_db), "a@x.com")
+    RescindDesk(desk_repo(qt_db), NullAgent()).execute(entry(qt_db), "desk@x.com")
     monkeypatch.setattr(PostgresDeskRepository, "_open_command", lambda *a, **k: None)
     with pytest.raises(DeskConflict, match="already open"):
-        RescindDesk(desk_repo(qt_db), NullAgent()).execute(entry(qt_db), "b@x.com")
+        RescindDesk(desk_repo(qt_db), NullAgent()).execute(entry(qt_db), "desk@x.com")
     assert [c["kind"] for c in commands(qt_db)] == ["publish", "rescind"]
 
 
