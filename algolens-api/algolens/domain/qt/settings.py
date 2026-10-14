@@ -38,8 +38,24 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-# Never shown, never editable (the engine also refuses them).
-HIDDEN_SECTIONS = frozenset({"database", "email"})
+# Never shown, never editable (the engine also refuses database and email).
+# The rest are not the QTs' to change from the desk (Dom, 2026-10-14):
+#   backtest            the desk trades the live book
+#   qt, live, execution platform and operations switches (desk_editable, data
+#                       staleness tolerances, position limits, cost keys)
+#   strategy_defaults,  model structure: the FDM table, allocation bounds and
+#   optimization        dynamic optimisation's internals
+HIDDEN_SECTIONS = frozenset(
+    {"database", "email", "backtest", "qt", "live", "execution", "strategy_defaults", "optimization"}
+)
+# Model structure inside sections the desk otherwise edits: (section, key)
+# pairs, a "*" key prefix matching keys that start with it, and keys of every
+# strategy under "strategies".
+HIDDEN_KEYS = frozenset({("general", "use_optimization"), ("general", "covariance_*")})
+HIDDEN_STRATEGY_KEYS = frozenset({"type", "enabled_live", "default_allocation"})
+# A key holding one of these anywhere in its path is hidden too
+# (execution.position_limit_backtest, strategies.<name>.enabled_backtest).
+HIDDEN_KEY_MARKERS = ("backtest",)
 FORBIDDEN_KEYS = frozenset({"portfolio_id", "host", "port", "user", "username", "dbname"})
 FORBIDDEN_MARKERS = ("password", "secret", "token", "api_key", "apikey", "private_key", "credential")
 
@@ -54,23 +70,49 @@ class SettingsRuleError(ValueError):
 
 
 def is_forbidden_key(key: str) -> bool:
+    """A key never shown nor editable: credentials, connection details,
+    backtest settings, and config comments (_note, _description, ...), which
+    are documentation, not settings."""
     lowered = str(key).lower()
-    return lowered in FORBIDDEN_KEYS or any(marker in lowered for marker in FORBIDDEN_MARKERS)
+    return (
+        lowered in FORBIDDEN_KEYS
+        or lowered.startswith("_")
+        or any(marker in lowered for marker in FORBIDDEN_MARKERS)
+        or any(marker in lowered for marker in HIDDEN_KEY_MARKERS)
+    )
+
+
+def _key_matches(pattern: str, key: str) -> bool:
+    return key.startswith(pattern[:-1]) if pattern.endswith("*") else key == pattern
+
+
+def is_hidden_path(path: list[str] | tuple[str, ...]) -> bool:
+    """Whether a setting at `path` is kept from the desk: a hidden section, a
+    credential, backtest or comment key anywhere, or a model-structure key."""
+    if not path:
+        return False
+    if path[0] in HIDDEN_SECTIONS or any(is_forbidden_key(k) for k in path):
+        return True
+    if len(path) >= 2 and any(
+        path[0] == section and _key_matches(key, path[1]) for section, key in HIDDEN_KEYS
+    ):
+        return True
+    return len(path) >= 3 and path[0] == "strategies" and path[2] in HIDDEN_STRATEGY_KEYS
 
 
 def visible_config(config: Mapping[str, Any] | None) -> dict[str, Any]:
-    """The config without the hidden sections and credential-like keys."""
+    """The config without everything is_hidden_path keeps from the desk."""
 
-    def strip(node: Any, depth: int) -> Any:
+    def strip(node: Any, prefix: tuple[str, ...]) -> Any:
         if isinstance(node, Mapping):
             return {
-                k: strip(v, depth + 1)
+                k: strip(v, prefix + (k,))
                 for k, v in node.items()
-                if not is_forbidden_key(k) and not (depth == 0 and k in HIDDEN_SECTIONS)
+                if not is_hidden_path(prefix + (k,))
             }
         return copy.deepcopy(node)
 
-    return strip(config or {}, 0)
+    return strip(config or {}, ())
 
 
 def value_type(value: Any) -> str:
@@ -175,7 +217,7 @@ def _check_path(path: Any) -> list[str]:
         or not all(isinstance(k, str) and k for k in path)
     ):
         raise SettingsRuleError("Each change needs a path: a list of keys")
-    if path[0] in HIDDEN_SECTIONS or any(is_forbidden_key(k) for k in path):
+    if is_hidden_path(path):
         raise SettingsRuleError(f"{'.'.join(path)} may not be changed from AlgoLens")
     return path
 
