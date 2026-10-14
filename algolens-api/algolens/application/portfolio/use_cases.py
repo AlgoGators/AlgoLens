@@ -26,6 +26,7 @@ from algolens.domain.portfolio.calculations import (
 from algolens.domain.portfolio.incubation import compute_incubation_window
 from algolens.domain.portfolio.registry import (
     asset_class_for,
+    counts_in_fund_total,
     desk_edit_allowed,
     group_portfolios,
 )
@@ -110,6 +111,7 @@ def build_strategy_detail(
         "lastUpdate": latest["date"].isoformat(),
         "book": rows.book,
         "fellBack": rows.fell_back,
+        "inFundTotal": counts_in_fund_total(cfg),
         "metrics": {
             "volatility": volatility,
             "sharpeRatio": sharpe,
@@ -160,6 +162,7 @@ def build_strategy_summary(
         "volatility": volatility,
         "sharpeRatio": sharpe,
         "annualizedReturn": annualized_return,
+        "inFundTotal": counts_in_fund_total(cfg),
     }
 
 
