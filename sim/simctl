@@ -201,8 +201,12 @@ BEGIN
                              'position_overrides', 'signals', 'equity_curve']
     LOOP
         IF to_regclass('trading.' || t) IS NULL THEN CONTINUE; END IF;
-        col := CASE WHEN t = 'equity_curve'
-                    THEN '("timestamp" AT TIME ZONE ''America/New_York'')::date' ELSE 'date' END;
+        -- The day column: date where the table has one, else its "timestamp" in New York.
+        col := CASE WHEN EXISTS (SELECT 1 FROM information_schema.columns
+                                 WHERE table_schema = 'trading' AND table_name = t
+                                   AND column_name = 'date')
+                    THEN 'date'
+                    ELSE '("timestamp" AT TIME ZONE ''America/New_York'')::date' END;
         EXECUTE format(
             'DELETE FROM trading.%I WHERE portfolio_id IN (''QT_CONSERVATIVE_PORTFOLIO'', '
             '''QT_CONSERVATIVE_MODEL_PORTFOLIO'') AND %s >= %L::date',
@@ -259,15 +263,19 @@ cmd_load() {
         # and skipped.
         compose exec -T postgres sh -c "gunzip -c $d/schema.sql.gz | psql -X -q -U postgres -d $DB" \
             > /dev/null 2> "$SIM_DIR/data/$snap.load.log" || true
+        if [ -f "$SIM_DIR/data/$snap/schema-extra.sql.gz" ]; then
+            compose exec -T postgres sh -c "gunzip -c $d/schema-extra.sql.gz | psql -X -q -U postgres -d $DB"                 > /dev/null 2>> "$SIM_DIR/data/$snap.load.log" || true
+        fi
         errs=$(grep -c ERROR "$SIM_DIR/data/$snap.load.log" || true)
-        say "restoring market data and metadata (data.sql.gz)"
+        say "restoring metadata (data.sql.gz)"
         compose exec -T postgres sh -c "gunzip -c $d/data.sql.gz | psql -X -q -U postgres -d $DB" \
             > /dev/null 2>> "$SIM_DIR/data/$snap.load.log" || true
         local f t
-        for f in "$SIM_DIR/data/$snap"/trading.*.csv.gz; do
+        # <schema>.<table>.csv.gz: the QT portfolios' trading rows and the market data.
+        for f in "$SIM_DIR/data/$snap"/*.csv.gz; do
             [ -e "$f" ] || continue
             t="$(basename "$f" .csv.gz)"
-            say "restoring $t (QT portfolios)"
+            say "restoring $t"
             compose exec -T postgres psql -X -q -U postgres -d "$DB" \
                 -c "SET session_replication_role = replica" \
                 -c "\\copy $t FROM PROGRAM 'gunzip -c $d/$t.csv.gz' WITH (FORMAT csv, HEADER true)" \
