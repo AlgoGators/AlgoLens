@@ -44,6 +44,10 @@ class DeskServiceStub:
     only; no field changed.
     1.4.0  2026-10-14  DeskRisk.checks (17), RiskCheck, RiskCheckStatus: every risk limit with
     the stored book's reading and its max, breach or not. Additive only.
+    1.5.0  2026-10-15  DeskRisk.multipliers (18), RiskMultiplier: the overlay's m, the risk
+    scale and the configured IDM and FDM per strategy. Additive only.
+    Contract C10 (the A -> B -> C approval) uses PublishRequest unchanged:
+    the flow is the publish row's payload.
 
     """
 
@@ -109,6 +113,10 @@ class DeskServiceServicer:
     only; no field changed.
     1.4.0  2026-10-14  DeskRisk.checks (17), RiskCheck, RiskCheckStatus: every risk limit with
     the stored book's reading and its max, breach or not. Additive only.
+    1.5.0  2026-10-15  DeskRisk.multipliers (18), RiskMultiplier: the overlay's m, the risk
+    scale and the configured IDM and FDM per strategy. Additive only.
+    Contract C10 (the A -> B -> C approval) uses PublishRequest unchanged:
+    the flow is the publish row's payload.
 
     """
 
@@ -248,6 +256,10 @@ class DeskService:
     only; no field changed.
     1.4.0  2026-10-14  DeskRisk.checks (17), RiskCheck, RiskCheckStatus: every risk limit with
     the stored book's reading and its max, breach or not. Additive only.
+    1.5.0  2026-10-15  DeskRisk.multipliers (18), RiskMultiplier: the overlay's m, the risk
+    scale and the configured IDM and FDM per strategy. Additive only.
+    Contract C10 (the A -> B -> C approval) uses PublishRequest unchanged:
+    the flow is the publish row's payload.
 
     """
 

@@ -126,6 +126,31 @@ export function RiskReport({ risk }: { risk: DeskRiskResult | null | undefined }
         </div>
       )}
 
+      {(risk.multipliers ?? []).length > 0 && (
+        <div className="mt-3 overflow-x-auto">
+          <table className="text-sm" data-testid="risk-multipliers">
+            <thead>
+              <tr className={muted}>
+                <th className="text-left font-normal py-1 pr-4">Multiplier</th>
+                <th className="text-right font-normal py-1 pr-4">Value</th>
+                <th className="text-left font-normal py-1" />
+              </tr>
+            </thead>
+            <tbody>
+              {(risk.multipliers ?? []).map(x => (
+                <tr key={x.name} className={rule} data-testid={`risk-multiplier-${x.name}`}>
+                  <td className="py-1 pr-4 whitespace-nowrap">{x.label}</td>
+                  <td className="py-1 pr-4 text-right font-mono">
+                    {x.value === null || !Number.isFinite(x.value) ? '-' : Number(x.value.toPrecision(4))}
+                  </td>
+                  <td className={`py-1 text-xs ${muted}`}>{x.detail}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
       {moved.length > 0 && (
         <div className="mt-3 overflow-x-auto">
           <table className="w-full text-sm" data-testid="risk-symbols">

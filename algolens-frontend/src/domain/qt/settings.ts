@@ -155,3 +155,34 @@ export function filterFields(fields: SettingField[], query: string): SettingFiel
     return words.every(word => label.includes(word));
   });
 }
+
+/**
+ * Which settings sections a viewer opened or closed, remembered in this
+ * browser only (a convenience: storage can be missing or refuse, and then
+ * nothing is remembered).
+ */
+export function readOpenState(key: string): Record<string, boolean> {
+  try {
+    const raw = window.localStorage.getItem(key);
+    const parsed = raw ? JSON.parse(raw) : {};
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+    return Object.fromEntries(
+      Object.entries(parsed as Record<string, unknown>).filter(([, v]) => typeof v === 'boolean'),
+    ) as Record<string, boolean>;
+  } catch {
+    return {};
+  }
+}
+
+export function writeOpenState(key: string, value: Record<string, boolean>): void {
+  try {
+    window.localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    // storage unavailable: the state is simply not remembered
+  }
+}
+
+/** A section is open when the viewer said so; otherwise when it needs attention. */
+export function sectionOpen(remembered: Record<string, boolean>, section: string, needsAttention: boolean): boolean {
+  return remembered[section] ?? needsAttention;
+}

@@ -10,6 +10,9 @@ import {
   POLL_SLOW_INTERVAL_MS,
   approvalTokenFrom,
   approveBlockedReason,
+  acceptCBlockedReason,
+  approvalPipeline,
+  flowOf,
   deskDayStatus,
   deskLockedReason,
   describeCommand,
@@ -618,9 +621,9 @@ describe('the risk check (C9)', () => {
     expect(riskBreachReason({ unavailable: 'UNAVAILABLE' })).toBe('The risk check is unavailable: UNAVAILABLE');
   });
 
-  it('closes Approve after the lock and cutoff checks', () => {
-    expect(approveBlockedReason(deskState({ risk: breached }))).toMatch(/^The positions breach risk limits/);
-    expect(approveBlockedReason(deskState({ risk: { unavailable: 'UNAVAILABLE' } }))).toMatch(/unavailable/);
+  it('leaves Approve open: the engine checks B after the pass (C10)', () => {
+    expect(approveBlockedReason(deskState({ risk: breached }))).toBeNull();
+    expect(approveBlockedReason(deskState({ risk: { unavailable: 'UNAVAILABLE' } }))).toBeNull();
     expect(approveBlockedReason(deskState({ risk: risk({}) }))).toBeNull();
     // A lock wins over the risk check.
     expect(
@@ -683,5 +686,85 @@ describe('the risk check (C9)', () => {
       }),
     );
     expect(moved.map(s => s.symbol)).toEqual(['ZC.v.0', 'ZS.v.0']);
+  });
+});
+
+describe('the A -> B -> C approval (C10)', () => {
+  const save = command({ id: 10, kind: 'save', status: 'done' });
+  const autoPublish = (over: Partial<DeskCommand>) =>
+    command({ id: 11, kind: 'publish', payload: { flow: 'auto', after: 10 }, ...over });
+  const changed = autoPublish({
+    status: 'refused',
+    result: {
+      reason: 'changed',
+      differs: [{ symbol: 'ZT.v.0', asked: 8, given: 2, moved_by: 'cap', category: 'risk' }],
+    },
+  });
+  const cRisk = (over: Partial<DeskRisk>) =>
+    ({
+      state: 'desk', auditId: 10, withinLimits: false, approvedOverride: false, breaches: [], m: 1,
+      bindingTerm: 'none', overLimitAfterRounding: '', overLimitByHold: '', refused: false, symbols: [],
+      grossLeverage: null, netLeverage: null, marginCushion: null, equityToMargin: null, limits: [],
+      checks: [], ...over,
+    }) as DeskRisk;
+
+  it('reads the flow of a publish row', () => {
+    expect(flowOf(autoPublish({}))).toBe('auto');
+    expect(flowOf(command({ kind: 'publish' }))).toBeNull();
+    expect(flowOf(command({ payload: { flow: 'bogus' } }))).toBeNull();
+    expect(flowOf(null)).toBeNull();
+  });
+
+  it('starts at A, then B once saved', () => {
+    expect(approvalPipeline(deskState({})).stage).toBe('a');
+    expect(approvalPipeline(deskState({ latestSave: save })).stage).toBe('b');
+  });
+
+  it('shows the engine running while the publish is open', () => {
+    const p = approvalPipeline(deskState({ latestSave: save, publish: autoPublish({ status: 'running' }) }));
+    expect(p.stage).toBe('checking');
+    expect(p.title).toMatch(/dynamic optimisation/);
+  });
+
+  it('asks the desk to choose when C differs from B', () => {
+    const p = approvalPipeline(deskState({ latestSave: save, publish: changed }));
+    expect(p.stage).toBe('choose');
+    expect(p.reason).toBe('changed');
+    expect(p.differences.map(d => d.symbol)).toEqual(['ZT.v.0']);
+    expect(p.title).toMatch(/changed 1 position \(C differs from B\)/);
+  });
+
+  it('does not offer a choice for an older save', () => {
+    const newer = command({ id: 12, kind: 'save', status: 'done' });
+    expect(approvalPipeline(deskState({ latestSave: newer, publish: changed })).stage).toBe('b');
+  });
+
+  it('names how the day was approved', () => {
+    const published = { published_by: 'd@x.com', published_at: '2026-10-08T12:00:00Z', publish_source: 'desk' as const, sent_at: null };
+    const auto = approvalPipeline(deskState({ publish: autoPublish({ status: 'done' }), published }));
+    expect(auto.stage).toBe('approved');
+    expect(auto.title).toMatch(/^Auto-approved/);
+    const b = approvalPipeline(deskState({
+      publish: command({ kind: 'publish', status: 'done', payload: { flow: 'override_b', after: 3 } }), published,
+    }));
+    expect(b.title).toMatch(/VP or President/);
+    const sent = approvalPipeline(deskState({ publish: autoPublish({ status: 'done' }),
+      published: { ...published, sent_at: '2026-10-08T13:30:00Z' } }));
+    expect(sent.stage).toBe('sent');
+    const fallback = approvalPipeline(deskState({ published: { ...published, publish_source: 'fallback' } }));
+    expect(fallback.stage).toBe('fallback');
+  });
+
+  it('opens Approve C only on a choice whose C is within the limits', () => {
+    const choosing = { latestSave: save, publish: changed };
+    expect(acceptCBlockedReason(deskState({ ...choosing, risk: cRisk({}) }))).toBeNull();
+    expect(acceptCBlockedReason(deskState({ ...choosing, risk: cRisk({ overLimitAfterRounding: 'R' }) }))).toMatch(
+      /over a limit \(R\)/,
+    );
+    expect(acceptCBlockedReason(deskState({ ...choosing,
+      risk: cRisk({ checks: [{ term: 'L_g', label: 'L', value: 9, max: 8, unit: 'multiple', status: 'over', detail: '' }] }) }))).toMatch(/L_g/);
+    expect(acceptCBlockedReason(deskState({ ...choosing, risk: cRisk({ refused: true }) }))).toMatch(/overlay refused/);
+    expect(acceptCBlockedReason(deskState({ ...choosing, risk: { unavailable: 'DOWN' } }))).toMatch(/unavailable/);
+    expect(acceptCBlockedReason(deskState({ latestSave: save, risk: cRisk({}) }))).toMatch(/no engine book/);
   });
 });

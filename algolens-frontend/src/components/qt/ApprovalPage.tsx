@@ -22,9 +22,9 @@ function Deadline({ date, deadlines, nowMs }: { date: string; deadlines: DeskDea
   const fallbackAt = Date.parse(deadlines.fallbackAt);
   let text: string;
   if (nowMs < approveBy) {
-    text = `The desk must approve the ${date} book by 09:30 New York (${formatCountdown(approveBy - nowMs)} left). Decide before then so the desk can approve the book you decide.`;
+    text = `Decide by 09:30 New York (${formatCountdown(approveBy - nowMs)} left): approving books the desk's positions exactly and approves the ${date} book, which is e-mailed at 09:30.`;
   } else if (nowMs < fallbackAt) {
-    text = `09:30 New York has passed. The ${date} book can still be approved until 10:00 (${formatCountdown(fallbackAt - nowMs)} left); from then the model's book is sent and this request can no longer be decided.`;
+    text = `09:30 New York has passed. Approving until 10:00 (${formatCountdown(fallbackAt - nowMs)} left) books the desk's positions and sends the ${date} book at once; from 10:00 the model's book is sent and this request can no longer be decided.`;
   } else {
     text = `Closed: from 10:00 New York on ${date} the model's book is sent, so this request can no longer be decided.`;
   }
