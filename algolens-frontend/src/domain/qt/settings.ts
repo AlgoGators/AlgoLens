@@ -140,3 +140,18 @@ export function versionStatus(state: SettingsState): { running: string; pending:
   const pending = state.pending && state.active ? `version ${state.active.version}, from the next live run` : null;
   return { running, pending };
 }
+
+/** A field's name inside its section (the section is the first path segment). */
+export function labelInSection(field: SettingField): string {
+  return field.path.length > 1 ? field.path.slice(1).join('.') : field.path[0];
+}
+
+/** The fields whose dotted path contains every word of `query` (case-insensitive). */
+export function filterFields(fields: SettingField[], query: string): SettingField[] {
+  const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return fields;
+  return fields.filter(field => {
+    const label = pathLabel(field.path).toLowerCase();
+    return words.every(word => label.includes(word));
+  });
+}
