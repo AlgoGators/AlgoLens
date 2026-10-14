@@ -52,15 +52,16 @@ def test_internal_roles_can_access_incubation(client, role):
     assert response.get_json() == {"incubating_strategies": []}
 
 
-@pytest.mark.parametrize("role", ["admin", "exec_board", "general_member"])
-def test_internal_roles_can_use_the_qt_desk(role):
-    from algolens.adapters.http.portfolio import can_use_qt_desk
+@pytest.mark.parametrize("role", ["admin", "exec_board"])
+def test_exec_roles_fall_back_to_the_qt_screen(role):
+    """Before migration 003 (and in its backfill) exec gets the desk."""
+    from algolens.domain.identity.screens import QT, legacy_screens
 
-    assert can_use_qt_desk({"role": role})
+    assert QT in legacy_screens(role)
 
 
-@pytest.mark.parametrize("role", [None, "", "investor", "viewer"])
-def test_other_roles_cannot_use_the_qt_desk(role):
-    from algolens.adapters.http.portfolio import can_use_qt_desk
+@pytest.mark.parametrize("role", [None, "", "general_member", "team_lead", "investor", "viewer"])
+def test_other_roles_do_not_fall_back_to_the_qt_screen(role):
+    from algolens.domain.identity.screens import QT, legacy_screens
 
-    assert not can_use_qt_desk({"role": role})
+    assert QT not in legacy_screens(role)

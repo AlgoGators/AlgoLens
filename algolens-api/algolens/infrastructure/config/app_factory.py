@@ -12,6 +12,7 @@ from flask_cors import CORS
 from flask_jwt_extended import JWTManager
 from werkzeug.middleware.proxy_fix import ProxyFix
 
+from algolens.adapters.http.api import api_bp
 from algolens.adapters.http.auth import auth_bp
 from algolens.adapters.http.desk import desk_bp
 from algolens.adapters.http.portfolio import portfolio_bp
@@ -203,6 +204,7 @@ def create_app():
     app.register_blueprint(auth_bp, url_prefix="/auth")
     app.register_blueprint(portfolio_bp, url_prefix="/portfolio")
     app.register_blueprint(desk_bp, url_prefix="/portfolio/desk")
+    app.register_blueprint(api_bp, url_prefix="/api")
 
     @app.route("/health/live", methods=["GET"])
     def liveness_check():

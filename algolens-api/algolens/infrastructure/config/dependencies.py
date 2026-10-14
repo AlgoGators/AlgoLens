@@ -40,6 +40,22 @@ def create_dev_auth_config():
     return EnvironmentDevAuthConfig()
 
 
+def create_screen_access_dependencies(connection_factory=None):
+    from algolens.infrastructure.identity.screen_access import (
+        PostgresScreenAccessRepository,
+    )
+
+    return PostgresScreenAccessRepository(connection_factory=connection_factory)
+
+
+def create_investor_dependencies(connection_factory=None):
+    """(strategy registry, investor repository) for the investor routes."""
+    from algolens.infrastructure.investor.repositories import PostgresInvestorRepository
+
+    registry = PostgresStrategyRegistry(connection_factory=connection_factory)
+    return registry, PostgresInvestorRepository(connection_factory=connection_factory)
+
+
 def create_desk_dependencies(connection_factory=None):
     """(desk repository, desk gRPC client, QT settings) for the desk routes."""
     from algolens.infrastructure.qt.desk_client import DeskClient

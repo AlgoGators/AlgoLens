@@ -22,6 +22,7 @@ export interface DeskSlotProps {
 interface PortfolioBookViewProps {
   portfolio: PortfolioEntry;
   onBack: () => void;
+  backLabel?: string;
   /** The QT desk panel, when the desk is enabled for this user and portfolio. */
   renderDesk?: (props: DeskSlotProps) => React.ReactNode;
 }
@@ -31,7 +32,12 @@ interface PortfolioBookViewProps {
  * Opens on the qt book; the API serves the system book, labelled as such,
  * while the portfolio has no qt book yet.
  */
-export function PortfolioBookView({ portfolio, onBack, renderDesk }: PortfolioBookViewProps) {
+export function PortfolioBookView({
+  portfolio,
+  onBack,
+  backLabel = 'Back to all strategies',
+  renderDesk,
+}: PortfolioBookViewProps) {
   const { theme } = useTheme();
   const [requested, setRequested] = useState<PositionBook | null>(null);
   const [strategy, setStrategy] = useState<Strategy | null>(null);
@@ -90,7 +96,7 @@ export function PortfolioBookView({ portfolio, onBack, renderDesk }: PortfolioBo
     <StrategyDetail
       strategy={strategy}
       onBack={onBack}
-      backLabel="Back to all strategies"
+      backLabel={backLabel}
       headerExtra={toggle}
     >
       {renderDesk?.({ portfolio, strategy, book: active, reload })}

@@ -13,12 +13,10 @@ import { EmptyPortfolioScreen } from './EmptyPortfolioScreen';
 import { IncubationScreen } from './IncubationScreen';
 import { PortfolioSwitcher } from './PortfolioSwitcher';
 import { PortfolioBookView } from './PortfolioBookView';
-import { DeskPanel } from './qt/DeskPanel';
 import { findPortfolio, type PortfolioList } from '../domain/portfolio/portfolioRegistry';
 import type { PortfolioData } from '../domain/portfolio/portfolioData';
 import { PortfolioApplicationService } from '../application/portfolio/portfolioService';
-import { isInternalRole } from '../domain/identity/user';
-import { useAuth } from '../adapters/react/AuthContext';
+import { useScreens } from '../adapters/react/ScreenContext';
 import { useTheme } from '../adapters/react/ThemeContext';
 
 interface DashboardProps {
@@ -39,8 +37,9 @@ export function Dashboard({ onLogout }: DashboardProps) {
   const [portfolioList, setPortfolioList] = useState<PortfolioList | null>(null);
   const [selectedPortfolioId, setSelectedPortfolioId] = useState<string | null>(null);
   const { theme } = useTheme();
-  const { user } = useAuth();
-  const isInternalMember = isInternalRole(user?.role);
+  const { hasScreen } = useScreens();
+  // The member screen. Incubation is served to the member and qt screens.
+  const isInternalMember = hasScreen('member') || hasScreen('qt');
 
   // Fetch portfolio data on mount
   useEffect(() => {
@@ -178,20 +177,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
               key={selectedPortfolio.portfolio_id}
               portfolio={selectedPortfolio}
               onBack={() => setSelectedPortfolioId(null)}
-              renderDesk={
-                // The desk (QT_DESK_ENABLED) on desk-editable futures books,
-                // for desk users. The server enforces all three again.
-                portfolioList?.deskEnabled && selectedPortfolio.desk_editable && isInternalMember
-                  ? ({ portfolio, book, reload }) => (
-                      <DeskPanel
-                        key={portfolio.portfolio_id}
-                        portfolioId={portfolio.portfolio_id}
-                        book={book}
-                        reloadBook={reload}
-                      />
-                    )
-                  : undefined
-              }
+              // Read-only here: the desk lives on the QT screen.
             />
           ) : isLoading ? (
             <div className="flex items-center justify-center min-h-[400px]">

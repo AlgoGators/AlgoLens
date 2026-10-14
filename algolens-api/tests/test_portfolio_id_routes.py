@@ -185,11 +185,33 @@ def test_portfolio_reads_require_login(client, reader):
     assert client.get("/portfolio/portfolios/QT_CONSERVATIVE_PORTFOLIO").status_code == 401
 
 
-def test_desk_access_helpers():
-    assert portfolio_http.can_use_qt_desk({"role": "admin"})
-    assert portfolio_http.can_use_qt_desk({"role": "general_member"})
-    assert not portfolio_http.can_use_qt_desk({"role": "investor"})
-    assert not portfolio_http.can_use_qt_desk(None)
+def test_desk_access_is_the_qt_screen(screen_access):
+    from flask_jwt_extended import verify_jwt_in_request
+
+    with app.app_context():
+        token = create_access_token(identity="7", additional_claims={"role": "general_member"})
+
+    def can_use(screens):
+        screen_access.screens["7"] = screens
+        with app.test_request_context(headers={"Cookie": f"access_token_cookie={token}"}):
+            verify_jwt_in_request()
+            return portfolio_http.can_use_qt_desk()
+
+    assert can_use(["qt"])
+    assert can_use(["member", "qt"])
+    assert not can_use(["member"])
+    assert not can_use(["investor"])
+    assert not can_use([])
+
+
+def test_portfolio_reads_need_the_member_or_qt_screen(client, reader, screen_access):
+    _login(client)
+    screen_access.screens["7"] = ["investor"]
+    assert client.get("/portfolio/portfolios").status_code == 403
+    screen_access.screens["7"] = ["qt"]
+    assert client.get("/portfolio/portfolios").status_code == 200
+    screen_access.screens["7"] = ["member"]
+    assert client.get("/portfolio/portfolios").status_code == 200
 
 
 def test_is_approver_reads_qt_approvers(monkeypatch):

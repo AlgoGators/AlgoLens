@@ -9,6 +9,8 @@ interface PortfolioSwitcherProps {
   groups: PortfolioGroup[];
   selected: string | null;
   onSelect: (portfolioId: string | null) => void;
+  /** The "All strategies" chip (the member screen's overview). */
+  showAll?: boolean;
 }
 
 /**
@@ -16,7 +18,7 @@ interface PortfolioSwitcherProps {
  * tab. Related portfolios (one portfolio_group) are shown together, e.g. the
  * QT desk book next to its untouched model twin.
  */
-export function PortfolioSwitcher({ groups, selected, onSelect }: PortfolioSwitcherProps) {
+export function PortfolioSwitcher({ groups, selected, onSelect, showAll = true }: PortfolioSwitcherProps) {
   const { theme } = useTheme();
   const dark = theme === 'dark';
 
@@ -36,9 +38,11 @@ export function PortfolioSwitcher({ groups, selected, onSelect }: PortfolioSwitc
       className={`mb-6 pb-4 border-b ${dark ? 'border-gray-800' : 'border-gray-200'}`}
     >
       <div className="flex flex-wrap items-center gap-2">
-        <button type="button" className={chip(selected === null)} onClick={() => onSelect(null)}>
-          All strategies
-        </button>
+        {showAll && (
+          <button type="button" className={chip(selected === null)} onClick={() => onSelect(null)}>
+            All strategies
+          </button>
+        )}
         {groups.map(group =>
           group.grouped ? (
             <div

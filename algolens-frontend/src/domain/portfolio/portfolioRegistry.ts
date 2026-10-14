@@ -79,3 +79,8 @@ export function describeBookLoadError(message: string): string {
   }
   return `Could not load this book: ${message}`;
 }
+
+/** The groups holding a desk-edited portfolio, each with its model twin (the QT screen). */
+export function deskGroups(groups: PortfolioGroup[]): PortfolioGroup[] {
+  return groups.filter(group => group.portfolios.some(p => p.desk_editable));
+}

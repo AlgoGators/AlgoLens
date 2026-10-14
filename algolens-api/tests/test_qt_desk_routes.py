@@ -211,10 +211,15 @@ def test_approval_refusals(client, desk):
     stranger = _login(client, email="nobody@x.com", role="investor")
     assert client.post("/portfolio/desk/approval", json={"token": "secret-token"}, headers=stranger).status_code == 403
 
+    # A member without the qt screen is not the desk: no approval page.
     member = _login(client, email="member@x.com", role="general_member")
-    assert client.post("/portfolio/desk/approval", json={"token": "secret-token"}, headers=member).status_code == 200
+    assert client.post("/portfolio/desk/approval", json={"token": "secret-token"}, headers=member).status_code == 403
+
+    # A desk user (qt screen) may look, but only an approver decides.
+    desk_user = _login(client, email="member@x.com", role="exec_board")
+    assert client.post("/portfolio/desk/approval", json={"token": "secret-token"}, headers=desk_user).status_code == 200
     assert client.post(
-        "/portfolio/desk/approval/decide", json={"token": "secret-token", "approved": True}, headers=member
+        "/portfolio/desk/approval/decide", json={"token": "secret-token", "approved": True}, headers=desk_user
     ).status_code == 403
 
     own = _login(client, email="vp@x.com")

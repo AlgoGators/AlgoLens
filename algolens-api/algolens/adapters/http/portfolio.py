@@ -1,11 +1,12 @@
 """Portfolio HTTP routes."""
 
 from datetime import datetime, timezone
-from functools import wraps
 import time
 
 from flask import Blueprint, current_app, jsonify, request
 from flask_jwt_extended import get_jwt, get_jwt_identity, jwt_required
+
+from algolens.adapters.http.access import has_screen, requires_screen
 
 from algolens.adapters.serializers.portfolio import (
     serialize_incubating_strategy_list,
@@ -29,6 +30,7 @@ from algolens.application.portfolio.use_cases import (
     StrategyDataNotFound,
     StrategyNotFound,
 )
+from algolens.domain.identity.screens import MEMBER, QT
 from algolens.infrastructure.config.dependencies import (
     create_portfolio_dependencies,
     load_qt_settings,
@@ -36,20 +38,18 @@ from algolens.infrastructure.config.dependencies import (
 
 portfolio_bp = Blueprint("portfolio", __name__)
 
-# Incubation is an internal member-only surface. Default-deny: an unrecognised
-# or absent role is refused, so new roles stay locked out until explicitly added.
-# exec_board is exec, and exec equals admin (HD ruling 2026-09-25, AlgoLens #93/#94; the
-# interim #94 map). The QT desk is the quant-trading team plus exec.
-INTERNAL_ROLES = frozenset({"admin", "exec_board", "general_member"})
+# Who may open what is screen access (algolens.adapters.http.access): an admin
+# assigns each user the member, investor and/or qt screen (Dom, 2026-10-11).
+# Portfolios, strategies and incubation are the member screen's; QT users see
+# them too, since the desk works on the same portfolios. Investors get their
+# own /api/investor reads and none of these.
+PORTFOLIO_SCREENS = (MEMBER, QT)
 
 
-def can_use_qt_desk(user):
-    """Whether a signed-in user may use the QT desk (edit, publish, settings).
-
-    Provisional: the internal allow-list above. AlgoLens#94 replaces this with
-    the qt_desk capability; every desk route goes through this one helper.
-    """
-    return (user or {}).get("role") in INTERNAL_ROLES
+def can_use_qt_desk():
+    """Whether the signed-in user may use the QT desk (edit, approve, settings):
+    the qt screen. Every desk route goes through this one helper."""
+    return has_screen(QT)
 
 
 def is_approver(user, role):
@@ -77,25 +77,6 @@ def _portfolio_dependencies():
     return create_portfolio_dependencies()
 
 
-def internal_only(fn):
-    """Refuse anyone whose JWT role is not an internal one."""
-
-    @wraps(fn)
-    def wrapper(*args, **kwargs):
-        role = get_jwt().get("role")
-        if role not in INTERNAL_ROLES:
-            current_app.logger.warning(
-                "Refused %s to %s: role %r is not internal",
-                request.method,
-                request.path,
-                role,
-            )
-            return jsonify({"error": "Insufficient permissions"}), 403
-        return fn(*args, **kwargs)
-
-    return wrapper
-
-
 def _request_user_id():
     user_id = get_jwt_identity()
     if user_id is None:
@@ -109,6 +90,7 @@ def _incubation_error_status(exc):
 
 @portfolio_bp.route("/strategy/<strategy_id>", methods=["GET"])
 @jwt_required()
+@requires_screen(*PORTFOLIO_SCREENS)
 def get_strategy(strategy_id):
     start = time.perf_counter()
     try:
@@ -139,6 +121,7 @@ def get_strategy(strategy_id):
 
 @portfolio_bp.route("/strategies", methods=["GET"])
 @jwt_required()
+@requires_screen(*PORTFOLIO_SCREENS)
 def get_all_strategies():
     start = time.perf_counter()
     current_app.logger.info("[STRATEGIES] === /strategies endpoint called ===")
@@ -163,6 +146,7 @@ def get_all_strategies():
 
 @portfolio_bp.route("/portfolios", methods=["GET"])
 @jwt_required()
+@requires_screen(*PORTFOLIO_SCREENS)
 def list_portfolios():
     """The portfolio switcher: live portfolios grouped by portfolio_group."""
     try:
@@ -178,6 +162,7 @@ def list_portfolios():
 
 @portfolio_bp.route("/portfolios/<portfolio_id>", methods=["GET"])
 @jwt_required()
+@requires_screen(*PORTFOLIO_SCREENS)
 def get_portfolio(portfolio_id):
     """One portfolio's book by portfolio id; ?book=system|qt_proposal|qt."""
     try:
@@ -201,7 +186,7 @@ def get_portfolio(portfolio_id):
 
 @portfolio_bp.route("/incubation", methods=["GET"])
 @jwt_required()
-@internal_only
+@requires_screen(*PORTFOLIO_SCREENS)
 def get_incubation_strategies():
     try:
         _registry, reader = _portfolio_dependencies()
@@ -218,7 +203,7 @@ def get_incubation_strategies():
 
 @portfolio_bp.route("/incubation/<strategy_id>/performance", methods=["GET"])
 @jwt_required()
-@internal_only
+@requires_screen(*PORTFOLIO_SCREENS)
 def get_incubation_perf(strategy_id):
     try:
         _registry, reader = _portfolio_dependencies()
@@ -236,7 +221,7 @@ def get_incubation_perf(strategy_id):
 
 @portfolio_bp.route("/incubation/<strategy_id>/start", methods=["POST"])
 @jwt_required()
-@internal_only
+@requires_screen(*PORTFOLIO_SCREENS)
 def start_strategy_incubation(strategy_id):
     payload = request.get_json(silent=True)
     if not isinstance(payload, dict):
@@ -276,7 +261,7 @@ def start_strategy_incubation(strategy_id):
 
 @portfolio_bp.route("/incubation/<strategy_id>/promote", methods=["POST"])
 @jwt_required()
-@internal_only
+@requires_screen(*PORTFOLIO_SCREENS)
 def promote_strategy_to_live(strategy_id):
     payload = request.get_json(silent=True)
     if not isinstance(payload, dict):
@@ -305,7 +290,7 @@ def promote_strategy_to_live(strategy_id):
 
 @portfolio_bp.route("/incubation/<strategy_id>/retire", methods=["POST"])
 @jwt_required()
-@internal_only
+@requires_screen(*PORTFOLIO_SCREENS)
 def retire_strategy(strategy_id):
     payload = request.get_json(silent=True)
     if not isinstance(payload, dict):
