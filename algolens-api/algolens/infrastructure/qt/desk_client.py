@@ -38,6 +38,15 @@ RISK_STATES = {
 }
 
 
+# RiskCheckStatus -> a check's "status" (desk.proto 1.4.0).
+CHECK_STATUSES = {
+    desk_pb2.RISK_CHECK_STATUS_WITHIN: "within",
+    desk_pb2.RISK_CHECK_STATUS_BOUND: "bound",
+    desk_pb2.RISK_CHECK_STATUS_OVER: "over",
+    desk_pb2.RISK_CHECK_STATUS_NOT_MEASURED: "not_measured",
+}
+
+
 def _optional(message, field):
     return getattr(message, field) if message.HasField(field) else None
 
@@ -70,6 +79,19 @@ def risk_report(reply):
         "marginCushion": _optional(reply, "margin_cushion"),
         "equityToMargin": _optional(reply, "equity_to_margin"),
         "limits": [{"name": limit.name, "value": limit.value} for limit in reply.limits],
+        # Every check with its reading and max, as trade-ngin labels and measures them.
+        "checks": [
+            {
+                "term": c.term,
+                "label": c.label,
+                "value": _optional(c, "value"),
+                "max": _optional(c, "max"),
+                "unit": c.unit,
+                "status": CHECK_STATUSES.get(c.status, "not_measured"),
+                "detail": c.detail,
+            }
+            for c in reply.checks
+        ],
     }
 
 

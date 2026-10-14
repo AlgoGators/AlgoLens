@@ -5,5 +5,5 @@ Do not edit: change the "Version:" line of the .proto and regenerate.
 
 API_VERSIONS = {
     "common": "1.0.0",
-    "desk": "1.3.0",
+    "desk": "1.4.0",
 }

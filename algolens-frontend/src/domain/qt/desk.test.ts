@@ -28,12 +28,13 @@ import {
   rescindBlockedReason,
   rescindConfirmText,
   rescindOpen,
-  formatRiskValue,
+  formatCheckValue,
+  bookReadings,
+  riskChecks,
   riskBadge,
   riskBindingLine,
   riskBreachReason,
   riskMovedSymbols,
-  riskReadings,
   serverClockOffsetMs,
   shouldKeepPolling,
   snapshotBySymbol,
@@ -639,36 +640,36 @@ describe('the risk check (C9)', () => {
   });
 
   it('says which limit bound and how far the book was cut', () => {
-    expect(riskBindingLine(breached)).toBe('Gross leverage bound: positions cut to 80%');
+    // The label is trade-ngin's (the check's), else the term itself.
+    expect(riskBindingLine(breached)).toBe('L_g bound: positions cut to 80%');
     expect(riskBindingLine(risk({}))).toBeNull();
-    expect(riskBindingLine(risk({ bindingTerm: 'R_jump', m: 0.5 }))).toBe('Jump risk bound: positions cut to 50%');
+    expect(
+      riskBindingLine(
+        risk({
+          bindingTerm: 'R_jump',
+          m: 0.5,
+          checks: [{ term: 'R_jump', label: 'Jump risk (R_jump)', value: 0.9, max: 0.9, unit: 'percent', status: 'bound', detail: '' }],
+        }),
+      ),
+    ).toBe('Jump risk (R_jump) bound: positions cut to 50%');
   });
 
-  it('puts the configured limits next to the stored book', () => {
-    const rows = riskReadings(
-      risk({
-        grossLeverage: 2.4,
-        netLeverage: -0.5,
-        marginCushion: 0.42,
-        equityToMargin: 3.1,
-        limits: [
-          { name: 'max_gross_leverage', value: 2 },
-          { name: 'max_net_leverage', value: 1 },
-          { name: 'R_max', value: 0.2 },
-        ],
-      }),
-    );
-    expect(rows.map(r => [r.label, r.reading, r.limit, r.over])).toEqual([
-      ['Gross leverage', 2.4, 2, true],
-      ['Net leverage', -0.5, 1, false],
-      ['Margin cushion', 0.42, null, false],
-      ['Equity / margin', 3.1, null, false],
-      ['R_max', null, 0.2, false],
+  it('renders every check as trade-ngin sent it', () => {
+    const checks = [
+      { term: 'R', label: 'Portfolio risk (R)', value: 0.31, max: 0.45, unit: 'percent', status: 'within' as const, detail: '' },
+      { term: 'CAP', label: 'Largest single name', value: 2, max: 2, unit: 'multiple', status: 'bound' as const, detail: 'ZT.v.0' },
+    ];
+    expect(riskChecks(risk({ checks }))).toEqual(checks);
+    expect(riskChecks(risk({}))).toEqual([]);
+    expect(formatCheckValue(0.31, 'percent')).toBe('31.0%');
+    expect(formatCheckValue(3.79, 'multiple')).toBe('3.79x');
+    expect(formatCheckValue(5, 'contracts')).toBe('5');
+    expect(formatCheckValue(2.25, 'tau')).toBe('2.25x risk target');
+    expect(formatCheckValue(null, 'percent')).toBe('-');
+    expect(bookReadings(risk({ marginCushion: 0.42, equityToMargin: 3.1 }))).toEqual([
+      { label: 'Margin cushion', value: '42.0%' },
+      { label: 'Equity / margin', value: '3.10x' },
     ]);
-    expect(formatRiskValue(2.4, 'leverage')).toBe('2.40x');
-    expect(formatRiskValue(0.42, 'percent')).toBe('42.0%');
-    expect(formatRiskValue(null, 'ratio')).toBe('-');
-    expect(formatRiskValue(0.2, 'number')).toBe('0.2');
   });
 
   it('lists the moved symbols, risk steps first', () => {

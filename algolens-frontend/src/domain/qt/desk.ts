@@ -142,6 +142,26 @@ export interface DeskRisk {
   equityToMargin: number | null;
   /** The portfolio's configured limits (risk.json). */
   limits: { name: string; value: number }[];
+  /** Every risk check with its reading and max, breach or not (desk.proto 1.4.0).
+   * trade-ngin owns the labels, units and maxes; they are rendered as given. */
+  checks?: RiskCheck[];
+}
+
+export type RiskCheckStatus = 'within' | 'bound' | 'over' | 'not_measured';
+
+/** One risk limit of the day's book, as trade-ngin measured it. */
+export interface RiskCheck {
+  term: string;
+  label: string;
+  /** The stored book's reading; null when not measured. */
+  value: number | null;
+  /** The limit in force, in the value's unit; null when none applies. */
+  max: number | null;
+  /** 'percent' (a fraction), 'multiple' (of the sizing capital), 'contracts',
+   * or 'tau' (a multiple of the risk target). */
+  unit: string;
+  status: RiskCheckStatus;
+  detail: string;
 }
 
 /** The risk check could not be read (the engine is down): approval is refused. */
@@ -592,18 +612,9 @@ export function riskBreachReason(risk: DeskRiskResult | null | undefined): strin
   return `The positions breach risk limits${terms.length ? ` (${terms.join(', ')})` : ''}: save within the limits or request an override`;
 }
 
-/** What each overlay term limits, for the report. */
-const RISK_TERMS: Record<string, string> = {
-  R: 'Portfolio risk',
-  R_jump: 'Jump risk',
-  R_shock: 'Shock risk',
-  L_g: 'Gross leverage',
-  L_n: 'Net leverage',
-  CAP: 'Per-name cap',
-};
-
-export function riskTermLabel(term: string): string {
-  return RISK_TERMS[term] ?? term;
+/** The label trade-ngin gave a term's check, else the term itself. */
+export function riskTermLabel(risk: DeskRisk, term: string): string {
+  return (risk.checks ?? []).find(c => c.term === term)?.label ?? term;
 }
 
 export type RiskBadgeTone = 'ok' | 'breach' | 'waived' | 'muted';
@@ -624,60 +635,44 @@ export function riskBadge(risk: DeskRiskResult): { tone: RiskBadgeTone; label: s
 /** "Gross leverage bound: positions cut to 80%", or null when the overlay did not cut the book. */
 export function riskBindingLine(risk: DeskRisk): string | null {
   if (!risk.bindingTerm || risk.bindingTerm === 'none' || !(risk.m < 1)) return null;
-  return `${riskTermLabel(risk.bindingTerm)} bound: positions cut to ${Math.round(risk.m * 100)}%`;
+  return `${riskTermLabel(risk, risk.bindingTerm)} bound: positions cut to ${Math.round(risk.m * 100)}%`;
 }
 
-export type RiskValueFormat = 'leverage' | 'percent' | 'ratio' | 'number';
-
-export interface RiskReadingRow {
-  label: string;
-  /** The stored qt book's reading; null when not recorded or not a reading. */
-  reading: number | null;
-  /** The configured limit; null when none applies. */
-  limit: number | null;
-  format: RiskValueFormat;
-  over: boolean;
+/** The checks in trade-ngin's order, as it sent them. */
+export function riskChecks(risk: DeskRisk): RiskCheck[] {
+  return risk.checks ?? [];
 }
 
-/**
- * The configured limits next to the stored book's readings: gross and net
- * leverage against max_gross_leverage and max_net_leverage, then the margin
- * cushion and equity/margin (readings without a limit), then every other
- * configured limit (no reading of its own).
- */
-export function riskReadings(risk: DeskRisk): RiskReadingRow[] {
-  const limits = new Map(risk.limits.map(l => [l.name, l.value]));
-  const row = (label: string, reading: number | null, limit: number | null, format: RiskValueFormat) => ({
-    label,
-    reading,
-    limit,
-    format,
-    over: reading !== null && limit !== null && Math.abs(reading) > limit + 1e-9,
-  });
-  const rows: RiskReadingRow[] = [
-    row('Gross leverage', risk.grossLeverage, limits.get('max_gross_leverage') ?? null, 'leverage'),
-    row('Net leverage', risk.netLeverage, limits.get('max_net_leverage') ?? null, 'leverage'),
-    row('Margin cushion', risk.marginCushion, null, 'percent'),
-    row('Equity / margin', risk.equityToMargin, null, 'ratio'),
-  ];
-  for (const limit of risk.limits) {
-    if (limit.name === 'max_gross_leverage' || limit.name === 'max_net_leverage') continue;
-    rows.push(row(limit.name, null, limit.value, 'number'));
-  }
-  return rows;
-}
-
-export function formatRiskValue(value: number | null, format: RiskValueFormat): string {
+/** A check's value or max in its unit; '-' when there is none. */
+export function formatCheckValue(value: number | null, unit: string): string {
   if (value === null || !Number.isFinite(value)) return '-';
-  switch (format) {
-    case 'leverage':
-    case 'ratio':
-      return `${value.toFixed(2)}x`;
+  switch (unit) {
     case 'percent':
       return `${(value * 100).toFixed(1)}%`;
+    case 'multiple':
+      return `${value.toFixed(2)}x`;
+    case 'contracts':
+      return String(Math.round(value));
+    case 'tau':
+      return `${Number(value.toPrecision(4))}x risk target`;
     default:
       return String(Number(value.toPrecision(4)));
   }
+}
+
+export const RISK_CHECK_STATUS_LABEL: Record<RiskCheckStatus, string> = {
+  within: 'within',
+  bound: 'bound',
+  over: 'over',
+  not_measured: 'not measured',
+};
+
+/** Readings of the stored book that have no limit (margin): shown under the checks. */
+export function bookReadings(risk: DeskRisk): { label: string; value: string }[] {
+  const rows: { label: string; value: string }[] = [];
+  if (risk.marginCushion !== null) rows.push({ label: 'Margin cushion', value: `${(risk.marginCushion * 100).toFixed(1)}%` });
+  if (risk.equityToMargin !== null) rows.push({ label: 'Equity / margin', value: `${risk.equityToMargin.toFixed(2)}x` });
+  return rows;
 }
 
 /** The symbols a step moved (moved_by not "none"), risk steps first. */
