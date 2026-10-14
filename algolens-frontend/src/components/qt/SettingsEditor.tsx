@@ -16,6 +16,7 @@ import {
   displaySetting,
   filterFields,
   groupBySection,
+  isConfigNote,
   isEditable,
   labelInSection,
   pathKey,
@@ -122,24 +123,30 @@ export function SettingsEditor({ portfolioId }: { portfolioId: string }) {
     const pending = field.pending !== null || field.pending_from_files;
     return (
       <tr key={key} className={`border-t ${rule} align-middle`}>
-        <td className="py-1 pr-2">
-          <label className="text-xs font-mono break-all" htmlFor={`setting-${key}`} title={pathLabel(field.path)}>
+        <td className="py-1.5 pr-4">
+          <label className="block text-xs font-mono break-words" htmlFor={`setting-${key}`} title={pathLabel(field.path)}>
             {labelInSection(field)}
           </label>
         </td>
-        <td className="py-1 pr-2 text-xs font-mono text-right whitespace-nowrap">
-          {displaySetting(field.value) || 'null'}
+        <td className="py-1.5 pr-4 text-xs font-mono text-right">
+          {/* A long value (a list, a table) is cut; the whole of it is in the tooltip. */}
+          <span className="block truncate" title={displaySetting(field.value) || 'null'}>
+            {displaySetting(field.value) || 'null'}
+          </span>
         </td>
-        <td className="py-1 pr-2 text-xs font-mono text-right whitespace-nowrap">
+        <td className="py-1.5 pr-4 text-xs font-mono text-right">
           {pending ? (
-            <span className="text-amber-500" title="Takes effect at the next live run">
+            <span
+              className="block truncate text-amber-500"
+              title={`Takes effect at the next live run: ${field.pending_from_files ? 'file value' : displaySetting(field.pending)}`}
+            >
               {field.pending_from_files ? 'file value' : displaySetting(field.pending)}
             </span>
           ) : (
             <span className={muted}>-</span>
           )}
         </td>
-        <td className="py-1 w-36">
+        <td className="py-1.5">
           {!editable ? (
             <span className={`text-xs ${muted}`}>{isEditable(field) ? '' : 'read-only'}</span>
           ) : field.type === 'boolean' ? (
@@ -169,7 +176,8 @@ export function SettingsEditor({ portfolioId }: { portfolioId: string }) {
     );
   };
 
-  const shown = filterFields(state.fields, query);
+  // Config comments (_note, _description, ...) are documentation, not settings.
+  const shown = filterFields(state.fields.filter(f => !isConfigNote(f)), query);
 
   return (
     <div data-testid="settings-editor">
@@ -250,12 +258,18 @@ export function SettingsEditor({ portfolioId }: { portfolioId: string }) {
                 {editedCount > 0 && <span className="normal-case font-normal text-orange-500">{editedCount} edited</span>}
               </summary>
               <div className="px-3 pb-2 overflow-x-auto">
-                <table className="w-full">
+                <table className="w-full table-fixed">
+                  <colgroup>
+                    <col className="w-[38%]" />
+                    <col className="w-[22%]" />
+                    <col className="w-[16%]" />
+                    <col className="w-[24%]" />
+                  </colgroup>
                   <thead>
                     <tr className={`text-[11px] uppercase tracking-wider ${muted}`}>
-                      <th className="text-left font-normal py-1 pr-2">Setting</th>
-                      <th className="text-right font-normal py-1 pr-2">Running</th>
-                      <th className="text-right font-normal py-1 pr-2">Pending</th>
+                      <th className="text-left font-normal py-1 pr-4">Setting</th>
+                      <th className="text-right font-normal py-1 pr-4">Running</th>
+                      <th className="text-right font-normal py-1 pr-4">Pending</th>
                       <th className="text-left font-normal py-1">{state.editable ? 'New value' : ''}</th>
                     </tr>
                   </thead>

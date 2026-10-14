@@ -186,3 +186,9 @@ export function writeOpenState(key: string, value: Record<string, boolean>): voi
 export function sectionOpen(remembered: Record<string, boolean>, section: string, needsAttention: boolean): boolean {
   return remembered[section] ?? needsAttention;
 }
+
+/** A config comment (`_note`, `_description`, `_idm_rationale`, ...): documentation, not a setting. */
+export function isConfigNote(field: SettingField): boolean {
+  return field.path.some(segment => segment.startsWith('_'));
+}
+

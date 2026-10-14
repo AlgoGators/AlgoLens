@@ -10,6 +10,7 @@ import {
   versionStatus,
   type SettingField,
   type SettingsState,
+  isConfigNote,
   readOpenState,
   sectionOpen,
   writeOpenState,
@@ -173,6 +174,16 @@ describe('remembered open sections without storage', () => {
     };
     expect(readOpenState('x')).toEqual({});
     expect(() => writeOpenState('x', { a: true })).not.toThrow();
+  });
+});
+
+describe('config comments', () => {
+  const f = (path: string[]): SettingField =>
+    ({ path, type: 'string', value: 'x', overridden: false, pending: null, pending_from_files: false });
+  it('are the keys starting with an underscore, at any depth', () => {
+    expect(isConfigNote(f(['live', '_note']))).toBe(true);
+    expect(isConfigNote(f(['strategies', 'TREND', 'config', '_idm_rationale']))).toBe(true);
+    expect(isConfigNote(f(['risk', 'max_gross_leverage']))).toBe(false);
   });
 });
 
