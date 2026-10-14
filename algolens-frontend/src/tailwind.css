@@ -1,0 +1,9 @@
+/*
+ * Generated at build time by Tailwind (postcss.config.mjs), pinned to the version that made
+ * src/index.css (4.1.3): the theme and the utilities every component uses. index.css stays the
+ * base (preflight, fonts, the app's tokens); this only adds what it lacks.
+ */
+@layer theme, utilities;
+@import 'tailwindcss/theme.css' layer(theme);
+@import 'tailwindcss/utilities.css' layer(utilities);
+@source './';
