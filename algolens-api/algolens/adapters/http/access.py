@@ -1,15 +1,18 @@
 """Screen-access gates for the HTTP routes.
 
-A user's screens (member / investor / qt) are read from the database on
-every request, not from the JWT, so an admin's grant or revoke takes effect
-on the user's next request. The server is the source of truth; the frontend
-only hides what it would refuse.
+A user's screens (member / investor / qt) AND their role are read from the
+database on every request, never from the JWT, so an admin's grant or revoke,
+a promotion and a demotion all take effect on the user's next request (a
+token can live 12 hours). An admin (role exec_board) holds every screen and
+is the only one who sees and uses the admin routes. A token whose user no
+longer exists has no role and no screen. The server is the source of truth;
+the frontend only hides what it would refuse.
 """
 
 from functools import wraps
 
 from flask import current_app, g, jsonify, request
-from flask_jwt_extended import get_jwt, get_jwt_identity
+from flask_jwt_extended import get_jwt_identity
 
 from algolens.application.identity.screen_access import GetUserScreens
 from algolens.domain.identity.screens import SCREENS, is_admin
@@ -26,20 +29,43 @@ def _warn_fallback():
     )
 
 
+def _is_dev_user(user_id):
+    dev = create_dev_auth_config()
+    return dev.is_enabled() and str(dev.user_id()) == str(user_id)
+
+
+def current_role():
+    """The signed-in user's role as auth.users holds it now (cached per
+    request); None when the user no longer exists. The JWT's role claim is
+    never trusted for access."""
+    if "algolens_role" in g:
+        return g.algolens_role
+    user_id = get_jwt_identity()
+    if _is_dev_user(user_id):
+        # The dev-login user (never in production) may have no auth.users row.
+        role = create_dev_auth_config().user_role()
+    else:
+        role = create_screen_access_dependencies().role_for(user_id)
+    g.algolens_role = role
+    return role
+
+
 def current_screens():
     """The signed-in user's screens, in landing order (cached per request)."""
     if "algolens_screens" in g:
         return g.algolens_screens
     user_id = get_jwt_identity()
-    role = get_jwt().get("role")
-    dev = create_dev_auth_config()
-    if dev.is_enabled() and str(dev.user_id()) == str(user_id):
-        # The dev-login user may have no auth.users row: every screen.
+    if _is_dev_user(user_id):
         screens = list(SCREENS)
     else:
-        screens = GetUserScreens(
-            create_screen_access_dependencies(), on_fallback=_warn_fallback
-        ).execute(user_id, role)
+        role = current_role()
+        screens = (
+            []
+            if role is None
+            else GetUserScreens(
+                create_screen_access_dependencies(), on_fallback=_warn_fallback
+            ).execute(user_id, role)
+        )
     g.algolens_screens = screens
     return screens
 
@@ -50,7 +76,7 @@ def has_screen(*screens):
 
 
 def current_is_admin():
-    return is_admin(get_jwt().get("role"))
+    return is_admin(current_role())
 
 
 def _refuse(what):

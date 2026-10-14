@@ -14,6 +14,7 @@ import {
   screensChanged,
   toggleScreen,
   type Screen,
+  isAdminRole,
 } from '../../domain/identity/screens';
 import {
   checkReportFile,
@@ -90,6 +91,11 @@ function UserRow({
             {name || '—'} · {user.role ?? 'no role'}
             {isSelf ? ' · you' : ''}
           </div>
+          {isAdminRole(user.role) && (
+            <div className="text-xs text-orange-500" data-testid="admin-all-screens">
+              Admin: sees every screen and the Admin tab, whatever is ticked here
+            </div>
+          )}
         </div>
         <div className="flex flex-wrap items-center gap-4 flex-1">
           {SCREEN_ORDER.map(screen => (

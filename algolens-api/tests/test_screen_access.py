@@ -70,13 +70,21 @@ def test_get_user_screens_falls_back_only_when_the_table_is_missing():
             return []
 
     calls = []
-    assert GetUserScreens(Missing(), on_fallback=lambda: calls.append(1)).execute(1, "exec_board") == [
-        "qt",
+    assert GetUserScreens(Missing(), on_fallback=lambda: calls.append(1)).execute(1, "team_lead") == [
         "member",
     ]
     assert calls == [1]
-    # With the table present, no row means no screen, whatever the role.
-    assert GetUserScreens(Empty()).execute(1, "exec_board") == []
+    # With the table present, no row means no screen for anyone but an admin.
+    assert GetUserScreens(Empty()).execute(1, "team_lead") == []
+
+
+def test_an_admin_holds_every_screen():
+    class Empty:
+        def screens_for(self, user_id):
+            raise AssertionError("an admin's grants are not consulted")
+
+    for role in ("exec_board", "admin"):
+        assert GetUserScreens(Empty()).execute(1, role) == ["qt", "member", "investor"]
 
 
 # --- /api/me/screens ----------------------------------------------------------
@@ -89,10 +97,13 @@ def test_me_screens_reads_the_grants(client, screen_access):
     assert body == {"screens": ["member", "investor"], "is_admin": False}
 
 
-def test_me_screens_for_an_admin_with_no_screen(client, screen_access):
+def test_me_screens_for_an_admin_is_every_screen_and_the_admin_tab(client, screen_access):
     screen_access.screens["7"] = []
     _login(client, role="exec_board")
-    assert client.get("/api/me/screens").get_json() == {"screens": [], "is_admin": True}
+    assert client.get("/api/me/screens").get_json() == {
+        "screens": ["qt", "member", "investor"],
+        "is_admin": True,
+    }
 
 
 def test_me_screens_requires_login(client):
@@ -158,3 +169,36 @@ def test_admin_writes_need_the_csrf_token(client, screen_access):
     screen_access.screens["3"] = ["member"]
     _login(client, role="exec_board")
     assert client.put("/api/admin/users/3/screens", json={"screens": []}).status_code == 401
+
+
+# --- the role is read from auth.users on every request, never from the token -----
+
+
+def test_a_demoted_admin_loses_admin_on_the_next_request(client, screen_access):
+    screen_access.screens["7"] = ["member"]
+    headers = _login(client, role="exec_board")
+    assert client.get("/api/admin/users").status_code == 200
+    screen_access.roles["7"] = "general_member"  # demoted in the database; the token still says exec_board
+    assert client.get("/api/admin/users").status_code == 403
+    assert client.put("/api/admin/users/8/screens", json={"screens": ["qt"]},
+                      headers=headers).status_code == 403
+    assert client.get("/api/me/screens").get_json() == {"screens": ["member"], "is_admin": False}
+    assert client.get("/api/investor/reports").status_code == 403
+
+
+def test_a_promoted_member_is_admin_on_the_next_request(client, screen_access):
+    screen_access.screens["7"] = ["member"]
+    _login(client, role="general_member")
+    assert client.get("/api/admin/users").status_code == 403
+    screen_access.roles["7"] = "exec_board"
+    assert client.get("/api/admin/users").status_code == 200
+
+
+def test_a_deleted_user_keeps_no_access_with_a_live_token(client, screen_access):
+    screen_access.screens["7"] = ["member", "investor", "qt"]
+    _login(client, role="exec_board")
+    screen_access.roles["7"] = None  # the auth.users row is gone
+    assert client.get("/api/me/screens").get_json() == {"screens": [], "is_admin": False}
+    assert client.get("/api/admin/users").status_code == 403
+    assert client.get("/portfolio/portfolios").status_code == 403
+    assert client.get("/api/investor/reports").status_code == 403

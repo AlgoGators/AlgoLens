@@ -6,7 +6,7 @@ import time
 from flask import Blueprint, current_app, jsonify, request
 from flask_jwt_extended import get_jwt, get_jwt_identity, jwt_required
 
-from algolens.adapters.http.access import has_screen, requires_screen
+from algolens.adapters.http.access import current_role, has_screen, requires_screen
 
 from algolens.adapters.serializers.portfolio import (
     serialize_incubating_strategy_list,
@@ -64,12 +64,13 @@ def is_approver(user, role):
 
 
 def current_user():
-    """The signed-in user as {id, email, role}, from the JWT claims."""
+    """The signed-in user as {id, email, role}: the id and email from the JWT,
+    the role from auth.users now (access.current_role), never the token's claim."""
     claims = get_jwt()
     return {
         "id": str(get_jwt_identity()),
         "email": claims.get("email") or "",
-        "role": claims.get("role"),
+        "role": current_role(),
     }
 
 

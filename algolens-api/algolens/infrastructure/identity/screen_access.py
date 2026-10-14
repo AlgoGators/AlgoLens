@@ -25,6 +25,19 @@ class PostgresScreenAccessRepository:
         finally:
             conn.close()
 
+    def role_for(self, user_id):
+        conn = self.connection_factory()
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    "SELECT role::text AS role FROM auth.users WHERE id = %s",
+                    (int(user_id),),
+                )
+                row = cursor.fetchone()
+                return row["role"] if row else None
+        finally:
+            conn.close()
+
     def list_users(self):
         conn = self.connection_factory()
         try:
