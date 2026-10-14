@@ -671,6 +671,12 @@ export function formatCheckValue(value: number | null, unit: string): string {
   }
 }
 
+/** How much of its max a check uses (|value| / max), or null when either is missing. */
+export function checkUsage(check: RiskCheck): number | null {
+  if (check.value === null || check.max === null || !Number.isFinite(check.value) || !(check.max > 0)) return null;
+  return Math.abs(check.value) / check.max;
+}
+
 export const RISK_CHECK_STATUS_LABEL: Record<RiskCheckStatus, string> = {
   within: 'within',
   bound: 'bound',

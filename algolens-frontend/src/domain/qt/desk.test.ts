@@ -32,6 +32,7 @@ import {
   rescindConfirmText,
   rescindOpen,
   formatCheckValue,
+  checkUsage,
   bookReadings,
   riskChecks,
   riskBadge,
@@ -768,3 +769,16 @@ describe('the A -> B -> C approval (C10)', () => {
     expect(acceptCBlockedReason(deskState({ latestSave: save, risk: cRisk({}) }))).toMatch(/no engine book/);
   });
 });
+
+describe('check usage', () => {
+  const c = (value: number | null, max: number | null) =>
+    ({ term: 'R', label: 'R', value, max, unit: 'percent', status: 'within' as const, detail: '' });
+  it('is |value| over max, or null', () => {
+    expect(checkUsage(c(0.2, 0.4))).toBe(0.5);
+    expect(checkUsage(c(-3, 6))).toBe(0.5);
+    expect(checkUsage(c(null, 0.4))).toBeNull();
+    expect(checkUsage(c(1, null))).toBeNull();
+    expect(checkUsage(c(1, 0))).toBeNull();
+  });
+});
+
