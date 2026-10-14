@@ -151,6 +151,8 @@ class FakeRepo:
             raise DeskConflict("not approved")
         if self.published.get("publish_source") != "desk":
             raise DeskConflict("not approved by the desk")
+        if (self.published.get("published_by") or "").lower() != requested_by.lower():
+            raise DeskConflict("only the approver can take the approval back")
         if self.published.get("sent_at") is not None:
             raise DeskConflict("already e-mailed")
         if any(
@@ -746,6 +748,16 @@ def test_rescind_refusals_from_the_repository():
     rescind.execute(QT, "d@x.com")
     with pytest.raises(DeskConflict, match="open"):  # one open rescind a day
         rescind.execute(QT, "d@x.com")
+    assert [c[0] for c in agent.calls] == ["Rescind"]
+
+
+def test_only_the_approver_can_rescind():
+    early = lambda: _ny(DAY, 9, 0)  # noqa: E731
+    repo, agent = _approved()  # approved by d@x.com
+    with pytest.raises(DeskConflict, match="only the approver"):
+        RescindDesk(repo, agent, now=early).execute(QT, "someone@x.com")
+    assert agent.calls == []
+    RescindDesk(repo, agent, now=early).execute(QT, "D@X.com")  # e-mail case does not matter
     assert [c[0] for c in agent.calls] == ["Rescind"]
 
 

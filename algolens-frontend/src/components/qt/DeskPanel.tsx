@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { useAuth } from '../../adapters/react/AuthContext';
 import { useTheme } from '../../adapters/react/ThemeContext';
 import { useCommandPoll } from '../../adapters/react/useCommandPoll';
 import { DeskService } from '../../application/qt/deskService';
@@ -174,6 +175,7 @@ function AskedVsGiven({ rows, dark }: { rows: ComparisonRow[]; dark: boolean }) 
  */
 export function DeskPanel({ portfolioId, book, reloadBook }: DeskPanelProps) {
   const { theme } = useTheme();
+  const { user } = useAuth();
   const dark = theme === 'dark';
   const [state, setState] = useState<DeskState | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -279,7 +281,8 @@ export function DeskPanel({ portfolioId, book, reloadBook }: DeskPanelProps) {
 
   const approveBlocked = approveBlockedReason(state, serverNow);
   // Shown only while the desk's own, unsent approval can be taken back (before 09:30 New York).
-  const rescindAllowed = rescindBlockedReason(state, serverNow) === null;
+  // ... and only to the user who approved it.
+  const rescindAllowed = rescindBlockedReason(state, serverNow, user?.email ?? null) === null;
   const overrideBlocked = overrideBlockedReason(state, serverNow);
   const act = async (fn: () => Promise<void>) => {
     setBusy(true);

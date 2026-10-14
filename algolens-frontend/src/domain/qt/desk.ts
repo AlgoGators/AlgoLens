@@ -545,10 +545,19 @@ export function rescindOpen(state: DeskState): boolean {
  * 09:30 New York on the book date, on the server's clock `nowMs`. The server
  * and the engine check all of it again.
  */
-export function rescindBlockedReason(state: DeskState, nowMs: number): string | null {
+export function rescindBlockedReason(
+  state: DeskState,
+  nowMs: number,
+  userEmail?: string | null,
+): string | null {
   if (!state.date) return 'No book for today yet';
   if (deskLock(state) !== 'published') return 'The day is not approved';
   if (publishSourceOf(state.published) !== 'desk') return 'Only a desk approval can be taken back';
+  // Only the approver takes an approval back (Dom, 2026-10-14); the API and the engine check again.
+  const approver = state.published?.published_by ?? '';
+  if (userEmail !== undefined && approver.trim().toLowerCase() !== (userEmail ?? '').trim().toLowerCase()) {
+    return `Only ${approver || 'the approver'} can take this approval back`;
+  }
   if (state.published?.sent_at) return 'The book has already been e-mailed';
   if (state.sendTracked === false) {
     return 'This database does not record when the e-mail goes out (migration 026); the approval cannot be taken back';
