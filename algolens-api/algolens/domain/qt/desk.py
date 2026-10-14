@@ -13,12 +13,13 @@ from decimal import Decimal, InvalidOperation
 from numbers import Integral
 from typing import Any
 
-# trading.position_overrides (migration 023).
+# trading.position_overrides (migration 023; 'rescind' since 029).
 SAVE = "save"
 OVERRIDE_REQUEST = "override_request"
 OVERRIDE_DECISION = "override_decision"
 PUBLISH = "publish"
-COMMAND_KINDS = (SAVE, OVERRIDE_REQUEST, OVERRIDE_DECISION, PUBLISH)
+RESCIND = "rescind"
+COMMAND_KINDS = (SAVE, OVERRIDE_REQUEST, OVERRIDE_DECISION, PUBLISH, RESCIND)
 
 PENDING = "pending"
 RUNNING = "running"

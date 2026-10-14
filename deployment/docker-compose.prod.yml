@@ -14,8 +14,10 @@
 # must never be OOM-killed. Every container here has a hard memory limit and
 # oom_score_adj 800, so under pressure the kernel kills AlgoLens first.
 #
-# Only `edge` publishes a port (8088). The security group allows 8088 only from
-# the old host, whose nginx terminates TLS for algolens.algogators.com.
+# Only `edge` publishes ports: 443 (TLS for algolens.algogators.com) and 80
+# (ACME challenges, redirect to HTTPS) to the internet, and 8088 (legacy plain
+# HTTP, trusts X-Forwarded-*) which the security group allows only from the old
+# host. See edge.conf.
 #
 # Logs: every service uses json-file capped at 3 x 10 MB, set here per service
 # (the Docker daemon config is shared with the live trading engine and is not
@@ -90,9 +92,16 @@ services:
       - backend
       - frontend
     ports:
-      - "0.0.0.0:8088:80"
+      - "0.0.0.0:80:80"
+      - "0.0.0.0:443:443"
+      - "0.0.0.0:8088:8088"
     volumes:
       - ./edge.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./edge-routes.conf:/etc/nginx/snippets/edge-routes.conf:ro
+      # Let's Encrypt certificate (certbot on the host, see DEPLOYMENT.md, "TLS")
+      # and the webroot certbot writes its HTTP-01 challenges to.
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+      - /var/www/certbot:/var/www/certbot:ro
     mem_limit: 32m
     memswap_limit: 32m
     cpus: 0.25

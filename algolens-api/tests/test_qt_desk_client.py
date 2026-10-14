@@ -48,6 +48,11 @@ class RecordingDesk(desk_pb2_grpc.DeskServiceServicer):
             "Publish", request, desk_pb2.CommandReply(status=desk_pb2.COMMAND_STATUS_REFUSED), context
         )
 
+    def Rescind(self, request, context):
+        return self._reply(
+            "Rescind", request, desk_pb2.CommandReply(status=desk_pb2.COMMAND_STATUS_ACCEPTED), context
+        )
+
 
 @pytest.fixture
 def desk_server():
@@ -79,6 +84,7 @@ def test_each_rpc_carries_the_command_row(desk_server):
     decision = {**COMMAND, "id": 42, "requested_by": "vp@x.com", "payload": {"approved": True}}
     assert agent.record_decision(decision, "tok") == "COMMAND_STATUS_ACCEPTED"
     assert agent.publish(COMMAND) == "COMMAND_STATUS_REFUSED"
+    assert agent.rescind({**COMMAND, "id": 43}) == "COMMAND_STATUS_ACCEPTED"
 
     by_name = dict(servicer.requests)
     run = by_name["RunDesk"]
@@ -90,8 +96,12 @@ def test_each_rpc_carries_the_command_row(desk_server):
     pub = by_name["Publish"]
     assert (pub.portfolio_id, pub.date, pub.published_by) == (
         "QT_CONSERVATIVE_PORTFOLIO", "2026-10-08", "desk@x.com")
+    rescind = by_name["Rescind"]
+    assert (rescind.portfolio_id, rescind.date, rescind.audit_id) == (
+        "QT_CONSERVATIVE_PORTFOLIO", "2026-10-08", 43)
     # Every call carried the version header, built from the vendored protos.
-    assert servicer.headers == [f"common={API_VERSIONS['common']},desk={API_VERSIONS['desk']}"] * 4
+    assert servicer.headers == [f"common={API_VERSIONS['common']},desk={API_VERSIONS['desk']}"] * 5
+    assert API_VERSIONS["desk"] == "1.2.0"
 
 
 def test_version_refusal_is_logged_and_swallowed(desk_server, caplog):

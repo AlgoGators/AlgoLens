@@ -22,7 +22,7 @@ AlgoLens and the engine (trade-ngin) **talk directly over gRPC**, and Postgres s
 
 | Direction | How | What |
 |---|---|---|
-| AlgoLens → engine | gRPC to `engine-rpc:50051` on the private Docker network `qt` (env `ENGINE_RPC_ADDR`; `DESK_AGENT_ADDR` is still read for one release; 3 s timeout) | The desk service `algogators.desk.DeskService`: `RunDesk` (a save), `RequestOverride`, `RecordDecision`, `Publish`, `GetRunStatus`. Contract: `algolens-api/proto/algogators/desk.proto`, vendored byte for byte from trade-ngin `proto/algogators/desk.proto` |
+| AlgoLens → engine | gRPC to `engine-rpc:50051` on the private Docker network `qt` (env `ENGINE_RPC_ADDR`; `DESK_AGENT_ADDR` is still read for one release; 3 s timeout) | The desk service `algogators.desk.DeskService`: `RunDesk` (a save), `RequestOverride`, `RecordDecision`, `Publish`, `Rescind`, `GetRunStatus`. Contract: `algolens-api/proto/algogators/desk.proto`, vendored byte for byte from trade-ngin `proto/algogators/desk.proto` |
 | Engine → AlgoLens | Postgres (`new_algo_data`) | The three books in `trading.positions` (`system`, `qt_proposal`, `qt`), the command log `trading.position_overrides` (status and result of every command), and `live_run_metadata.published_by` / `published_at` / `settings_used`, plus `publish_source` / `sent_at` once trade-ngin migration 026 is applied (read as NULL before) |
 
 **How a command works:**
@@ -39,6 +39,7 @@ AlgoLens and the engine (trade-ngin) **talk directly over gRPC**, and Postgres s
 **The rest of the setup:**
 - **E-mail:** override approval links go to the VP and the President (env `QT_APPROVERS`, set on both sides). The daily book e-mails come from the engine.
 - **Daily cutoff (America/New_York, every calendar day):** the desk **approves** the day (the UI's Approve button; command kind `publish`, RPC `Publish`) by 09:30. Approved books are e-mailed at 09:30; an approval between 09:30 and 10:00 is e-mailed at once. At 10:00 an unapproved day gets the model's book, published (`publish_source='fallback'`) and e-mailed by the engine. From 10:00 AlgoLens refuses (409) to approve, save, request or decide an override for that day; the engine refuses too. The desk banner counts down on the server's clock (`serverTime` and `deadlines` in the desk state).
+- **Rescind approval (contract C8, trade-ngin migration 029):** before 09:30 New York the desk may take back its own unsent approval (command kind `rescind`, RPC `Rescind`). The engine clears `published_by` / `published_at` / `publish_source`, so the day takes edits and a new approval again. AlgoLens refuses (409) from 09:30, on an engine publish (fallback, model-only), once sent, and while a publish or rescind is open; the engine refuses too.
 - **Feature flag:** the desk UI and its write routes sit behind `QT_DESK_ENABLED`.
 - **Spec:** trade-ngin `docs/design/qt-contract.md` and `docs/design/qt-master-rulings.md`. The gRPC channel amends the master document's original "never call each other" (decided 2026-10-09).
 

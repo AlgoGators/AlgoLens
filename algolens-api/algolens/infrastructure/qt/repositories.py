@@ -2,7 +2,7 @@
 
 Tables (trade-ngin migrations, new_algo_data):
   trading.positions            portfolio_type system / qt_proposal / qt (021)
-  trading.position_overrides   the command log (023, 025). AlgoLens only
+  trading.position_overrides   the command log (023, 025, 029). AlgoLens only
                                inserts, always `pending` with the engine's
                                columns NULL (the 025 insert trigger). After 025
                                it holds no UPDATE there, so no SELECT ... FOR
@@ -23,6 +23,7 @@ import psycopg2.errors
 from psycopg2.extras import Json
 
 from algolens.application.qt.ports import DeskConflict, DeskNotFound, DeskNotSeeded
+from algolens.domain.qt.cutoff import SOURCE_DESK
 from algolens.domain.qt.desk import (
     DECIDING_STATUSES,
     DONE,
@@ -31,6 +32,7 @@ from algolens.domain.qt.desk import (
     OVERRIDE_REQUEST,
     PENDING,
     PUBLISH,
+    RESCIND,
     SAVE,
     DeskRuleError,
     open_override_request,
@@ -121,8 +123,9 @@ class PostgresDeskRepository:
     @contextmanager
     def _transaction(self):
         """A cursor in one transaction, committed on success and rolled back
-        on any error. A unique violation (the 025 partial indexes: one open
-        publish, one open override request, one decision per request) is a
+        on any error. A unique violation (the 025 and 029 partial indexes: one
+        open publish, one open override request, one decision per request,
+        one open rescind) is a
         409, like the checks this code makes under the lock first."""
         conn = self.connection_factory()
         try:
@@ -143,7 +146,7 @@ class PostgresDeskRepository:
     @staticmethod
     def _lock_day(cursor, portfolio_id, day):
         """Serialise AlgoLens' writers of one portfolio's book day (save,
-        override request, decision, publish) until the transaction ends. An
+        override request, decision, publish, rescind) until the transaction ends. An
         advisory lock needs no table privilege."""
         cursor.execute(
             "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
@@ -151,9 +154,11 @@ class PostgresDeskRepository:
         )
 
     def _published(self, cursor, portfolio_id, day):
-        """C3: a day is published once live_run_metadata.published_at is set
-        for it, which also covers the engine's own non-trading-day publish. A
-        done publish row counts too, should the two ever disagree.
+        """C3: a day is published while live_run_metadata.published_at is set
+        for it, which also covers the engine's own non-trading-day publish. The
+        engine sets it and finishes the publish row in one statement; a done
+        publish row alone does not lock the day, so a rescinded approval
+        (published_at cleared again) reopens it.
 
         No information_schema guard here: if this role cannot read the column
         the write must fail, not proceed as if the day were open."""
@@ -165,20 +170,11 @@ class PostgresDeskRepository:
             """,
             (portfolio_id, day),
         )
-        if cursor.fetchone() is not None:
-            return True
-        cursor.execute(
-            """
-            SELECT 1 FROM trading.position_overrides
-            WHERE portfolio_id = %s AND date = %s AND kind = %s AND status = %s
-            LIMIT 1
-            """,
-            (portfolio_id, day, PUBLISH, DONE),
-        )
         return cursor.fetchone() is not None
 
     @staticmethod
-    def _open_publish(cursor, portfolio_id, day):
+    def _open_command(cursor, portfolio_id, day, kind):
+        """The day's pending or running command of `kind`, or None."""
         cursor.execute(
             """
             SELECT id, status FROM trading.position_overrides
@@ -186,7 +182,7 @@ class PostgresDeskRepository:
             ORDER BY id
             LIMIT 1
             """,
-            (portfolio_id, day, PUBLISH, list(OPEN_STATUSES)),
+            (portfolio_id, day, kind, list(OPEN_STATUSES)),
         )
         return cursor.fetchone()
 
@@ -196,7 +192,7 @@ class PostgresDeskRepository:
         if self._published(cursor, portfolio_id, day):
             raise DeskConflict(f"The {day.isoformat()} book is already published")
         if refuse_open_publish:
-            publish = self._open_publish(cursor, portfolio_id, day)
+            publish = self._open_command(cursor, portfolio_id, day, PUBLISH)
             if publish is not None:
                 raise DeskConflict(
                     f"A publish of the {day.isoformat()} book is already "
@@ -430,6 +426,54 @@ class PostgresDeskRepository:
             self._lock_day(cursor, portfolio_id, day)
             self._guard_day(cursor, portfolio_id, day)
             return self._insert(cursor, portfolio_id, day, PUBLISH, requested_by)
+
+    def insert_rescind(self, portfolio_id, day, requested_by):
+        """Under the day lock: refuse (C8) unless live_run_metadata says the
+        day is published by the desk (publish_source 'desk') and sent_at is
+        NULL on all its rows, and while a publish or a rescind is open. The
+        engine checks the same again, and the 09:30 New York cutoff, when it
+        runs the row."""
+        with self._transaction() as cursor:
+            self._lock_day(cursor, portfolio_id, day)
+            if len(self._cutoff_columns(cursor)) != len(CUTOFF_COLUMNS):
+                raise DeskConflict(
+                    "An approval cannot be taken back on this database: live_run_metadata "
+                    "has no publish_source and sent_at yet (migration 026)"
+                )
+            cursor.execute(
+                """
+                SELECT published_by, published_at, publish_source, sent_at
+                FROM trading.live_run_metadata
+                WHERE portfolio_id = %s AND date = %s
+                """,
+                (portfolio_id, day),
+            )
+            rows = cursor.fetchall()
+            published = [r for r in rows if r["published_at"] is not None]
+            if not published:
+                raise DeskConflict(
+                    f"The {day.isoformat()} book is not approved; there is no approval to take back"
+                )
+            sources = sorted({r["publish_source"] or "unknown" for r in published})
+            if sources != [SOURCE_DESK]:
+                raise DeskConflict(
+                    f"The {day.isoformat()} book was published by the engine "
+                    f"({', '.join(sources)}), not approved by the desk; only a desk "
+                    "approval can be taken back"
+                )
+            if any(r["sent_at"] is not None for r in rows):
+                raise DeskConflict(
+                    f"The {day.isoformat()} book has already been e-mailed; its approval "
+                    "can no longer be taken back"
+                )
+            for kind in (PUBLISH, RESCIND):
+                command = self._open_command(cursor, portfolio_id, day, kind)
+                if command is not None:
+                    raise DeskConflict(
+                        f"A {kind} of the {day.isoformat()} book is already "
+                        f"{command['status']} (#{command['id']})"
+                    )
+            return self._insert(cursor, portfolio_id, day, RESCIND, requested_by)
 
     def insert_override_request(self, portfolio_id, day, requested_by, reason):
         """Under the day lock: refuse a published day, an open publish and a

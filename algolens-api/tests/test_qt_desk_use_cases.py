@@ -20,6 +20,7 @@ from algolens.application.qt.use_cases import (
     LookupApproval,
     PublishDesk,
     RequestOverride,
+    RescindDesk,
     SaveDeskEdit,
 )
 from algolens.domain.qt import desk as rules
@@ -90,9 +91,7 @@ class FakeRepo:
     # The Postgres repository's checks, made under its day lock.
 
     def _is_published(self, portfolio_id):
-        return bool(self.published and self.published.get("published_at")) or any(
-            r["kind"] == "publish" and r["status"] == "done" for r in self.rows
-        )
+        return bool(self.published and self.published.get("published_at"))
 
     def _guard(self, portfolio_id, refuse_open_publish=True):
         if self._is_published(portfolio_id):
@@ -147,6 +146,20 @@ class FakeRepo:
         self._guard(portfolio_id)
         return self._insert(portfolio_id=portfolio_id, kind="publish", requested_by=requested_by)
 
+    def insert_rescind(self, portfolio_id, day, requested_by):
+        if not self._is_published(portfolio_id):
+            raise DeskConflict("not approved")
+        if self.published.get("publish_source") != "desk":
+            raise DeskConflict("not approved by the desk")
+        if self.published.get("sent_at") is not None:
+            raise DeskConflict("already e-mailed")
+        if any(
+            r["kind"] in ("publish", "rescind") and r["status"] in ("pending", "running")
+            for r in self.rows
+        ):
+            raise DeskConflict("publish or rescind open")
+        return self._insert(portfolio_id=portfolio_id, kind="rescind", requested_by=requested_by)
+
     def insert_override_request(self, portfolio_id, day, requested_by, reason):
         self._guard(portfolio_id)
         payload = rules.override_payload(self.proposal_rows(portfolio_id, day))
@@ -200,6 +213,9 @@ class FakeAgent:
 
     def publish(self, command):
         return self._record("Publish", command["id"])
+
+    def rescind(self, command):
+        return self._record("Rescind", command["id"])
 
 
 # --- save (A3) ---------------------------------------------------------------
@@ -267,10 +283,25 @@ def test_save_before_the_proposal_is_seeded_is_409():
 def test_save_after_publish_is_refused():
     repo = FakeRepo()
     repo.insert_command(QT["portfolio_id"], DAY, "publish", "d@x.com")["status"] = "done"
+    repo.published = {"published_by": "d@x.com", "published_at": NOW}
     with pytest.raises(DeskConflict):
         SaveDeskEdit(repo, FakeAgent()).execute(
             QT, [{"symbol": "ZC.v.0", "quantity": 1, "expected": 3}], "r", "d@x.com"
         )
+
+
+def test_a_rescinded_approval_reopens_the_day():
+    # The approval's row stays done; live_run_metadata.published_at is cleared again.
+    repo = FakeRepo()
+    repo.insert_command(QT["portfolio_id"], DAY, "publish", "d@x.com")["status"] = "done"
+    repo.published = None
+    state = GetDeskState(repo).execute(QT)
+    assert state["published"] is None
+    assert state["locked"] is None
+    SaveDeskEdit(repo, FakeAgent()).execute(
+        QT, [{"symbol": "ZC.v.0", "quantity": 1, "expected": 3}], "r", "d@x.com"
+    )
+    assert PublishDesk(repo, FakeAgent()).execute(QT, "d@x.com")["command"]["kind"] == "publish"
 
 
 def test_symbol_choices_only_for_editable_books():
@@ -399,6 +430,7 @@ def test_publish_refuses_a_second_open_or_done_publish_but_allows_a_retry():
     repo.get_command(first["id"])["status"] = "failed"
     second = publish.execute(QT, "d@x.com")["command"]
     repo.get_command(second["id"])["status"] = "done"
+    repo.published = {"published_by": "d@x.com", "published_at": NOW}
     with pytest.raises(DeskConflict):
         publish.execute(QT, "d@x.com")
 
@@ -638,3 +670,114 @@ def test_the_approval_page_shows_the_deadline():
     assert page["deadlines"]["approveBy"] == "2026-10-08T09:30:00-04:00"
     assert page["deadlines"]["fallbackAt"] == "2026-10-08T10:00:00-04:00"
     assert page["serverTime"] == "2026-10-08T13:00:00+00:00"
+
+
+# --- rescind (C8: the desk takes back its approval before the 09:30 send) -------
+
+
+def _approved(day=DAY, sent_at=None, source="desk"):
+    """A day the desk approved: its publish row done, live_run_metadata published."""
+    repo, agent = FakeRepo(day=day), FakeAgent()
+    repo.insert_command(QT["portfolio_id"], day, "publish", "d@x.com")["status"] = "done"
+    repo.published = {"published_by": "d@x.com", "published_at": _ny(day, 8, 0),
+                      "publish_source": source, "sent_at": sent_at}
+    return repo, agent
+
+
+def test_rescind_inserts_a_row_then_calls_the_engine():
+    repo, agent = _approved()
+    result = RescindDesk(repo, agent, now=lambda: _ny(DAY, 9, 0)).execute(QT, "d@x.com")
+    command = result["command"]
+    assert command["kind"] == "rescind" and command["status"] == "pending"
+    assert command["requested_by"] == "d@x.com"
+    assert agent.calls == [("Rescind", command["id"])]
+    assert result["agent"] == "COMMAND_STATUS_ACCEPTED"
+
+
+def test_rescind_succeeds_when_the_engine_cannot_be_reached():
+    repo, _agent = _approved()
+    result = RescindDesk(repo, FakeAgent(fail=True), now=lambda: _ny(DAY, 9, 0)).execute(
+        QT, "d@x.com")
+    assert result["command"]["status"] == "pending"
+    assert result["agent"].startswith("not delivered")
+
+
+@pytest.mark.parametrize("hour, minute", [(9, 30), (9, 45), (10, 0), (23, 59)])
+def test_rescind_from_0930_new_york_is_refused_without_a_row(hour, minute):
+    repo, agent = _approved()
+    with pytest.raises(DeskConflict, match="can no longer be taken back"):
+        RescindDesk(repo, agent, now=lambda: _ny(DAY, hour, minute)).execute(QT, "d@x.com")
+    assert [r["kind"] for r in repo.rows] == ["publish"] and agent.calls == []
+
+
+def test_rescind_at_0929_is_accepted_and_a_past_book_date_is_closed():
+    repo, agent = _approved()
+    RescindDesk(repo, agent, now=lambda: _ny(DAY, 9, 29, 59)).execute(QT, "d@x.com")
+    assert [r["kind"] for r in repo.rows] == ["publish", "rescind"]
+    repo, agent = _approved()
+    with pytest.raises(DeskConflict):
+        RescindDesk(repo, agent, now=lambda: _ny(DAY + timedelta(days=1), 7, 0)).execute(
+            QT, "d@x.com")
+
+
+def test_rescind_follows_new_york_across_dst():
+    nov1 = date(2026, 11, 1)  # 09:30 EST is 14:30 UTC
+    repo, agent = _approved(day=nov1)
+    before = datetime(2026, 11, 1, 14, 29, tzinfo=timezone.utc)
+    RescindDesk(repo, agent, now=lambda: before).execute(QT, "d@x.com")
+    repo, agent = _approved(day=nov1)
+    at = datetime(2026, 11, 1, 14, 30, tzinfo=timezone.utc)
+    with pytest.raises(DeskConflict):
+        RescindDesk(repo, agent, now=lambda: at).execute(QT, "d@x.com")
+
+
+def test_rescind_refusals_from_the_repository():
+    early = lambda: _ny(DAY, 9, 0)  # noqa: E731
+    with pytest.raises(DeskConflict, match="not approved"):  # nothing to take back
+        RescindDesk(FakeRepo(), FakeAgent(), now=early).execute(QT, "d@x.com")
+    repo, agent = _approved(source="fallback")
+    with pytest.raises(DeskConflict, match="not approved by the desk"):
+        RescindDesk(repo, agent, now=early).execute(QT, "d@x.com")
+    repo, agent = _approved(sent_at=_ny(DAY, 8, 30))
+    with pytest.raises(DeskConflict, match="e-mailed"):
+        RescindDesk(repo, agent, now=early).execute(QT, "d@x.com")
+    repo, agent = _approved()
+    rescind = RescindDesk(repo, agent, now=early)
+    rescind.execute(QT, "d@x.com")
+    with pytest.raises(DeskConflict, match="open"):  # one open rescind a day
+        rescind.execute(QT, "d@x.com")
+    assert [c[0] for c in agent.calls] == ["Rescind"]
+
+
+@pytest.mark.parametrize("entry", [MODEL, EQUITY])
+def test_rescind_is_refused_on_a_portfolio_the_desk_may_not_edit(entry):
+    repo, agent = _approved()
+    with pytest.raises(DeskForbidden):
+        RescindDesk(repo, agent, now=lambda: _ny(DAY, 9, 0)).execute(entry, "d@x.com")
+    assert agent.calls == []
+
+
+def test_rescind_before_the_proposal_is_seeded_is_409():
+    with pytest.raises(DeskNotSeeded):
+        RescindDesk(FakeRepo(day=None), FakeAgent(), now=lambda: _ny(DAY, 9, 0)).execute(
+            QT, "d@x.com")
+
+
+def test_desk_state_carries_the_latest_rescind_and_a_done_rescind_reopens_the_day():
+    repo, agent = _approved()
+    now = lambda: _ny(DAY, 9, 0)  # noqa: E731
+    assert GetDeskState(repo, now=now).execute(QT)["rescind"] is None
+    command = RescindDesk(repo, agent, now=now).execute(QT, "d@x.com")["command"]
+    state = GetDeskState(repo, now=now).execute(QT)
+    assert state["rescind"]["id"] == command["id"] and state["rescind"]["status"] == "pending"
+    assert state["locked"] == "published"
+    # The engine clears published_at and finishes the row done.
+    repo.get_command(command["id"]).update(
+        status="done", message="approval of 2026-10-08 rescinded",
+        result={"rescinded": {"published_by": "d@x.com"}})
+    repo.published = None
+    state = GetDeskState(repo, now=now).execute(QT)
+    assert state["rescind"]["status"] == "done" and state["locked"] is None
+    assert state["published"] is None
+    second = PublishDesk(repo, FakeAgent(), now=now).execute(QT, "d@x.com")["command"]
+    assert second["kind"] == "publish"

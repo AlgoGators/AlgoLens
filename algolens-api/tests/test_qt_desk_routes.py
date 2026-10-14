@@ -65,7 +65,7 @@ def test_every_desk_route_is_404_while_the_flag_is_off(client, desk, monkeypatch
     headers = _login(client)
     assert client.get("/portfolio/desk/QT_CONSERVATIVE_PORTFOLIO").status_code == 404
     assert client.get("/portfolio/desk/QT_CONSERVATIVE_PORTFOLIO/symbols").status_code == 404
-    for path in ("save", "override-request", "publish"):
+    for path in ("save", "override-request", "publish", "rescind"):
         response = client.post(
             f"/portfolio/desk/QT_CONSERVATIVE_PORTFOLIO/{path}",
             json={"reason": "r", "changes": [{"symbol": "ZC.v.0", "quantity": 1, "expected": 3}]},
@@ -337,3 +337,51 @@ def test_approve_after_10_new_york_is_409_and_state_carries_the_clock(client, de
     assert state["serverTime"] == late.isoformat()
     assert state["deadlines"]["approvalClosed"] is True
     assert state["deadlines"]["fallbackAt"] == "2026-10-08T10:00:00-04:00"
+
+
+def test_rescind_and_state(client, desk):
+    repo, agent = desk
+    headers = _login(client)
+    path = "/portfolio/desk/QT_CONSERVATIVE_PORTFOLIO/rescind"
+    # Nothing approved yet: nothing to take back.
+    assert client.post(path, json={}, headers=headers).status_code == 409
+    repo.published = {"published_by": "desk@x.com", "published_at": NOW,
+                      "publish_source": "desk", "sent_at": None}
+
+    response = client.post(path, json={}, headers=headers)
+
+    assert response.status_code == 201
+    body = response.get_json()
+    assert body["command"]["kind"] == "rescind" and body["command"]["status"] == "pending"
+    assert body["command"]["requested_by"] == "desk@x.com"
+    assert agent.calls[-1] == ("Rescind", body["command"]["id"])
+    assert client.post(path, json={}, headers=headers).status_code == 409  # one open rescind
+    state = client.get("/portfolio/desk/QT_CONSERVATIVE_PORTFOLIO").get_json()
+    assert state["rescind"]["id"] == body["command"]["id"]
+
+
+def test_rescind_needs_a_desk_user_and_the_csrf_header(client, desk):
+    path = "/portfolio/desk/QT_CONSERVATIVE_PORTFOLIO/rescind"
+    headers = _login(client, role="investor")
+    assert client.post(path, json={}, headers=headers).status_code == 403
+    _login(client)
+    assert client.post(path, json={}).status_code in (401, 422)
+    assert desk[0].rows == []
+
+
+def test_rescind_from_0930_new_york_is_409(client, desk, monkeypatch):
+    from datetime import datetime, timezone
+
+    repo, _agent = desk
+    repo.published = {"published_by": "desk@x.com", "published_at": NOW,
+                      "publish_source": "desk", "sent_at": None}
+    monkeypatch.setattr(
+        use_cases, "_utcnow", lambda: datetime(2026, 10, 8, 13, 30, tzinfo=timezone.utc)
+    )  # 09:30 EDT
+    headers = _login(client)
+    response = client.post(
+        "/portfolio/desk/QT_CONSERVATIVE_PORTFOLIO/rescind", json={}, headers=headers
+    )
+    assert response.status_code == 409
+    assert "can no longer be taken back" in response.get_json()["error"]
+    assert repo.rows == []

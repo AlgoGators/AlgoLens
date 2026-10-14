@@ -15,6 +15,8 @@ import {
   overrideBlockedReason,
   proposalKey,
   publishSourceOf,
+  rescindBlockedReason,
+  rescindConfirmText,
   serverClockOffsetMs,
   type ComparisonRow,
   type DayPhase,
@@ -83,6 +85,7 @@ function bannerTone(phase: DayPhase, dark: boolean): string {
       return dark ? 'bg-red-950 border-red-800 text-red-200' : 'bg-red-50 border-red-300 text-red-800';
     case 'open':
     case 'approving':
+    case 'rescinding':
       return dark ? 'bg-amber-950 border-amber-800 text-amber-200' : 'bg-amber-50 border-amber-300 text-amber-900';
     default:
       return dark ? 'bg-gray-900 border-gray-700 text-gray-200' : 'bg-gray-50 border-gray-300 text-gray-800';
@@ -177,6 +180,9 @@ export function DeskPanel({ portfolioId, book, reloadBook }: DeskPanelProps) {
   const [editing, setEditing] = useState(false);
   const [lastSave, setLastSave] = useState<DeskCommand | null>(null);
   const [lastPublish, setLastPublish] = useState<DeskCommand | null>(null);
+  const [lastRescind, setLastRescind] = useState<DeskCommand | null>(null);
+  // The inline "Take back the approval?" confirmation (no window.confirm: the app may run sandboxed).
+  const [confirmRescind, setConfirmRescind] = useState(false);
   const [lastRequest, setLastRequest] = useState<DeskCommand | null>(null);
   const [overrideReason, setOverrideReason] = useState('');
   const [overrideOpen, setOverrideOpen] = useState(false);
@@ -203,6 +209,7 @@ export function DeskPanel({ portfolioId, book, reloadBook }: DeskPanelProps) {
       setError(null);
       setLastSave(prev => (prev && next.latestSave?.id === prev.id ? prev : next.latestSave));
       setLastPublish(prev => (prev && next.publish?.id === prev.id ? prev : next.publish));
+      setLastRescind(prev => (prev && next.rescind?.id === prev.id ? prev : next.rescind ?? null));
     } catch (err) {
       if (seq !== requestSeq.current) return;
       setError(err instanceof Error ? err.message : String(err));
@@ -211,6 +218,7 @@ export function DeskPanel({ portfolioId, book, reloadBook }: DeskPanelProps) {
 
   useEffect(() => {
     setEditing(false);
+    setConfirmRescind(false);
     setLastRequest(null);
     setActionError(null);
     load();
@@ -270,6 +278,8 @@ export function DeskPanel({ portfolioId, book, reloadBook }: DeskPanelProps) {
   }
 
   const approveBlocked = approveBlockedReason(state, serverNow);
+  // Shown only while the desk's own, unsent approval can be taken back (before 09:30 New York).
+  const rescindAllowed = rescindBlockedReason(state, serverNow) === null;
   const overrideBlocked = overrideBlockedReason(state, serverNow);
   const act = async (fn: () => Promise<void>) => {
     setBusy(true);
@@ -319,6 +329,57 @@ export function DeskPanel({ portfolioId, book, reloadBook }: DeskPanelProps) {
               {approveBlocked}
             </p>
           )}
+          {rescindAllowed && !confirmRescind && (
+            <button
+              type="button"
+              data-testid="rescind-button"
+              disabled={busy}
+              title="Take back the desk's approval before the 09:30 New York e-mail; the day reopens for edits."
+              onClick={() => setConfirmRescind(true)}
+              className="mt-2 px-3 py-1 rounded border text-sm disabled:opacity-50"
+            >
+              Rescind approval
+            </button>
+          )}
+          {rescindAllowed && confirmRescind && (
+            <div
+              data-testid="rescind-confirm"
+              role="alertdialog"
+              aria-label="Rescind approval"
+              className={`mt-2 max-w-xs rounded border px-3 py-2 text-sm ${
+                dark ? 'border-amber-800 bg-amber-950 text-amber-200' : 'border-amber-300 bg-amber-50 text-amber-900'
+              }`}
+            >
+              <p>{rescindConfirmText(state.date)}</p>
+              <div className="mt-2 flex justify-end gap-2">
+                <button
+                  type="button"
+                  data-testid="rescind-confirm-button"
+                  className="px-3 py-1 rounded bg-orange-500 text-white disabled:opacity-50"
+                  disabled={busy}
+                  onClick={() =>
+                    act(async () => {
+                      const result = await DeskService.rescind(portfolioId);
+                      setConfirmRescind(false);
+                      setLastRescind(result.command);
+                      load();
+                    })
+                  }
+                >
+                  Confirm
+                </button>
+                <button
+                  type="button"
+                  data-testid="rescind-cancel-button"
+                  className="px-3 py-1 rounded border"
+                  disabled={busy}
+                  onClick={() => setConfirmRescind(false)}
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
@@ -332,6 +393,7 @@ export function DeskPanel({ portfolioId, book, reloadBook }: DeskPanelProps) {
 
       <CommandStatus command={lastSave} label="save" onFinal={refreshAll} />
       <CommandStatus command={lastPublish} label="approve" onFinal={load} />
+      <CommandStatus command={lastRescind} label="rescind" onFinal={load} />
       <CommandStatus command={lastRequest} label="override" onFinal={load} />
       {actionError && <p className="mt-3 text-sm text-red-500">{actionError}</p>}
 

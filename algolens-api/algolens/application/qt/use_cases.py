@@ -27,13 +27,15 @@ from algolens.domain.qt.cutoff import (
     closed_message,
     deadlines,
     publish_source,
+    rescind_closed,
+    rescind_closed_message,
 )
 from algolens.domain.qt.desk import (
-    DONE,
     OPEN_STATUSES,
     OVERRIDE_DECISION,
     OVERRIDE_REQUEST,
     PUBLISH,
+    RESCIND,
     SAVE,
     DeskRuleError,
     as_number,
@@ -126,11 +128,12 @@ def _current_sha256(repo: DeskRepositoryPort, portfolio_id, day) -> str | None:
         return None
 
 
-def _published_record(repo: DeskRepositoryPort, portfolio_id, day, publishes):
-    """C3: published_by/at from live_run_metadata; a done publish row stands
-    in should live_run_metadata not say so (yet). publish_source and sent_at
-    come from migration 026's columns (NULL before it, or before the engine
-    set them); publish_source is otherwise read from published_by."""
+def _published_record(repo: DeskRepositoryPort, portfolio_id, day):
+    """C3: published_by/at from live_run_metadata, the only record of an
+    approval (a done publish row is history: a rescinded approval clears
+    published_at and leaves its row done). publish_source and sent_at come
+    from migration 026's columns (NULL before it, or before the engine set
+    them); publish_source is otherwise read from published_by."""
     published = repo.publish_state(portfolio_id, day)
     if published and published.get("published_at"):
         return {
@@ -140,14 +143,6 @@ def _published_record(repo: DeskRepositoryPort, portfolio_id, day, publishes):
                 published.get("publish_source"), published.get("published_by")
             ),
             "sent_at": _iso(published.get("sent_at")),
-        }
-    done = [c for c in publishes if c["status"] == DONE]
-    if done:
-        return {
-            "published_by": done[-1]["requested_by"],
-            "published_at": _iso(done[-1].get("finished_at")),
-            "publish_source": publish_source(None, done[-1]["requested_by"]),
-            "sent_at": None,
         }
     return None
 
@@ -160,12 +155,7 @@ def _refuse_after_cutoff(
     "already published" when it is."""
     if not approval_closed(day, now):
         return
-    published = _published_record(
-        repo,
-        portfolio_id,
-        day,
-        [c for c in repo.commands(portfolio_id, day) if c["kind"] == PUBLISH],
-    )
+    published = _published_record(repo, portfolio_id, day)
     if published:
         raise DeskConflict(
             f"The {day.isoformat()} book is already published"
@@ -201,6 +191,9 @@ class GetDeskState:
             "latestSave": None,
             "overrideRequests": [],
             "publish": None,
+            # The latest rescind (C8: the desk takes back its approval), polled
+            # like publish.
+            "rescind": None,
             "published": None,
             # Why save, override request and publish are closed, or None:
             # "published" (C3) or "publishing" (a publish is pending/running).
@@ -217,6 +210,7 @@ class GetDeskState:
         commands = list(self.repo.commands(portfolio_id, day))
         saves = [c for c in commands if c["kind"] == SAVE]
         publishes = [c for c in commands if c["kind"] == PUBLISH]
+        rescinds = [c for c in commands if c["kind"] == RESCIND]
         decisions = {
             c["parent_id"]: c for c in commands if c["kind"] == OVERRIDE_DECISION
         }
@@ -225,7 +219,7 @@ class GetDeskState:
             for c in commands
             if c["kind"] == OVERRIDE_REQUEST
         ]
-        published = _published_record(self.repo, portfolio_id, day, publishes)
+        published = _published_record(self.repo, portfolio_id, day)
         publishing = any(c["status"] in OPEN_STATUSES for c in publishes)
         open_request = open_override_request(
             commands, now, _current_sha256(self.repo, portfolio_id, day)
@@ -241,6 +235,7 @@ class GetDeskState:
                 "latestSave": public_command(saves[-1]) if saves else None,
                 "overrideRequests": requests,
                 "publish": public_command(publishes[-1]) if publishes else None,
+                "rescind": public_command(rescinds[-1]) if rescinds else None,
                 "published": published,
                 "locked": "published" if published else "publishing" if publishing else None,
                 "openOverrideRequestId": open_request["id"] if open_request else None,
@@ -372,12 +367,7 @@ class LookupApproval:
         payload = request.get("payload") if isinstance(request.get("payload"), Mapping) else {}
         snapshot = payload.get("proposal") if isinstance(payload.get("proposal"), list) else None
         current = _current_sha256(self.repo, portfolio_id, day)
-        published = _published_record(
-            self.repo,
-            portfolio_id,
-            day,
-            [c for c in self.repo.commands(portfolio_id, day) if c["kind"] == PUBLISH],
-        )
+        published = _published_record(self.repo, portfolio_id, day)
         return {
             "request": public_command(request),
             "decision": public_command(decision),
@@ -456,4 +446,30 @@ class PublishDesk:
         # Published (C3) and publish-already-open are refused under the day lock.
         command = self.repo.insert_publish(portfolio_id, day, requested_by)
         outcome = self.agent.publish(command)
+        return {"command": public_command(command), "agent": outcome}
+
+
+class RescindDesk:
+    """The desk takes back its own approval of the day (the UI's "Rescind
+    approval"; command kind 'rescind', contract C8). Only a desk approval
+    (publish_source 'desk'), only while it is unsent and only before 09:30
+    New York on the book date, when the engine e-mails it; refused here (409)
+    and by the engine otherwise. Once the engine clears published_at the day
+    takes edits and a new approval again."""
+
+    def __init__(self, repo: DeskRepositoryPort, agent: DeskAgentPort, now=None):
+        self.repo = repo
+        self.agent = agent
+        self.now = now or _utcnow
+
+    def execute(self, entry: Mapping[str, Any], requested_by: str) -> dict[str, Any]:
+        _require_editable(entry)
+        portfolio_id = entry["portfolio_id"]
+        day = _desk_day(self.repo, portfolio_id)
+        if rescind_closed(day, self.now()):
+            raise DeskConflict(rescind_closed_message(day))
+        # Not a desk approval, already sent, and a publish or rescind already
+        # open are refused under the day lock.
+        command = self.repo.insert_rescind(portfolio_id, day, requested_by)
+        outcome = self.agent.rescind(command)
         return {"command": public_command(command), "agent": outcome}
