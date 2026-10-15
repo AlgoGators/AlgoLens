@@ -9,7 +9,7 @@
 # /app/config is built here from the image's own config_template (so portfolio.json and
 # risk.json always match the engine version), with the database block pointed at the sim
 # postgres and every portfolio's email.json pointed at Mailpit (sim_config.py).
-ARG ENGINE_IMAGE=trade-ngin:rpc-0b9dbf6e
+ARG ENGINE_IMAGE=trade-ngin:sim
 
 FROM ubuntu:24.04 AS libfaketime
 ARG LIBFAKETIME_COMMIT=ba9ed5b2

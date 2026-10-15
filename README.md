@@ -83,6 +83,12 @@ pip install -r requirements.txt
 python app.py     # runs at http://localhost:5000
 ```
 
+### QT desk simulator
+
+[`sim/`](sim/README.md) runs AlgoLens, the real trade-ngin engine and Postgres locally on a clock
+you can move (09:29, 09:31, 10:01...), to try the desk at any time of day. Open Claude Code or
+Codex in `sim/` and ask it the desk's rules: [`sim/AGENTS.md`](sim/AGENTS.md) gives it them.
+
 ---
 
 ## Production Deployment

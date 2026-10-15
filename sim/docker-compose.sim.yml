@@ -73,7 +73,7 @@ services:
     build:
       context: ./engine
       args:
-        ENGINE_IMAGE: ${ENGINE_IMAGE:-trade-ngin:rpc-0b9dbf6e}
+        ENGINE_IMAGE: ${ENGINE_IMAGE:-trade-ngin:sim}
     image: algolens-sim/engine-rpc:local
     command: rpc
     init: true

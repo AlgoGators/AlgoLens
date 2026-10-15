@@ -5,7 +5,49 @@ one clock you can move. Use it to see what the desk and the engine do at 09:29, 
 New York without waiting for that time.
 
 Everything runs locally in Docker. Nothing here talks to production, except `snapshot.sh`, which
-you run yourself to take a read-only copy of the data.
+the maintainer runs to take a read-only copy of the data.
+
+## Ask an agent
+
+`AGENTS.md` holds the desk's rules (the 09:30 send, the 10:00 fallback, A → B → C, overrides,
+rescind, the risk checks and the fund cap) and the simulator's commands, written for an AI
+agent. Open Claude Code or Codex in this directory and ask it anything:
+
+```bash
+cd sim
+claude        # or: codex
+> what happens if I approve at 09:45?
+> set up the scenario where the VP approves my override
+> why was my approval refused?
+```
+
+The agent answers from the rules, cites the contract section, and can set the clock and run
+the scenario for you.
+
+## Quick start for teammates
+
+You need Docker Desktop, Git Bash, a clone of this repository, a clone of
+[trade-ngin](https://github.com/AlgoGators/trade-ngin) and a snapshot file from the maintainer.
+
+```bash
+# from the AlgoLens repository root, in Git Bash
+bash sim/simctl engine ../trade-ngin          # build the engine image (about 12 min the first time)
+bash sim/simctl build                         # build the simulator's images
+bash sim/simctl load ~/Downloads/snapshot-<timestamp>.tar.gz   # the file the maintainer sent you
+bash sim/simctl up
+bash sim/simctl model-run                     # build the day's model book with the real engine
+bash sim/simctl save                          # every `reset` returns here
+```
+
+Then open http://localhost:8080 (log in as `qt@sim.local` / `sim`) and http://localhost:8025
+(the mail). Move the clock with `bash sim/simctl clock 09:29`. The scenarios are below and in
+`AGENTS.md`.
+
+The snapshot holds the fund's trading data (no user accounts). Keep it private: don't commit it
+(this repository is public) or post it anywhere. The maintainer makes one with
+`bash sim/snapshot.sh` and packs it with `bash sim/simctl pack sim/data/snapshot-<timestamp>`.
+Without a snapshot, `load synthetic` starts the stack, but every engine run fails on it (see
+below).
 
 | What | Where |
 |---|---|
@@ -38,14 +80,18 @@ It appears only when the backend runs with `SIM_MODE=1`, which only this compose
 - Git Bash (comes with Git for Windows). Run `simctl` from Git Bash as `bash sim/simctl ...`,
   or from PowerShell as `.\sim\simctl.ps1 ...`. The examples below use Git Bash, from the
   repository root.
-- The engine image built locally: `docker images trade-ngin` should list
-  `trade-ngin:rpc-0b9dbf6e`. To use another tag, put `ENGINE_IMAGE=trade-ngin:rpc-<sha>` in
-  `sim/.env` (or export it) and run `bash sim/simctl build`.
+- The engine image built locally: `bash sim/simctl engine <trade-ngin checkout>` builds it
+  from that checkout's HEAD and tags it `trade-ngin:sim`, the simulator's default. Build
+  trade-ngin's `main` (what production runs) unless you are testing an engine branch. To run
+  another image, put `ENGINE_IMAGE=trade-ngin:rpc-<sha>` in `sim/.env` (or export it) and run
+  `bash sim/simctl build`.
 - Two browser profiles (or one normal window and one private window), so the desk and the VP
   can be logged in at the same time. Use `http://localhost:8080`, not `127.0.0.1`: the session
   cookie is marked Secure, which browsers accept on plain HTTP only for `localhost`.
 
-## First run
+## First run (maintainer, with the server key)
+
+Teammates without the server key: use the quick start above instead.
 
 1. Take a snapshot of production. You run this yourself. It only reads; nothing is written on
    the server, and the copy lands in `sim/data/`:
@@ -130,11 +176,8 @@ from the working tree.
 
 ## Test script
 
-Which flow you can test depends on the code you run. The "approve B" flow below (approve the
-model's book unchanged, auto-approval, approve C after the dynamic optimisation) ships in
-AlgoLens PR `qt/desk-pipeline` and trade-ngin PR #208. Until both are merged, check out
-`qt/desk-pipeline` here (and build an engine image from #208, then set `ENGINE_IMAGE`), or
-run today's flow: Save, then Approve.
+These need AlgoLens `main` and an engine built from trade-ngin `main` (the A → B → C
+approval, C10, and the fund cap, C11). `AGENTS.md` has more scenarios (rescind, the fund cap).
 
 Start each scenario with `bash sim/simctl reset`, then log in again in both browsers.
 
@@ -179,7 +222,9 @@ mails the President an alert. Use it to check the stack, not the engine. Rebuild
 | File | What |
 |---|---|
 | `docker-compose.sim.yml` | postgres, mailpit, engine-rpc, backend, frontend, edge |
+| `AGENTS.md`, `CLAUDE.md` | the desk's rules and the commands, for an AI agent |
 | `simctl`, `simctl.ps1` | the driver, and its PowerShell wrapper |
+| `engine/build-engine.sh` | builds the engine image from a trade-ngin checkout (`simctl engine`) |
 | `snapshot.sh` | the read-only production snapshot (you run it) |
 | `postgres/Dockerfile` | postgres:16 with libfaketime |
 | `engine/Dockerfile`, `engine/sim_config.py` | the engine image with libfaketime and `/app/config` (database: sim postgres; e-mail: Mailpit) |
