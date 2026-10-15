@@ -15,7 +15,7 @@ export MSYS_NO_PATHCONV=1
 
 here="$(cd "$(dirname "$0")" && pwd)"
 repo="$(cd "$here/../.." && pwd)"
-image="${ENGINE_IMAGE:-trade-ngin:rpc-0b9dbf6e}"
+image="${ENGINE_IMAGE:-trade-ngin:sim}"
 migrations=(014_contract_metadata_fee_per_contract 017_live_results_roll_costs 021_qt_books
             022_strategy_config 023_qt_command_log 024_drop_retired_qt_tables
             025_qt_command_log_hardening 027_qt_daily_cutoff 028_ops_data_ready 029_qt_rescind)

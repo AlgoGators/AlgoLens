@@ -1,14 +1,17 @@
 #!/usr/bin/env bash
 # simctl: drive the QT desk simulator (sim/README.md). Git Bash on Windows, or any bash.
 #
+#   simctl engine <trade-ngin checkout> [jobs]
+#                                build the engine image (trade-ngin:sim) from a trade-ngin checkout
 #   simctl build                 build the images (AlgoLens from the checked-out branch)
 #   simctl up | down | destroy   start, stop (keep data), stop and delete every volume
-#   simctl load <snapshot-dir|synthetic> [--day YYYY-MM-DD | --keep]
+#   simctl load <snapshot-dir|snapshot.tar.gz|synthetic> [--day YYYY-MM-DD | --keep]
 #                                restore a snapshot (or the synthetic fixture) + the sim users,
 #                                then save it as the template `reset` returns to
 #   simctl reset                 back to the template; clock to 08:00 of the sim day; Mailpit
 #                                emptied; engine-rpc restarted (its scheduler state cleared)
 #   simctl save                  make the current database the template
+#   simctl pack <snapshot-dir>   one .tar.gz of a snapshot, to hand to a teammate (not to git)
 #   simctl clock HH:MM[:SS]      set the clock to that New York time on the sim day
 #   simctl clock +5m | -1h | +30s
 #   simctl day YYYY-MM-DD        set the sim day (keeps the New York time of day)
@@ -229,6 +232,18 @@ cmd_load() {
     done
     ensure_clock
 
+    case "$src" in
+        *.tar.gz|*.tgz)  # a packed snapshot (simctl pack): unpack it under sim/data/ first
+            [ -f "$src" ] || die "load: no file $src"
+            local name; name="$(basename "$src")"; name="${name%.tar.gz}"; name="${name%.tgz}"
+            if [ ! -d "$SIM_DIR/data/$name" ]; then
+                tar -xzf - -C "$SIM_DIR/data" < "$src" || die "load: could not unpack $src"
+            fi
+            [ -d "$SIM_DIR/data/$name" ] || die "load: $src did not unpack to sim/data/$name"
+            say "unpacked $src to sim/data/$name"
+            src="$SIM_DIR/data/$name" ;;
+    esac
+
     local snap=""
     if [ "$src" != synthetic ]; then
         local abs; abs="$(cd "$src" 2>/dev/null && pwd)" || die "load: no directory $src"
@@ -390,6 +405,25 @@ cmd_status() {
     echo "--- mail: http://localhost:8025"
 }
 
+cmd_engine() {
+    [ $# -ge 1 ] || die "engine: give a trade-ngin checkout (git clone https://github.com/AlgoGators/trade-ngin.git)"
+    bash "$SIM_DIR/engine/build-engine.sh" "$@"
+    if [ -f "$SIM_DIR/.env" ] && grep -q '^ENGINE_IMAGE=' "$SIM_DIR/.env"; then
+        say "sim/.env sets $(grep '^ENGINE_IMAGE=' "$SIM_DIR/.env"); remove that line to run trade-ngin:sim"
+    fi
+    say "next: bash sim/simctl build && bash sim/simctl up"
+}
+
+cmd_pack() {
+    local dir="${1:-}"
+    [ -n "$dir" ] && [ -f "$dir/schema.sql.gz" ] || die "pack: give a snapshot directory (sim/data/snapshot-...)"
+    local abs; abs="$(cd "$dir" && pwd)"
+    local name; name="$(basename "$abs")"
+    tar -czf - -C "$(dirname "$abs")" "$name" > "$SIM_DIR/data/$name.tar.gz"
+    say "wrote sim/data/$name.tar.gz ($(du -h "$SIM_DIR/data/$name.tar.gz" | cut -f1))"
+    say "it holds the fund's trading data: share it privately (never commit it; the repo is public)"
+}
+
 cmd_logs() {
     if [ $# -eq 0 ]; then set -- engine-rpc backend; fi
     compose logs -f --tail=100 "$@"
@@ -398,6 +432,7 @@ cmd_logs() {
 main() {
     local cmd="${1:-help}"; shift || true
     case "$cmd" in
+        engine) cmd_engine "$@" ;;
         build) cmd_build "$@" ;;
         up) cmd_up ;;
         down) compose down ;;
@@ -405,6 +440,7 @@ main() {
         load) cmd_load "$@" ;;
         reset) cmd_reset ;;
         save) cmd_save ;;
+        pack) cmd_pack "$@" ;;
         clock) cmd_clock "$@" ;;
         day) cmd_day "$@" ;;
         model-run) cmd_model_run "$@" ;;
