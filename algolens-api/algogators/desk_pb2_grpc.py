@@ -48,6 +48,11 @@ class DeskServiceStub:
     scale and the configured IDM and FDM per strategy. Additive only.
     Contract C10 (the A -> B -> C approval) uses PublishRequest unchanged:
     the flow is the publish row's payload.
+    1.6.0  2026-10-16  DeskRisk.blocks_publish (19) and blockers (20): decision 5's publish
+    gate (only the final book over a cap blocks; an approved override only
+    over the margin cap), and DESK_RISK_STATE_INCOMPLETE (5): a qt book a
+    desk or override run did not finish (it blocks). Additive only. Every
+    publish path refuses on it.
 
     """
 
@@ -117,6 +122,11 @@ class DeskServiceServicer:
     scale and the configured IDM and FDM per strategy. Additive only.
     Contract C10 (the A -> B -> C approval) uses PublishRequest unchanged:
     the flow is the publish row's payload.
+    1.6.0  2026-10-16  DeskRisk.blocks_publish (19) and blockers (20): decision 5's publish
+    gate (only the final book over a cap blocks; an approved override only
+    over the margin cap), and DESK_RISK_STATE_INCOMPLETE (5): a qt book a
+    desk or override run did not finish (it blocks). Additive only. Every
+    publish path refuses on it.
 
     """
 
@@ -260,6 +270,11 @@ class DeskService:
     scale and the configured IDM and FDM per strategy. Additive only.
     Contract C10 (the A -> B -> C approval) uses PublishRequest unchanged:
     the flow is the publish row's payload.
+    1.6.0  2026-10-16  DeskRisk.blocks_publish (19) and blockers (20): decision 5's publish
+    gate (only the final book over a cap blocks; an approved override only
+    over the margin cap), and DESK_RISK_STATE_INCOMPLETE (5): a qt book a
+    desk or override run did not finish (it blocks). Additive only. Every
+    publish path refuses on it.
 
     """
 

@@ -106,7 +106,7 @@ def test_each_rpc_carries_the_command_row(desk_server):
         "QT_CONSERVATIVE_PORTFOLIO", "2026-10-08", 43)
     # Every call carried the version header, built from the vendored protos.
     assert servicer.headers == [f"common={API_VERSIONS['common']},desk={API_VERSIONS['desk']}"] * 5
-    assert API_VERSIONS["desk"] == "1.5.0"
+    assert API_VERSIONS["desk"] == "1.6.0"
 
 
 def test_version_refusal_is_logged_and_swallowed(desk_server, caplog):
@@ -171,6 +171,8 @@ def test_get_desk_risk_maps_the_report(desk_server):
                                     detail="gross leverage bound"),
             desk_pb2.RiskMultiplier(name="idm:TREND", label="IDM, TREND"),
         ],
+        blocks_publish=True,
+        blockers=[desk_pb2.RiskBreach(term="MARGIN", detail="margin over the fund cap")],
     )
 
     report = DeskClient(address).get_desk_risk("QT_CONSERVATIVE_PORTFOLIO", date(2026, 10, 8))
@@ -185,6 +187,8 @@ def test_get_desk_risk_maps_the_report(desk_server):
         "withinLimits": False,
         "approvedOverride": False,
         "breaches": [{"term": "L_g", "detail": "gross leverage bound"}],
+        "blocksPublish": True,
+        "blockers": [{"term": "MARGIN", "detail": "margin over the fund cap"}],
         "m": pytest.approx(0.8),
         "bindingTerm": "L_g",
         "overLimitAfterRounding": "R",
@@ -242,3 +246,12 @@ def test_get_desk_risk_raises_when_the_engine_is_unreachable():
     with pytest.raises(DeskRiskUnavailable) as exc:
         DeskClient("127.0.0.1:1", timeout=0.5).get_desk_risk("P", date(2026, 10, 8))
     assert exc.value.reason in ("UNAVAILABLE", "DEADLINE_EXCEEDED")
+
+
+def test_get_desk_risk_maps_an_incomplete_book(desk_server):
+    servicer, address = desk_server
+    servicer.risk = desk_pb2.DeskRisk(
+        state=desk_pb2.DESK_RISK_STATE_INCOMPLETE, blocks_publish=True,
+        blockers=[desk_pb2.RiskBreach(term="incomplete", detail="save again")])
+    report = DeskClient(address).get_desk_risk("QT_CONSERVATIVE_PORTFOLIO", date(2026, 10, 8))
+    assert report["state"] == "incomplete" and report["blocksPublish"] is True

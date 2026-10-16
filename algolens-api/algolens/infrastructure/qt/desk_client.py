@@ -35,6 +35,8 @@ RISK_STATES = {
     desk_pb2.DESK_RISK_STATE_MODEL: "model",
     desk_pb2.DESK_RISK_STATE_DESK: "desk",
     desk_pb2.DESK_RISK_STATE_OVERRIDE: "override",
+    # 1.6.0: a qt book a desk or override run did not finish writing.
+    desk_pb2.DESK_RISK_STATE_INCOMPLETE: "incomplete",
 }
 
 
@@ -59,6 +61,11 @@ def risk_report(reply):
         "withinLimits": reply.within_limits,
         "approvedOverride": reply.approved_override,
         "breaches": [{"term": b.term, "detail": b.detail} for b in reply.breaches],
+        # Decision 5's publish gate (1.6.0), decided by the engine: whether the
+        # day's book may be approved, and what stops it. AlgoLens does not
+        # recompute it.
+        "blocksPublish": reply.blocks_publish,
+        "blockers": [{"term": b.term, "detail": b.detail} for b in reply.blockers],
         "m": reply.m,
         "bindingTerm": reply.binding_term,
         "overLimitAfterRounding": reply.over_limit_after_rounding,

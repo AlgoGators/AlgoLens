@@ -102,7 +102,8 @@ export interface DeskState {
 }
 
 /** Which run wrote the day's qt book (desk.proto DeskRiskState). */
-export type DeskRiskState = 'no_book' | 'model' | 'desk' | 'override' | 'unspecified';
+/** 'incomplete' (desk.proto 1.6.0): a qt book a desk or override run did not finish writing. */
+export type DeskRiskState = 'no_book' | 'model' | 'desk' | 'override' | 'incomplete' | 'unspecified';
 
 export interface RiskBreach {
   /** An overlay term (R, R_jump, R_shock, L_g, L_n, CAP), a step (cap, overlay, clip, trim) or "refused". */
@@ -128,6 +129,12 @@ export interface DeskRisk {
   /** An approved override: the ask trades as asked, the breaches are waived. */
   approvedOverride: boolean;
   breaches: RiskBreach[];
+  /** Decision 5's publish gate, as the engine decides it (desk.proto 1.6.0):
+   * whether the day's book may be approved, and what stops it. Only the final
+   * book over a cap (gross, net, per-name, margin) blocks; an approved override
+   * only over the margin cap. AlgoLens shows it and does not recompute it. */
+  blocksPublish?: boolean;
+  blockers?: RiskBreach[];
   /** The overlay's multiplier (1: no cut) and the term that bound ("none"). */
   m: number;
   bindingTerm: string;
@@ -605,22 +612,41 @@ export function riskUnavailable(risk: DeskRiskResult | null | undefined): risk i
   return !!risk && 'unavailable' in risk;
 }
 
-/** Whether the desk's positions breach a risk limit with no approved override (C9). */
+/** Decision 5 (2026-10-16): the caps the VP or President may approve a book
+ * past. The margin cap is never among them. */
+export const OVERRIDABLE_CAPS: readonly string[] = ['L_g', 'L_n', 'CAP'];
+
+/** Whether the engine's publish gate blocks the day's book (decision 5). */
 export function riskBreached(risk: DeskRiskResult | null | undefined): risk is DeskRisk {
-  return !!risk && !riskUnavailable(risk) && risk.state === 'desk' && !risk.withinLimits && !risk.approvedOverride;
+  return !!risk && !riskUnavailable(risk) && !!risk.blocksPublish;
 }
 
 /**
- * Why the risk check blocks Approve, or null (C9). The model's book, no book,
- * an approved override and positions within the limits pass; a breach, or a
- * check that cannot be read, block. The server refuses the same (409).
+ * The refusal for a blocked book: what blocks, and what the desk can do. The
+ * server words it the same way (409).
+ */
+export function riskBlockedMessage(risk: DeskRisk, book = 'The positions are'): string {
+  const blockers = risk.blockers ?? [];
+  const terms = blockers.map(b => b.term);
+  const incomplete = blockers.find(b => b.term === 'incomplete');
+  if (incomplete) return incomplete.detail;
+  const text = `${book} over a cap (${blockers.map(b => b.detail || b.term).join('; ')})`;
+  if (terms.includes('MARGIN')) return `${text}: the margin cap cannot be overridden; save positions within it`;
+  if (risk.state === 'override' || !terms.every(t => OVERRIDABLE_CAPS.includes(t))) return text;
+  return `${text}: save within the caps or ask the VP or President to approve your positions`;
+}
+
+/**
+ * Why the risk check blocks Approve, or null (decision 5). Only the engine's
+ * gate blocks: a book over a cap, an incomplete book, or an approved override
+ * over the margin cap. A bound limit, R, R_jump, R_shock and the trim are
+ * reported and never block. A check that cannot be read blocks.
  */
 export function riskBreachReason(risk: DeskRiskResult | null | undefined): string | null {
   if (!risk) return null;
   if (riskUnavailable(risk)) return `The risk check is unavailable: ${risk.unavailable}`;
   if (!riskBreached(risk)) return null;
-  const terms = [...new Set(risk.breaches.map(b => b.term))];
-  return `The positions breach risk limits${terms.length ? ` (${terms.join(', ')})` : ''}: save within the limits or request an override`;
+  return riskBlockedMessage(risk);
 }
 
 /** The label trade-ngin gave a term's check, else the term itself. */
@@ -635,12 +661,21 @@ export function riskBadge(risk: DeskRiskResult): { tone: RiskBadgeTone; label: s
   if (riskUnavailable(risk)) return { tone: 'muted', label: `Risk check unavailable (${risk.unavailable})` };
   if (risk.state === 'model') return { tone: 'ok', label: 'Model book — within limits' };
   if (risk.state === 'no_book') return { tone: 'muted', label: 'No book for the day yet' };
+  if (risk.state === 'incomplete') return { tone: 'breach', label: 'Incomplete book — save again' };
+  const margin = (risk.blockers ?? []).some(b => b.term === 'MARGIN');
   if (risk.state === 'override' || risk.approvedOverride) {
-    return { tone: 'waived', label: 'Override approved — breaches waived' };
+    return risk.blocksPublish
+      ? { tone: 'breach', label: 'Over the margin cap — cannot be overridden' }
+      : { tone: 'waived', label: 'Override approved — gross, net and per-name caps waived' };
+  }
+  if (risk.blocksPublish) {
+    return margin
+      ? { tone: 'breach', label: 'Over the margin cap — cannot be overridden' }
+      : { tone: 'breach', label: 'Over a cap — needs the VP or President' };
   }
   return risk.withinLimits
     ? { tone: 'ok', label: 'Within risk limits' }
-    : { tone: 'breach', label: 'Outside risk limits — override required' };
+    : { tone: 'ok', label: 'Within the caps — limits that bound are reported' };
 }
 
 /** "Gross leverage bound: positions cut to 80%", or null when the overlay did not cut the book. */
@@ -915,12 +950,7 @@ export function acceptCBlockedReason(state: DeskState, nowMs?: number): string |
   if (approvalPipeline(state).stage !== 'choose') return 'There is no engine book to choose';
   const risk = state.risk;
   if (!risk || riskUnavailable(risk)) return 'The risk check is unavailable; try again';
-  const over = (risk.checks ?? []).filter(c => c.status === 'over').map(c => c.term);
-  for (const text of [risk.overLimitAfterRounding, risk.overLimitByHold]) {
-    for (const term of (text ?? '').split(/[;\s]+/)) if (term && !over.includes(term)) over.push(term);
-  }
-  if (over.length || risk.refused) {
-    return `The engine's book (C) is itself over a limit (${over.join(', ') || 'the overlay refused'}): ask the VP or President`;
-  }
+  // Decision 5: only the engine's gate blocks C (a bound limit is fine: C was cut to fit it).
+  if (riskBreached(risk)) return riskBlockedMessage(risk, "The engine's book (C) is");
   return null;
 }

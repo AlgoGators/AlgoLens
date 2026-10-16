@@ -175,15 +175,38 @@ def _desk_risk(agent: DeskAgentPort, portfolio_id: str, day) -> dict[str, Any]:
         return {"unavailable": exc.reason}
 
 
+# Decision 5 (2026-10-16): the caps the VP or President may approve a book past.
+# The margin cap is never among them. The engine decides what blocks
+# (DeskRisk.blocks_publish, desk.proto 1.6.0); this only words the refusal.
+OVERRIDABLE_CAPS = frozenset({"L_g", "L_n", "CAP"})
+
+
+def blocked_message(risk: Mapping[str, Any], book: str = "The positions are") -> str:
+    """The refusal for a report whose blocksPublish is set: what blocks, and
+    what the desk can do about it."""
+    blockers = list(risk.get("blockers") or ())
+    terms = [b.get("term") for b in blockers]
+    if "incomplete" in terms:
+        return next(b["detail"] for b in blockers if b.get("term") == "incomplete")
+    detail = "; ".join(b.get("detail") or b.get("term") or "" for b in blockers)
+    text = f"{book} over a cap ({detail})"
+    if "MARGIN" in terms:
+        return text + ": the margin cap cannot be overridden; save positions within it"
+    if risk.get("state") == "override" or not set(terms) <= OVERRIDABLE_CAPS:
+        return text
+    return text + ": save within the caps or ask the VP or President to approve your positions"
+
+
 def _refuse_outside_risk_limits(
     repo: DeskRepositoryPort, agent: DeskAgentPort, portfolio_id: str, day
 ) -> None:
-    """C9: the desk may not approve positions that breach a risk limit. Refuse
-    (409) while a save is still running, while the report cannot be read (fail
-    closed), while it is not yet the report of the latest done save, and while
-    it says the desk's positions are outside the limits with no approved
-    override. The model's book, no book and an approved override pass. A
-    published day is left to the repository's refusal (C3)."""
+    """Decision 5: the desk may not approve a book the engine's publish gate
+    blocks. Refuse (409) while a save is still running, while the report
+    cannot be read (fail closed), while it is not yet the report of the latest
+    done save, and while the engine says the book may not be published
+    (blocksPublish: over a cap, an incomplete book, or an approved override
+    over the margin cap). A published day is left to the repository's
+    refusal (C3). The engine checks again."""
     if _published_record(repo, portfolio_id, day):
         return
     saves = [c for c in repo.commands(portfolio_id, day) if c["kind"] == SAVE]
@@ -195,20 +218,14 @@ def _refuse_outside_risk_limits(
     risk = _desk_risk(agent, portfolio_id, day)
     if "unavailable" in risk:
         raise DeskConflict(f"The risk check is unavailable ({risk['unavailable']}); try again")
-    if risk.get("state") != "desk":
-        return
     done = [c for c in saves if c["status"] == DONE]
-    if done and int(done[-1]["id"]) != int(risk.get("auditId") or 0):
+    if (risk.get("state") == "desk" and done
+            and int(done[-1]["id"]) != int(risk.get("auditId") or 0)):
         raise DeskConflict(
             f"The risk check has not caught up with save #{done[-1]['id']}; try again"
         )
-    if not risk.get("withinLimits") and not risk.get("approvedOverride"):
-        terms = ", ".join(dict.fromkeys(b["term"] for b in risk.get("breaches") or ()))
-        raise DeskConflict(
-            f"The {day.isoformat()} positions breach risk limits"
-            + (f" ({terms})" if terms else "")
-            + ": save within the limits or request an override"
-        )
+    if risk.get("blocksPublish"):
+        raise DeskConflict(blocked_message(risk, f"The {day.isoformat()} positions are"))
 
 
 def _refuse_c_outside_limits(
@@ -216,10 +233,10 @@ def _refuse_c_outside_limits(
 ) -> int:
     """C10, Approve C: the QT approves the engine's book of the latest done
     save. Refuse (409) while a save is running, without a done save, while
-    the risk check cannot be read or is of another save, and while C itself is
-    over a limit (a check read over, a term over after rounding or through a
-    hold, the overlay refused). A limit that bound is fine: C is the book cut
-    to fit it. Returns the save's id. The engine checks again."""
+    the risk check cannot be read or is of another save, and while the
+    engine's publish gate blocks C (decision 5: C over a cap). A limit that
+    bound is fine: C is the book cut to fit it. Returns the save's id. The
+    engine checks again."""
     saves = [c for c in repo.commands(portfolio_id, day) if c["kind"] == SAVE]
     running = next((c for c in reversed(saves) if c["status"] in OPEN_STATUSES), None)
     if running is not None:
@@ -237,17 +254,8 @@ def _refuse_c_outside_limits(
         raise DeskConflict(
             f"The day's book is not the result of save #{save_id} yet; try again"
         )
-    over = [c["term"] for c in risk.get("checks") or () if c.get("status") == "over"]
-    for text in (risk.get("overLimitAfterRounding"), risk.get("overLimitByHold")):
-        for term in (text or "").replace(" ", ";").split(";"):
-            if term and term not in over:
-                over.append(term)
-    if over or risk.get("refused"):
-        raise DeskConflict(
-            "The engine's book (C) is itself over a limit ("
-            + (", ".join(over) or "the overlay refused")
-            + "): ask the VP or President to approve your positions"
-        )
+    if risk.get("blocksPublish"):
+        raise DeskConflict(blocked_message(risk, "The engine's book (C) is"))
     return save_id
 
 

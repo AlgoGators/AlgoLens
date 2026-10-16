@@ -219,7 +219,7 @@ class FakeRepo:
 
 
 def risk_report(state="model", audit_id=0, within_limits=True, approved_override=False,
-                breaches=()):
+                breaches=(), blockers=()):
     """A GetDeskRisk report as DeskClient.get_desk_risk returns it."""
     return {
         "state": state,
@@ -227,6 +227,9 @@ def risk_report(state="model", audit_id=0, within_limits=True, approved_override
         "withinLimits": within_limits,
         "approvedOverride": approved_override,
         "breaches": [{"term": t, "detail": f"{t} bound"} for t in breaches],
+        # Decision 5's gate as the engine decides it (desk.proto 1.6.0).
+        "blocksPublish": bool(blockers),
+        "blockers": [{"term": t, "detail": f"{t} over its cap"} for t in blockers],
         "m": 1.0,
         "bindingTerm": "none",
         "overLimitAfterRounding": "",
@@ -902,19 +905,47 @@ def test_desk_state_has_no_risk_before_the_first_book():
     assert state["risk"] is None and agent.risk_calls == []
 
 
-def test_approve_is_refused_while_the_positions_breach_a_risk_limit():
+def test_approve_is_refused_while_the_engine_blocks_the_book():
     repo = FakeRepo()
     save_id = _saved(repo)
     agent = FakeAgent(risk=risk_report("desk", audit_id=save_id, within_limits=False,
-                                       breaches=["L_g", "cap", "L_g"]))
+                                       breaches=["L_g"], blockers=["L_g", "CAP"]))
     with pytest.raises(DeskConflict) as exc:
         PublishDesk(repo, agent).execute(QT, "d@x.com")
     assert str(exc.value) == (
-        "The 2026-10-08 positions breach risk limits (L_g, cap): save within the limits or "
-        "request an override"
+        "The 2026-10-08 positions are over a cap (L_g over its cap; CAP over its cap): save "
+        "within the caps or ask the VP or President to approve your positions"
     )
     assert [r["kind"] for r in repo.rows] == ["save"]
     assert agent.calls == []
+
+
+def test_a_breach_the_engine_does_not_block_on_is_approvable():
+    # Decision 5: a bound limit, R and the trim are reported; only the gate blocks.
+    repo = FakeRepo()
+    save_id = _saved(repo)
+    agent = FakeAgent(risk=risk_report("desk", audit_id=save_id, within_limits=False,
+                                       breaches=["R", "cap"]))
+    assert PublishDesk(repo, agent).execute(QT, "d@x.com")["command"]["kind"] == "publish"
+
+
+def test_the_margin_cap_is_never_overridable():
+    repo = FakeRepo()
+    _saved(repo)
+    agent = FakeAgent(risk=risk_report("override", audit_id=99, within_limits=False,
+                                       approved_override=True, blockers=["MARGIN"]))
+    with pytest.raises(DeskConflict, match="the margin cap cannot be overridden"):
+        PublishDesk(repo, agent).execute(QT, "d@x.com")
+
+
+def test_an_incomplete_book_is_refused_with_the_engines_reason():
+    repo = FakeRepo()
+    agent = FakeAgent(risk={**risk_report("incomplete", within_limits=False),
+                            "blocksPublish": True,
+                            "blockers": [{"term": "incomplete", "detail": "the day's book is "
+                                          "incomplete; save again"}]})
+    with pytest.raises(DeskConflict, match="^the day's book is incomplete; save again$"):
+        PublishDesk(repo, agent).execute(QT, "d@x.com")
 
 
 def test_an_approved_override_waives_the_breaches():
@@ -1038,17 +1069,29 @@ def test_accept_c_publishes_the_engines_book_of_the_latest_save():
                                             "acknowledged": ["ZT.v.0"]}
 
 
-@pytest.mark.parametrize("over, needle", [
-    ({"checks": [{"term": "L_g", "status": "over"}]}, "L_g"),
-    ({"overLimitAfterRounding": "R"}, r"\(R\)"),
-    ({"refused": True}, "the overlay refused"),
+@pytest.mark.parametrize("blockers, needle", [
+    (["L_g"], r"^The engine's book \(C\) is over a cap \(L_g over its cap\): save within the caps or ask the VP or President"),
+    (["MARGIN"], "the margin cap cannot be overridden"),
+    (["refused"], r"over a cap \(refused over its cap\)$"),
 ])
-def test_accept_c_refuses_a_c_over_a_limit(over, needle):
+def test_accept_c_refuses_a_c_the_engine_blocks(blockers, needle):
     repo = FakeRepo()
     save_id = _saved(repo)
+    gate = risk_report(blockers=blockers)
+    report = _c_report(save_id, blocksPublish=True, blockers=gate["blockers"])
     with pytest.raises(DeskConflict, match=needle):
-        PublishDesk(repo, FakeAgent(risk=_c_report(save_id, **over)), now=lambda: NOW).execute(
+        PublishDesk(repo, FakeAgent(risk=report), now=lambda: NOW).execute(
             QT, "d@x.com", flow="accept_c", acknowledged=[])
+
+
+def test_accept_c_with_an_over_after_rounding_term_the_engine_passes_publishes():
+    # R still over after rounding is reported, not a cap (decision 5).
+    repo = FakeRepo()
+    save_id = _saved(repo)
+    report = _c_report(save_id, overLimitAfterRounding="R")
+    result = PublishDesk(repo, FakeAgent(risk=report), now=lambda: NOW).execute(
+        QT, "d@x.com", flow="accept_c", acknowledged=[])
+    assert result["command"]["kind"] == "publish"
 
 
 def test_accept_c_needs_a_finished_current_save_and_a_readable_check():

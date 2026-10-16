@@ -69,14 +69,14 @@ working at 10:00.
 
 Pressing **Approve** on B starts the pipeline A → B → C:
 
-1. **C equals B and is within every limit:** the day is **auto-approved**. Before 09:30 it
+1. **C equals B and is within the caps:** the day is **auto-approved**. Before 09:30 it
    waits for the 09:30 send; from 09:30 it is sent at once.
 2. **C differs from B** (any symbol, even when only a trading rule moved it) **or is outside a
    limit:** nothing is approved. The desk shows B next to C, the symbols that moved and what
    moved them. The QT then chooses one of two things:
    - **Approve C.** The QT ticks "I approve C knowing it differs". This works only while C is
-     still the latest saved book, and only if C itself is over no limit. A limit that **bound**
-     (C was cut to fit it) is fine; a check that is **over**, or a refused overlay, is not.
+     still the latest saved book, and only if C itself is over no **cap** (decision 5, below). A
+     limit that **bound** (C was cut to fit it) is fine.
    - **Insist on B: request an override.** The request e-mails the VP and the President a link
      (it works once and expires after 48 hours). Either one approves, and then the engine books
      **B exactly as asked** and publishes it. A rejection publishes nothing; the QT can still
@@ -91,6 +91,17 @@ nothing.
   book), `clip`, `trim`.
 - **Trading rules (not a breach, but still a difference from B):** `sign_close` (no flip from
   long to short in one day), `rounding`, `buffer`, `search`, `hold`.
+
+### What blocks an approval: the caps (decision 5, 2026-10-16)
+
+Only the final book over a **cap** blocks: gross leverage (L_g), net leverage (L_n), the
+per-name cap (CAP) and the fund's margin cap (MARGIN). A desk book whose caps were not measured,
+or whose overlay refused, is blocked too, and so is an **incomplete** book (a desk or override
+run did not finish writing it, for example an override the margin cap refused): save again.
+Everything else (a limit that bound, R, R_jump, R_shock, the trim, every trading rule) is shown
+and never blocks. The VP or the President may approve a book past gross, net and per-name; **no
+one can approve a book past the margin cap**. The engine decides this (`GetDeskRisk`'s
+`blocks_publish` and `blockers`) and AlgoLens shows it; every approval path applies it.
 
 ### The risk checks the desk sees (C9, C11)
 
