@@ -56,6 +56,9 @@ export interface PublishedRecord {
   publish_source?: PublishSource | null;
   /** When the engine e-mailed the book (026); null until then, or before 026. */
   sent_at?: string | null;
+  /** The C10 flow that approved the day: 'override_b' for an approved override; null for a
+   * plain approval (or before the server reported it). */
+  flow?: string | null;
 }
 
 /** The day's clock, in America/New_York, computed by the server. */
@@ -93,6 +96,9 @@ export interface DeskState {
   rescind?: DeskCommand | null;
   /** From live_run_metadata.published_at (C3): the day is frozen once set. */
   published: PublishedRecord | null;
+  /** Whether the viewer is the VP or the President (QT_APPROVERS): only they take back a day an
+   * override published. */
+  viewerIsApprover?: boolean;
   /** Why save, override request and approval are closed: published, or an approval is open. */
   locked?: 'published' | 'publishing' | null;
   /** The day's override request still in play (C2), if any. */
@@ -768,18 +774,14 @@ export function rescindOpen(state: DeskState): boolean {
  * 09:30 New York on the book date, on the server's clock `nowMs`. The server
  * and the engine check all of it again.
  */
-export function rescindBlockedReason(
-  state: DeskState,
-  nowMs: number,
-  userEmail?: string | null,
-): string | null {
+export function rescindBlockedReason(state: DeskState, nowMs: number): string | null {
   if (!state.date) return 'No book for today yet';
   if (deskLock(state) !== 'published') return 'The day is not approved';
   if (publishSourceOf(state.published) !== 'desk') return 'Only a desk approval can be taken back';
-  // Only the approver takes an approval back (Dom, 2026-10-14); the API and the engine check again.
-  const approver = state.published?.published_by ?? '';
-  if (userEmail !== undefined && approver.trim().toLowerCase() !== (userEmail ?? '').trim().toLowerCase()) {
-    return `Only ${approver || 'the approver'} can take this approval back`;
+  // Anyone on QT takes back a desk approval; a day an override published only the VP or the
+  // President (Dom, 2026-10-16). The API and the engine check again.
+  if (state.published?.flow === 'override_b' && !state.viewerIsApprover) {
+    return 'This day was published through an override: only the VP or the President can take it back';
   }
   if (state.published?.sent_at) return 'The book has already been e-mailed';
   if (state.sendTracked === false) {

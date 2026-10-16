@@ -33,8 +33,8 @@ Start the agent in `sim/` (`cd sim && claude`, or `cd sim && codex`) so it picks
 
 | Login | Role | Can |
 |---|---|---|
-| `qt@sim.local` | QT desk | edit the day's book, approve, rescind its own approval, request an override |
-| `vp@sim.local` | VP (approver) | approve or reject an override request (from the e-mailed link) |
+| `qt@sim.local` | QT desk | edit the day's book, approve, rescind a desk approval, request an override |
+| `vp@sim.local` | VP (approver) | approve or reject an override request (from the e-mailed link); rescind a day an override published |
 | `president@sim.local` | President (approver) | the same as the VP; also gets the alerts |
 
 An override needs **either** the VP **or** the President, not both. Nobody may decide their own
@@ -128,10 +128,12 @@ equity.
 
 ## Taking an approval back: Rescind (C8)
 
-The QT who approved can rescind the approval **before 09:30**, if it hasn't been sent yet. The
-day is then open again: edit, then approve again. A rescind is refused from 09:30 on, and
-refused by anyone other than the approver. A fallback, a sent day and a past day cannot be
-rescinded.
+Anyone on QT can rescind a desk approval **before 09:30**, if it hasn't been sent yet. A day
+published through an approved override can be rescinded only by the VP or the President (Dom,
+2026-10-16). The day is then open again: edit, then approve again. After an override's day is
+rescinded, its booking cannot simply be approved again: save the book you want, or ask for a
+new override. A rescind is refused from 09:30 on. A fallback, a sent day and a past day cannot
+be rescinded.
 
 ## Settings the desk may change
 
@@ -166,6 +168,7 @@ fallback happens.
 | 5 | `clock 10:01`, `pass` | nothing | fallback: A is published and sent; the President's alert is in Mailpit |
 | 6 | after 5, or `clock 10:02` | QT: approve | refused: approval closed at 10:00 |
 | 7 | `clock 09:10` | QT: approve, then rescind before 09:30 | the day is open again; rescind at 09:31 is refused |
+| 9 | `clock 09:05` | scenario 3, then QT: rescind | refused: only the VP or the President; the VP rescinds it; QT's plain Approve of the booking is refused |
 | 8 | `clock 09:10` | QT: set ZN to 200 (its margin alone is about $503k), request an override | the request is refused by the fund cap (MARGIN) with the amounts, and no e-mail goes to the VP or the President; save within the cap and approve, or the fallback sends A at 10:00 |
 
 ## When something looks wrong

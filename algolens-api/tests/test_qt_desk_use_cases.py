@@ -169,13 +169,14 @@ class FakeRepo:
                                payload={"flow": "override_b", "after": decision["id"]})
         return decision, publish
 
-    def insert_rescind(self, portfolio_id, day, requested_by):
+    def insert_rescind(self, portfolio_id, day, requested_by, is_approver=False):
         if not self._is_published(portfolio_id):
             raise DeskConflict("not approved")
         if self.published.get("publish_source") != "desk":
             raise DeskConflict("not approved by the desk")
-        if (self.published.get("published_by") or "").lower() != requested_by.lower():
-            raise DeskConflict("only the approver can take the approval back")
+        why = rules.rescind_refusal(rules.approving_flow(self.rows), day.isoformat(), is_approver)
+        if why:
+            raise DeskConflict(why)
         if self.published.get("sent_at") is not None:
             raise DeskConflict("already e-mailed")
         if any(
@@ -522,6 +523,7 @@ def test_publish_state_comes_from_live_run_metadata():
         "published_at": NOW.isoformat(),
         "publish_source": "desk",
         "sent_at": None,
+        "flow": None,
     }
 
 
@@ -753,10 +755,13 @@ def test_the_approval_page_shows_the_deadline():
 # --- rescind (C8: the desk takes back its approval before the 09:30 send) -------
 
 
-def _approved(day=DAY, sent_at=None, source="desk"):
-    """A day the desk approved: its publish row done, live_run_metadata published."""
+def _approved(day=DAY, sent_at=None, source="desk", flow=None):
+    """A day the desk approved: its publish row done (with the C10 flow that approved it),
+    live_run_metadata published."""
     repo, agent = FakeRepo(day=day), FakeAgent()
-    repo.insert_command(QT["portfolio_id"], day, "publish", "d@x.com")["status"] = "done"
+    row = repo.insert_command(QT["portfolio_id"], day, "publish", "d@x.com",
+                              payload={"flow": flow} if flow else None)
+    row.update(status="done", result={"published": True, "published_at": "2026-10-08T12:00:00Z"})
     repo.published = {"published_by": "d@x.com", "published_at": _ny(day, 8, 0),
                       "publish_source": source, "sent_at": sent_at}
     return repo, agent
@@ -827,14 +832,32 @@ def test_rescind_refusals_from_the_repository():
     assert [c[0] for c in agent.calls] == ["Rescind"]
 
 
-def test_only_the_approver_can_rescind():
-    early = lambda: _ny(DAY, 9, 0)  # noqa: E731
-    repo, agent = _approved()  # approved by d@x.com
-    with pytest.raises(DeskConflict, match="only the approver"):
-        RescindDesk(repo, agent, now=early).execute(QT, "someone@x.com")
-    assert agent.calls == []
-    RescindDesk(repo, agent, now=early).execute(QT, "D@X.com")  # e-mail case does not matter
+@pytest.mark.parametrize("flow", [None, "auto", "accept_c"])
+def test_anyone_on_qt_can_rescind_a_desk_approval(flow):
+    # Dom 2026-10-16: not only the approver (the route lets only the QT screen in).
+    repo, agent = _approved(flow=flow)  # approved by d@x.com
+    RescindDesk(repo, agent, now=lambda: _ny(DAY, 9, 0)).execute(QT, "someone@x.com")
     assert [c[0] for c in agent.calls] == ["Rescind"]
+
+
+def test_only_the_vp_or_president_can_rescind_an_override_day():
+    early = lambda: _ny(DAY, 9, 0)  # noqa: E731
+    repo, agent = _approved(flow="override_b")
+    for who in ("d@x.com", "someone@x.com"):
+        with pytest.raises(DeskConflict, match="only the VP or the President can take it back"):
+            RescindDesk(repo, agent, now=early).execute(QT, who)
+    assert agent.calls == []
+    RescindDesk(repo, agent, now=early).execute(QT, "vp@x.com", is_approver=True)
+    assert [c[0] for c in agent.calls] == ["Rescind"]
+
+
+def test_desk_state_says_which_flow_approved_the_day_and_whether_the_viewer_approves():
+    repo, _agent = _approved(flow="override_b")
+    now = lambda: _ny(DAY, 9, 0)  # noqa: E731
+    state = GetDeskState(repo, FakeAgent(), now=now).execute(QT)
+    assert state["published"]["flow"] == "override_b" and state["viewerIsApprover"] is False
+    state = GetDeskState(repo, FakeAgent(), now=now).execute(QT, viewer_is_approver=True)
+    assert state["viewerIsApprover"] is True
 
 
 @pytest.mark.parametrize("entry", [MODEL, EQUITY])

@@ -157,7 +157,15 @@ def _approver_role(user):
 @handled
 def desk_state(portfolio_id):
     repo, agent, _settings = _desk_dependencies()
-    return jsonify(GetDeskState(repo, agent).execute(_portfolio(portfolio_id))), 200
+    viewer_is_approver = _approver_role(current_user()) is not None
+    return (
+        jsonify(
+            GetDeskState(repo, agent).execute(
+                _portfolio(portfolio_id), viewer_is_approver=viewer_is_approver
+            )
+        ),
+        200,
+    )
 
 
 @desk_bp.route("/<portfolio_id>/symbols", methods=["GET"])
@@ -259,8 +267,11 @@ def desk_publish(portfolio_id):
 @handled
 def desk_rescind(portfolio_id):
     repo, agent, _settings = _desk_dependencies()
+    user = current_user()
     result = RescindDesk(repo, agent).execute(
-        _portfolio(portfolio_id), current_user()["email"]
+        _portfolio(portfolio_id),
+        user["email"],
+        is_approver=_approver_role(user) is not None,
     )
     return jsonify(result), 201
 

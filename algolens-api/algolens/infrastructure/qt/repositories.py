@@ -35,10 +35,12 @@ from algolens.domain.qt.desk import (
     RESCIND,
     SAVE,
     DeskRuleError,
+    approving_flow,
     open_override_request,
     override_payload,
     proposal_snapshot,
     request_matches,
+    rescind_refusal,
     snapshot_sha256,
 )
 from algolens.infrastructure.db.postgres import get_db_connection
@@ -444,13 +446,13 @@ class PostgresDeskRepository:
             return self._insert(cursor, portfolio_id, day, PUBLISH, requested_by,
                                 payload=payload)
 
-    def insert_rescind(self, portfolio_id, day, requested_by):
+    def insert_rescind(self, portfolio_id, day, requested_by, is_approver=False):
         """Under the day lock: refuse (C8) unless live_run_metadata says the
-        day is published by the desk (publish_source 'desk') by `requested_by`
-        (only the approver takes an approval back) and sent_at is
-        NULL on all its rows, and while a publish or a rescind is open. The
-        engine checks the same again, and the 09:30 New York cutoff, when it
-        runs the row."""
+        day is published by the desk (publish_source 'desk') and sent_at is
+        NULL on all its rows, and while a publish or a rescind is open. Anyone
+        on QT takes back a desk approval; a day an override published only the
+        VP or the President (`is_approver`; Dom 2026-10-16). The engine checks
+        the same again, and the 09:30 New York cutoff, when it runs the row."""
         with self._transaction() as cursor:
             self._lock_day(cursor, portfolio_id, day)
             if len(self._cutoff_columns(cursor)) != len(CUTOFF_COLUMNS):
@@ -479,12 +481,13 @@ class PostgresDeskRepository:
                     f"({', '.join(sources)}), not approved by the desk; only a desk "
                     "approval can be taken back"
                 )
-            approver = max(published, key=lambda r: r["published_at"])["published_by"] or ""
-            if approver.strip().lower() != (requested_by or "").strip().lower():
-                raise DeskConflict(
-                    f"The {day.isoformat()} book was approved by {approver}; only they can "
-                    "take the approval back"
-                )
+            why = rescind_refusal(
+                approving_flow(self._day_commands(cursor, portfolio_id, day)),
+                day.isoformat(),
+                is_approver,
+            )
+            if why:
+                raise DeskConflict(why)
             if any(r["sent_at"] is not None for r in rows):
                 raise DeskConflict(
                     f"The {day.isoformat()} book has already been e-mailed; its approval "

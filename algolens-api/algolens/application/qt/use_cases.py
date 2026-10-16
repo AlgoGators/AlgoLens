@@ -40,6 +40,7 @@ from algolens.domain.qt.desk import (
     RESCIND,
     SAVE,
     DeskRuleError,
+    approving_flow,
     as_number,
     asked_vs_given,
     open_override_request,
@@ -267,7 +268,9 @@ class GetDeskState:
         self.agent = agent
         self.now = now or _utcnow
 
-    def execute(self, entry: Mapping[str, Any]) -> dict[str, Any]:
+    def execute(
+        self, entry: Mapping[str, Any], viewer_is_approver: bool = False
+    ) -> dict[str, Any]:
         portfolio_id = entry["portfolio_id"]
         day = self.repo.desk_date(portfolio_id)
         now = self.now()
@@ -291,6 +294,9 @@ class GetDeskState:
             # like publish.
             "rescind": None,
             "published": None,
+            # Whether the viewer is the VP or the President (QT_APPROVERS):
+            # only they take back a day an override published.
+            "viewerIsApprover": viewer_is_approver,
             # Why save, override request and publish are closed, or None:
             # "published" (C3) or "publishing" (a publish is pending/running).
             "locked": None,
@@ -319,6 +325,9 @@ class GetDeskState:
             if c["kind"] == OVERRIDE_REQUEST
         ]
         published = _published_record(self.repo, portfolio_id, day)
+        if published:
+            # The C10 flow that approved the day ("override_b" for an override).
+            published["flow"] = approving_flow(commands)
         publishing = any(c["status"] in OPEN_STATUSES for c in publishes)
         open_request = open_override_request(
             commands, now, _current_sha256(self.repo, portfolio_id, day)
@@ -621,26 +630,30 @@ class PublishDesk:
 
 
 class RescindDesk:
-    """The desk takes back its own approval of the day (the UI's "Rescind
-    approval"; command kind 'rescind', contract C8). Only a desk approval
-    (publish_source 'desk'), only while it is unsent and only before 09:30
-    New York on the book date, when the engine e-mails it; refused here (409)
-    and by the engine otherwise. Once the engine clears published_at the day
-    takes edits and a new approval again."""
+    """The desk takes back the day's approval (the UI's "Rescind approval";
+    command kind 'rescind', contract C8). Only a desk approval (publish_source
+    'desk'), only while it is unsent and only before 09:30 New York on the book
+    date, when the engine e-mails it; refused here (409) and by the engine
+    otherwise. Anyone on QT takes back a desk approval; a day an override
+    published only the VP or the President (Dom 2026-10-16). Once the engine
+    clears published_at the day takes edits and a new approval again."""
 
     def __init__(self, repo: DeskRepositoryPort, agent: DeskAgentPort, now=None):
         self.repo = repo
         self.agent = agent
         self.now = now or _utcnow
 
-    def execute(self, entry: Mapping[str, Any], requested_by: str) -> dict[str, Any]:
+    def execute(
+        self, entry: Mapping[str, Any], requested_by: str, is_approver: bool = False
+    ) -> dict[str, Any]:
         _require_editable(entry)
         portfolio_id = entry["portfolio_id"]
         day = _desk_day(self.repo, portfolio_id)
         if rescind_closed(day, self.now()):
             raise DeskConflict(rescind_closed_message(day))
-        # Not a desk approval, already sent, and a publish or rescind already
-        # open are refused under the day lock.
-        command = self.repo.insert_rescind(portfolio_id, day, requested_by)
+        # Not a desk approval, already sent, an override's day taken back by
+        # someone other than the VP or the President, and a publish or rescind
+        # already open are refused under the day lock.
+        command = self.repo.insert_rescind(portfolio_id, day, requested_by, is_approver)
         outcome = self.agent.rescind(command)
         return {"command": public_command(command), "agent": outcome}

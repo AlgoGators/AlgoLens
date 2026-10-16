@@ -433,12 +433,14 @@ describe('rescind (the desk takes back its approval, C8)', () => {
     expect(rescindBlockedReason(approved, at(EDT(D, '09:45')))).toMatch(/e-mailed at 09:30 New York/);
   });
 
-  it('is open only to the user who approved', () => {
+  it('is open to anyone on QT for a desk approval, and only to the VP or President for an override', () => {
     const now = at(EDT(D, '09:12'));
-    expect(rescindBlockedReason(approved, now, 'd@x.com')).toBeNull();
-    expect(rescindBlockedReason(approved, now, 'D@X.COM')).toBeNull();
-    expect(rescindBlockedReason(approved, now, 'other@x.com')).toBe('Only d@x.com can take this approval back');
-    expect(rescindBlockedReason(approved, now, null)).toBe('Only d@x.com can take this approval back');
+    expect(rescindBlockedReason(approved, now)).toBeNull();
+    const override = { ...approved, published: { ...approved.published!, flow: 'override_b' } };
+    expect(rescindBlockedReason(override, now)).toBe(
+      'This day was published through an override: only the VP or the President can take it back',
+    );
+    expect(rescindBlockedReason({ ...override, viewerIsApprover: true }, now)).toBeNull();
   });
 
   it('follows the server clock across a DST change', () => {

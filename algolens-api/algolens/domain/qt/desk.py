@@ -317,3 +317,37 @@ def three_books(
             }
         )
     return rows
+
+
+# The C10 flow of an override's approval (payload.flow of its publish row).
+OVERRIDE_FLOW = "override_b"
+
+
+def approving_flow(commands: Iterable[Mapping[str, Any]]) -> str | None:
+    """The C10 flow of the publish row that approved the day: the newest done
+    publish whose result carries published_at (a rescinded approval is older).
+    "override_b" for an override's approval; None for a plain publish (or no
+    approval), else "auto" or "accept_c"."""
+    approving = [
+        c
+        for c in commands
+        if c.get("kind") == PUBLISH
+        and c.get("status") == DONE
+        and isinstance(c.get("result"), Mapping)
+        and "published_at" in c["result"]
+    ]
+    if not approving:
+        return None
+    payload = max(approving, key=lambda c: c["id"]).get("payload")
+    return payload.get("flow") if isinstance(payload, Mapping) else None
+
+
+def rescind_refusal(flow: str | None, day_iso: str, is_approver: bool) -> str | None:
+    """Who may take an approval back (Dom 2026-10-16): anyone on QT a desk
+    approval; only the VP or the President a day an override published."""
+    if flow == OVERRIDE_FLOW and not is_approver:
+        return (
+            f"The {day_iso} book was published through an override the VP or the "
+            "President approved; only the VP or the President can take it back"
+        )
+    return None

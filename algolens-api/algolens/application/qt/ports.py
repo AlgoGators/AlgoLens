@@ -102,10 +102,13 @@ class DeskRepositoryPort(Protocol):
         {"flow": "override_b", "after": <decision id>} requested by the QT who
         asked, in one transaction. Returns (decision, publish or None)."""
 
-    def insert_rescind(self, portfolio_id: str, day: date, requested_by: str) -> Row:
+    def insert_rescind(
+        self, portfolio_id: str, day: date, requested_by: str, is_approver: bool = False
+    ) -> Row:
         """Under the day lock: refuse (DeskConflict) unless live_run_metadata
         says the day is published by the desk (publish_source 'desk') and not
-        sent, and while a publish or a rescind is open (C8)."""
+        sent, and while a publish or a rescind is open (C8). A day an override
+        published only the VP or the President (`is_approver`) takes back."""
 
     def insert_override_request(
         self, portfolio_id: str, day: date, requested_by: str, reason: str
