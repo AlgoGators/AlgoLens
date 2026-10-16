@@ -2,6 +2,9 @@
 
 Pure rules from docs/design/qt-contract.md (trade-ngin) sections 4 and 7 and
 the master rulings 13, 14 and 16. No database, no HTTP.
+
+The position-edit feature (an editable desk book, a reason on every change,
+the audit trail) follows John Riley's design in #80 (F2) and #31/#32.
 """
 
 import hashlib
