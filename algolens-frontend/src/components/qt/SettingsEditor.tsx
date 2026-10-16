@@ -1,5 +1,5 @@
 /**
- * Desk settings editor (A7), ported from the closed config dashboard (#33/#34:
+ * Desk settings editor (A7), ported from John Riley's config dashboard (#33/#34:
  * ConfigDashboard + ConfigHistory) onto the settings lane: the settings the
  * last live run used (live_run_metadata.settings_used), editable key by key,
  * saved as a new strategy_config version that the next live run merges over
