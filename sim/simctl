@@ -149,8 +149,8 @@ cmd_up() {
         compose --profile build build backend-base
     fi
     compose up -d --build
-    say "AlgoLens  http://localhost:8080   (qt@sim.local / vp@sim.local / president@sim.local, password sim)"
-    say "Mailpit   http://localhost:8025"
+    say "AlgoLens  http://localhost:${SIM_WEB_PORT:-8080}   (qt@sim.local / vp@sim.local / president@sim.local, password sim)"
+    say "Mailpit   http://localhost:${SIM_MAIL_PORT:-8025}"
     show_clock
 }
 
@@ -164,7 +164,7 @@ clear_engine_state() {
 
 clear_mail() {
     if running mailpit; then
-        curl -fsS -X DELETE http://localhost:8025/api/v1/messages >/dev/null 2>&1 \
+        curl -fsS -X DELETE http://localhost:${SIM_MAIL_PORT:-8025}/api/v1/messages >/dev/null 2>&1 \
             && say "Mailpit emptied" || true
     fi
 }
@@ -402,7 +402,7 @@ cmd_status() {
             WHERE portfolio_id LIKE 'QT\\_%'
             ORDER BY id DESC LIMIT 10" 2>/dev/null || true
     fi
-    echo "--- mail: http://localhost:8025"
+    echo "--- mail: http://localhost:${SIM_MAIL_PORT:-8025}"
 }
 
 cmd_engine() {
@@ -446,7 +446,7 @@ main() {
         model-run) cmd_model_run "$@" ;;
         pass) cmd_pass ;;
         status) cmd_status ;;
-        mail) echo "Mailpit: http://localhost:8025" ;;
+        mail) echo "Mailpit: http://localhost:${SIM_MAIL_PORT:-8025}" ;;
         logs) cmd_logs "$@" ;;
         psql) compose exec postgres psql -U postgres -d "$DB" "$@" ;;
         compose) compose "$@" ;;
