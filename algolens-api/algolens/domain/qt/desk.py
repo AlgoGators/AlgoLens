@@ -228,8 +228,10 @@ def request_matches(request: Mapping[str, Any], current_sha256: str | None) -> b
     return isinstance(recorded, str) and recorded == current_sha256
 
 
-# A decision in one of these states settles its request (C2).
-DECIDING_STATUSES = (PENDING, RUNNING, DONE)
+# A decision in one of these states settles its request (C2). The link works once
+# (D-75): a decision the engine refused (the margin cap, say) uses it up too; a failed
+# one (nothing was booked: try again) does not.
+DECIDING_STATUSES = (PENDING, RUNNING, DONE, REFUSED)
 
 
 def open_override_request(
