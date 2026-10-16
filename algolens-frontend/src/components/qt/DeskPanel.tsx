@@ -493,7 +493,9 @@ export function DeskPanel({ portfolioId, book, reloadBook }: DeskPanelProps) {
             {' - '}
             {r.decision
               ? `${(r.decision.payload as { approved?: boolean }).approved ? 'APPROVED' : 'REJECTED'} by the ${r.decision.approver_role} (${r.decision.requested_by}), ${r.decision.status}${r.decision.message ? `: ${r.decision.message}` : ''}`
-              : 'awaiting the VP or the President'}
+              : r.status === 'refused' || r.status === 'failed'
+                ? 'not sent to the VP or the President'
+                : 'awaiting the VP or the President'}
           </p>
         ))}
         {!overrideOpen ? (

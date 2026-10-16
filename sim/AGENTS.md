@@ -113,9 +113,12 @@ measured. trade-ngin supplies the labels, units and maxes; AlgoLens hardcodes no
 - **L_g, L_n:** gross and net leverage.
 - **The per-name cap and the trim.**
 - **MARGIN, the fund's hard cap (C11):** initial margin may be at most **100% of the fund's
-  equity after today's transaction costs**. The engine refuses a desk or override book over the
-  cap outright, even one the VP or the President approved. The day stays unapproved, and at
-  10:00 the model's book goes out.
+  equity after today's transaction costs**. An override request over the cap is refused when it
+  is made, from the margin data in the database (each contract's initial margin × the net
+  quantity asked for), so nothing is e-mailed; an approval is measured again and refused before
+  the engine runs (decision 10). The engine also refuses a desk or override book over the cap
+  outright, even one the VP or the President approved. The day stays unapproved, and at 10:00
+  the model's book goes out.
 - **Multipliers (shown, not limits):** the overlay's m, the risk scale, and each strategy's IDM
   and FDM. The IDM and FDM are configured settings, not estimated per run.
 
@@ -163,7 +166,7 @@ fallback happens.
 | 5 | `clock 10:01`, `pass` | nothing | fallback: A is published and sent; the President's alert is in Mailpit |
 | 6 | after 5, or `clock 10:02` | QT: approve | refused: approval closed at 10:00 |
 | 7 | `clock 09:10` | QT: approve, then rescind before 09:30 | the day is open again; rescind at 09:31 is refused |
-| 8 | `clock 09:10` | QT: set quantities far beyond the fund's money (thousands of contracts), approve; VP approves the override | refused by the fund cap (MARGIN), even with the VP's approval; the fallback sends A at 10:00 |
+| 8 | `clock 09:10` | QT: set ZN to 200 (its margin alone is about $503k), request an override | the request is refused by the fund cap (MARGIN) with the amounts, and no e-mail goes to the VP or the President; save within the cap and approve, or the fallback sends A at 10:00 |
 
 ## When something looks wrong
 
