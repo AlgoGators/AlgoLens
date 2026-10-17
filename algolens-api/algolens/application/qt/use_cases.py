@@ -24,6 +24,7 @@ from algolens.application.qt.ports import (
 )
 from algolens.domain.portfolio.registry import desk_edit_allowed
 from algolens.domain.qt.cutoff import (
+    NEW_YORK,
     approval_closed,
     closed_message,
     deadlines,
@@ -165,6 +166,18 @@ def _refuse_after_cutoff(
             + (f" (by {published['published_by']})" if published.get("published_by") else "")
         )
     raise DeskConflict(closed_message(day, action))
+
+
+def _refuse_future_day(day, now: datetime, action: str) -> None:
+    """A future day's book is not approved, by the desk or through an
+    override (D-43): it would freeze on prices its own morning run has not
+    seen. Edits to it are still taken. The engine refuses it too."""
+    today = now.astimezone(NEW_YORK).date()
+    if day > today:
+        raise DeskConflict(
+            f"{action} of the {day.isoformat()} book opens on {day.isoformat()}: it is a "
+            f"future day (today is {today.isoformat()} in New York)"
+        )
 
 
 def _desk_risk(agent: DeskAgentPort, portfolio_id: str, day) -> dict[str, Any]:
@@ -429,6 +442,7 @@ class ApproveDesk:
         portfolio_id = entry["portfolio_id"]
         day = _desk_day(self.repo, portfolio_id)
         _refuse_after_cutoff(self.repo, portfolio_id, day, self.now(), "Approval")
+        _refuse_future_day(day, self.now(), "Approval")
         # An Approve with no edit approves B as it stands (the model's A, or
         # the last save): the engine still runs it, so C is checked the same way.
         save, publish = self.repo.approve_proposal(
@@ -472,6 +486,7 @@ class RequestOverride:
         portfolio_id = entry["portfolio_id"]
         day = _desk_day(self.repo, portfolio_id)
         _refuse_after_cutoff(self.repo, portfolio_id, day, self.now(), "An override request")
+        _refuse_future_day(day, self.now(), "An override request")
         # One transaction: the C3 refusals, one open request a day (C2) and
         # the proposal snapshot with its hash (C1).
         command = self.repo.insert_override_request(portfolio_id, day, requested_by, reason)
@@ -608,6 +623,7 @@ class PublishDesk:
         portfolio_id = entry["portfolio_id"]
         day = _desk_day(self.repo, portfolio_id)
         _refuse_after_cutoff(self.repo, portfolio_id, day, self.now(), "Approval")
+        _refuse_future_day(day, self.now(), "Approval")
         payload = None
         if flow == "accept_c":
             # C10: the QT approves the engine's book C, knowing it differs.
