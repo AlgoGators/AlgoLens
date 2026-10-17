@@ -124,7 +124,13 @@ def build_strategy_detail(
             "dailyReturn": float_or_default(latest["daily_return"]),
             "cumulativeReturn": return_percent,
             "annualizedReturn": annualized_return,
-            "grossLeverage": float_or_default(latest["gross_leverage"]),
+            # D-28: the futures runners write gross leverage to portfolio_leverage and leave
+            # gross_leverage NULL (the equity runner writes both).
+            "grossLeverage": float_or_default(
+                latest["gross_leverage"]
+                if latest["gross_leverage"] is not None
+                else latest["portfolio_leverage"]
+            ),
             "netLeverage": float_or_default(latest["net_leverage"]),
             "portfolioLeverage": float_or_default(latest["portfolio_leverage"]),
             "marginPosted": float_or_default(latest["margin_posted"]),

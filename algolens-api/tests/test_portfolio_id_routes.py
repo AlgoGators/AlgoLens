@@ -51,9 +51,9 @@ LATEST = {
     "volatility": 10,
     "total_annualized_return": 5,
     "daily_return": 0,
-    "gross_leverage": 1,
+    "gross_leverage": None,
     "net_leverage": 1,
-    "portfolio_leverage": 1,
+    "portfolio_leverage": 3.7988,
     "margin_posted": 0,
     "equity_to_margin_ratio": 0,
     "margin_cushion": 0.877141,
@@ -152,6 +152,15 @@ def test_portfolio_detail_defaults_to_qt_with_fallback(client, reader):
     assert body["portfolioGroup"] == "qt_conservative"
     # A paper book: listed, not added to the fund total.
     assert body["inFundTotal"] is False
+
+
+def test_gross_leverage_falls_back_to_portfolio_leverage_on_futures(client, reader):
+    # D-28: a futures row has gross_leverage NULL; its gross leverage is portfolio_leverage.
+    _login(client)
+
+    body = client.get("/portfolio/portfolios/QT_CONSERVATIVE_PORTFOLIO").get_json()
+
+    assert body["metrics"]["grossLeverage"] == pytest.approx(3.7988)
 
 
 def test_margin_cushion_is_served_as_a_percent(client, reader):
