@@ -1270,3 +1270,17 @@ def test_the_settings_lock_list_from_migration_004(qt_db):
     log = _exec(qt_db, "SELECT path, locked, reason FROM trading.desk_settings_lock_log ORDER BY id")
     assert [(tuple(r["path"]), r["locked"], r["reason"]) for r in log] == [
         (("risk", "max_drawdown"), True, "freeze it"), (("live",), False, "open live")]
+
+
+
+def test_a_portfolio_read_lists_its_strategies(qt_db):
+    # D-20: a portfolio holds strategies (sleeves); the read names them with what each holds.
+    add_results(qt_db, "qt", D2, 500000)
+    add_position(qt_db, "qt", D2, "ZC.v.0", 2, sleeve="TREND")
+    add_position(qt_db, "qt", D2, "ZS.v.0", 1, sleeve="TREND")
+    add_position(qt_db, "qt", D2, "ES.v.0", 0, sleeve="FAST")
+    add_position(qt_db, "qt", D1, "CL.v.0", 1, sleeve="OLD")
+
+    rows = repo(qt_db).fetch_portfolio_rows(QT, book="qt", allow_fallback=False)
+
+    assert list(rows.sleeves) == [{"name": "FAST", "positions": 0}, {"name": "TREND", "positions": 2}]

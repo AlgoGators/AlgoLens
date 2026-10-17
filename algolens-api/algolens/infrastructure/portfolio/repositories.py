@@ -600,6 +600,27 @@ class PostgresPortfolioRepository:
         )
         return cursor.fetchall()
 
+    def _portfolio_sleeves(self, cursor, portfolio_id, book, has_portfolio_type):
+        """D-20: the strategies (sleeves) of the book's latest date, with how many symbols each
+        holds there."""
+        book_filter = "AND portfolio_type = %s" if has_portfolio_type else ""
+        params = (portfolio_id, book) if has_portfolio_type else (portfolio_id,)
+        cursor.execute(
+            f"""
+            SELECT strategy_name AS name, count(*) FILTER (WHERE quantity <> 0) AS positions
+            FROM trading.positions
+            WHERE portfolio_id = %s {book_filter}
+            AND date = (
+                SELECT max(date) FROM trading.positions
+                WHERE portfolio_id = %s {book_filter}
+            )
+            GROUP BY strategy_name
+            ORDER BY strategy_name
+            """,
+            params * 2,
+        )
+        return [{"name": r["name"], "positions": int(r["positions"])} for r in cursor.fetchall()]
+
     def fetch_portfolio_rows(self, portfolio_id, book=DEFAULT_BOOK, allow_fallback=True):
         """Detail rows for one portfolio's book, found by portfolio id alone."""
         conn = self.connection_factory()
@@ -673,6 +694,11 @@ class PostgresPortfolioRepository:
                 else:
                     executions = []
                 contract_sizes = self._contract_sizes(cursor, positions, executions)
+                sleeves = (
+                    self._portfolio_sleeves(cursor, portfolio_id, served_book, has_portfolio_type)
+                    if has_portfolio_type or served_book == FALLBACK_BOOK
+                    else []
+                )
         finally:
             conn.close()
 
@@ -686,6 +712,7 @@ class PostgresPortfolioRepository:
             book=served_book,
             fell_back=fell_back,
             contract_sizes=contract_sizes,
+            sleeves=sleeves,
         )
 
     def list_incubating_strategies(self):

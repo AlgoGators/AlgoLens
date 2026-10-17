@@ -76,7 +76,6 @@ export function QtHome() {
             groups={groups}
             selected={selected ? selected.portfolio_id : null}
             onSelect={id => setSelectedId(id)}
-            showAll={false}
           />
           {selected ? (
             <PortfolioBookView

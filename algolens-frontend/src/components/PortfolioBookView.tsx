@@ -6,6 +6,7 @@ import type { Strategy } from '../domain/portfolio/portfolioData';
 import {
   activeToggleBook,
   describeBookLoadError,
+  type BookChoice,
   type PortfolioEntry,
 } from '../domain/portfolio/portfolioRegistry';
 import { BookToggle } from './BookToggle';
@@ -23,6 +24,10 @@ interface PortfolioBookViewProps {
   portfolio: PortfolioEntry;
   onBack: () => void;
   backLabel?: string;
+  /** The member screen (D-68): the portfolio's Model / QT switch in place of the desk's toggle. */
+  choices?: BookChoice[];
+  /** The portfolio's name (D-24), e.g. the group's. */
+  title?: string;
   /** The QT desk panel, when the desk is enabled for this user and portfolio. */
   renderDesk?: (props: DeskSlotProps) => React.ReactNode;
 }
@@ -35,11 +40,21 @@ interface PortfolioBookViewProps {
 export function PortfolioBookView({
   portfolio,
   onBack,
-  backLabel = 'Back to all strategies',
+  backLabel = 'Back to all portfolios',
   renderDesk,
+  choices,
+  title,
 }: PortfolioBookViewProps) {
   const { theme } = useTheme();
+  const dark = theme === 'dark';
   const [requested, setRequested] = useState<PositionBook | null>(null);
+  // D-68: which of the portfolio's two books is shown (QT first, ruling 20).
+  const [choiceKey, setChoiceKey] = useState<BookChoice['key']>(
+    choices?.some(c => c.key === 'qt') ? 'qt' : 'model',
+  );
+  const choice = choices?.find(c => c.key === choiceKey) ?? null;
+  const readId = choice ? choice.portfolio.portfolio_id : portfolio.portfolio_id;
+  const readBook = choice ? choice.book : requested;
   const [strategy, setStrategy] = useState<Strategy | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -56,7 +71,7 @@ export function PortfolioBookView({
     let cancelled = false;
     setLoading(true);
     setError(null);
-    PortfolioApplicationService.getPortfolio(portfolio.portfolio_id, requested)
+    PortfolioApplicationService.getPortfolio(readId, readBook)
       .then(data => {
         if (!cancelled) setStrategy(data);
       })
@@ -72,17 +87,53 @@ export function PortfolioBookView({
     return () => {
       cancelled = true;
     };
-  }, [portfolio.portfolio_id, requested, reloadKey]);
+  }, [readId, readBook, reloadKey]);
 
   const reload = useCallback(() => setReloadKey(k => k + 1), []);
   const active = activeToggleBook(requested, strategy?.book);
-  const toggle = <BookToggle active={active} onChange={setRequested} disabled={loading} />;
+  const toggle = choices ? (
+    choices.length > 1 ? (
+      <div
+        role="radiogroup"
+        aria-label="Book"
+        data-testid="model-qt-switch"
+        className={`inline-flex rounded-lg border overflow-hidden ${dark ? 'border-gray-700' : 'border-gray-300'}`}
+      >
+        {choices.map(c => (
+          <button
+            key={c.key}
+            type="button"
+            role="radio"
+            aria-checked={c.key === choiceKey}
+            disabled={loading}
+            onClick={() => setChoiceKey(c.key)}
+            className={`px-3 py-1.5 text-sm ${
+              c.key === choiceKey ? 'bg-orange-500 text-white' : dark ? 'text-gray-300' : 'text-gray-700'
+            }`}
+          >
+            {c.label}
+          </button>
+        ))}
+      </div>
+    ) : null
+  ) : (
+    <BookToggle active={active} onChange={setRequested} disabled={loading} />
+  );
+  const strategiesLine =
+    strategy?.strategies && strategy.strategies.length > 0 ? (
+      <p className={`mt-2 text-sm ${dark ? 'text-gray-400' : 'text-gray-500'}`} data-testid="portfolio-strategies">
+        Strategies:{' '}
+        {strategy.strategies
+          .map(s => `${s.name} (${s.positions} position${s.positions === 1 ? '' : 's'})`)
+          .join(', ')}
+      </p>
+    ) : null;
 
   if (!strategy) {
     return (
       <div>
         <div className="mb-4 flex items-center justify-between gap-4">
-          <h1 className="text-2xl">{portfolio.name}</h1>
+          <h1 className="text-2xl">{title ?? portfolio.name}</h1>
           {toggle}
         </div>
         <p className={theme === 'dark' ? 'text-gray-400' : 'text-gray-600'}>
@@ -97,7 +148,13 @@ export function PortfolioBookView({
       strategy={strategy}
       onBack={onBack}
       backLabel={backLabel}
-      headerExtra={toggle}
+      headerExtra={
+        <>
+          {toggle}
+          {strategiesLine}
+        </>
+      }
+      title={title}
     >
       {renderDesk?.({ portfolio, strategy, book: active, reload })}
     </StrategyDetail>
