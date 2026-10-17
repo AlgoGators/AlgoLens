@@ -1,9 +1,11 @@
 """Tests for the data-driven strategy registry and the extracted portfolio service.
 
-The registry tests force the DB-unavailable path (so they run without a database)
-and assert the built-in fallback. The service tests exercise the pure transform /
+The registry test forces the DB-unavailable path (so it runs without a database)
+and asserts it is an error (D-23: there is no built-in fallback). The service tests exercise the pure transform /
 computation helpers with hand-built rows -- no DB needed.
 """
+
+import pytest
 
 from services import strategy_registry as reg
 from services import portfolio_service as svc
@@ -12,44 +14,17 @@ from services import portfolio_service as svc
 # --- registry ----------------------------------------------------------------
 
 
-def test_registry_falls_back_to_default_on_db_error(monkeypatch):
-    # Simulate the DB being unavailable / migration not applied.
+def test_registry_read_failure_is_an_error(monkeypatch):
+    # D-23: no built-in default stands in for the registry (it hid the QT books).
     def boom():
         raise ValueError("no db configured")
 
     monkeypatch.setattr(reg, "get_db_connection", boom)
 
-    registry = reg.get_registry()
-    assert [s["id"] for s in registry] == ["trendfollowing"]
-    assert registry[0]["strategy_type"] == "LIVE_TREND_FOLLOWING"
-    assert registry[0]["initial_equity"] == 500000.0
-
-
-def test_every_registry_entry_names_a_portfolio(monkeypatch):
-    """A registry entry without a portfolio is a correctness bug, not a default.
-
-    The trading tables are keyed by portfolio as well as strategy, and
-    LIVE_TREND_FOLLOWING exists under more than one. An entry that names only the
-    strategy would make every downstream query ambiguous, silently blending
-    portfolios rather than failing. See AlgoGators/AlgoLens#29.
-    """
-    monkeypatch.setattr(
-        reg, "get_db_connection", lambda: (_ for _ in ()).throw(ValueError())
-    )
-
-    for strategy in reg.get_registry():
-        assert strategy.get("portfolio_id"), (
-            f"registry entry {strategy['id']!r} does not name a portfolio_id"
-        )
-
-
-def test_get_strategy_config_known_and_unknown(monkeypatch):
-    monkeypatch.setattr(
-        reg, "get_db_connection", lambda: (_ for _ in ()).throw(ValueError())
-    )
-
-    assert reg.get_strategy_config("trendfollowing")["name"] == "Trend Following"
-    assert reg.get_strategy_config("does-not-exist") is None
+    with pytest.raises(reg.RegistryUnavailable):
+        reg.get_registry()
+    with pytest.raises(reg.RegistryUnavailable):
+        reg.get_strategy_config("trendfollowing")
 
 
 # --- pure computation helpers ------------------------------------------------
@@ -98,6 +73,32 @@ def test_transform_positions_percent_of_total():
     assert out[0]["name"] == "ES"  # ".v.0" stripped
     assert out[0]["notional"] == 200.0
     assert out[0]["percentOfTotal"] == 50.0
+
+
+def test_notionals_apply_the_contract_size():
+    # D-32: 5 ZF at 103.65625 with contract size 1000 is $518,281.25, not $518; a root
+    # with no size (an equity) counts with 1.
+    from algolens.domain.portfolio.calculations import transform_executions, transform_positions
+
+    sizes = {"ZF": 1000.0, "MBT": 0.1}
+    positions = [
+        {"symbol": "ZF.v.0", "quantity": -5, "average_price": 103.65625},
+        {"symbol": "MBT.v.0", "quantity": 3, "average_price": 111026.67},
+        {"symbol": "AAPL", "quantity": 10, "average_price": 200},
+    ]
+    out = {p["symbol"]: p for p in transform_positions(positions, 1_000_000, sizes)}
+
+    assert out["ZF.v.0"]["notional"] == pytest.approx(518281.25)
+    assert out["ZF.v.0"]["percentOfTotal"] == pytest.approx(51.828125)
+    assert out["MBT.v.0"]["notional"] == pytest.approx(33308.0)
+    assert out["AAPL"]["notional"] == 2000.0
+
+    [trade] = transform_executions(
+        [{"symbol": "ZF.v.0", "side": "SELL", "quantity": 1, "price": 103.65625,
+          "commissions_fees": 1.5, "execution_time": None}],
+        sizes,
+    )
+    assert trade["notional"] == pytest.approx(103656.25)
 
 
 def test_transform_finalized_only_changed_positions():

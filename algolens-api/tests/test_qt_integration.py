@@ -181,6 +181,8 @@ def test_portfolio_read_falls_back_to_system_only_when_unnamed(qt_db):
     assert (fallback.book, fallback.fell_back) == ("system", True)
     assert [p["symbol"] for p in fallback.positions] == ["ZC.v.0"]
     assert (exact.book, exact.fell_back, exact.positions) == ("qt", False, [])
+    # D-37: the model book has no qt rows; its system numbers are not served as "qt".
+    assert exact.book_missing is True and exact.latest is None
 
 
 def test_portfolio_read_scopes_executions_to_the_book(qt_db):
@@ -207,6 +209,63 @@ def test_portfolio_read_ignores_strategy_id(qt_db):
 
     assert rows.latest is not None
     assert [p["symbol"] for p in rows.positions] == ["ZC.v.0"]
+
+
+def test_member_read_scopes_results_and_trades_to_the_book(qt_db):
+    # D-34: the member page (strategy-id read) listed the model's trades next to the QT
+    # book's copy of them, and took its numbers from whichever book wrote last.
+    add_results(qt_db, "system", D2, 501000)
+    add_results(qt_db, "qt", D2, 502000)
+    add_position(qt_db, "qt", D2, "ZC.v.0", 1)
+    add_execution(qt_db, "system", D2, "e1", "ZC.v.0")
+    add_execution(qt_db, "qt", D2, "e1", "ZS.v.0")
+
+    rows = repo(qt_db).fetch_detail_rows(STRATEGY, QT, book="qt", allow_fallback=False)
+    system = repo(qt_db).fetch_detail_rows(STRATEGY, QT, book="system", allow_fallback=False)
+
+    assert [e["symbol"] for e in rows.executions] == ["ZS.v.0"]
+    assert float(rows.latest["current_portfolio_value"]) == 502000
+    assert [e["symbol"] for e in system.executions] == ["ZC.v.0"]
+    assert float(system.latest["current_portfolio_value"]) == 501000
+
+
+def test_portfolio_reads_carry_the_contract_sizes(qt_db):
+    # D-32: notionals need the contract multiplier; a root with no metadata is left out.
+    _exec(
+        qt_db,
+        """
+        INSERT INTO metadata.contract_metadata
+            ("Databento Symbol", "IB Symbol", "Name", "Exchange", "Asset Type", "Sector",
+             "Contract Size")
+        VALUES ('ZF', 'ZF', '5-Year Note', 'CBOT', 'Futures', 'Rates', '1,000')
+        """,
+    )
+    add_results(qt_db, "qt", D2, 500000)
+    add_position(qt_db, "qt", D2, "ZF.v.0", -5)
+    add_position(qt_db, "qt", D2, "QQQ", 2)
+
+    by_portfolio = repo(qt_db).fetch_portfolio_rows(QT, book="qt", allow_fallback=False)
+    by_strategy = repo(qt_db).fetch_detail_rows(STRATEGY, QT, book="qt", allow_fallback=False)
+
+    assert by_portfolio.contract_sizes == {"ZF": 1000.0}
+    assert by_strategy.contract_sizes == {"ZF": 1000.0}
+
+
+def test_closed_positions_compare_with_the_books_previous_date(qt_db):
+    # D-35: "yesterday" is the book's previous date (a weekend or a gap in between),
+    # not the calendar's yesterday.
+    d0 = date(2026, 10, 5)
+    add_results(qt_db, "qt", D2, 500000)
+    add_position(qt_db, "qt", d0, "ZS.v.0", 4)
+    add_position(qt_db, "qt", D2, "ZC.v.0", 1)
+
+    by_portfolio = repo(qt_db).fetch_portfolio_rows(QT, book="qt", allow_fallback=False)
+    by_strategy = repo(qt_db).fetch_detail_rows(STRATEGY, QT, book="qt", allow_fallback=False)
+
+    for rows in (by_portfolio, by_strategy):
+        assert [(p["symbol"], float(p["quantity"])) for p in rows.yesterday_positions] == [
+            ("ZS.v.0", 4.0)
+        ]
 
 
 # --- A3-A6: the desk against the real command log ----------------------------

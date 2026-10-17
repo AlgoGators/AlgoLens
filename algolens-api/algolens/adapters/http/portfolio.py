@@ -6,7 +6,7 @@ import time
 from flask import Blueprint, current_app, jsonify, request
 from flask_jwt_extended import get_jwt, get_jwt_identity, jwt_required
 
-from algolens.adapters.http.access import current_role, has_screen, requires_screen
+from algolens.adapters.http.access import admin_only, current_role, has_screen, requires_screen
 
 from algolens.adapters.serializers.portfolio import (
     serialize_incubating_strategy_list,
@@ -16,6 +16,7 @@ from algolens.adapters.serializers.portfolio import (
 )
 from algolens.application.portfolio.ports import IncubationError
 from algolens.application.portfolio.use_cases import (
+    BookNotWritten,
     GetIncubationPerformance,
     GetPortfolioDetail,
     GetStrategyDetail,
@@ -176,6 +177,8 @@ def get_portfolio(portfolio_id):
         return jsonify({"error": str(exc)}), 400
     except PortfolioNotFound:
         return jsonify({"error": "Portfolio not found"}), 404
+    except BookNotWritten as exc:
+        return jsonify({"error": str(exc), "missingBook": exc.book}), 404
     except StrategyDataNotFound:
         return jsonify({"error": "No data found for portfolio"}), 404
     except Exception as exc:
@@ -223,6 +226,7 @@ def get_incubation_perf(strategy_id):
 @portfolio_bp.route("/incubation/<strategy_id>/start", methods=["POST"])
 @jwt_required()
 @requires_screen(*PORTFOLIO_SCREENS)
+@admin_only  # D-55: a lifecycle change (a live book retired, the QT book included) is an admin's
 def start_strategy_incubation(strategy_id):
     payload = request.get_json(silent=True)
     if not isinstance(payload, dict):
@@ -263,6 +267,7 @@ def start_strategy_incubation(strategy_id):
 @portfolio_bp.route("/incubation/<strategy_id>/promote", methods=["POST"])
 @jwt_required()
 @requires_screen(*PORTFOLIO_SCREENS)
+@admin_only  # D-55: a lifecycle change (a live book retired, the QT book included) is an admin's
 def promote_strategy_to_live(strategy_id):
     payload = request.get_json(silent=True)
     if not isinstance(payload, dict):
@@ -292,6 +297,7 @@ def promote_strategy_to_live(strategy_id):
 @portfolio_bp.route("/incubation/<strategy_id>/retire", methods=["POST"])
 @jwt_required()
 @requires_screen(*PORTFOLIO_SCREENS)
+@admin_only  # D-55: a lifecycle change (a live book retired, the QT book included) is an admin's
 def retire_strategy(strategy_id):
     payload = request.get_json(silent=True)
     if not isinstance(payload, dict):

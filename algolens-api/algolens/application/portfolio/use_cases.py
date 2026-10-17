@@ -39,6 +39,14 @@ class StrategyDataNotFound(NotFoundError):
     """A known strategy has no live portfolio data yet."""
 
 
+class BookNotWritten(NotFoundError):
+    """D-37: the portfolio has no rows in the book the request named."""
+
+    def __init__(self, portfolio_id: str, book: str):
+        super().__init__(f"{portfolio_id} has no {book} rows")
+        self.book = book
+
+
 class PortfolioNotFound(NotFoundError):
     """No live registry entry exists for the requested portfolio id."""
 
@@ -83,9 +91,10 @@ def build_strategy_detail(
         stream: build_historical_data(stream_rows)
         for stream, stream_rows in rows.equity_by_stream.items()
     }
-    transformed_positions = transform_positions(rows.positions, current_value)
+    sizes = getattr(rows, "contract_sizes", None)
+    transformed_positions = transform_positions(rows.positions, current_value, sizes)
     stats = compute_return_stats(historical_data)
-    transformed_executions = transform_executions(rows.executions)
+    transformed_executions = transform_executions(rows.executions, sizes)
     transformed_finalized = transform_finalized(rows.yesterday_positions, rows.positions)
 
     volatility = float(latest["volatility"])
@@ -124,12 +133,20 @@ def build_strategy_detail(
             "dailyReturn": float_or_default(latest["daily_return"]),
             "cumulativeReturn": return_percent,
             "annualizedReturn": annualized_return,
-            "grossLeverage": float_or_default(latest["gross_leverage"]),
+            # D-28: the futures runners write gross leverage to portfolio_leverage and leave
+            # gross_leverage NULL (the equity runner writes both).
+            "grossLeverage": float_or_default(
+                latest["gross_leverage"]
+                if latest["gross_leverage"] is not None
+                else latest["portfolio_leverage"]
+            ),
             "netLeverage": float_or_default(latest["net_leverage"]),
             "portfolioLeverage": float_or_default(latest["portfolio_leverage"]),
             "marginPosted": float_or_default(latest["margin_posted"]),
             "equityToMarginRatio": float_or_default(latest["equity_to_margin_ratio"]),
-            "marginCushion": float_or_default(latest["margin_cushion"]),
+            # D-27: the engine stores the cushion as a fraction of equity ((equity - margin) /
+            # equity, 0.877); the screens print a percent, as the combined view computes it.
+            "marginCushion": float_or_default(latest["margin_cushion"]) * 100,
             "totalNotional": float_or_default(latest["gross_notional"]),
             "unrealizedPnL": float_or_default(latest["total_unrealized_pnl"]),
             "realizedPnL": float_or_default(latest["total_realized_pnl"]),
@@ -345,6 +362,8 @@ class GetPortfolioDetail:
         rows = self.reader.fetch_portfolio_rows(
             portfolio_id, book=requested_book, allow_fallback=allow_fallback
         )
+        if getattr(rows, "book_missing", False):
+            raise BookNotWritten(portfolio_id, rows.book)
         detail = build_strategy_detail(cfg, rows)
         if detail is None:
             raise StrategyDataNotFound(portfolio_id)

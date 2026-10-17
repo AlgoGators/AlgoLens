@@ -51,12 +51,12 @@ LATEST = {
     "volatility": 10,
     "total_annualized_return": 5,
     "daily_return": 0,
-    "gross_leverage": 1,
+    "gross_leverage": None,
     "net_leverage": 1,
-    "portfolio_leverage": 1,
+    "portfolio_leverage": 3.7988,
     "margin_posted": 0,
     "equity_to_margin_ratio": 0,
-    "margin_cushion": 0,
+    "margin_cushion": 0.877141,
     "gross_notional": 0,
     "total_unrealized_pnl": 0,
     "total_realized_pnl": 0,
@@ -79,9 +79,16 @@ class FakeRegistry:
 class FakeReader:
     def __init__(self):
         self.calls = []
+        # Portfolios with no rows in a named book other than system (D-37).
+        self.missing = set()
 
     def fetch_portfolio_rows(self, portfolio_id, book="qt", allow_fallback=True):
         self.calls.append((portfolio_id, book, allow_fallback))
+        if portfolio_id in self.missing and not allow_fallback:
+            return PortfolioDetailRows(
+                latest=None, equity_curve=[], equity_by_stream={}, positions=[],
+                executions=[], yesterday_positions=[], book=book, book_missing=True,
+            )
         served = "system" if allow_fallback else book
         return PortfolioDetailRows(
             latest=LATEST,
@@ -152,6 +159,35 @@ def test_portfolio_detail_defaults_to_qt_with_fallback(client, reader):
     assert body["portfolioGroup"] == "qt_conservative"
     # A paper book: listed, not added to the fund total.
     assert body["inFundTotal"] is False
+
+
+def test_a_named_book_with_no_rows_says_so(client, reader):
+    # D-37: "QT" on the model book is not the system numbers under the QT name.
+    _login(client)
+    reader.missing.add("QT_CONSERVATIVE_PORTFOLIO")
+
+    response = client.get("/portfolio/portfolios/QT_CONSERVATIVE_PORTFOLIO?book=qt")
+
+    assert response.status_code == 404
+    assert response.get_json()["missingBook"] == "qt"
+
+
+def test_gross_leverage_falls_back_to_portfolio_leverage_on_futures(client, reader):
+    # D-28: a futures row has gross_leverage NULL; its gross leverage is portfolio_leverage.
+    _login(client)
+
+    body = client.get("/portfolio/portfolios/QT_CONSERVATIVE_PORTFOLIO").get_json()
+
+    assert body["metrics"]["grossLeverage"] == pytest.approx(3.7988)
+
+
+def test_margin_cushion_is_served_as_a_percent(client, reader):
+    # D-27: the engine's fraction 0.877141 is 87.71%, not 0.88%.
+    _login(client)
+
+    body = client.get("/portfolio/portfolios/QT_CONSERVATIVE_PORTFOLIO").get_json()
+
+    assert body["metrics"]["marginCushion"] == pytest.approx(87.7141)
 
 
 @pytest.mark.parametrize("book", ["system", "qt_proposal", "qt"])

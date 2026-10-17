@@ -96,6 +96,41 @@ function emptyCombined(): CombinedMetrics {
  * Returns null if any point is non-positive, because a return off a zero or negative
  * base is undefined and everything downstream of it would be noise.
  */
+/**
+ * D-36: several books' equity curves summed by day. Books stamp a day at different times
+ * (futures at 05:00 UTC, equities at 00:00 UTC), so points are keyed by their date
+ * (YYYY-MM-DD), the last point of a day standing for it. Between its first and last day a
+ * book with no point on a day counts with its previous value, so the total does not drop
+ * by a whole book on a day only the other books wrote. Each day is stamped 12:00 UTC, which
+ * the charts' local-time axis shows as that same day from the Americas to Europe.
+ */
+export function sumCurvesByDay(
+  curves: { date: string; value: number }[][]
+): { date: string; value: number }[] {
+  const perBook = curves.map(curve => {
+    const byDay = new Map<string, number>();
+    [...curve]
+      .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
+      .forEach(pt => byDay.set(pt.date.slice(0, 10), pt.value));
+    return byDay;
+  });
+  const days = Array.from(new Set(perBook.flatMap(byDay => Array.from(byDay.keys())))).sort();
+  return days.map(day => {
+    let value = 0;
+    perBook.forEach(byDay => {
+      const bookDays = Array.from(byDay.keys());
+      if (bookDays.length === 0 || day < bookDays[0] || day > bookDays[bookDays.length - 1]) return;
+      let last: number | undefined;
+      for (const d of bookDays) {
+        if (d > day) break;
+        last = byDay.get(d);
+      }
+      value += last ?? 0;
+    });
+    return { date: `${day}T12:00:00Z`, value };
+  });
+}
+
 function periodReturns(curve: { value: number }[]): number[] | null {
   if (curve.length < 2) return null;
   const returns: number[] = [];
@@ -169,23 +204,22 @@ export function informationRatioVsBenchmark(
   const streams = selected.map(s => s.equityByStream?.system);
   if (streams.some(stream => !stream || stream.length === 0)) return null;
 
-  const benchmarkByDate = new Map<string, number>();
-  streams.forEach(stream => {
-    stream!.forEach(pt => {
-      benchmarkByDate.set(pt.date, (benchmarkByDate.get(pt.date) || 0) + pt.value);
-    });
-  });
+  // Keyed by day like the book curve (D-36).
+  const day = (iso: string) => iso.slice(0, 10);
+  const benchmarkByDate = new Map<string, number>(
+    sumCurvesByDay(streams.map(stream => stream!)).map(pt => [day(pt.date), pt.value])
+  );
 
   // Only dates present in both curves. A book date the benchmark does not cover is
   // not a day on which the benchmark returned zero.
-  const paired = bookCurve.filter(pt => benchmarkByDate.has(pt.date));
+  const paired = bookCurve.filter(pt => benchmarkByDate.has(day(pt.date)));
 
   // n points give n-1 returns, and dispersion needs at least two of those.
   if (paired.length < 3) return null;
 
   const bookReturns = periodReturns(paired);
   const benchReturns = periodReturns(
-    paired.map(pt => ({ value: benchmarkByDate.get(pt.date)! }))
+    paired.map(pt => ({ value: benchmarkByDate.get(day(pt.date))! }))
   );
   if (bookReturns === null || benchReturns === null) return null;
 
@@ -267,15 +301,7 @@ export function computeCombinedMetrics(
   // Combined equity curve: sum each selected strategy's REAL historical equity by
   // date, then express it as cumulative % return from the first (earliest) point.
   // Reads the actual per-strategy equity curves instead of simulating a series.
-  const equityByDate = new Map<string, number>();
-  selected.forEach(s => {
-    s.historicalData.forEach(pt => {
-      equityByDate.set(pt.date, (equityByDate.get(pt.date) || 0) + pt.value);
-    });
-  });
-  const combinedCurve = Array.from(equityByDate.entries())
-    .map(([date, value]) => ({ date, value }))
-    .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+  const combinedCurve = sumCurvesByDay(selected.map(s => s.historicalData));
 
   const baseEquity = combinedCurve.length > 0 ? combinedCurve[0].value : 0;
   const historicalPerformance = combinedCurve.map(pt => ({

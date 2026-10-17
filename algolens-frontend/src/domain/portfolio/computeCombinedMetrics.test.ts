@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { computeCombinedMetrics } from './computeCombinedMetrics';
+import { computeCombinedMetrics, sumCurvesByDay } from './computeCombinedMetrics';
 import type { Strategy, StrategyMetrics, Position, FinalizedPosition } from './portfolioData';
 
 // Minimal builders so tests stay readable. Only the fields the computation reads
@@ -154,8 +154,9 @@ describe('computeCombinedMetrics', () => {
     const out = computeCombinedMetrics([a, b], ['a', 'b']);
 
     // Combined equity by date is 200k -> 210k -> 235k; performance is % from the base.
+    // Days are summed and stamped 12:00 UTC (D-36).
     expect(out.historicalPerformance.map(p => p.date)).toEqual([
-      '2026-01-01', '2026-01-02', '2026-01-03',
+      '2026-01-01T12:00:00Z', '2026-01-02T12:00:00Z', '2026-01-03T12:00:00Z',
     ]);
     expect(out.historicalPerformance[0].return).toBeCloseTo(0, 6);
     expect(out.historicalPerformance[1].return).toBeCloseTo(5, 6);    // 210/200 - 1
@@ -375,5 +376,39 @@ describe('sortino ratio', () => {
   it('is unavailable rather than zero when nothing is selected', () => {
     const out = computeCombinedMetrics([strategy({ id: 'a' })], []);
     expect(out.advancedMetrics.sortinoRatio).toBeNull();
+  });
+});
+
+describe('sumCurvesByDay (D-36)', () => {
+  it('adds a futures book (05:00 UTC) and an equity book (00:00 UTC) on the same day', () => {
+    const futures = [
+      { date: '2026-10-13T05:00:00+00:00', value: 500 },
+      { date: '2026-10-14T05:00:00+00:00', value: 510 },
+    ];
+    const equities = [
+      { date: '2026-10-13T00:00:00+00:00', value: 100 },
+      { date: '2026-10-14T00:00:00+00:00', value: 90 },
+    ];
+    expect(sumCurvesByDay([futures, equities])).toEqual([
+      { date: '2026-10-13T12:00:00Z', value: 600 },
+      { date: '2026-10-14T12:00:00Z', value: 600 },
+    ]);
+  });
+
+  it('carries a book over a day it did not write, only inside its own span', () => {
+    const daily = [
+      { date: '2026-10-09T05:00:00Z', value: 500 },
+      { date: '2026-10-10T05:00:00Z', value: 505 },
+      { date: '2026-10-11T05:00:00Z', value: 507 },
+      { date: '2026-10-12T05:00:00Z', value: 509 },
+    ];
+    const weekdays = [
+      { date: '2026-10-09T00:00:00Z', value: 100 },
+      { date: '2026-10-12T00:00:00Z', value: 104 },
+    ];
+    const late = [{ date: '2026-10-12T00:00:00Z', value: 50 }];
+    expect(sumCurvesByDay([daily, weekdays, late]).map(p => p.value)).toEqual([
+      600, 605, 607, 663,
+    ]);
   });
 });

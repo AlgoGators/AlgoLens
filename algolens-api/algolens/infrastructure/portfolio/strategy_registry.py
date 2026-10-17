@@ -1,27 +1,21 @@
-"""Postgres-backed strategy registry with a built-in fallback."""
+"""Postgres-backed strategy registry (no fallback: a failed read is an error, D-23)."""
 
 import logging
 
 import psycopg2
 
+from algolens.application.shared.errors import ApplicationError
 from algolens.infrastructure.db.postgres import get_db_connection
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_REGISTRY = [
-    {
-        "id": "trendfollowing",
-        "strategy_type": "LIVE_TREND_FOLLOWING",
-        "portfolio_id": "CONSERVATIVE_PORTFOLIO",
-        "name": "Trend Following",
-        "description": "Systematic trend following across multiple futures contracts",
-        "initial_equity": 500000.0,
-        "managers": ["AlgoLens System"],
-        "is_active": True,
-        "lifecycle": "live",
-        "sort_order": 0,
-    }
-]
+class RegistryUnavailable(ApplicationError):
+    """trading.strategy_registry could not be read, or holds no rows.
+
+    D-23: there is no built-in default list. A default once stood in for a failed read and
+    silently hid every portfolio but the trend book, the QT books included; a failed read is
+    now an error the screens show.
+    """
 
 
 def _normalize(row):
@@ -83,20 +77,17 @@ class PostgresStrategyRegistry:
                 rows = cursor.fetchall()
 
             registry = [_normalize(row) for row in rows]
-            if not registry:
-                logger.warning(
-                    "[REGISTRY] strategy_registry table is empty; using built-in default"
-                )
-                registry = list(DEFAULT_REGISTRY)
         except (psycopg2.Error, ValueError) as exc:
-            logger.warning(
-                "[REGISTRY] Could not read strategy_registry (%s); using built-in default",
-                getattr(exc, "pgcode", None) or str(exc),
-            )
-            registry = list(DEFAULT_REGISTRY)
+            reason = getattr(exc, "pgcode", None) or str(exc)
+            logger.error("[REGISTRY] Could not read strategy_registry (%s)", reason)
+            raise RegistryUnavailable(f"the portfolio registry could not be read ({reason})") from exc
         finally:
             if conn is not None:
                 conn.close()
+
+        if not registry:
+            logger.error("[REGISTRY] strategy_registry is empty")
+            raise RegistryUnavailable("the portfolio registry is empty")
 
         if active_only:
             registry = [

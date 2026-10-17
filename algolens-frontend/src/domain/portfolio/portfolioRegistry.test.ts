@@ -76,6 +76,13 @@ describe('describeBookLoadError', () => {
     expect(describeBookLoadError('API request failed: 404 NOT FOUND. Body: {}')).toMatch(/No run has written/);
   });
 
+  it('says a named book has no rows instead of showing another book (D-37)', () => {
+    const message = 'API request failed: 404 NOT FOUND. Body: {"error":"X has no qt rows","missingBook":"qt"}';
+    expect(describeBookLoadError(message)).toBe(
+      'This portfolio has no QT book: no run has written QT rows for it. Its numbers are on System.',
+    );
+  });
+
   it('passes other failures through', () => {
     expect(describeBookLoadError('API request failed: 500')).toBe('Could not load this book: API request failed: 500');
   });

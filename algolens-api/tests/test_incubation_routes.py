@@ -2,7 +2,8 @@
 
 from datetime import datetime, timezone
 
-from flask_jwt_extended import create_access_token
+import pytest
+from flask_jwt_extended import create_access_token, get_csrf_token
 
 from app import app
 
@@ -94,3 +95,23 @@ def test_get_incubation_performance_returns_serialized_payload(client, monkeypat
     assert data["equity_curve"] == [
         {"date": "2026-07-02T00:00:00+00:00", "equity": 251000.0}
     ]
+
+
+
+@pytest.mark.parametrize("action", ["start", "promote", "retire"])
+def test_lifecycle_changes_need_an_admin(client, action):
+    # D-55: a member could retire or re-incubate a live book, the QT book included.
+    def post_as(role):
+        with app.app_context():
+            token = create_access_token(identity="1", additional_claims={"role": role})
+            csrf = get_csrf_token(token)
+        client.set_cookie("access_token_cookie", token)
+        return client.post(
+            f"/portfolio/incubation/qt_conservative/{action}",
+            json={},
+            headers={"X-CSRF-TOKEN": csrf},
+        )
+
+    assert post_as("general_member").status_code == 403
+    # An admin reaches the route (and is told what the empty body lacks).
+    assert post_as("admin").status_code == 400
