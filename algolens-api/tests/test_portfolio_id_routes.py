@@ -56,7 +56,7 @@ LATEST = {
     "portfolio_leverage": 1,
     "margin_posted": 0,
     "equity_to_margin_ratio": 0,
-    "margin_cushion": 0,
+    "margin_cushion": 0.877141,
     "gross_notional": 0,
     "total_unrealized_pnl": 0,
     "total_realized_pnl": 0,
@@ -152,6 +152,15 @@ def test_portfolio_detail_defaults_to_qt_with_fallback(client, reader):
     assert body["portfolioGroup"] == "qt_conservative"
     # A paper book: listed, not added to the fund total.
     assert body["inFundTotal"] is False
+
+
+def test_margin_cushion_is_served_as_a_percent(client, reader):
+    # D-27: the engine's fraction 0.877141 is 87.71%, not 0.88%.
+    _login(client)
+
+    body = client.get("/portfolio/portfolios/QT_CONSERVATIVE_PORTFOLIO").get_json()
+
+    assert body["metrics"]["marginCushion"] == pytest.approx(87.7141)
 
 
 @pytest.mark.parametrize("book", ["system", "qt_proposal", "qt"])

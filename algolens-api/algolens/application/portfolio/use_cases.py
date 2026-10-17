@@ -129,7 +129,9 @@ def build_strategy_detail(
             "portfolioLeverage": float_or_default(latest["portfolio_leverage"]),
             "marginPosted": float_or_default(latest["margin_posted"]),
             "equityToMarginRatio": float_or_default(latest["equity_to_margin_ratio"]),
-            "marginCushion": float_or_default(latest["margin_cushion"]),
+            # D-27: the engine stores the cushion as a fraction of equity ((equity - margin) /
+            # equity, 0.877); the screens print a percent, as the combined view computes it.
+            "marginCushion": float_or_default(latest["margin_cushion"]) * 100,
             "totalNotional": float_or_default(latest["gross_notional"]),
             "unrealizedPnL": float_or_default(latest["total_unrealized_pnl"]),
             "realizedPnL": float_or_default(latest["total_realized_pnl"]),
