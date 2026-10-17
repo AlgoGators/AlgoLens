@@ -1,0 +1,172 @@
+{
+  "config": {
+    "_covariance_history_prices_note": "daily closes per symbol the PortfolioManager keeps for the optimiser covariance, one per date, oldest dropped first; absent means 756 (the trend sleeve own cap); at least 2",
+    "_covariance_stale_dates_note": "how many dates of the union of the covariance symbols' dates a symbol's last close may trail the newest before the optimiser leaves it out of the date intersection (its column becomes the guarded 0.01 variance, WARN COVARIANCE_STALE_PARTICIPANT); at exactly this many it stays; absent means 5; a whole number of at least 0, e.g. 3 to leave out a symbol more than three dates stale",
+    "_description": "QT_CONSERVATIVE_PORTFOLIO: the QT desk book (desk editing on). A copy of CONSERVATIVE_PORTFOLIO.",
+    "_equity_slow_rule_note": "required; on the book's first sleeve a negative combined forecast of these symbols stands only when the scaled forecast of every pair named is negative, and is 0 otherwise",
+    "_qt_note": "QT platform (docs/design/qt-contract.md): desk_editable turns on the three books (system, qt_proposal, qt) and the desk commands; false runs and stores the system book only",
+    "_sizing_note": "required; half_compounding: the book is sized on starting_capital less the drawdown of its cumulative settled net P&L from its running peak, never above starting_capital; starting_capital must equal initial_capital",
+    "_version": "2.0.0",
+    "backtest": {
+      "lookback_years": 2,
+      "store_trade_details": true
+    },
+    "covariance_history_prices": 756,
+    "covariance_stale_dates": 5,
+    "equity_slow_rule": {
+      "pairs": [
+        [
+          32,
+          128
+        ],
+        [
+          64,
+          256
+        ]
+      ],
+      "symbols": [
+        "M2K",
+        "MES",
+        "MNQ",
+        "MYM"
+      ]
+    },
+    "execution": {
+      "commission_rate": 0.0005,
+      "position_limit_backtest": 1000,
+      "position_limit_live": 500,
+      "slippage_bps": 1
+    },
+    "initial_capital": 500000.0,
+    "live": {
+      "_note": "Must match backtest.lookback_years (2 yrs \u2248 730 days). Strategy needs 256+ trading days for longest EMA and 252 for vol_lookback_long.",
+      "_note_spinoff_child_policy": "E2-F31. What to do with a company a spinoff hands you. liquidate_at_first_close (default) books the child and sells it at its first close. hold keeps it, and is only safe when the child is itself in the configured universe -- otherwise no bars are loaded for it and every later run reports 'Missing T-1 price for symbol with a non-zero position' and rolls the target back forever (F-4). Unrecognised text takes the default.",
+      "data_staleness_tolerance_days": 4,
+      "execution_price_max_staleness_days": 5,
+      "historical_days": 730,
+      "spinoff_child_policy": "liquidate_at_first_close"
+    },
+    "optimization": {
+      "_one_pass_note": "required on a futures book: cost_penalty_scalar is the cost multiplier of the one optimisation pass, sign_close_band the forecast below which a sign close waits, b_sigma_floor the floor of the no-trade buffer as a ratio to the risk target; the retired keys tau, asymmetric_risk_buffer and buffer_size_factor are refused there",
+      "b_sigma_floor": 0.05,
+      "convergence_threshold": 1e-06,
+      "cost_penalty_scalar": 100,
+      "max_iterations": 100,
+      "sign_close_band": 2,
+      "use_buffering": true
+    },
+    "portfolio_id": "QT_CONSERVATIVE_PORTFOLIO",
+    "qt": {
+      "desk_editable": true
+    },
+    "risk": {
+      "_description": "Risk configuration for CONSERVATIVE_PORTFOLIO",
+      "max_drawdown": 0.3,
+      "modules": [
+        {
+          "R_jump_max": 4.5,
+          "R_max": 2.25,
+          "R_shock_max": 4.0,
+          "_missing_symbol_policy_reason": "Schema-1 behaviour, migrated literally: risk_manager.cpp:55-58 gates the book on the subset of its symbols present in the window (T-4 \u00a710). Changing it is its own measured commit.",
+          "_overlay_limits_note": "the overlay reads the book in capital terms (weights on the sizing capital): R_max, R_jump_max and R_shock_max are ratios to the first sleeve's risk target tau; max_gross_leverage and max_net_leverage are the gross and net leverage limits; per_name_cap is the cap on one symbol's weight; trim_max is the most contracts the trim removes in a day. All required on a futures book; var_limit, jump_risk_limit and max_correlation are retired here and in risk_reporting, and max_leverage at the top level, and each is refused",
+          "confidence_level": 0.99,
+          "id": "carver",
+          "lookback_period": 252,
+          "lookback_unit": "dates",
+          "max_gross_leverage": 8.0,
+          "max_net_leverage": 6.0,
+          "min_gate_dates": 21,
+          "missing_symbol_policy": "ignore",
+          "per_name_cap": 2,
+          "trim_max": 5,
+          "type": "carver"
+        }
+      ],
+      "risk_reporting": {
+        "_note": "RA-01: the live runners' snapshot RiskManager reads this block through AppConfig::risk_config; on day one it mirrors the gate (HD Q5).",
+        "confidence_level": 0.99,
+        "lookback_period": 252,
+        "max_gross_leverage": 8.0,
+        "max_net_leverage": 6.0,
+        "type": "carver",
+        "window": "all_bars"
+      },
+      "schema": 2
+    },
+    "sizing_mode": "half_compounding",
+    "starting_capital": 500000.0,
+    "strategies": {
+      "TREND_FOLLOWING": {
+        "config": {
+          "_idm_rationale": "Carver Table 16 (Advanced Futures Trading Strategies, p.125): 30+ instruments -> 2.50; the universe is 36 names. The formula 1/sqrt(w'Hw), H the correlation of the instruments' subsystem returns floored at 0, reaches the 2.5 cap on the 36 names. HD 2026-09-25",
+          "ema_windows": [
+            [
+              2,
+              8
+            ],
+            [
+              4,
+              16
+            ],
+            [
+              8,
+              32
+            ],
+            [
+              16,
+              64
+            ],
+            [
+              32,
+              128
+            ],
+            [
+              64,
+              256
+            ]
+          ],
+          "idm": 2.5,
+          "risk_target": 0.2,
+          "vol_lookback_long": 252,
+          "vol_lookback_short": 32
+        },
+        "default_allocation": 1.0,
+        "enabled_backtest": true,
+        "enabled_live": true,
+        "type": "TrendFollowingStrategy"
+      }
+    },
+    "strategy_defaults": {
+      "fdm": [
+        [
+          1,
+          1
+        ],
+        [
+          2,
+          1.03
+        ],
+        [
+          3,
+          1.08
+        ],
+        [
+          4,
+          1.13
+        ],
+        [
+          5,
+          1.19
+        ],
+        [
+          6,
+          1.26
+        ]
+      ],
+      "max_strategy_allocation": 1,
+      "min_strategy_allocation": 0.1
+    },
+    "use_optimization": true
+  },
+  "strategy_config_version": null
+}

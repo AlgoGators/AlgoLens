@@ -15,6 +15,7 @@ import psycopg2
 from flask import Blueprint, current_app, jsonify, request
 from flask_jwt_extended import get_jwt_identity, jwt_required
 
+from algolens.adapters.http.access import admin_only
 from algolens.adapters.http.portfolio import (
     can_use_qt_desk,
     current_user,
@@ -41,7 +42,9 @@ from algolens.application.qt.use_cases import (
     SaveDeskEdit,
 )
 from algolens.application.qt.settings_use_cases import (
+    ChangeSettingsLock,
     GetSettings,
+    ListSettingsLocks,
     RevertSettings,
     SaveSettings,
 )
@@ -392,3 +395,30 @@ def settings_revert(portfolio_id):
         current_user()["email"],
     )
     return jsonify({"version": version}), 201
+
+
+# --- D-14: the admin's lock list for desk settings ------------------------------
+
+
+@desk_bp.route("/settings-locks", methods=["GET"])
+@jwt_required()
+@desk_enabled
+@desk_user
+@handled
+def settings_locks_list():
+    repo, _agent, _settings = _desk_dependencies()
+    return jsonify(ListSettingsLocks(repo).execute()), 200
+
+
+@desk_bp.route("/settings-locks", methods=["POST"])
+@jwt_required()
+@desk_enabled
+@admin_only
+@handled
+def settings_locks_change():
+    payload = _body()
+    repo, _agent, _settings = _desk_dependencies()
+    result = ChangeSettingsLock(repo).execute(
+        payload.get("path"), payload.get("locked"), payload.get("reason"), current_user()["email"]
+    )
+    return jsonify(result), 200

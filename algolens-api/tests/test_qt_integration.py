@@ -1238,3 +1238,28 @@ def test_before_029_the_command_log_refuses_a_rescind_row(qt_db):
     with pytest.raises(psycopg2.IntegrityError):
         RescindDesk(desk_repo(qt_db), NullAgent()).execute(entry(qt_db), "desk@x.com")
     assert [c["kind"] for c in commands(qt_db)] == ["publish"]
+
+
+def test_the_settings_lock_list_from_migration_004(qt_db):
+    # D-14: before 004 the repository reports no table (the starting locks apply); after it
+    # the seeded list is read, an admin's lock and unlock land, and each is logged.
+    from pathlib import Path
+
+    assert desk_repo(qt_db).settings_locks() is None
+    sql = (Path(__file__).parent.parent / "migrations" / "004_desk_settings_locks.sql").read_text("utf-8")
+    with qt_db.setup.cursor() as cur:
+        cur.execute(sql)
+        cur.execute("GRANT SELECT, INSERT, UPDATE, DELETE ON trading.desk_settings_locks TO algolens_test_app")
+        cur.execute("GRANT SELECT, INSERT ON trading.desk_settings_lock_log TO algolens_test_app")
+        cur.execute("GRANT USAGE ON SEQUENCE trading.desk_settings_lock_log_id_seq TO algolens_test_app")
+
+    seeded = [tuple(r["path"]) for r in desk_repo(qt_db).settings_locks()]
+    assert ("use_optimization",) in seeded and ("strategies", "*", "type") in seeded and len(seeded) == 9
+
+    desk_repo(qt_db).set_settings_lock(["risk", "max_drawdown"], True, "freeze it", "admin@x.com")
+    desk_repo(qt_db).set_settings_lock(["live"], False, "open live", "admin@x.com")
+    paths = [tuple(r["path"]) for r in desk_repo(qt_db).settings_locks()]
+    assert ("risk", "max_drawdown") in paths and ("live",) not in paths
+    log = _exec(qt_db, "SELECT path, locked, reason FROM trading.desk_settings_lock_log ORDER BY id")
+    assert [(tuple(r["path"]), r["locked"], r["reason"]) for r in log] == [
+        (("risk", "max_drawdown"), True, "freeze it"), (("live",), False, "open live")]

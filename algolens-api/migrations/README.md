@@ -10,6 +10,7 @@ its column in the same PR or straight after. A blank cell means "not recorded", 
 | 001 | `001_create_strategy_registry.sql` | `trading.strategy_registry`: the portfolios AlgoLens shows, by API id, with display metadata and starting equity; seeds the trend book | none (drop the table) | |
 | 002 | `002_strategy_lifecycle.sql` | Lifecycle (`live`, `incubating`, `retired`) on the registry and `trading.strategy_lifecycle_log` | none | |
 | 003 | `003_screen_access.sql` | `auth.user_screen_access` and `auth.screen_access_log` (member, investor and qt screens, admin-assigned) and `investor.reports` | `003_screen_access_rollback.sql` (destructive: back up first) | |
+| 004 | `004_desk_settings_locks.sql` | `trading.desk_settings_locks` (the settings the QT desk sees greyed out, D-14; seeded with Dom's 2026-10-14 list) and its append-only log | `004_desk_settings_locks_rollback.sql` (drops the log) | |
 
 The QT tables AlgoLens reads and writes (`trading.position_overrides`, `trading.strategy_config`,
 the `portfolio_group` and `desk_editable` registry columns) are trade-ngin's migrations 021 to 029.

@@ -4,13 +4,15 @@
  * last live run used (live_run_metadata.settings_used), editable key by key,
  * saved as a new strategy_config version that the next live run merges over
  * the config files. Running and pending are shown side by side; a revert is a
- * new version. The database and email sections are never shown.
+ * new version. The database, email and qt blocks and backtest keys are never shown; an admin's
+ * locks are greyed out, never hidden (D-14), and every setting carries its explanation (D-16).
  */
 import React, { useCallback, useEffect, useState } from 'react';
 import { AlertCircle, Check, RotateCcw } from 'lucide-react';
 import { useTheme } from '../../adapters/react/ThemeContext';
 import { DeskService } from '../../application/qt/deskService';
 import {
+  boundsHint,
   buildSettingChanges,
   canSubmitSettings,
   displaySetting,
@@ -19,6 +21,7 @@ import {
   isConfigNote,
   isEditable,
   labelInSection,
+  lockedReason,
   pathKey,
   pathLabel,
   readOpenState,
@@ -121,12 +124,21 @@ export function SettingsEditor({ portfolioId }: { portfolioId: string }) {
     const current = key in edits ? edits[key] : displaySetting(field.pending ?? field.value);
     const bad = key in edits && invalid.includes(pathLabel(field.path));
     const pending = field.pending !== null || field.pending_from_files;
+    const why = lockedReason(field);
+    const hint = boundsHint(field.bounds);
     return (
-      <tr key={key} className={`border-t ${rule} align-middle`}>
+      <tr
+        key={key}
+        data-testid={why ? 'setting-locked' : 'setting-row'}
+        className={`border-t ${rule} align-top ${why ? 'opacity-60' : ''}`}
+      >
         <td className="py-1.5 pr-4">
           <label className="block text-xs font-mono break-words" htmlFor={`setting-${key}`} title={pathLabel(field.path)}>
             {labelInSection(field)}
           </label>
+          {/* D-16: the config files' explanation of the setting. */}
+          {field.help && <p className={`mt-0.5 text-xs ${muted}`}>{field.help}</p>}
+          {why && <p className={`mt-0.5 text-xs ${muted}`} data-testid="setting-why">{why}</p>}
         </td>
         <td className="py-1.5 pr-4 text-xs font-mono text-right">
           {/* A long value (a list, a table) is cut; the whole of it is in the tooltip. */}
@@ -148,7 +160,7 @@ export function SettingsEditor({ portfolioId }: { portfolioId: string }) {
         </td>
         <td className="py-1.5">
           {!editable ? (
-            <span className={`text-xs ${muted}`}>{isEditable(field) ? '' : 'read-only'}</span>
+            <span className={`text-xs ${muted}`}>{why ? 'locked' : isEditable(field) ? '' : 'read-only'}</span>
           ) : field.type === 'boolean' ? (
             <select
               id={`setting-${key}`}
@@ -166,7 +178,8 @@ export function SettingsEditor({ portfolioId }: { portfolioId: string }) {
               className={`${cell} ${bad ? 'border-red-500' : ''}`}
               value={current}
               disabled={busy}
-              title={bad ? `Invalid ${field.type}` : undefined}
+              title={bad ? `Invalid ${field.type}${hint ? `: ${hint}` : ''}` : hint ?? undefined}
+              placeholder={hint ?? undefined}
               inputMode={field.type === 'number' ? 'decimal' : undefined}
               onChange={e => setEdits(prev => ({ ...prev, [key]: e.target.value }))}
             />

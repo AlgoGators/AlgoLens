@@ -18,9 +18,19 @@ CONFIG = {"risk": {"max_leverage": 2.0, "max_drawdown": 0.3}, "capital": 500000,
 
 
 class FakeSettingsRepo:
-    def __init__(self, settings_used=None):
+    def __init__(self, settings_used=None, locks=None):
         self.settings_used = settings_used
         self.versions = []
+        # None: the lock table is absent and the starting locks apply.
+        self.locks = locks
+        self.lock_log = []
+
+    def settings_locks(self):
+        return None if self.locks is None else [{"path": list(p)} for p in self.locks]
+
+    def set_settings_lock(self, path, locked, reason, by):
+        self.locks = [p for p in self.locks if list(p) != list(path)] + ([tuple(path)] if locked else [])
+        self.lock_log.append((tuple(path), locked, reason, by))
 
     def latest_settings_used(self, portfolio_id):
         if self.settings_used is None:
@@ -150,3 +160,57 @@ def test_settings_routes_are_404_without_the_flag(client, settings_repo, monkeyp
     monkeypatch.setenv("QT_DESK_ENABLED", "false")
     _login(client)
     assert client.get("/portfolio/desk/QT_CONSERVATIVE_PORTFOLIO/settings").status_code == 404
+
+
+def test_a_revert_may_not_change_a_locked_setting():
+    # D-14: a version saved while a key was unlocked cannot bring that value back once it is.
+    config = {**CONFIG, "use_optimization": True}
+    repo = FakeSettingsRepo({"strategy_config_version": None, "config": config}, locks=[])
+    SaveSettings(repo).execute(QT, [{"path": ["use_optimization"], "value": False}], "a", "d@x.com")
+    SaveSettings(repo).execute(QT, [{"path": ["use_optimization"], "value": True}], "b", "d@x.com")
+    repo.locks = [("use_optimization",)]
+    with pytest.raises(SettingsRuleError, match="changes settings an admin locked: use_optimization"):
+        RevertSettings(repo).execute(QT, 1, "back", "d@x.com")
+    # A save of something else still goes through with the locked key carried as it is.
+    SaveSettings(repo).execute(QT, [{"path": ["capital"], "value": 1}], "c", "d@x.com")
+    assert repo.versions[-1]["overrides"]["use_optimization"] is True
+
+
+def test_the_view_marks_locked_and_read_only_fields():
+    config = {**CONFIG, "use_optimization": True, "sizing_mode": "half_compounding",
+              "_sizing_note": "one value"}
+    repo = FakeSettingsRepo({"strategy_config_version": None, "config": config}, locks=[("use_optimization",)])
+    fields = {tuple(f["path"]): f for f in GetSettings(repo).execute(QT)["fields"]}
+    assert fields[("use_optimization",)]["locked"] is True
+    assert fields[("sizing_mode",)]["readOnly"] and fields[("sizing_mode",)]["help"] == "one value"
+    assert fields[("capital",)]["locked"] is False and fields[("capital",)]["readOnly"] is None
+
+
+def test_lock_routes_list_for_the_desk_and_change_for_an_admin(client, settings_repo):
+    settings_repo.locks = [("live",)]
+    member = _login(client, role="exec_board", email="desk@x.com")
+    listed = client.get("/portfolio/desk/settings-locks")
+    assert listed.status_code == 200 and listed.get_json()["locks"] == [{"path": ["live"], "reason": None, "lockedBy": None, "lockedAt": None}]
+
+    desk_only = _login(client, role="team_lead")
+    refused = client.post("/portfolio/desk/settings-locks",
+                          json={"path": ["capital"], "locked": True, "reason": "r"}, headers=desk_only)
+    assert refused.status_code == 403
+
+    admin = _login(client, role="admin")
+    done = client.post("/portfolio/desk/settings-locks",
+                       json={"path": ["capital"], "locked": True, "reason": "freeze"}, headers=admin)
+    assert done.status_code == 200
+    assert ("capital",) in settings_repo.locks and settings_repo.lock_log[-1][1:3] == (True, "freeze")
+    unlocked = client.post("/portfolio/desk/settings-locks",
+                           json={"path": ["live"], "locked": False, "reason": "open"}, headers=admin)
+    assert unlocked.status_code == 200 and ("live",) not in settings_repo.locks
+
+
+def test_a_lock_change_needs_the_lock_table(client, settings_repo):
+    settings_repo.locks = None  # migration 004 not applied: the starting locks apply
+    admin = _login(client, role="admin")
+    response = client.post("/portfolio/desk/settings-locks",
+                           json={"path": ["capital"], "locked": True, "reason": "r"}, headers=admin)
+    assert response.status_code == 409
+    assert client.get("/portfolio/desk/settings-locks").get_json()["stored"] is False

@@ -7,7 +7,8 @@
  *            merged over the config files at the next live run
  *
  * Every field shows both, unmistakably. Only keys the run reported can be
- * edited; the database and email sections are never shown.
+ * edited; the database, email and qt blocks and backtest keys are never shown. An admin's locked
+ * settings are shown greyed out (D-14), one-value settings read-only with the reason (D-16).
  */
 
 export type SettingType = 'number' | 'boolean' | 'string' | 'array' | 'null' | 'object';
@@ -21,6 +22,22 @@ export interface SettingField {
   pending: unknown;
   /** The active version stops overriding this key: it goes back to the file value. */
   pending_from_files: boolean;
+  /** D-16: the config files' explanation of the setting. */
+  help?: string | null;
+  /** D-14: an admin locked it (the lock pattern that covers it); shown greyed out. */
+  locked?: boolean;
+  lockedBy?: string[] | null;
+  /** D-16: why it cannot be changed (one legal value, or it mirrors another setting). */
+  readOnly?: string | null;
+  /** D-15: the engine's bounds on a risk gate limit. */
+  bounds?: SettingBounds | null;
+}
+
+export interface SettingBounds {
+  min: number | null;
+  max: number | null;
+  minExclusive: boolean;
+  integer: boolean;
 }
 
 export interface SettingsVersion {
@@ -50,9 +67,39 @@ export interface SettingChange {
 export const pathKey = (path: string[]) => path.join('\u0000');
 export const pathLabel = (path: string[]) => path.join('.');
 
-/** Whether a field can be edited in the form (null leaves are read-only). */
+/** Whether a field can be edited in the form: a typed value that is neither locked by an admin
+ * (D-14) nor read-only (D-16); null leaves are read-only. */
 export function isEditable(field: SettingField): boolean {
+  if (field.locked || field.readOnly) return false;
   return field.type === 'number' || field.type === 'boolean' || field.type === 'string' || field.type === 'array';
+}
+
+/** Why a field cannot be changed, for the greyed-out row; null when it can. */
+export function lockedReason(field: SettingField): string | null {
+  if (field.readOnly) return field.readOnly;
+  if (field.locked) {
+    const by = field.lockedBy && field.lockedBy.join('.') !== field.path.join('.') ? ` (${field.lockedBy.join('.')})` : '';
+    return `Locked by an admin${by}`;
+  }
+  return null;
+}
+
+/** D-15: the bounds as a hint ("above 0 and at most 10, a whole number"), or null. */
+export function boundsHint(bounds: SettingBounds | null | undefined): string | null {
+  if (!bounds) return null;
+  const parts: string[] = [];
+  if (bounds.min !== null) parts.push(`${bounds.minExclusive ? 'above' : 'at least'} ${bounds.min}`);
+  if (bounds.max !== null) parts.push(`at most ${bounds.max}`);
+  const range = parts.join(' and ');
+  return bounds.integer ? `${range ? `${range}, ` : ''}a whole number` : range || null;
+}
+
+/** Whether a number breaks a field's bounds (the engine refuses it, D-78). */
+export function outOfBounds(value: unknown, bounds: SettingBounds | null | undefined): boolean {
+  if (!bounds || typeof value !== 'number') return false;
+  if (bounds.integer && !Number.isInteger(value)) return true;
+  if (bounds.min !== null && (bounds.minExclusive ? value <= bounds.min : value < bounds.min)) return true;
+  return bounds.max !== null && value > bounds.max;
 }
 
 /** Parse a typed value to the field's type; undefined = invalid. */
@@ -104,7 +151,7 @@ export function buildSettingChanges(
     const key = pathKey(field.path);
     if (!(key in edits) || !isEditable(field)) continue;
     const value = coerceSetting(edits[key], field.type);
-    if (value === undefined) {
+    if (value === undefined || outOfBounds(value, field.bounds)) {
       invalid.push(pathLabel(field.path));
       continue;
     }
@@ -192,3 +239,12 @@ export function isConfigNote(field: SettingField): boolean {
   return field.path.some(segment => segment.startsWith('_'));
 }
 
+
+/**
+ * D-14: a lock path as an admin types it ("strategies.*.type") into its keys; null when it is
+ * empty or has an empty key.
+ */
+export function parseLockPath(text: string): string[] | null {
+  const keys = text.trim().split('.').map(k => k.trim());
+  return keys.length > 0 && keys.every(k => k.length > 0) ? keys : null;
+}

@@ -153,6 +153,14 @@ class SettingsRepositoryPort(Protocol):
     def config_version(self, portfolio_id: str, version: int) -> Row | None:
         ...
 
+    def settings_locks(self) -> Sequence[Row] | None:
+        """D-14: trading.desk_settings_locks as [{path, reason, locked_by, locked_at}], or None
+        while the table is absent (AlgoLens migration 004)."""
+
+    def set_settings_lock(self, path: Sequence[str], locked: bool, reason: str, by: str) -> None:
+        """Lock or unlock one setting and log it (trading.desk_settings_lock_log), in one
+        transaction."""
+
     def insert_config_version(
         self,
         portfolio_id: str,

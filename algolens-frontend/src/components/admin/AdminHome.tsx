@@ -25,6 +25,9 @@ import {
   type ReportKind,
 } from '../../domain/investor/investor';
 import { Card, SectionTitle } from '../ScreenFrame';
+import { DeskService } from '../../application/qt/deskService';
+import type { SettingsLocks } from '../../infrastructure/api/deskApi';
+import { parseLockPath } from '../../domain/qt/settings';
 
 const SCREEN_HINTS: Record<Screen, string> = {
   member: 'Portfolios, strategies, incubation',
@@ -415,6 +418,114 @@ export function AdminHome() {
       </div>
       <UsersSection />
       <ReportsSection />
+      <SettingsLocksSection />
+    </div>
+  );
+}
+
+/**
+ * D-14: the settings the QT desk may not change. A locked setting is shown to the desk greyed
+ * out, never hidden; every lock and unlock is logged with its reason.
+ */
+function SettingsLocksSection() {
+  const { theme } = useTheme();
+  const dark = theme === 'dark';
+  const muted = dark ? 'text-gray-400' : 'text-gray-500';
+  const input = `px-2 py-1 rounded border text-sm ${
+    dark ? 'border-gray-700 bg-gray-800 text-white' : 'border-gray-300 bg-white text-gray-900'
+  }`;
+  const [locks, setLocks] = useState<SettingsLocks | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [path, setPath] = useState('');
+  const [reason, setReason] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    DeskService.settingsLocks()
+      .then(setLocks)
+      .catch(err => setError(errorText(err)));
+  }, []);
+
+  const change = async (keys: string[], locked: boolean) => {
+    setBusy(true);
+    setError(null);
+    try {
+      setLocks(await DeskService.changeSettingsLock(keys, locked, reason.trim()));
+      if (locked) setPath('');
+      setReason('');
+    } catch (err) {
+      setError(errorText(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const keys = parseLockPath(path);
+
+  return (
+    <div data-testid="settings-locks">
+      <SectionTitle>Desk settings locks</SectionTitle>
+      <Card>
+        <p className={`text-sm mb-3 ${muted}`}>
+          Settings the QT desk sees greyed out and cannot change. A path is a list of keys joined
+          by dots; * stands for any key and covariance_* for any key starting with covariance_.
+          A section's path locks everything in it. Each change needs a reason.
+        </p>
+        {locks && !locks.stored && (
+          <p className="text-sm mb-3 text-amber-500">
+            The lock list is not in the database yet (AlgoLens migration 004): the starting locks
+            below apply and cannot be changed until it is.
+          </p>
+        )}
+        {error && <p className="text-sm mb-3 text-red-500">{error}</p>}
+        <table className="w-full text-sm mb-4">
+          <tbody>
+            {(locks?.locks ?? []).map(lock => (
+              <tr key={lock.path.join('.')} className={`border-t ${dark ? 'border-gray-800' : 'border-gray-100'}`}>
+                <td className="py-1.5 pr-4 font-mono text-xs">{lock.path.join('.')}</td>
+                <td className={`py-1.5 pr-4 text-xs ${muted}`}>
+                  {lock.reason}
+                  {lock.lockedBy ? ` (${lock.lockedBy})` : ''}
+                </td>
+                <td className="py-1.5 text-right">
+                  <button
+                    type="button"
+                    className="text-xs hover:underline disabled:opacity-50"
+                    disabled={busy || !locks?.stored || !reason.trim()}
+                    title={reason.trim() ? 'Unlock it for the desk' : 'Give a reason first'}
+                    onClick={() => change(lock.path, false)}
+                  >
+                    Unlock
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <div className="flex flex-wrap gap-2 items-center">
+          <input
+            aria-label="Setting path to lock"
+            className={`${input} font-mono`}
+            placeholder="risk.max_drawdown"
+            value={path}
+            onChange={e => setPath(e.target.value)}
+          />
+          <input
+            aria-label="Reason"
+            className={`${input} flex-1 min-w-[12rem]`}
+            placeholder="Reason (for the lock or the unlock)"
+            value={reason}
+            onChange={e => setReason(e.target.value)}
+          />
+          <button
+            type="button"
+            className="px-3 py-1 rounded border text-sm disabled:opacity-50"
+            disabled={busy || !locks?.stored || !keys || !reason.trim()}
+            onClick={() => keys && change(keys, true)}
+          >
+            Lock
+          </button>
+        </div>
+      </Card>
     </div>
   );
 }
