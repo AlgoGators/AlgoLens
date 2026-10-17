@@ -94,13 +94,15 @@ export const DeskApi = {
   requestOverride: (portfolioId: string, reason: string) =>
     request<CommandResult>('POST', `${desk(portfolioId)}/override-request`, { reason }),
   /** C10: save the edits (B) and approve them; the engine publishes when its book (C) equals B. */
-  approve: (portfolioId: string, changes: QuantityChange[], reason: string) =>
-    request<ApproveResult>('POST', `${desk(portfolioId)}/approve`, { changes, reason }),
+  approve: (portfolioId: string, changes: QuantityChange[], reason: string, email = true) =>
+    request<ApproveResult>('POST', `${desk(portfolioId)}/approve`, { changes, reason, email }),
   /** Approve the day's book (the engine's publish command). */
   publish: (portfolioId: string) => request<CommandResult>('POST', `${desk(portfolioId)}/publish`, {}),
   /** C10: approve the engine's book (C), acknowledging the symbols it changed. */
-  acceptC: (portfolioId: string, acknowledged: string[]) =>
-    request<CommandResult>('POST', `${desk(portfolioId)}/publish`, { flow: 'accept_c', acknowledged }),
+  acceptC: (portfolioId: string, acknowledged: string[], email = true) =>
+    request<CommandResult>('POST', `${desk(portfolioId)}/publish`, { flow: 'accept_c', acknowledged, email }),
+  /** D-66: e-mail today's approved, unsent book now (a day approved without its e-mail). */
+  send: (portfolioId: string) => request<CommandResult>('POST', `${desk(portfolioId)}/send`, {}),
   /** Take back the desk's approval of the day before the 09:30 send (the engine's rescind command). */
   rescind: (portfolioId: string) => request<CommandResult>('POST', `${desk(portfolioId)}/rescind`, {}),
   settings: (portfolioId: string) => request<SettingsState>('GET', `${desk(portfolioId)}/settings`),

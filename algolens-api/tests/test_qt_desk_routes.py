@@ -167,13 +167,14 @@ def test_publish_and_state(client, desk):
 
 def test_publish_outside_the_risk_limits_is_409_with_the_reason(client, desk):
     repo, agent = desk
-    agent.risk = risk_report("desk", audit_id=0, within_limits=False, breaches=["L_g"])
+    agent.risk = risk_report("desk", audit_id=0, within_limits=False, breaches=["L_g"],
+                             blockers=["L_g"])
     headers = _login(client)
     response = client.post("/portfolio/desk/QT_CONSERVATIVE_PORTFOLIO/publish", json={}, headers=headers)
     assert response.status_code == 409
     assert response.get_json() == {
-        "error": "The 2026-10-08 positions breach risk limits (L_g): save within the limits or "
-        "request an override"
+        "error": "The 2026-10-08 positions are over a cap (L_g over its cap): save within the "
+        "caps or ask the VP or President to approve your positions"
     }
     assert repo.rows == []
 

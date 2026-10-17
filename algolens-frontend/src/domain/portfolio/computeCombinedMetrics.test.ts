@@ -167,10 +167,9 @@ describe('computeCombinedMetrics', () => {
 });
 
 describe('information ratio', () => {
-  // The yardstick is the `benchmark` stream -- what the algorithm would have
-  // compounded to with no human edits -- not an index. That is the only benchmark
-  // series the platform actually has, and it is the comparison AlphaAttribution
-  // already treats as the answer to "did the desk add value".
+  // The yardstick is the model's book (the `system` stream, D-3) -- not an index.
+  // It is the comparison AlphaAttribution draws as the desk's value. (`benchmark`
+  // below names the yardstick's curve in these tests.)
 
   function withStreams(
     id: string,
@@ -181,7 +180,7 @@ describe('information ratio', () => {
       id,
       historicalData: book.map(([date, value]) => ({ date, value })),
       ...(benchmark
-        ? { equityByStream: { benchmark: benchmark.map(([date, value]) => ({ date, value })) } }
+        ? { equityByStream: { system: benchmark.map(([date, value]) => ({ date, value })) } }
         : {}),
     });
   }

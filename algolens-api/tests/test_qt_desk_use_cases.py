@@ -23,6 +23,7 @@ from algolens.application.qt.use_cases import (
     PublishDesk,
     RequestOverride,
     RescindDesk,
+    SendDesk,
     SaveDeskEdit,
 )
 from algolens.domain.qt import desk as rules
@@ -149,12 +150,22 @@ class FakeRepo:
         return self._insert(portfolio_id=portfolio_id, kind="publish", requested_by=requested_by,
                             payload=dict(payload or {}))
 
-    def approve_proposal(self, portfolio_id, day, plan, reason, requested_by):
+    def approve_proposal(self, portfolio_id, day, plan, reason, requested_by, email=True):
         save = self.save_proposal(portfolio_id, day, plan, reason, requested_by)
+        payload = {"flow": "auto", "after": save["id"]}
+        if not email:
+            payload["email"] = False
         publish = self._insert(portfolio_id=portfolio_id, kind="publish",
-                               requested_by=requested_by,
-                               payload={"flow": "auto", "after": save["id"]})
+                               requested_by=requested_by, payload=payload)
         return save, publish
+
+    def insert_send(self, portfolio_id, day, requested_by):
+        if not self._is_published(portfolio_id):
+            raise DeskConflict("not approved")
+        if self.published.get("sent_at") is not None:
+            raise DeskConflict("already been e-mailed")
+        return self._insert(portfolio_id=portfolio_id, kind="publish",
+                            requested_by=requested_by, payload={"flow": "send"})
 
     def decide_override(self, request_id, approved, approver, approver_role, reason):
         decision = self.insert_decision(request_id, approved, approver, approver_role, reason)
@@ -169,13 +180,14 @@ class FakeRepo:
                                payload={"flow": "override_b", "after": decision["id"]})
         return decision, publish
 
-    def insert_rescind(self, portfolio_id, day, requested_by):
+    def insert_rescind(self, portfolio_id, day, requested_by, is_approver=False):
         if not self._is_published(portfolio_id):
             raise DeskConflict("not approved")
         if self.published.get("publish_source") != "desk":
             raise DeskConflict("not approved by the desk")
-        if (self.published.get("published_by") or "").lower() != requested_by.lower():
-            raise DeskConflict("only the approver can take the approval back")
+        why = rules.rescind_refusal(rules.approving_flow(self.rows), day.isoformat(), is_approver)
+        if why:
+            raise DeskConflict(why)
         if self.published.get("sent_at") is not None:
             raise DeskConflict("already e-mailed")
         if any(
@@ -219,7 +231,7 @@ class FakeRepo:
 
 
 def risk_report(state="model", audit_id=0, within_limits=True, approved_override=False,
-                breaches=()):
+                breaches=(), blockers=()):
     """A GetDeskRisk report as DeskClient.get_desk_risk returns it."""
     return {
         "state": state,
@@ -227,6 +239,9 @@ def risk_report(state="model", audit_id=0, within_limits=True, approved_override
         "withinLimits": within_limits,
         "approvedOverride": approved_override,
         "breaches": [{"term": t, "detail": f"{t} bound"} for t in breaches],
+        # Decision 5's gate as the engine decides it (desk.proto 1.6.0).
+        "blocksPublish": bool(blockers),
+        "blockers": [{"term": t, "detail": f"{t} over its cap"} for t in blockers],
         "m": 1.0,
         "bindingTerm": "none",
         "overLimitAfterRounding": "",
@@ -519,6 +534,8 @@ def test_publish_state_comes_from_live_run_metadata():
         "published_at": NOW.isoformat(),
         "publish_source": "desk",
         "sent_at": None,
+        "flow": None,
+        "email": None,
     }
 
 
@@ -750,10 +767,13 @@ def test_the_approval_page_shows_the_deadline():
 # --- rescind (C8: the desk takes back its approval before the 09:30 send) -------
 
 
-def _approved(day=DAY, sent_at=None, source="desk"):
-    """A day the desk approved: its publish row done, live_run_metadata published."""
+def _approved(day=DAY, sent_at=None, source="desk", flow=None):
+    """A day the desk approved: its publish row done (with the C10 flow that approved it),
+    live_run_metadata published."""
     repo, agent = FakeRepo(day=day), FakeAgent()
-    repo.insert_command(QT["portfolio_id"], day, "publish", "d@x.com")["status"] = "done"
+    row = repo.insert_command(QT["portfolio_id"], day, "publish", "d@x.com",
+                              payload={"flow": flow} if flow else None)
+    row.update(status="done", result={"published": True, "published_at": "2026-10-08T12:00:00Z"})
     repo.published = {"published_by": "d@x.com", "published_at": _ny(day, 8, 0),
                       "publish_source": source, "sent_at": sent_at}
     return repo, agent
@@ -824,14 +844,32 @@ def test_rescind_refusals_from_the_repository():
     assert [c[0] for c in agent.calls] == ["Rescind"]
 
 
-def test_only_the_approver_can_rescind():
-    early = lambda: _ny(DAY, 9, 0)  # noqa: E731
-    repo, agent = _approved()  # approved by d@x.com
-    with pytest.raises(DeskConflict, match="only the approver"):
-        RescindDesk(repo, agent, now=early).execute(QT, "someone@x.com")
-    assert agent.calls == []
-    RescindDesk(repo, agent, now=early).execute(QT, "D@X.com")  # e-mail case does not matter
+@pytest.mark.parametrize("flow", [None, "auto", "accept_c"])
+def test_anyone_on_qt_can_rescind_a_desk_approval(flow):
+    # Dom 2026-10-16: not only the approver (the route lets only the QT screen in).
+    repo, agent = _approved(flow=flow)  # approved by d@x.com
+    RescindDesk(repo, agent, now=lambda: _ny(DAY, 9, 0)).execute(QT, "someone@x.com")
     assert [c[0] for c in agent.calls] == ["Rescind"]
+
+
+def test_only_the_vp_or_president_can_rescind_an_override_day():
+    early = lambda: _ny(DAY, 9, 0)  # noqa: E731
+    repo, agent = _approved(flow="override_b")
+    for who in ("d@x.com", "someone@x.com"):
+        with pytest.raises(DeskConflict, match="only the VP or the President can take it back"):
+            RescindDesk(repo, agent, now=early).execute(QT, who)
+    assert agent.calls == []
+    RescindDesk(repo, agent, now=early).execute(QT, "vp@x.com", is_approver=True)
+    assert [c[0] for c in agent.calls] == ["Rescind"]
+
+
+def test_desk_state_says_which_flow_approved_the_day_and_whether_the_viewer_approves():
+    repo, _agent = _approved(flow="override_b")
+    now = lambda: _ny(DAY, 9, 0)  # noqa: E731
+    state = GetDeskState(repo, FakeAgent(), now=now).execute(QT)
+    assert state["published"]["flow"] == "override_b" and state["viewerIsApprover"] is False
+    state = GetDeskState(repo, FakeAgent(), now=now).execute(QT, viewer_is_approver=True)
+    assert state["viewerIsApprover"] is True
 
 
 @pytest.mark.parametrize("entry", [MODEL, EQUITY])
@@ -902,19 +940,47 @@ def test_desk_state_has_no_risk_before_the_first_book():
     assert state["risk"] is None and agent.risk_calls == []
 
 
-def test_approve_is_refused_while_the_positions_breach_a_risk_limit():
+def test_approve_is_refused_while_the_engine_blocks_the_book():
     repo = FakeRepo()
     save_id = _saved(repo)
     agent = FakeAgent(risk=risk_report("desk", audit_id=save_id, within_limits=False,
-                                       breaches=["L_g", "cap", "L_g"]))
+                                       breaches=["L_g"], blockers=["L_g", "CAP"]))
     with pytest.raises(DeskConflict) as exc:
         PublishDesk(repo, agent).execute(QT, "d@x.com")
     assert str(exc.value) == (
-        "The 2026-10-08 positions breach risk limits (L_g, cap): save within the limits or "
-        "request an override"
+        "The 2026-10-08 positions are over a cap (L_g over its cap; CAP over its cap): save "
+        "within the caps or ask the VP or President to approve your positions"
     )
     assert [r["kind"] for r in repo.rows] == ["save"]
     assert agent.calls == []
+
+
+def test_a_breach_the_engine_does_not_block_on_is_approvable():
+    # Decision 5: a bound limit, R and the trim are reported; only the gate blocks.
+    repo = FakeRepo()
+    save_id = _saved(repo)
+    agent = FakeAgent(risk=risk_report("desk", audit_id=save_id, within_limits=False,
+                                       breaches=["R", "cap"]))
+    assert PublishDesk(repo, agent).execute(QT, "d@x.com")["command"]["kind"] == "publish"
+
+
+def test_the_margin_cap_is_never_overridable():
+    repo = FakeRepo()
+    _saved(repo)
+    agent = FakeAgent(risk=risk_report("override", audit_id=99, within_limits=False,
+                                       approved_override=True, blockers=["MARGIN"]))
+    with pytest.raises(DeskConflict, match="the margin cap cannot be overridden"):
+        PublishDesk(repo, agent).execute(QT, "d@x.com")
+
+
+def test_an_incomplete_book_is_refused_with_the_engines_reason():
+    repo = FakeRepo()
+    agent = FakeAgent(risk={**risk_report("incomplete", within_limits=False),
+                            "blocksPublish": True,
+                            "blockers": [{"term": "incomplete", "detail": "the day's book is "
+                                          "incomplete; save again"}]})
+    with pytest.raises(DeskConflict, match="^the day's book is incomplete; save again$"):
+        PublishDesk(repo, agent).execute(QT, "d@x.com")
 
 
 def test_an_approved_override_waives_the_breaches():
@@ -1038,17 +1104,29 @@ def test_accept_c_publishes_the_engines_book_of_the_latest_save():
                                             "acknowledged": ["ZT.v.0"]}
 
 
-@pytest.mark.parametrize("over, needle", [
-    ({"checks": [{"term": "L_g", "status": "over"}]}, "L_g"),
-    ({"overLimitAfterRounding": "R"}, r"\(R\)"),
-    ({"refused": True}, "the overlay refused"),
+@pytest.mark.parametrize("blockers, needle", [
+    (["L_g"], r"^The engine's book \(C\) is over a cap \(L_g over its cap\): save within the caps or ask the VP or President"),
+    (["MARGIN"], "the margin cap cannot be overridden"),
+    (["refused"], r"over a cap \(refused over its cap\)$"),
 ])
-def test_accept_c_refuses_a_c_over_a_limit(over, needle):
+def test_accept_c_refuses_a_c_the_engine_blocks(blockers, needle):
     repo = FakeRepo()
     save_id = _saved(repo)
+    gate = risk_report(blockers=blockers)
+    report = _c_report(save_id, blocksPublish=True, blockers=gate["blockers"])
     with pytest.raises(DeskConflict, match=needle):
-        PublishDesk(repo, FakeAgent(risk=_c_report(save_id, **over)), now=lambda: NOW).execute(
+        PublishDesk(repo, FakeAgent(risk=report), now=lambda: NOW).execute(
             QT, "d@x.com", flow="accept_c", acknowledged=[])
+
+
+def test_accept_c_with_an_over_after_rounding_term_the_engine_passes_publishes():
+    # R still over after rounding is reported, not a cap (decision 5).
+    repo = FakeRepo()
+    save_id = _saved(repo)
+    report = _c_report(save_id, overLimitAfterRounding="R")
+    result = PublishDesk(repo, FakeAgent(risk=report), now=lambda: NOW).execute(
+        QT, "d@x.com", flow="accept_c", acknowledged=[])
+    assert result["command"]["kind"] == "publish"
 
 
 def test_accept_c_needs_a_finished_current_save_and_a_readable_check():
@@ -1073,3 +1151,66 @@ def test_accept_c_needs_a_finished_current_save_and_a_readable_check():
     with pytest.raises(DeskRuleError):
         PublishDesk(repo, FakeAgent(), now=lambda: NOW).execute(QT, "d@x.com", flow="bogus")
 
+
+
+# --- a future day (D-43) ------------------------------------------------------
+
+
+def test_a_future_day_is_not_approved_but_takes_edits():
+    eve = lambda: _ny(DAY - timedelta(days=1), 20, 0)  # noqa: E731  the evening before
+    repo, agent = FakeRepo(), FakeAgent()
+    with pytest.raises(DeskConflict, match="it is a future day"):
+        ApproveDesk(repo, agent, now=eve).execute(QT, [], "r", "d@x.com")
+    with pytest.raises(DeskConflict, match="it is a future day"):
+        PublishDesk(repo, agent, now=eve).execute(QT, "d@x.com")
+    with pytest.raises(DeskConflict, match="An override request of the"):
+        RequestOverride(repo, agent, now=eve).execute(QT, "r", "d@x.com")
+    assert repo.rows == [] and agent.calls == []
+    SaveDeskEdit(repo, agent, now=eve).execute(
+        QT, [{"symbol": "ZC.v.0", "quantity": 0, "expected": 3}], "r", "d@x.com")
+    assert [r["kind"] for r in repo.rows] == ["save"]
+
+
+# --- approve with or without the e-mail; Send (D-66) ----------------------------------------
+
+
+def test_approve_and_publish_can_hold_the_email():
+    early = lambda: _ny(DAY, 9, 0)  # noqa: E731
+    repo, agent = FakeRepo(), FakeAgent()
+    result = ApproveDesk(repo, agent, now=early).execute(QT, [], "r", "d@x.com", email=False)
+    assert result["command"]["payload"] == {"flow": "auto", "after": result["save"]["id"],
+                                            "email": False}
+    repo, agent = FakeRepo(), FakeAgent()
+    command = PublishDesk(repo, agent, now=early).execute(QT, "d@x.com", email=False)["command"]
+    assert command["payload"] == {"email": False}
+    repo, agent = FakeRepo(), FakeAgent()
+    command = PublishDesk(repo, agent, now=early).execute(QT, "d@x.com")["command"]
+    assert "email" not in (command["payload"] or {})        # on by default
+    with pytest.raises(DeskRuleError, match="email must be true or false"):
+        PublishDesk(FakeRepo(), FakeAgent(), now=early).execute(QT, "d@x.com", email="no")
+
+
+def test_the_desk_state_says_whether_the_approval_held_the_email():
+    repo, _agent = _approved()
+    repo.rows[0]["payload"] = {"email": False}
+    state = GetDeskState(repo, FakeAgent(), now=lambda: _ny(DAY, 9, 0)).execute(QT)
+    assert state["published"]["email"] is False
+
+
+def test_send_emails_todays_published_unsent_book():
+    repo, agent = _approved()
+    result = SendDesk(repo, agent, now=lambda: _ny(DAY, 11, 0)).execute(QT, "d@x.com")
+    assert result["command"]["payload"] == {"flow": "send"}
+    assert agent.calls[-1] == ("Publish", result["command"]["id"])
+
+
+def test_send_is_refused_for_another_day_unapproved_or_sent():
+    with pytest.raises(DeskConflict, match="Only today's book is e-mailed"):
+        repo, agent = _approved()
+        SendDesk(repo, agent, now=lambda: _ny(DAY + timedelta(days=1), 8, 0)).execute(
+            QT, "d@x.com")
+    with pytest.raises(DeskConflict, match="not approved"):
+        SendDesk(FakeRepo(), FakeAgent(), now=lambda: _ny(DAY, 11, 0)).execute(QT, "d@x.com")
+    repo, agent = _approved(sent_at=_ny(DAY, 9, 30))
+    with pytest.raises(DeskConflict, match="already been e-mailed"):
+        SendDesk(repo, agent, now=lambda: _ny(DAY, 11, 0)).execute(QT, "d@x.com")

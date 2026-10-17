@@ -34,11 +34,14 @@ from algolens.domain.qt.desk import (
     PUBLISH,
     RESCIND,
     SAVE,
+    SEND_FLOW,
     DeskRuleError,
+    approving_flow,
     open_override_request,
     override_payload,
     proposal_snapshot,
     request_matches,
+    rescind_refusal,
     snapshot_sha256,
 )
 from algolens.infrastructure.db.postgres import get_db_connection
@@ -310,15 +313,18 @@ class PostgresDeskRepository:
         with self._transaction() as cursor:
             return self._save_proposal(cursor, portfolio_id, day, plan, reason, requested_by)
 
-    def approve_proposal(self, portfolio_id, day, plan, reason, requested_by):
+    def approve_proposal(self, portfolio_id, day, plan, reason, requested_by, email=True):
         """C10, the QT's Approve on B: the save of save_proposal and a publish
-        row that runs after it ({"flow": "auto", "after": <save id>}), in one
+        row that runs after it ({"flow": "auto", "after": <save id>}, and
+        "email": false when the desk approves without the e-mail, D-66), in one
         transaction under the day lock. Returns (save, publish)."""
         with self._transaction() as cursor:
             save = self._save_proposal(cursor, portfolio_id, day, plan, reason, requested_by)
+            payload = {"flow": "auto", "after": int(save["id"])}
+            if not email:
+                payload["email"] = False
             publish = self._insert(
-                cursor, portfolio_id, day, PUBLISH, requested_by,
-                payload={"flow": "auto", "after": int(save["id"])},
+                cursor, portfolio_id, day, PUBLISH, requested_by, payload=payload,
             )
             return save, publish
 
@@ -444,13 +450,48 @@ class PostgresDeskRepository:
             return self._insert(cursor, portfolio_id, day, PUBLISH, requested_by,
                                 payload=payload)
 
-    def insert_rescind(self, portfolio_id, day, requested_by):
+    def insert_send(self, portfolio_id, day, requested_by):
+        """D-66, the desk's Send: under the day lock, refuse unless the day is
+        published and not yet e-mailed and no publish or rescind is open, then
+        insert a publish row {"flow": "send"}. The engine checks the same again
+        (and that the day is today) when it runs the row."""
+        with self._transaction() as cursor:
+            self._lock_day(cursor, portfolio_id, day)
+            if len(self._cutoff_columns(cursor)) != len(CUTOFF_COLUMNS):
+                raise DeskConflict(
+                    "This database does not record when the e-mail goes out (migration "
+                    "026); a day cannot be sent from the desk"
+                )
+            cursor.execute(
+                """
+                SELECT max(published_at) AS published_at, max(sent_at) AS sent_at
+                FROM trading.live_run_metadata
+                WHERE portfolio_id = %s AND date = %s
+                """,
+                (portfolio_id, day),
+            )
+            row = cursor.fetchone() or {}
+            if row.get("published_at") is None:
+                raise DeskConflict(f"The {day.isoformat()} book is not approved; approve it first")
+            if row.get("sent_at") is not None:
+                raise DeskConflict(f"The {day.isoformat()} book has already been e-mailed")
+            for kind in (PUBLISH, RESCIND):
+                command = self._open_command(cursor, portfolio_id, day, kind)
+                if command is not None:
+                    raise DeskConflict(
+                        f"A {kind} of the {day.isoformat()} book is already "
+                        f"{command['status']} (#{command['id']})"
+                    )
+            return self._insert(cursor, portfolio_id, day, PUBLISH, requested_by,
+                                payload={"flow": SEND_FLOW})
+
+    def insert_rescind(self, portfolio_id, day, requested_by, is_approver=False):
         """Under the day lock: refuse (C8) unless live_run_metadata says the
-        day is published by the desk (publish_source 'desk') by `requested_by`
-        (only the approver takes an approval back) and sent_at is
-        NULL on all its rows, and while a publish or a rescind is open. The
-        engine checks the same again, and the 09:30 New York cutoff, when it
-        runs the row."""
+        day is published by the desk (publish_source 'desk') and sent_at is
+        NULL on all its rows, and while a publish or a rescind is open. Anyone
+        on QT takes back a desk approval; a day an override published only the
+        VP or the President (`is_approver`; Dom 2026-10-16). The engine checks
+        the same again, and the 09:30 New York cutoff, when it runs the row."""
         with self._transaction() as cursor:
             self._lock_day(cursor, portfolio_id, day)
             if len(self._cutoff_columns(cursor)) != len(CUTOFF_COLUMNS):
@@ -479,12 +520,13 @@ class PostgresDeskRepository:
                     f"({', '.join(sources)}), not approved by the desk; only a desk "
                     "approval can be taken back"
                 )
-            approver = max(published, key=lambda r: r["published_at"])["published_by"] or ""
-            if approver.strip().lower() != (requested_by or "").strip().lower():
-                raise DeskConflict(
-                    f"The {day.isoformat()} book was approved by {approver}; only they can "
-                    "take the approval back"
-                )
+            why = rescind_refusal(
+                approving_flow(self._day_commands(cursor, portfolio_id, day)),
+                day.isoformat(),
+                is_approver,
+            )
+            if why:
+                raise DeskConflict(why)
             if any(r["sent_at"] is not None for r in rows):
                 raise DeskConflict(
                     f"The {day.isoformat()} book has already been e-mailed; its approval "

@@ -1,5 +1,4 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { useAuth } from '../../adapters/react/AuthContext';
 import { useTheme } from '../../adapters/react/ThemeContext';
 import { useCommandPoll } from '../../adapters/react/useCommandPoll';
 import { DeskService } from '../../application/qt/deskService';
@@ -17,6 +16,7 @@ import {
   proposalKey,
   publishSourceOf,
   rescindBlockedReason,
+  sendBlockedReason,
   rescindConfirmText,
   serverClockOffsetMs,
   type ComparisonRow,
@@ -178,7 +178,6 @@ function AskedVsGiven({ rows, dark }: { rows: ComparisonRow[]; dark: boolean }) 
  */
 export function DeskPanel({ portfolioId, book, reloadBook }: DeskPanelProps) {
   const { theme } = useTheme();
-  const { user } = useAuth();
   const dark = theme === 'dark';
   const [state, setState] = useState<DeskState | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -188,6 +187,8 @@ export function DeskPanel({ portfolioId, book, reloadBook }: DeskPanelProps) {
   const [lastRescind, setLastRescind] = useState<DeskCommand | null>(null);
   // The inline "Take back the approval?" confirmation (no window.confirm: the app may run sandboxed).
   const [confirmRescind, setConfirmRescind] = useState(false);
+  // D-66: Approve sends the day's e-mail unless the desk unticks it (on by default).
+  const [sendEmail, setSendEmail] = useState(true);
   const [lastRequest, setLastRequest] = useState<DeskCommand | null>(null);
   const [overrideReason, setOverrideReason] = useState('');
   const [overrideOpen, setOverrideOpen] = useState(false);
@@ -293,9 +294,10 @@ export function DeskPanel({ portfolioId, book, reloadBook }: DeskPanelProps) {
   }
 
   const approveBlocked = approveBlockedReason(state, serverNow);
-  // Shown only while the desk's own, unsent approval can be taken back (before 09:30 New York).
-  // ... and only to the user who approved it.
-  const rescindAllowed = rescindBlockedReason(state, serverNow, user?.email ?? null) === null;
+  // Shown only while the desk's unsent approval can be taken back (before 09:30 New York), and on
+  // a day an override published only to the VP or the President.
+  const rescindAllowed = rescindBlockedReason(state, serverNow) === null;
+  const sendAllowed = sendBlockedReason(state, serverNow) === null;
   const overrideBlocked = overrideBlockedReason(state, serverNow);
   const askForB = () => {
     // C10: the desk insists on its positions (B): the VP or the President approves them.
@@ -337,7 +339,7 @@ export function DeskPanel({ portfolioId, book, reloadBook }: DeskPanelProps) {
             }
             onClick={() =>
               act(async () => {
-                const result = await DeskService.approve(portfolioId, [], 'Approved as proposed');
+                const result = await DeskService.approve(portfolioId, [], 'Approved as proposed', sendEmail);
                 setLastSave(result.save);
                 setLastPublish(result.command);
                 load();
@@ -347,10 +349,39 @@ export function DeskPanel({ portfolioId, book, reloadBook }: DeskPanelProps) {
           >
             {deskLock(state) === 'published' && publishSourceOf(state.published) === 'desk' ? 'Approved' : 'Approve'}
           </button>
+          {approveBlocked === null && (
+            <label className={`mt-1 flex items-center gap-1 text-xs ${muted}`}>
+              <input
+                type="checkbox"
+                data-testid="approve-email"
+                checked={sendEmail}
+                onChange={e => setSendEmail(e.target.checked)}
+              />
+              Send the e-mail
+            </label>
+          )}
           {approveBlocked && state.date && (
             <p className={`mt-1 max-w-xs text-right text-xs ${muted}`} data-testid="approve-blocked">
               {approveBlocked}
             </p>
+          )}
+          {sendAllowed && (
+            <button
+              type="button"
+              data-testid="send-button"
+              disabled={busy}
+              title="E-mail today's approved book now (the daily e-mail and CSV), once."
+              onClick={() =>
+                act(async () => {
+                  const result = await DeskService.send(portfolioId);
+                  setLastPublish(result.command);
+                  load();
+                })
+              }
+              className="mt-2 px-3 py-1 rounded border text-sm disabled:opacity-50"
+            >
+              Send the e-mail
+            </button>
           )}
           {rescindAllowed && !confirmRescind && (
             <button
@@ -416,7 +447,7 @@ export function DeskPanel({ portfolioId, book, reloadBook }: DeskPanelProps) {
           onAskForB={askForB}
           onApproveC={acknowledged =>
             act(async () => {
-              const result = await DeskService.acceptC(portfolioId, acknowledged);
+              const result = await DeskService.acceptC(portfolioId, acknowledged, sendEmail);
               setLastPublish(result.command);
               load();
             })
@@ -457,6 +488,7 @@ export function DeskPanel({ portfolioId, book, reloadBook }: DeskPanelProps) {
           key={proposalKey(state.books.qt_proposal)}
           portfolioId={portfolioId}
           proposal={state.books.qt_proposal}
+          sendEmail={sendEmail}
           onCancel={() => setEditing(false)}
           onStale={message => {
             setActionError(message);
@@ -493,7 +525,9 @@ export function DeskPanel({ portfolioId, book, reloadBook }: DeskPanelProps) {
             {' - '}
             {r.decision
               ? `${(r.decision.payload as { approved?: boolean }).approved ? 'APPROVED' : 'REJECTED'} by the ${r.decision.approver_role} (${r.decision.requested_by}), ${r.decision.status}${r.decision.message ? `: ${r.decision.message}` : ''}`
-              : 'awaiting the VP or the President'}
+              : r.status === 'refused' || r.status === 'failed'
+                ? 'not sent to the VP or the President'
+                : 'awaiting the VP or the President'}
           </p>
         ))}
         {!overrideOpen ? (

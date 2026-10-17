@@ -29,6 +29,7 @@ import {
   publishBlockedReason,
   publishSourceOf,
   rescindBlockedReason,
+  sendBlockedReason,
   rescindConfirmText,
   rescindOpen,
   formatCheckValue,
@@ -433,12 +434,14 @@ describe('rescind (the desk takes back its approval, C8)', () => {
     expect(rescindBlockedReason(approved, at(EDT(D, '09:45')))).toMatch(/e-mailed at 09:30 New York/);
   });
 
-  it('is open only to the user who approved', () => {
+  it('is open to anyone on QT for a desk approval, and only to the VP or President for an override', () => {
     const now = at(EDT(D, '09:12'));
-    expect(rescindBlockedReason(approved, now, 'd@x.com')).toBeNull();
-    expect(rescindBlockedReason(approved, now, 'D@X.COM')).toBeNull();
-    expect(rescindBlockedReason(approved, now, 'other@x.com')).toBe('Only d@x.com can take this approval back');
-    expect(rescindBlockedReason(approved, now, null)).toBe('Only d@x.com can take this approval back');
+    expect(rescindBlockedReason(approved, now)).toBeNull();
+    const override = { ...approved, published: { ...approved.published!, flow: 'override_b' } };
+    expect(rescindBlockedReason(override, now)).toBe(
+      'This day was published through an override: only the VP or the President can take it back',
+    );
+    expect(rescindBlockedReason({ ...override, viewerIsApprover: true }, now)).toBeNull();
   });
 
   it('follows the server clock across a DST change', () => {
@@ -602,11 +605,36 @@ const breached = risk({
   bindingTerm: 'L_g',
 });
 
-describe('the risk check (C9)', () => {
-  it('blocks a breach without an approved override', () => {
-    expect(riskBreachReason(breached)).toBe(
-      'The positions breach risk limits (L_g, cap): save within the limits or request an override',
+/** The engine's publish gate blocking on these caps (desk.proto 1.6.0). */
+const blocked = (terms: string[], over: Partial<DeskRisk> = {}) =>
+  risk({
+    withinLimits: false,
+    blocksPublish: true,
+    blockers: terms.map(term => ({ term, detail: `${term} over its cap` })),
+    ...over,
+  });
+
+describe('the risk check (C9, decision 5)', () => {
+  it("blocks only what the engine's gate blocks", () => {
+    expect(riskBreachReason(blocked(['L_g', 'CAP']))).toBe(
+      'The positions are over a cap (L_g over its cap; CAP over its cap): save within the caps or ask the VP or President to approve your positions',
     );
+    // A bound limit is reported, not a block.
+    expect(riskBreachReason(breached)).toBeNull();
+  });
+
+  it('never offers an override past the margin cap', () => {
+    expect(riskBreachReason(blocked(['MARGIN']))).toMatch(/the margin cap cannot be overridden/);
+    expect(riskBreachReason(blocked(['MARGIN'], { state: 'override', approvedOverride: true }))).toMatch(
+      /cannot be overridden/,
+    );
+  });
+
+  it("refuses an incomplete book with the engine's reason", () => {
+    const incomplete = risk({ state: 'incomplete', withinLimits: false, blocksPublish: true,
+      blockers: [{ term: 'incomplete', detail: "the day's book is incomplete; save again" }] });
+    expect(riskBreachReason(incomplete)).toBe("the day's book is incomplete; save again");
+    expect(riskBadge(incomplete)).toEqual({ tone: 'breach', label: 'Incomplete book — save again' });
   });
 
   it('passes no report, the model book, no book, an override and positions within the limits', () => {
@@ -634,10 +662,12 @@ describe('the risk check (C9)', () => {
 
   it('names the report in its badge', () => {
     expect(riskBadge(risk({}))).toEqual({ tone: 'ok', label: 'Within risk limits' });
-    expect(riskBadge(breached)).toEqual({ tone: 'breach', label: 'Outside risk limits — override required' });
+    expect(riskBadge(breached)).toEqual({ tone: 'ok', label: 'Within the caps — limits that bound are reported' });
+    expect(riskBadge(blocked(['L_g']))).toEqual({ tone: 'breach', label: 'Over a cap — needs the VP or President' });
+    expect(riskBadge(blocked(['MARGIN']))).toEqual({ tone: 'breach', label: 'Over the margin cap — cannot be overridden' });
     expect(riskBadge({ ...breached, state: 'override', approvedOverride: true })).toEqual({
       tone: 'waived',
-      label: 'Override approved — breaches waived',
+      label: 'Override approved — gross, net and per-name caps waived',
     });
     expect(riskBadge(risk({ state: 'model' }))).toEqual({ tone: 'ok', label: 'Model book — within limits' });
     expect(riskBadge({ unavailable: 'UNAVAILABLE' }).tone).toBe('muted');
@@ -757,15 +787,17 @@ describe('the A -> B -> C approval (C10)', () => {
     expect(fallback.stage).toBe('fallback');
   });
 
-  it('opens Approve C only on a choice whose C is within the limits', () => {
+  it("opens Approve C unless the engine's gate blocks C (decision 5)", () => {
     const choosing = { latestSave: save, publish: changed };
     expect(acceptCBlockedReason(deskState({ ...choosing, risk: cRisk({}) }))).toBeNull();
-    expect(acceptCBlockedReason(deskState({ ...choosing, risk: cRisk({ overLimitAfterRounding: 'R' }) }))).toMatch(
-      /over a limit \(R\)/,
+    // R over after rounding is reported, not a cap: C may be approved.
+    expect(acceptCBlockedReason(deskState({ ...choosing, risk: cRisk({ overLimitAfterRounding: 'R' }) }))).toBeNull();
+    const gate = (terms: string[]) => cRisk({ blocksPublish: true,
+      blockers: terms.map(term => ({ term, detail: `${term} over its cap` })) });
+    expect(acceptCBlockedReason(deskState({ ...choosing, risk: gate(['L_g']) }))).toMatch(
+      /^The engine's book \(C\) is over a cap \(L_g over its cap\): save within the caps or ask the VP or President/,
     );
-    expect(acceptCBlockedReason(deskState({ ...choosing,
-      risk: cRisk({ checks: [{ term: 'L_g', label: 'L', value: 9, max: 8, unit: 'multiple', status: 'over', detail: '' }] }) }))).toMatch(/L_g/);
-    expect(acceptCBlockedReason(deskState({ ...choosing, risk: cRisk({ refused: true }) }))).toMatch(/overlay refused/);
+    expect(acceptCBlockedReason(deskState({ ...choosing, risk: gate(['MARGIN']) }))).toMatch(/cannot be overridden/);
     expect(acceptCBlockedReason(deskState({ ...choosing, risk: { unavailable: 'DOWN' } }))).toMatch(/unavailable/);
     expect(acceptCBlockedReason(deskState({ latestSave: save, risk: cRisk({}) }))).toMatch(/no engine book/);
   });
@@ -783,3 +815,33 @@ describe('check usage', () => {
   });
 });
 
+
+
+describe('send (D-66: e-mail an approved, unsent day)', () => {
+  const approved = deskState({
+    deadlines: deadlinesFor(D),
+    sendTracked: true,
+    publish: command({ kind: 'publish', status: 'done' }),
+    published: { published_by: 'd@x.com', published_at: EDT(D, '09:10'), publish_source: 'desk', sent_at: null },
+  });
+
+  it('is offered at once for a day approved without the e-mail', () => {
+    const held = { ...approved, published: { ...approved.published!, email: false } };
+    expect(sendBlockedReason(held, at(EDT(D, '09:12')))).toBeNull();
+  });
+
+  it('waits for the 09:30 send when the e-mail was asked for, then offers it if it did not go', () => {
+    expect(sendBlockedReason(approved, at(EDT(D, '09:12')))).toBe('The e-mail goes out at 09:30 New York');
+    expect(sendBlockedReason(approved, at(EDT(D, '11:00')))).toBeNull();
+  });
+
+  it('is closed once sent, while a command is open, and for another day', () => {
+    const sent = { ...approved, published: { ...approved.published!, sent_at: EDT(D, '09:30') } };
+    expect(sendBlockedReason(sent, at(EDT(D, '11:00')))).toBe('The book has already been e-mailed');
+    const sending = { ...approved, publish: command({ kind: 'publish', status: 'running' }) };
+    expect(sendBlockedReason(sending, at(EDT(D, '11:00')))).toBe('An approval or a send is in progress');
+    expect(sendBlockedReason(deskState({ deadlines: deadlinesFor(D) }), at(EDT(D, '11:00')))).toBe(
+      'The day is not approved',
+    );
+  });
+});

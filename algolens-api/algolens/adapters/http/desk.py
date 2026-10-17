@@ -37,6 +37,7 @@ from algolens.application.qt.use_cases import (
     PublishDesk,
     RequestOverride,
     RescindDesk,
+    SendDesk,
     SaveDeskEdit,
 )
 from algolens.application.qt.settings_use_cases import (
@@ -157,7 +158,15 @@ def _approver_role(user):
 @handled
 def desk_state(portfolio_id):
     repo, agent, _settings = _desk_dependencies()
-    return jsonify(GetDeskState(repo, agent).execute(_portfolio(portfolio_id))), 200
+    viewer_is_approver = _approver_role(current_user()) is not None
+    return (
+        jsonify(
+            GetDeskState(repo, agent).execute(
+                _portfolio(portfolio_id), viewer_is_approver=viewer_is_approver
+            )
+        ),
+        200,
+    )
 
 
 @desk_bp.route("/<portfolio_id>/symbols", methods=["GET"])
@@ -202,6 +211,7 @@ def desk_approve(portfolio_id):
         payload.get("changes") or [],
         payload.get("reason"),
         current_user()["email"],
+        email=payload.get("email"),
     )
     return jsonify(result), 201
 
@@ -248,7 +258,20 @@ def desk_publish(portfolio_id):
         current_user()["email"],
         flow=payload.get("flow"),
         acknowledged=payload.get("acknowledged"),
+        email=payload.get("email"),
     )
+    return jsonify(result), 201
+
+
+@desk_bp.route("/<portfolio_id>/send", methods=["POST"])
+@jwt_required()
+@desk_enabled
+@desk_user
+@handled
+def desk_send(portfolio_id):
+    """D-66: e-mail today's approved, unsent book now."""
+    repo, agent, _settings = _desk_dependencies()
+    result = SendDesk(repo, agent).execute(_portfolio(portfolio_id), current_user()["email"])
     return jsonify(result), 201
 
 
@@ -259,8 +282,11 @@ def desk_publish(portfolio_id):
 @handled
 def desk_rescind(portfolio_id):
     repo, agent, _settings = _desk_dependencies()
+    user = current_user()
     result = RescindDesk(repo, agent).execute(
-        _portfolio(portfolio_id), current_user()["email"]
+        _portfolio(portfolio_id),
+        user["email"],
+        is_approver=_approver_role(user) is not None,
     )
     return jsonify(result), 201
 

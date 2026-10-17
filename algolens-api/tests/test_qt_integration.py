@@ -4,6 +4,7 @@ Opt-in: see tests/qt_fixture.py (ALGOLENS_TEST_DATABASE_URL, localhost only).
 The schema is new_algo_data's after migrations 021 (emulated), 022 and 023.
 """
 
+import json
 from datetime import date, datetime, timedelta, timezone
 
 import psycopg2
@@ -1019,9 +1020,10 @@ def _needs_029(factory):
         pytest.skip("kind 'rescind' is 029's")
 
 
-def engine_publishes(factory, publish_id, source="desk", sent_at=None, by="desk@x.com"):
+def engine_publishes(factory, publish_id, source="desk", sent_at=None, by="desk@x.com",
+                     result=None):
     """The engine runs a publish: the row done, live_run_metadata published."""
-    engine_finishes(factory, publish_id)
+    engine_finishes(factory, publish_id, **({"result": json.dumps(result)} if result else {}))
     _exec(
         factory,
         "INSERT INTO trading.live_run_metadata "
@@ -1101,14 +1103,48 @@ def test_rescind_refuses_what_is_not_an_unsent_desk_approval(qt_db):
     assert commands(qt_db) == []
 
 
-def test_only_the_approver_can_rescind_and_a_refusal_writes_nothing(qt_db):
+def test_anyone_on_qt_can_rescind_a_desk_approval(qt_db):
+    # Dom 2026-10-16: not only the approver (the route lets only the QT screen in).
     _needs_029(qt_db)
     _approve(qt_db)  # approved by desk@x.com
-    with pytest.raises(DeskConflict, match="approved by desk@x.com; only they"):
-        RescindDesk(desk_repo(qt_db), NullAgent()).execute(entry(qt_db), "other@x.com")
-    assert [c["kind"] for c in commands(qt_db)] == ["publish"]
-    RescindDesk(desk_repo(qt_db), NullAgent()).execute(entry(qt_db), "Desk@X.com")
+    RescindDesk(desk_repo(qt_db), NullAgent()).execute(entry(qt_db), "other@x.com")
     assert [c["kind"] for c in commands(qt_db)] == ["publish", "rescind"]
+
+
+def test_only_the_vp_or_president_can_rescind_an_override_day(qt_db):
+    _needs_029(qt_db)
+    seed_day(qt_db)
+    # The day an approved override published: its publish row carries flow override_b.
+    command = desk_repo(qt_db).insert_publish(QT, D2, "desk@x.com", {"flow": "override_b",
+                                                                    "after": 1})
+    engine_publishes(qt_db, command["id"], result={"published": True,
+                                                   "published_at": "2026-10-08T12:00:00+00:00"})
+    with pytest.raises(DeskConflict, match="only the VP or the President can take it back"):
+        RescindDesk(desk_repo(qt_db), NullAgent()).execute(entry(qt_db), "desk@x.com")
+    assert [c["kind"] for c in commands(qt_db)] == ["publish"]
+    RescindDesk(desk_repo(qt_db), NullAgent()).execute(entry(qt_db), "vp@x.com",
+                                                       is_approver=True)
+    assert [c["kind"] for c in commands(qt_db)] == ["publish", "rescind"]
+
+
+def test_send_needs_a_published_unsent_day_and_nothing_open(qt_db):
+    """D-66: the desk's Send inserts a publish row {"flow": "send"} under the day lock."""
+    _needs_029(qt_db)
+    seed_day(qt_db)
+    repo = desk_repo(qt_db)
+    with pytest.raises(DeskConflict, match="not approved"):
+        repo.insert_send(QT, D2, "desk@x.com")
+    command = PublishDesk(repo, NullAgent()).execute(entry(qt_db), "desk@x.com", email=False)
+    assert command["command"]["payload"] == {"email": False}
+    engine_publishes(qt_db, command["command"]["id"])
+    send = repo.insert_send(QT, D2, "other@x.com")
+    assert (send["kind"], send["payload"]) == ("publish", {"flow": "send"})
+    with pytest.raises(DeskConflict, match="already pending"):
+        repo.insert_send(QT, D2, "other@x.com")
+    engine_finishes(qt_db, send["id"])
+    _exec(qt_db, "UPDATE trading.live_run_metadata SET sent_at = now()")
+    with pytest.raises(DeskConflict, match="already been e-mailed"):
+        repo.insert_send(QT, D2, "other@x.com")
 
 
 def test_rescind_from_0930_new_york_writes_nothing(qt_db):

@@ -102,10 +102,17 @@ class DeskRepositoryPort(Protocol):
         {"flow": "override_b", "after": <decision id>} requested by the QT who
         asked, in one transaction. Returns (decision, publish or None)."""
 
-    def insert_rescind(self, portfolio_id: str, day: date, requested_by: str) -> Row:
+    def insert_send(self, portfolio_id: str, day: date, requested_by: str) -> Row:
+        """D-66: under the day lock, refuse (DeskConflict) unless the day is
+        published and unsent and nothing is open; insert {"flow": "send"}."""
+
+    def insert_rescind(
+        self, portfolio_id: str, day: date, requested_by: str, is_approver: bool = False
+    ) -> Row:
         """Under the day lock: refuse (DeskConflict) unless live_run_metadata
         says the day is published by the desk (publish_source 'desk') and not
-        sent, and while a publish or a rescind is open (C8)."""
+        sent, and while a publish or a rescind is open (C8). A day an override
+        published only the VP or the President (`is_approver`) takes back."""
 
     def insert_override_request(
         self, portfolio_id: str, day: date, requested_by: str, reason: str
@@ -188,10 +195,12 @@ class DeskAgentPort(Protocol):
     def get_desk_risk(self, portfolio_id: str, day: date) -> dict[str, Any]:
         """The risk report of the day's qt book (GetDeskRisk, desk.proto
         1.3.0, checks since 1.4.0), JSON-friendly with camelCase keys: state ('no_book', 'model',
-        'desk', 'override'), auditId, withinLimits, approvedOverride,
+        'desk', 'override', 'incomplete'), auditId, withinLimits, approvedOverride,
         breaches, m, bindingTerm, overLimitAfterRounding, overLimitByHold,
         refused, symbols, grossLeverage, netLeverage, marginCushion,
         equityToMargin (None when not recorded), limits and (1.4.0) checks:
         {term, label, value, max, unit, status, detail}, every limit with its
-        reading and max as trade-ngin reports it. Raises
+        reading and max as trade-ngin reports it, and (1.6.0) blocksPublish
+        and blockers: decision 5's publish gate as the engine decides it; state
+        'incomplete' is a qt book a desk or override run did not finish. Raises
         DeskRiskUnavailable when the call fails."""

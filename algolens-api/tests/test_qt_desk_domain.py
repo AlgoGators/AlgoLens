@@ -227,6 +227,7 @@ def _decision(parent, status):
         ([_request(1, "done", expires=None)], None),  # never e-mailed a link
         ([_request(1, "done"), _decision(1, "pending")], None),
         ([_request(1, "done"), _decision(1, "done")], None),
+        ([_request(1, "done"), _decision(1, "refused")], None),  # the link works once (D-75)
         ([_request(1, "done"), _decision(1, "failed")], 1),  # may be decided again
         ([_request(1, "refused"), _request(2, "failed")], None),
     ],

@@ -33,8 +33,8 @@ Start the agent in `sim/` (`cd sim && claude`, or `cd sim && codex`) so it picks
 
 | Login | Role | Can |
 |---|---|---|
-| `qt@sim.local` | QT desk | edit the day's book, approve, rescind its own approval, request an override |
-| `vp@sim.local` | VP (approver) | approve or reject an override request (from the e-mailed link) |
+| `qt@sim.local` | QT desk | edit the day's book, approve, rescind a desk approval, request an override |
+| `vp@sim.local` | VP (approver) | approve or reject an override request (from the e-mailed link); rescind a day an override published |
 | `president@sim.local` | President (approver) | the same as the VP; also gets the alerts |
 
 An override needs **either** the VP **or** the President, not both. Nobody may decide their own
@@ -53,6 +53,7 @@ promotion or a demotion takes effect on the next click.
 | until 09:30 | The QT edits, saves, requests overrides and **approves**. An approval freezes the day and sends nothing yet. |
 | **09:30** | **Send.** Every approved day is e-mailed (the daily report and CSV). An approval made between 09:30 and 10:00 is sent at once. |
 | **10:00** | **Fallback.** If the day is not approved, the model's book A is published and sent, any unapproved desk edits are thrown away, and the President is alerted: "QT did not approve … the model's book was sent at 10:00". |
+| a future day | A book dated after today (New York) takes edits but cannot be approved, and no override can be requested for it, until its own day (D-43). |
 | after 10:00 | Approving is refused: "Approval of the <day> book closed at 10:00 New York…". Saving, override requests and decisions are refused because the day is published. |
 
 The moment that counts for an approval is **when Approve was pressed** (the row's `created_at`),
@@ -69,16 +70,16 @@ working at 10:00.
 
 Pressing **Approve** on B starts the pipeline A → B → C:
 
-1. **C equals B and is within every limit:** the day is **auto-approved**. Before 09:30 it
+1. **C equals B and is within the caps:** the day is **auto-approved**. Before 09:30 it
    waits for the 09:30 send; from 09:30 it is sent at once.
 2. **C differs from B** (any symbol, even when only a trading rule moved it) **or is outside a
    limit:** nothing is approved. The desk shows B next to C, the symbols that moved and what
    moved them. The QT then chooses one of two things:
    - **Approve C.** The QT ticks "I approve C knowing it differs". This works only while C is
-     still the latest saved book, and only if C itself is over no limit. A limit that **bound**
-     (C was cut to fit it) is fine; a check that is **over**, or a refused overlay, is not.
+     still the latest saved book, and only if C itself is over no **cap** (decision 5, below). A
+     limit that **bound** (C was cut to fit it) is fine.
    - **Insist on B: request an override.** The request e-mails the VP and the President a link
-     (it works once and expires after 48 hours). Either one approves, and then the engine books
+     (it works once and expires at 10:00 New York that day, the approval cutoff). Either one approves, and then the engine books
      **B exactly as asked** and publishes it. A rejection publishes nothing; the QT can still
      approve C until 10:00.
 
@@ -92,6 +93,17 @@ nothing.
 - **Trading rules (not a breach, but still a difference from B):** `sign_close` (no flip from
   long to short in one day), `rounding`, `buffer`, `search`, `hold`.
 
+### What blocks an approval: the caps (decision 5, 2026-10-16)
+
+Only the final book over a **cap** blocks: gross leverage (L_g), net leverage (L_n), the
+per-name cap (CAP) and the fund's margin cap (MARGIN). A desk book whose caps were not measured,
+or whose overlay refused, is blocked too, and so is an **incomplete** book (a desk or override
+run did not finish writing it, for example an override the margin cap refused): save again.
+Everything else (a limit that bound, R, R_jump, R_shock, the trim, every trading rule) is shown
+and never blocks. The VP or the President may approve a book past gross, net and per-name; **no
+one can approve a book past the margin cap**. The engine decides this (`GetDeskRisk`'s
+`blocks_publish` and `blockers`) and AlgoLens shows it; every approval path applies it.
+
 ### The risk checks the desk sees (C9, C11)
 
 Each check shows the book's reading against its max, with a status: within, bound, over, or not
@@ -102,9 +114,12 @@ measured. trade-ngin supplies the labels, units and maxes; AlgoLens hardcodes no
 - **L_g, L_n:** gross and net leverage.
 - **The per-name cap and the trim.**
 - **MARGIN, the fund's hard cap (C11):** initial margin may be at most **100% of the fund's
-  equity after today's transaction costs**. The engine refuses a desk or override book over the
-  cap outright, even one the VP or the President approved. The day stays unapproved, and at
-  10:00 the model's book goes out.
+  equity after today's transaction costs**. An override request over the cap is refused when it
+  is made, from the margin data in the database (each contract's initial margin × the net
+  quantity asked for), so nothing is e-mailed; an approval is measured again and refused before
+  the engine runs (decision 10). The engine also refuses a desk or override book over the cap
+  outright, even one the VP or the President approved. The day stays unapproved, and at 10:00
+  the model's book goes out.
 - **Multipliers (shown, not limits):** the overlay's m, the risk scale, and each strategy's IDM
   and FDM. The IDM and FDM are configured settings, not estimated per run.
 
@@ -112,12 +127,21 @@ measured. trade-ngin supplies the labels, units and maxes; AlgoLens hardcodes no
 spread and market impact. They are stored with each execution and reduce the day's P&L and
 equity.
 
+## Approve with or without the e-mail; Send (D-66)
+
+Approve has a **Send the e-mail** box, ticked by default. Untick it and the day is approved but
+nothing is e-mailed: not at 09:30, not at once after 09:30. The desk then sends today's book with
+**Send the e-mail** (shown once the day is approved and unsent). It goes once; a past day is never
+sent late. An override's approval always e-mails.
+
 ## Taking an approval back: Rescind (C8)
 
-The QT who approved can rescind the approval **before 09:30**, if it hasn't been sent yet. The
-day is then open again: edit, then approve again. A rescind is refused from 09:30 on, and
-refused by anyone other than the approver. A fallback, a sent day and a past day cannot be
-rescinded.
+Anyone on QT can rescind a desk approval **before 09:30**, if it hasn't been sent yet. A day
+published through an approved override can be rescinded only by the VP or the President (Dom,
+2026-10-16). The day is then open again: edit, then approve again. After an override's day is
+rescinded, its booking cannot simply be approved again: save the book you want, or ask for a
+new override. A rescind is refused from 09:30 on. A fallback, a sent day and a past day cannot
+be rescinded.
 
 ## Settings the desk may change
 
@@ -152,7 +176,8 @@ fallback happens.
 | 5 | `clock 10:01`, `pass` | nothing | fallback: A is published and sent; the President's alert is in Mailpit |
 | 6 | after 5, or `clock 10:02` | QT: approve | refused: approval closed at 10:00 |
 | 7 | `clock 09:10` | QT: approve, then rescind before 09:30 | the day is open again; rescind at 09:31 is refused |
-| 8 | `clock 09:10` | QT: set quantities far beyond the fund's money (thousands of contracts), approve; VP approves the override | refused by the fund cap (MARGIN), even with the VP's approval; the fallback sends A at 10:00 |
+| 9 | `clock 09:05` | scenario 3, then QT: rescind | refused: only the VP or the President; the VP rescinds it; QT's plain Approve of the booking is refused |
+| 8 | `clock 09:10` | QT: set ZN to 200 (its margin alone is about $503k), request an override | the request is refused by the fund cap (MARGIN) with the amounts, and no e-mail goes to the VP or the President; save within the cap and approve, or the fallback sends A at 10:00 |
 
 ## When something looks wrong
 

@@ -228,8 +228,10 @@ def request_matches(request: Mapping[str, Any], current_sha256: str | None) -> b
     return isinstance(recorded, str) and recorded == current_sha256
 
 
-# A decision in one of these states settles its request (C2).
-DECIDING_STATUSES = (PENDING, RUNNING, DONE)
+# A decision in one of these states settles its request (C2). The link works once
+# (D-75): a decision the engine refused (the margin cap, say) uses it up too; a failed
+# one (nothing was booked: try again) does not.
+DECIDING_STATUSES = (PENDING, RUNNING, DONE, REFUSED)
 
 
 def open_override_request(
@@ -317,3 +319,67 @@ def three_books(
             }
         )
     return rows
+
+
+# The C10 flow of an override's approval (payload.flow of its publish row).
+OVERRIDE_FLOW = "override_b"
+
+
+def approving_flow(commands: Iterable[Mapping[str, Any]]) -> str | None:
+    """The C10 flow of the publish row that approved the day: the newest done
+    publish whose result carries published_at (a rescinded approval is older).
+    "override_b" for an override's approval; None for a plain publish (or no
+    approval), else "auto" or "accept_c"."""
+    approving = [
+        c
+        for c in commands
+        if c.get("kind") == PUBLISH
+        and c.get("status") == DONE
+        and isinstance(c.get("result"), Mapping)
+        and "published_at" in c["result"]
+    ]
+    if not approving:
+        return None
+    payload = max(approving, key=lambda c: c["id"]).get("payload")
+    return payload.get("flow") if isinstance(payload, Mapping) else None
+
+
+def approving_email(commands: Iterable[Mapping[str, Any]]) -> bool | None:
+    """D-66: whether the approval of the day asked for its e-mail (payload.email is
+    not false), None when the day is not approved by a publish row."""
+    approving = [
+        c
+        for c in commands
+        if c.get("kind") == PUBLISH
+        and c.get("status") == DONE
+        and isinstance(c.get("result"), Mapping)
+        and "published_at" in c["result"]
+    ]
+    if not approving:
+        return None
+    payload = max(approving, key=lambda c: c["id"]).get("payload")
+    return not (isinstance(payload, Mapping) and payload.get("email") is False)
+
+
+def require_email_choice(value: Any) -> bool:
+    """D-66: Approve's "send the e-mail" choice, true when absent."""
+    if value is None:
+        return True
+    if not isinstance(value, bool):
+        raise DeskRuleError("email must be true or false")
+    return value
+
+
+# D-66: the flow of a publish row that e-mails an approved, unsent day (the desk's Send).
+SEND_FLOW = "send"
+
+
+def rescind_refusal(flow: str | None, day_iso: str, is_approver: bool) -> str | None:
+    """Who may take an approval back (Dom 2026-10-16): anyone on QT a desk
+    approval; only the VP or the President a day an override published."""
+    if flow == OVERRIDE_FLOW and not is_approver:
+        return (
+            f"The {day_iso} book was published through an override the VP or the "
+            "President approved; only the VP or the President can take it back"
+        )
+    return None

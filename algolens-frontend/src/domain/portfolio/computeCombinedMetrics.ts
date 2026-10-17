@@ -144,18 +144,15 @@ export function sortinoRatioFromCurve(
 /**
  * Information ratio: mean active return over its own standard deviation, annualised.
  *
- * The yardstick is the `benchmark` stream -- what the algorithm would have compounded
- * to with no human edits. That is the only benchmark series the platform actually
- * produces, and it is the comparison AlphaAttribution already treats as the answer to
- * "did the desk add value". `system` is deliberately not the yardstick: position
- * buffering anchors each day's target on yesterday's actual position, so `system`
- * drifts along with the desk's own past decisions.
+ * The yardstick is the `system` stream -- the model's book of the same portfolio, the
+ * comparison AlphaAttribution draws as the desk's value (D-3, HD 2026-10-16). It replaces
+ * the `benchmark` stream of the retired model twin, which the platform never wrote (D-1).
  *
  * Returns null rather than a number whenever it cannot be computed honestly. There are
  * four such cases, and each of them used to produce a plausible-looking figure:
  *
- *   - a selected strategy carries no benchmark stream (the pre-migration state, and
- *     the reason this must not silently sum a partial benchmark against a full book)
+ *   - a selected strategy carries no model book (`system`) stream (the reason this must
+ *     not silently sum a partial yardstick against a full book)
  *   - fewer than three dates overlap, so there is no dispersion to divide by
  *   - tracking error is zero. This is production today: nothing writes edits into
  *     `qt`, so the two curves are identical. Reporting 0.00 would read as "the desk
@@ -169,7 +166,7 @@ export function informationRatioVsBenchmark(
   bookCurve: { date: string; value: number }[],
   selected: Strategy[]
 ): number | null {
-  const streams = selected.map(s => s.equityByStream?.benchmark);
+  const streams = selected.map(s => s.equityByStream?.system);
   if (streams.some(stream => !stream || stream.length === 0)) return null;
 
   const benchmarkByDate = new Map<string, number>();
