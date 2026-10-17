@@ -28,6 +28,7 @@ import { Card, SectionTitle } from '../ScreenFrame';
 import { DeskService } from '../../application/qt/deskService';
 import type { SettingsLocks } from '../../infrastructure/api/deskApi';
 import { parseLockPath } from '../../domain/qt/settings';
+import { choiceKey, type InvestorLinks } from '../../domain/investor/investor';
 
 const SCREEN_HINTS: Record<Screen, string> = {
   member: 'Portfolios, strategies, incubation',
@@ -417,6 +418,7 @@ export function AdminHome() {
         </p>
       </div>
       <UsersSection />
+      <InvestorBooksSection />
       <ReportsSection />
       <SettingsLocksSection />
     </div>
@@ -525,6 +527,103 @@ function SettingsLocksSection() {
             Lock
           </button>
         </div>
+      </Card>
+    </div>
+  );
+}
+
+/**
+ * D-25 (decision 13): which book each investor follows, their portfolio's QT book or a model
+ * book; with none set an investor follows the QT book.
+ */
+function InvestorBooksSection() {
+  const { theme } = useTheme();
+  const dark = theme === 'dark';
+  const muted = dark ? 'text-gray-400' : 'text-gray-500';
+  const select = `px-2 py-1 rounded border text-sm ${
+    dark ? 'border-gray-700 bg-gray-800 text-white' : 'border-gray-300 bg-white text-gray-900'
+  }`;
+  const [links, setLinks] = useState<InvestorLinks | null>(null);
+  const [users, setUsers] = useState<AdminUser[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState<number | null>(null);
+
+  const load = () =>
+    Promise.all([InvestorService.investorLinks(), ScreenService.users()])
+      .then(([l, u]) => {
+        setLinks(l);
+        setUsers(u);
+      })
+      .catch(err => setError(errorText(err)));
+  useEffect(() => {
+    load();
+  }, []);
+
+  const investors = (users ?? []).filter(u => u.screens.includes('investor'));
+  const set = async (userId: number, key: string) => {
+    const choice = links?.choices.find(c => choiceKey(c) === key);
+    if (!choice) return;
+    setSaving(userId);
+    setError(null);
+    try {
+      await InvestorService.setInvestorLink(userId, choice.portfolio_id, choice.book);
+      await load();
+    } catch (err) {
+      setError(errorText(err));
+    } finally {
+      setSaving(null);
+    }
+  };
+
+  return (
+    <div data-testid="investor-books">
+      <SectionTitle>Investor books</SectionTitle>
+      <Card>
+        <p className={`text-sm mb-3 ${muted}`}>
+          Each investor sees only the portfolio and book they follow: its QT book (the desk's
+          edits) or a model book. With none set, an investor follows the QT book.
+        </p>
+        {links && !links.stored && (
+          <p className="text-sm mb-3 text-amber-500">
+            Investor books are not in the database yet (AlgoLens migration 005): every investor
+            follows the QT book until it is.
+          </p>
+        )}
+        {error && <p className="text-sm mb-3 text-red-500">{error}</p>}
+        {investors.length === 0 ? (
+          <p className={`text-sm ${muted}`}>No user has the Investor screen.</p>
+        ) : (
+          <table className="w-full text-sm">
+            <tbody>
+              {investors.map(user => {
+                const link = links?.links.find(l => l.user_id === user.id);
+                return (
+                  <tr key={user.id} className={`border-t ${dark ? 'border-gray-800' : 'border-gray-100'}`}>
+                    <td className="py-1.5 pr-4">{user.email}</td>
+                    <td className="py-1.5 text-right">
+                      <select
+                        aria-label={`Book ${user.email} follows`}
+                        className={select}
+                        disabled={!links?.stored || saving === user.id}
+                        value={link ? choiceKey(link) : ''}
+                        onChange={e => set(user.id, e.target.value)}
+                      >
+                        <option value="" disabled>
+                          The QT book (default)
+                        </option>
+                        {(links?.choices ?? []).map(choice => (
+                          <option key={choiceKey(choice)} value={choiceKey(choice)}>
+                            {choice.label}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
       </Card>
     </div>
   );

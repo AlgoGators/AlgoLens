@@ -1,5 +1,10 @@
 import type { Screen } from '../../domain/identity/screens';
-import type { InvestorPortfolio, InvestorReport } from '../../domain/investor/investor';
+import type {
+  InvestorBookChoice,
+  InvestorLinks,
+  InvestorPortfolio,
+  InvestorReport,
+} from '../../domain/investor/investor';
 import { apiDownload, apiRequest } from './apiRequest';
 
 export interface AdminUser {
@@ -32,6 +37,13 @@ export const InvestorApi = {
     apiRequest<{ portfolios: InvestorPortfolio[] }>('GET', '/api/investor/allocation').then(r => r.portfolios),
   reports: () =>
     apiRequest<{ reports: InvestorReport[] }>('GET', '/api/investor/reports').then(r => r.reports),
+  /** D-25: who follows which book, and what can be followed (admin). */
+  investorLinks: () => apiRequest<InvestorLinks>('GET', '/api/admin/investor-links'),
+  setInvestorLink: (userId: number, portfolioId: string, book: string) =>
+    apiRequest<InvestorBookChoice>('PUT', `/api/admin/investors/${userId}/portfolio`, {
+      portfolio_id: portfolioId,
+      book,
+    }),
   downloadReport: (report: InvestorReport) =>
     apiDownload(`/api/investor/reports/${report.id}/download`, report.filename),
 
