@@ -78,7 +78,8 @@ jobs:
         # this green until the test-bearing PRs land, then it enforces automatically.
         run: |
           if [ -d algolens-api/tests ]; then
-            cd algolens-api && python -m pytest tests -q
+            # D-59: a coverage gate (87% on 2026-10-17, with the integration database).
+            cd algolens-api && python -m pytest tests -q --cov=algolens --cov-fail-under=85
           else
             echo "::warning::algolens-api/tests not present yet — merge the test PRs to enable this gate"
           fi
@@ -105,5 +106,5 @@ jobs:
       - name: Build
         run: npm run build
 
-      - name: Test
-        run: npm test
+      - name: Test (with the coverage gate, D-59)
+        run: npm run test:coverage

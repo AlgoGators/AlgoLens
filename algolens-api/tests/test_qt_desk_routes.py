@@ -452,3 +452,58 @@ def test_a_deleted_user_cannot_look_up_or_decide(client, desk, screen_access):
     assert page.status_code == 403 and "no longer exists" in page.get_json()["error"]
     assert decided.status_code == 403
     assert not any(r["kind"] == "override_decision" for r in desk[0].rows)
+
+
+# D-59: every desk route, not 4 of 13, is checked for the flag, the qt screen and the
+# desk-editable portfolio.
+P, M = "QT_CONSERVATIVE_PORTFOLIO", "QT_CONSERVATIVE_MODEL_PORTFOLIO"
+SAVE = {"changes": [{"symbol": "ZC.v.0", "quantity": 1, "expected": 3}], "reason": "r"}
+PORTFOLIO_ROUTES = [
+    ("get", "/portfolio/desk/{p}", None),
+    ("get", "/portfolio/desk/{p}/symbols", None),
+    ("post", "/portfolio/desk/{p}/save", SAVE),
+    ("post", "/portfolio/desk/{p}/approve", SAVE),
+    ("post", "/portfolio/desk/{p}/override-request", {"reason": "r"}),
+    ("post", "/portfolio/desk/{p}/publish", {}),
+    ("post", "/portfolio/desk/{p}/send", {}),
+    ("post", "/portfolio/desk/{p}/rescind", {}),
+    ("get", "/portfolio/desk/{p}/settings", None),
+    ("post", "/portfolio/desk/{p}/settings", {"overrides": {}, "reason": "r"}),
+    ("post", "/portfolio/desk/{p}/settings/revert", {"version": 1, "reason": "r"}),
+]
+OTHER_ROUTES = [
+    ("get", "/portfolio/desk/commands/1", None),
+    ("post", "/portfolio/desk/approval", {"token": "t"}),
+    ("post", "/portfolio/desk/approval/decide", {"token": "t", "approved": True}),
+]
+ALL_ROUTES = [(m, path.format(p=P), body) for m, path, body in PORTFOLIO_ROUTES] + OTHER_ROUTES
+
+
+def _call(client, method, path, body, headers):
+    if method == "get":
+        return client.get(path)
+    return client.post(path, json=body, headers=headers)
+
+
+@pytest.mark.parametrize("method, path, body", ALL_ROUTES)
+def test_every_desk_route_is_404_with_the_desk_off(client, desk, monkeypatch, method, path, body):
+    monkeypatch.setenv("QT_DESK_ENABLED", "false")
+    assert _call(client, method, path, body, _login(client)).status_code == 404
+    assert desk[0].rows == []
+
+
+@pytest.mark.parametrize("method, path, body",
+                         [(m, p, b) for m, p, b in ALL_ROUTES if "/approval" not in p])
+def test_every_desk_route_needs_the_qt_screen(client, desk, method, path, body):
+    # An investor (no qt screen) is refused before anything is read or written. The approval
+    # routes admit the VP and the President without the screen; test_approval_refusals covers them.
+    assert _call(client, method, path, body, _login(client, role="investor")).status_code == 403
+    assert desk[0].rows == []
+
+
+@pytest.mark.parametrize("method, path, body",
+                         [(m, path.format(p=M), b) for m, path, b in PORTFOLIO_ROUTES if m == "post"])
+def test_every_write_route_refuses_a_book_the_desk_may_not_edit(client, desk, method, path, body):
+    response = _call(client, method, path, body, _login(client))
+    assert response.status_code == 403, response.get_json()
+    assert desk[0].rows == []
