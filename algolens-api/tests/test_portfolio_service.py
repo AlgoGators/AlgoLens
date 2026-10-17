@@ -1,9 +1,11 @@
 """Tests for the data-driven strategy registry and the extracted portfolio service.
 
-The registry tests force the DB-unavailable path (so they run without a database)
-and assert the built-in fallback. The service tests exercise the pure transform /
+The registry test forces the DB-unavailable path (so it runs without a database)
+and asserts it is an error (D-23: there is no built-in fallback). The service tests exercise the pure transform /
 computation helpers with hand-built rows -- no DB needed.
 """
+
+import pytest
 
 from services import strategy_registry as reg
 from services import portfolio_service as svc
@@ -12,44 +14,17 @@ from services import portfolio_service as svc
 # --- registry ----------------------------------------------------------------
 
 
-def test_registry_falls_back_to_default_on_db_error(monkeypatch):
-    # Simulate the DB being unavailable / migration not applied.
+def test_registry_read_failure_is_an_error(monkeypatch):
+    # D-23: no built-in default stands in for the registry (it hid the QT books).
     def boom():
         raise ValueError("no db configured")
 
     monkeypatch.setattr(reg, "get_db_connection", boom)
 
-    registry = reg.get_registry()
-    assert [s["id"] for s in registry] == ["trendfollowing"]
-    assert registry[0]["strategy_type"] == "LIVE_TREND_FOLLOWING"
-    assert registry[0]["initial_equity"] == 500000.0
-
-
-def test_every_registry_entry_names_a_portfolio(monkeypatch):
-    """A registry entry without a portfolio is a correctness bug, not a default.
-
-    The trading tables are keyed by portfolio as well as strategy, and
-    LIVE_TREND_FOLLOWING exists under more than one. An entry that names only the
-    strategy would make every downstream query ambiguous, silently blending
-    portfolios rather than failing. See AlgoGators/AlgoLens#29.
-    """
-    monkeypatch.setattr(
-        reg, "get_db_connection", lambda: (_ for _ in ()).throw(ValueError())
-    )
-
-    for strategy in reg.get_registry():
-        assert strategy.get("portfolio_id"), (
-            f"registry entry {strategy['id']!r} does not name a portfolio_id"
-        )
-
-
-def test_get_strategy_config_known_and_unknown(monkeypatch):
-    monkeypatch.setattr(
-        reg, "get_db_connection", lambda: (_ for _ in ()).throw(ValueError())
-    )
-
-    assert reg.get_strategy_config("trendfollowing")["name"] == "Trend Following"
-    assert reg.get_strategy_config("does-not-exist") is None
+    with pytest.raises(reg.RegistryUnavailable):
+        reg.get_registry()
+    with pytest.raises(reg.RegistryUnavailable):
+        reg.get_strategy_config("trendfollowing")
 
 
 # --- pure computation helpers ------------------------------------------------
