@@ -16,6 +16,7 @@ import {
   proposalKey,
   publishSourceOf,
   rescindBlockedReason,
+  runStatusMessage,
   sendBlockedReason,
   rescindConfirmText,
   serverClockOffsetMs,
@@ -438,6 +439,12 @@ export function DeskPanel({ portfolioId, book, reloadBook }: DeskPanelProps) {
       </div>
 
       {dayStatus && state.deadlines && <DayBanner status={dayStatus} nowMs={serverNow} dark={dark} />}
+
+      {runStatusMessage(state.runStatus) && (
+        <p data-testid="run-status" className={`mt-3 text-sm ${muted}`}>
+          {runStatusMessage(state.runStatus)}
+        </p>
+      )}
 
       {state.seeded && (
         <ApprovalPipeline

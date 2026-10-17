@@ -14,6 +14,7 @@ back on, so a failed call raises DeskRiskUnavailable and the caller decides
 """
 
 import logging
+from datetime import timezone
 
 import grpc
 
@@ -108,6 +109,23 @@ def risk_report(reply):
     }
 
 
+def _timestamp(reply, field):
+    if not reply.HasField(field):
+        return None
+    return getattr(reply, field).ToDatetime(tzinfo=timezone.utc).isoformat()
+
+
+def run_status(reply):
+    """A RunStatus reply as the desk page reads it (D-56)."""
+    name = desk_pb2.RunState.Name(reply.state)
+    return {
+        "state": name.removeprefix("RUN_STATE_").lower(),
+        "startedAt": _timestamp(reply, "started_at"),
+        "finishedAt": _timestamp(reply, "finished_at"),
+        "message": reply.message,
+    }
+
+
 class DeskClient:
     def __init__(self, address, timeout=DEFAULT_TIMEOUT_SECONDS, channel_factory=None):
         self.address = address
@@ -198,6 +216,24 @@ class DeskClient:
             audit_id=int(command["id"]),
         )
         return self._call("Rescind", request, command["id"])
+
+    def get_run_status(self, portfolio_id, day):
+        """D-56: the model run's state (GetRunStatus); raises DeskRiskUnavailable when the
+        engine cannot be asked, like GetDeskRisk."""
+        request = desk_pb2.RunStatusRequest(portfolio_id=portfolio_id, date=_day(day))
+        try:
+            stub = desk_pb2_grpc.DeskServiceStub(self.channel_factory(self.address))
+            reply = stub.GetRunStatus(request, timeout=self.timeout)
+        except grpc.RpcError as exc:
+            log = logger.error if is_version_mismatch(exc) else logger.warning
+            log("[DESK] GetRunStatus %s %s failed: %s", portfolio_id, _day(day), describe_rpc_error(exc))
+            raise DeskRiskUnavailable(status_name(exc)) from exc
+        except Exception as exc:
+            logger.error(
+                "[DESK] GetRunStatus %s %s failed: %s", portfolio_id, _day(day), exc, exc_info=True
+            )
+            raise DeskRiskUnavailable("error") from exc
+        return run_status(reply)
 
     def get_desk_risk(self, portfolio_id, day):
         request = desk_pb2.DeskRiskRequest(portfolio_id=portfolio_id, date=_day(day))

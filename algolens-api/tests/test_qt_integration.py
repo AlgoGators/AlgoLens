@@ -296,6 +296,9 @@ class NullAgent:
     def record_decision(self, decision, token):
         return self._lost(decision, token)
 
+    def get_run_status(self, portfolio_id, day):
+        return {"state": "succeeded", "startedAt": None, "finishedAt": None, "message": ""}
+
     def get_desk_risk(self, portfolio_id, day):
         # Not a command: the risk report of the model's book, inside the limits, so the
         # approval gate (C9) passes; the gate itself is tested against fakes.

@@ -9,7 +9,7 @@ user's action.
 
 import logging
 from collections.abc import Mapping
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Any
 
 from algolens.application.qt.ports import (
@@ -182,6 +182,14 @@ def _refuse_future_day(day, now: datetime, action: str) -> None:
         )
 
 
+def _run_status(agent: DeskAgentPort, portfolio_id: str, day) -> dict[str, Any]:
+    """D-56: the engine's word on the model run of `day`, or {"unavailable": <reason>}."""
+    try:
+        return agent.get_run_status(portfolio_id, day)
+    except DeskRiskUnavailable as exc:
+        return {"unavailable": exc.reason}
+
+
 def _desk_risk(agent: DeskAgentPort, portfolio_id: str, day) -> dict[str, Any]:
     """The engine's risk report of the day's qt book (contract C9), or
     {"unavailable": <reason>} when it cannot be read."""
@@ -320,6 +328,10 @@ class GetDeskState:
             # {"unavailable": reason}; None before the first book.
             "risk": None,
         }
+        # D-56: today's model run as the engine reports it (running, failed, refused), so the
+        # page says why there is no book yet instead of inferring it.
+        today = date.fromisoformat(state["deadlines"]["today"])
+        state["runStatus"] = {"date": today.isoformat(), **_run_status(self.agent, portfolio_id, today)}
         if day is None:
             return state
 

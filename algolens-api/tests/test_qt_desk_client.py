@@ -58,6 +58,11 @@ class RecordingDesk(desk_pb2_grpc.DeskServiceServicer):
     def GetDeskRisk(self, request, context):
         return self._reply("GetDeskRisk", request, self.risk, context)
 
+    def GetRunStatus(self, request, context):
+        reply = desk_pb2.RunStatus(state=desk_pb2.RUN_STATE_REFUSED, message="risk_refusal: R over")
+        reply.started_at.FromJsonString("2026-10-08T10:47:00Z")
+        return self._reply("GetRunStatus", request, reply, context)
+
 
 @pytest.fixture
 def desk_server():
@@ -255,3 +260,18 @@ def test_get_desk_risk_maps_an_incomplete_book(desk_server):
         blockers=[desk_pb2.RiskBreach(term="incomplete", detail="save again")])
     report = DeskClient(address).get_desk_risk("QT_CONSERVATIVE_PORTFOLIO", date(2026, 10, 8))
     assert report["state"] == "incomplete" and report["blocksPublish"] is True
+
+
+def test_get_run_status_maps_the_state_and_times(desk_server):
+    # D-56: the desk page shows the model run's state from the engine, not an inference.
+    servicer, address = desk_server
+    status = DeskClient(address).get_run_status("P", date(2026, 10, 8))
+    assert status == {"state": "refused", "startedAt": "2026-10-08T10:47:00+00:00",
+                      "finishedAt": None, "message": "risk_refusal: R over"}
+    name, request = servicer.requests[-1]
+    assert (name, request.portfolio_id, request.date) == ("GetRunStatus", "P", "2026-10-08")
+
+
+def test_get_run_status_raises_when_the_engine_is_unreachable():
+    with pytest.raises(DeskRiskUnavailable):
+        DeskClient("127.0.0.1:1", timeout=0.5).get_run_status("P", date(2026, 10, 8))

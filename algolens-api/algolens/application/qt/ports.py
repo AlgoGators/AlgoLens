@@ -192,6 +192,12 @@ class DeskAgentPort(Protocol):
     def rescind(self, command: Row) -> str:
         ...
 
+    def get_run_status(self, portfolio_id: str, day: date) -> dict[str, Any]:
+        """D-56: the model run's state for the book and day (GetRunStatus): state
+        ('not_started', 'running', 'succeeded', 'refused', 'failed'), startedAt, finishedAt
+        (ISO or None) and message. Raises DeskRiskUnavailable when it cannot be read."""
+        ...
+
     def get_desk_risk(self, portfolio_id: str, day: date) -> dict[str, Any]:
         """The risk report of the day's qt book (GetDeskRisk, desk.proto
         1.3.0, checks since 1.4.0), JSON-friendly with camelCase keys: state ('no_book', 'model',
