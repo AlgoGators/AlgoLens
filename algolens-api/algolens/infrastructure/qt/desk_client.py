@@ -13,6 +13,7 @@ back on, so a failed call raises DeskRiskUnavailable and the caller decides
 (the desk state shows it; the approval gate refuses, failing closed).
 """
 
+import json
 import logging
 from datetime import timezone
 
@@ -216,6 +217,25 @@ class DeskClient:
             audit_id=int(command["id"]),
         )
         return self._call("Rescind", request, command["id"])
+
+    def check_settings(self, portfolio_id, overrides):
+        """HD D-17: CheckSettings; raises DeskRiskUnavailable when the engine cannot be asked."""
+        request = desk_pb2.SettingsCheckRequest(
+            portfolio_id=portfolio_id, overrides_json=json.dumps(overrides, sort_keys=True)
+        )
+        try:
+            stub = desk_pb2_grpc.DeskServiceStub(self.channel_factory(self.address))
+            # The engine parses the config files and the overrides: allow it more than a read.
+            reply = stub.CheckSettings(request, timeout=max(self.timeout, 30))
+        except grpc.RpcError as exc:
+            log = logger.error if is_version_mismatch(exc) else logger.warning
+            log("[DESK] CheckSettings %s failed: %s", portfolio_id, describe_rpc_error(exc))
+            raise DeskRiskUnavailable(status_name(exc)) from exc
+        except Exception as exc:
+            logger.error("[DESK] CheckSettings %s failed: %s", portfolio_id, exc, exc_info=True)
+            raise DeskRiskUnavailable("error") from exc
+        logger.info("[DESK] CheckSettings %s -> %s", portfolio_id, "ok" if reply.ok else "refused")
+        return reply.ok, reply.error
 
     def get_run_status(self, portfolio_id, day):
         """D-56: the model run's state (GetRunStatus); raises DeskRiskUnavailable when the

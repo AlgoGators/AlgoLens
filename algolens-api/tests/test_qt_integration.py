@@ -931,6 +931,13 @@ RUN_CONFIG = {
 }
 
 
+class AcceptingEngine:
+    """CheckSettings (D-17) that accepts: the engine's own check is tested in trade-ngin."""
+
+    def check_settings(self, portfolio_id, overrides):
+        return True, ""
+
+
 def report_settings(factory, day, version, config=RUN_CONFIG, portfolio=QT):
     """A live run of the 022 binary writing settings_used."""
     _exec(
@@ -961,10 +968,10 @@ def test_settings_versions_keep_exactly_one_active(qt_db):
     report_settings(qt_db, D1, None)
     repo = desk_repo(qt_db)
 
-    SaveSettings(repo).execute(
+    SaveSettings(repo, AcceptingEngine()).execute(
         entry(qt_db), [{"path": ["risk", "max_leverage"], "value": 1.5}], "less risk", "d@x.com"
     )
-    SaveSettings(repo).execute(
+    SaveSettings(repo, AcceptingEngine()).execute(
         entry(qt_db), [{"path": ["strategies", "tf", "lookbacks"], "value": [8, 16]}], "faster", "d@x.com"
     )
 
@@ -982,7 +989,7 @@ def test_settings_versions_keep_exactly_one_active(qt_db):
     report_settings(qt_db, D2, 2, config={**RUN_CONFIG, "risk": {"max_leverage": 1.5, "max_drawdown": 0.3}})
     assert GetSettings(repo).execute(entry(qt_db))["pending"] is False
 
-    RevertSettings(repo).execute(entry(qt_db), 1, "undo faster", "d@x.com")
+    RevertSettings(repo, AcceptingEngine()).execute(entry(qt_db), 1, "undo faster", "d@x.com")
     rows = config_rows(qt_db)
     assert [(r["version"], r["is_active"]) for r in rows] == [(1, False), (2, False), (3, True)]
     assert rows[2]["overrides"] == {"risk": {"max_leverage": 1.5}}
@@ -1002,7 +1009,7 @@ def test_settings_refuse_unknown_keys_and_hidden_sections(qt_db):
         {"path": ["database", "host"], "value": "x"},
     ):
         with pytest.raises(SettingsRuleError):
-            SaveSettings(desk_repo(qt_db)).execute(entry(qt_db), [change], "r", "d@x.com")
+            SaveSettings(desk_repo(qt_db), AcceptingEngine()).execute(entry(qt_db), [change], "r", "d@x.com")
     assert config_rows(qt_db) == []
 
 

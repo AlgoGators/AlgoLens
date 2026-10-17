@@ -9,9 +9,11 @@ from collections.abc import Mapping
 from typing import Any
 
 from algolens.application.qt.ports import (
+    DeskAgentPort,
     DeskConflict,
     DeskForbidden,
     DeskNotFound,
+    DeskRiskUnavailable,
     SettingsRepositoryPort,
 )
 from algolens.domain.portfolio.registry import desk_edit_allowed
@@ -70,6 +72,21 @@ def _locks(repo: SettingsRepositoryPort) -> list[tuple[str, ...]]:
     if rows is None:
         return list(DEFAULT_LOCKS)
     return [tuple(row["path"]) for row in rows]
+
+
+def _engine_accepts(agent: DeskAgentPort, portfolio_id: str, overrides: Mapping[str, Any]) -> None:
+    """HD D-17: the engine checks a settings version before it is saved, with the checks a live
+    run makes at start-up; a refused version is never saved, and nothing is saved while the
+    engine cannot be asked (a bad version would stop the desk run, the 09:30 send and the 10:00
+    fallback until reverted)."""
+    try:
+        ok, error = agent.check_settings(portfolio_id, dict(overrides))
+    except DeskRiskUnavailable as exc:
+        raise DeskConflict(
+            f"The engine could not check this change ({exc.reason}); nothing was saved. Try again."
+        ) from None
+    if not ok:
+        raise SettingsRuleError(f"The engine refuses this change: {error}")
 
 
 def _require_settings_editor(entry: Mapping[str, Any]) -> None:
@@ -132,8 +149,9 @@ def _require_running(repo, portfolio_id):
 
 
 class SaveSettings:
-    def __init__(self, repo: SettingsRepositoryPort):
+    def __init__(self, repo: SettingsRepositoryPort, agent: DeskAgentPort):
         self.repo = repo
+        self.agent = agent
 
     def execute(
         self, entry: Mapping[str, Any], changes: Any, reason: Any, created_by: str
@@ -149,6 +167,7 @@ class SaveSettings:
         if overrides == base:
             raise SettingsRuleError("No setting changed")
         check_overrides_apply(running["config"], overrides)
+        _engine_accepts(self.agent, portfolio_id, overrides)
         row = self.repo.insert_config_version(
             portfolio_id,
             overrides,
@@ -209,8 +228,9 @@ class RevertSettings:
     """Restore an earlier version as a NEW version (history is append-only).
     Version 0 restores the config files alone (empty overrides)."""
 
-    def __init__(self, repo: SettingsRepositoryPort):
+    def __init__(self, repo: SettingsRepositoryPort, agent: DeskAgentPort):
         self.repo = repo
+        self.agent = agent
 
     def execute(
         self, entry: Mapping[str, Any], version: Any, reason: Any, created_by: str
@@ -241,6 +261,7 @@ class RevertSettings:
             raise SettingsRuleError(
                 "This version changes settings an admin locked: " + ", ".join(locked)
             )
+        _engine_accepts(self.agent, portfolio_id, overrides)
         row = self.repo.insert_config_version(
             portfolio_id,
             dict(overrides),

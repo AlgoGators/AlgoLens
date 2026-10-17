@@ -61,14 +61,37 @@ class FakeSettingsRepo:
         return row
 
 
+class Engine:
+    """CheckSettings (D-17): accepts unless told otherwise; records what it was asked."""
+
+    def __init__(self):
+        self.answer, self.down, self.calls = (True, ""), None, []
+
+    def check_settings(self, portfolio_id, overrides):
+        from algolens.application.qt.ports import DeskRiskUnavailable
+
+        self.calls.append((portfolio_id, overrides))
+        if self.down:
+            raise DeskRiskUnavailable(self.down)
+        return self.answer
+
+
+ENGINE = Engine()
+
+
+@pytest.fixture(autouse=True)
+def _fresh_engine():
+    ENGINE.answer, ENGINE.down, ENGINE.calls = (True, ""), None, []
+
+
 def used(version=None):
     return {"strategy_config_version": version, "config": CONFIG}
 
 
 def test_save_merges_over_the_active_layer_and_is_pending():
     repo = FakeSettingsRepo(used())
-    SaveSettings(repo).execute(QT, [{"path": ["risk", "max_leverage"], "value": 1.5}], "less", "d@x.com")
-    SaveSettings(repo).execute(QT, [{"path": ["capital"], "value": 400000}], "smaller", "d@x.com")
+    SaveSettings(repo, ENGINE).execute(QT, [{"path": ["risk", "max_leverage"], "value": 1.5}], "less", "d@x.com")
+    SaveSettings(repo, ENGINE).execute(QT, [{"path": ["capital"], "value": 400000}], "smaller", "d@x.com")
 
     assert [r["is_active"] for r in repo.versions] == [False, True]
     assert repo.versions[-1]["overrides"] == {"risk": {"max_leverage": 1.5}, "capital": 400000}
@@ -82,45 +105,45 @@ def test_save_merges_over_the_active_layer_and_is_pending():
 
 def test_setting_a_pending_key_back_to_its_running_value_undoes_it():
     repo = FakeSettingsRepo(used())
-    SaveSettings(repo).execute(QT, [{"path": ["risk", "max_leverage"], "value": 1.5}], "a", "d@x.com")
-    SaveSettings(repo).execute(QT, [{"path": ["risk", "max_leverage"], "value": 2.0}], "undo", "d@x.com")
+    SaveSettings(repo, ENGINE).execute(QT, [{"path": ["risk", "max_leverage"], "value": 1.5}], "a", "d@x.com")
+    SaveSettings(repo, ENGINE).execute(QT, [{"path": ["risk", "max_leverage"], "value": 2.0}], "undo", "d@x.com")
     assert repo.versions[-1]["overrides"] == {"risk": {"max_leverage": 2.0}}
     with pytest.raises(SettingsRuleError, match="No setting changed"):
-        SaveSettings(repo).execute(QT, [{"path": ["risk", "max_leverage"], "value": 2.0}], "again", "d@x.com")
+        SaveSettings(repo, ENGINE).execute(QT, [{"path": ["risk", "max_leverage"], "value": 2.0}], "again", "d@x.com")
     assert len(repo.versions) == 2
 
 
 def test_running_version_equal_to_active_is_not_pending():
     repo = FakeSettingsRepo(used())
-    SaveSettings(repo).execute(QT, [{"path": ["capital"], "value": 1}], "r", "d@x.com")
+    SaveSettings(repo, ENGINE).execute(QT, [{"path": ["capital"], "value": 1}], "r", "d@x.com")
     repo.settings_used = used(version=1)
     assert GetSettings(repo).execute(QT)["pending"] is False
 
 
 def test_revert_is_a_new_version():
     repo = FakeSettingsRepo(used())
-    SaveSettings(repo).execute(QT, [{"path": ["capital"], "value": 1}], "a", "d@x.com")
-    SaveSettings(repo).execute(QT, [{"path": ["capital"], "value": 2}], "b", "d@x.com")
-    RevertSettings(repo).execute(QT, 1, "back to v1", "d@x.com")
+    SaveSettings(repo, ENGINE).execute(QT, [{"path": ["capital"], "value": 1}], "a", "d@x.com")
+    SaveSettings(repo, ENGINE).execute(QT, [{"path": ["capital"], "value": 2}], "b", "d@x.com")
+    RevertSettings(repo, ENGINE).execute(QT, 1, "back to v1", "d@x.com")
     assert [(r["version"], r["is_active"]) for r in repo.versions] == [(1, False), (2, False), (3, True)]
     assert repo.versions[-1]["overrides"] == {"capital": 1}
-    RevertSettings(repo).execute(QT, 0, "back to the files", "d@x.com")
+    RevertSettings(repo, ENGINE).execute(QT, 0, "back to the files", "d@x.com")
     assert repo.versions[-1]["overrides"] == {}
 
 
 def test_settings_refusals():
     repo = FakeSettingsRepo(None)
     with pytest.raises(DeskConflict):  # no run has reported settings_used yet
-        SaveSettings(repo).execute(QT, [{"path": ["capital"], "value": 1}], "r", "d@x.com")
+        SaveSettings(repo, ENGINE).execute(QT, [{"path": ["capital"], "value": 1}], "r", "d@x.com")
     repo.settings_used = used()
     with pytest.raises(DeskRuleError):
-        SaveSettings(repo).execute(QT, [{"path": ["capital"], "value": 1}], " ", "d@x.com")
+        SaveSettings(repo, ENGINE).execute(QT, [{"path": ["capital"], "value": 1}], " ", "d@x.com")
     with pytest.raises(SettingsRuleError):
-        SaveSettings(repo).execute(QT, [{"path": ["risk", "unknown"], "value": 1}], "r", "d@x.com")
+        SaveSettings(repo, ENGINE).execute(QT, [{"path": ["risk", "unknown"], "value": 1}], "r", "d@x.com")
     with pytest.raises(DeskForbidden):
-        SaveSettings(repo).execute(MODEL, [{"path": ["capital"], "value": 1}], "r", "d@x.com")
+        SaveSettings(repo, ENGINE).execute(MODEL, [{"path": ["capital"], "value": 1}], "r", "d@x.com")
     with pytest.raises(SettingsRuleError):
-        RevertSettings(repo).execute(QT, -1, "r", "d@x.com")
+        RevertSettings(repo, ENGINE).execute(QT, -1, "r", "d@x.com")
     assert repo.versions == []
 
 
@@ -128,7 +151,7 @@ def test_settings_refusals():
 def settings_repo(monkeypatch):
     repo = FakeSettingsRepo(used())
     monkeypatch.setenv("QT_DESK_ENABLED", "true")
-    monkeypatch.setattr(desk_http, "create_desk_dependencies", lambda: (repo, None, load_qt_settings()))
+    monkeypatch.setattr(desk_http, "create_desk_dependencies", lambda: (repo, ENGINE, load_qt_settings()))
     monkeypatch.setattr(desk_http, "create_portfolio_dependencies", lambda: (FakeRegistry(), None))
     return repo
 
@@ -166,13 +189,13 @@ def test_a_revert_may_not_change_a_locked_setting():
     # D-14: a version saved while a key was unlocked cannot bring that value back once it is.
     config = {**CONFIG, "use_optimization": True}
     repo = FakeSettingsRepo({"strategy_config_version": None, "config": config}, locks=[])
-    SaveSettings(repo).execute(QT, [{"path": ["use_optimization"], "value": False}], "a", "d@x.com")
-    SaveSettings(repo).execute(QT, [{"path": ["use_optimization"], "value": True}], "b", "d@x.com")
+    SaveSettings(repo, ENGINE).execute(QT, [{"path": ["use_optimization"], "value": False}], "a", "d@x.com")
+    SaveSettings(repo, ENGINE).execute(QT, [{"path": ["use_optimization"], "value": True}], "b", "d@x.com")
     repo.locks = [("use_optimization",)]
     with pytest.raises(SettingsRuleError, match="changes settings an admin locked: use_optimization"):
-        RevertSettings(repo).execute(QT, 1, "back", "d@x.com")
+        RevertSettings(repo, ENGINE).execute(QT, 1, "back", "d@x.com")
     # A save of something else still goes through with the locked key carried as it is.
-    SaveSettings(repo).execute(QT, [{"path": ["capital"], "value": 1}], "c", "d@x.com")
+    SaveSettings(repo, ENGINE).execute(QT, [{"path": ["capital"], "value": 1}], "c", "d@x.com")
     assert repo.versions[-1]["overrides"]["use_optimization"] is True
 
 
@@ -214,3 +237,30 @@ def test_a_lock_change_needs_the_lock_table(client, settings_repo):
                            json={"path": ["capital"], "locked": True, "reason": "r"}, headers=admin)
     assert response.status_code == 409
     assert client.get("/portfolio/desk/settings-locks").get_json()["stored"] is False
+
+
+def test_the_engine_checks_a_version_before_it_is_saved():
+    # D-17: the whole desk layer the save would make active is checked; a refusal saves nothing
+    # and carries the engine's reason.
+    repo = FakeSettingsRepo(used())
+    SaveSettings(repo, ENGINE).execute(QT, [{"path": ["capital"], "value": 1}], "a", "d@x.com")
+    assert ENGINE.calls[-1] == ("QT_CONSERVATIVE_PORTFOLIO", {"capital": 1})
+
+    ENGINE.answer = (False, "risk.modules[0].R_max must be at most 10")
+    with pytest.raises(SettingsRuleError, match="The engine refuses this change: risk.modules"):
+        SaveSettings(repo, ENGINE).execute(QT, [{"path": ["capital"], "value": 2}], "b", "d@x.com")
+    with pytest.raises(SettingsRuleError, match="The engine refuses"):
+        RevertSettings(repo, ENGINE).execute(QT, 0, "files", "d@x.com")
+    assert len(repo.versions) == 1
+
+
+def test_nothing_is_saved_while_the_engine_cannot_check(client, settings_repo):
+    ENGINE.down = "UNAVAILABLE"
+    headers = _login(client)
+    response = client.post(
+        "/portfolio/desk/QT_CONSERVATIVE_PORTFOLIO/settings",
+        json={"changes": [{"path": ["capital"], "value": 1}], "reason": "r"},
+        headers=headers,
+    )
+    assert response.status_code == 409 and "could not check" in response.get_json()["error"]
+    assert settings_repo.versions == []

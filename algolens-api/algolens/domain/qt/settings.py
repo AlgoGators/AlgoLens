@@ -84,6 +84,8 @@ DEFAULT_LOCKS = (
 READ_ONLY = (
     (("risk", "schema"), "The risk file's schema version: the engine reads one value."),
     (("sizing_mode",), "One legal value on a live futures book (half_compounding)."),
+    (("starting_capital",),
+     "Follows initial_capital: the engine requires the two equal, so it moves with it."),
     (("risk", "risk_reporting", "*"),
      "Mirrors the risk gate's limit in risk.modules and moves with it; the engine refuses a run "
      "where the two differ."),
@@ -431,6 +433,9 @@ def changes_to_overrides(
         # change. Whether anything changes at all is judged against the desk
         # layer by the caller.
         _set(overrides, path, new)
+    # D-60: the engine requires starting_capital to equal initial_capital; they move together.
+    if "initial_capital" in overrides and lookup(running, ["starting_capital"])[0]:
+        overrides["starting_capital"] = overrides["initial_capital"]
     for list_path, edits in list_edits.items():
         found, base = lookup(active_overrides or {}, list_path)
         if not found or not _is_id_list(base):

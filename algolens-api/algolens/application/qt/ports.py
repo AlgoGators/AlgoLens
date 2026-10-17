@@ -200,6 +200,12 @@ class DeskAgentPort(Protocol):
     def rescind(self, command: Row) -> str:
         ...
 
+    def check_settings(self, portfolio_id: str, overrides: Mapping[str, Any]) -> tuple[bool, str]:
+        """HD D-17: whether a live run would accept `overrides` as the portfolio's desk settings
+        (CheckSettings, desk.proto 1.7.0): (ok, the refusal a run would give). Raises
+        DeskRiskUnavailable when the engine cannot be asked."""
+        ...
+
     def get_run_status(self, portfolio_id: str, day: date) -> dict[str, Any]:
         """D-56: the model run's state for the book and day (GetRunStatus): state
         ('not_started', 'running', 'succeeded', 'refused', 'failed'), startedAt, finishedAt

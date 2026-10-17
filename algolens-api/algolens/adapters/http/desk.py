@@ -370,8 +370,8 @@ def settings_get(portfolio_id):
 @handled
 def settings_save(portfolio_id):
     payload = _body()
-    repo, _agent, _settings = _desk_dependencies()
-    version = SaveSettings(repo).execute(
+    repo, agent, _settings = _desk_dependencies()
+    version = SaveSettings(repo, agent).execute(
         _portfolio(portfolio_id),
         payload.get("changes"),
         payload.get("reason"),
@@ -387,8 +387,8 @@ def settings_save(portfolio_id):
 @handled
 def settings_revert(portfolio_id):
     payload = _body()
-    repo, _agent, _settings = _desk_dependencies()
-    version = RevertSettings(repo).execute(
+    repo, agent, _settings = _desk_dependencies()
+    version = RevertSettings(repo, agent).execute(
         _portfolio(portfolio_id),
         payload.get("version"),
         payload.get("reason"),

@@ -394,3 +394,14 @@ def test_the_shipped_gate_limits_are_fields_and_a_change_moves_the_mirror():
         SHIPPED, [{"path": ["risk", "modules", "carver", "max_net_leverage"], "value": 5.0}])
     assert overrides["risk"]["risk_reporting"] == {"max_net_leverage": 5.0}
     check_overrides_apply(SHIPPED, overrides)
+
+
+
+def test_initial_capital_moves_starting_capital_which_is_read_only():
+    # D-60 found it: the engine refuses a run whose starting_capital differs from initial_capital.
+    overrides = changes_to_overrides(SHIPPED, [{"path": ["initial_capital"], "value": 450000.0}])
+    assert overrides == {"initial_capital": 450000.0, "starting_capital": 450000.0}
+    field = next(f for f in settings_view(SHIPPED, {}, {}, False) if f["path"] == ["starting_capital"])
+    assert "Follows initial_capital" in field["readOnly"]
+    with pytest.raises(SettingsRuleError, match="read-only"):
+        changes_to_overrides(SHIPPED, [{"path": ["starting_capital"], "value": 450000.0}])
