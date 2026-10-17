@@ -79,7 +79,7 @@ Pressing **Approve** on B starts the pipeline A → B → C:
      still the latest saved book, and only if C itself is over no **cap** (decision 5, below). A
      limit that **bound** (C was cut to fit it) is fine.
    - **Insist on B: request an override.** The request e-mails the VP and the President a link
-     (it works once and expires after 48 hours). Either one approves, and then the engine books
+     (it works once and expires at 10:00 New York that day, the approval cutoff). Either one approves, and then the engine books
      **B exactly as asked** and publishes it. A rejection publishes nothing; the QT can still
      approve C until 10:00.
 
