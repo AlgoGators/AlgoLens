@@ -127,6 +127,13 @@ measured. trade-ngin supplies the labels, units and maxes; AlgoLens hardcodes no
 spread and market impact. They are stored with each execution and reduce the day's P&L and
 equity.
 
+## Approve with or without the e-mail; Send (D-66)
+
+Approve has a **Send the e-mail** box, ticked by default. Untick it and the day is approved but
+nothing is e-mailed: not at 09:30, not at once after 09:30. The desk then sends today's book with
+**Send the e-mail** (shown once the day is approved and unsent). It goes once; a past day is never
+sent late. An override's approval always e-mails.
+
 ## Taking an approval back: Rescind (C8)
 
 Anyone on QT can rescind a desk approval **before 09:30**, if it hasn't been sent yet. A day

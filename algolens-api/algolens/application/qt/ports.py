@@ -102,6 +102,10 @@ class DeskRepositoryPort(Protocol):
         {"flow": "override_b", "after": <decision id>} requested by the QT who
         asked, in one transaction. Returns (decision, publish or None)."""
 
+    def insert_send(self, portfolio_id: str, day: date, requested_by: str) -> Row:
+        """D-66: under the day lock, refuse (DeskConflict) unless the day is
+        published and unsent and nothing is open; insert {"flow": "send"}."""
+
     def insert_rescind(
         self, portfolio_id: str, day: date, requested_by: str, is_approver: bool = False
     ) -> Row:

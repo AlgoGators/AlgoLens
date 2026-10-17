@@ -1127,6 +1127,26 @@ def test_only_the_vp_or_president_can_rescind_an_override_day(qt_db):
     assert [c["kind"] for c in commands(qt_db)] == ["publish", "rescind"]
 
 
+def test_send_needs_a_published_unsent_day_and_nothing_open(qt_db):
+    """D-66: the desk's Send inserts a publish row {"flow": "send"} under the day lock."""
+    _needs_029(qt_db)
+    seed_day(qt_db)
+    repo = desk_repo(qt_db)
+    with pytest.raises(DeskConflict, match="not approved"):
+        repo.insert_send(QT, D2, "desk@x.com")
+    command = PublishDesk(repo, NullAgent()).execute(entry(qt_db), "desk@x.com", email=False)
+    assert command["command"]["payload"] == {"email": False}
+    engine_publishes(qt_db, command["command"]["id"])
+    send = repo.insert_send(QT, D2, "other@x.com")
+    assert (send["kind"], send["payload"]) == ("publish", {"flow": "send"})
+    with pytest.raises(DeskConflict, match="already pending"):
+        repo.insert_send(QT, D2, "other@x.com")
+    engine_finishes(qt_db, send["id"])
+    _exec(qt_db, "UPDATE trading.live_run_metadata SET sent_at = now()")
+    with pytest.raises(DeskConflict, match="already been e-mailed"):
+        repo.insert_send(QT, D2, "other@x.com")
+
+
 def test_rescind_from_0930_new_york_writes_nothing(qt_db):
     _needs_029(qt_db)
     _approve(qt_db)

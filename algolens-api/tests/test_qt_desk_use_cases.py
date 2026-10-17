@@ -23,6 +23,7 @@ from algolens.application.qt.use_cases import (
     PublishDesk,
     RequestOverride,
     RescindDesk,
+    SendDesk,
     SaveDeskEdit,
 )
 from algolens.domain.qt import desk as rules
@@ -149,12 +150,22 @@ class FakeRepo:
         return self._insert(portfolio_id=portfolio_id, kind="publish", requested_by=requested_by,
                             payload=dict(payload or {}))
 
-    def approve_proposal(self, portfolio_id, day, plan, reason, requested_by):
+    def approve_proposal(self, portfolio_id, day, plan, reason, requested_by, email=True):
         save = self.save_proposal(portfolio_id, day, plan, reason, requested_by)
+        payload = {"flow": "auto", "after": save["id"]}
+        if not email:
+            payload["email"] = False
         publish = self._insert(portfolio_id=portfolio_id, kind="publish",
-                               requested_by=requested_by,
-                               payload={"flow": "auto", "after": save["id"]})
+                               requested_by=requested_by, payload=payload)
         return save, publish
+
+    def insert_send(self, portfolio_id, day, requested_by):
+        if not self._is_published(portfolio_id):
+            raise DeskConflict("not approved")
+        if self.published.get("sent_at") is not None:
+            raise DeskConflict("already been e-mailed")
+        return self._insert(portfolio_id=portfolio_id, kind="publish",
+                            requested_by=requested_by, payload={"flow": "send"})
 
     def decide_override(self, request_id, approved, approver, approver_role, reason):
         decision = self.insert_decision(request_id, approved, approver, approver_role, reason)
@@ -524,6 +535,7 @@ def test_publish_state_comes_from_live_run_metadata():
         "publish_source": "desk",
         "sent_at": None,
         "flow": None,
+        "email": None,
     }
 
 
@@ -1157,3 +1169,48 @@ def test_a_future_day_is_not_approved_but_takes_edits():
     SaveDeskEdit(repo, agent, now=eve).execute(
         QT, [{"symbol": "ZC.v.0", "quantity": 0, "expected": 3}], "r", "d@x.com")
     assert [r["kind"] for r in repo.rows] == ["save"]
+
+
+# --- approve with or without the e-mail; Send (D-66) ----------------------------------------
+
+
+def test_approve_and_publish_can_hold_the_email():
+    early = lambda: _ny(DAY, 9, 0)  # noqa: E731
+    repo, agent = FakeRepo(), FakeAgent()
+    result = ApproveDesk(repo, agent, now=early).execute(QT, [], "r", "d@x.com", email=False)
+    assert result["command"]["payload"] == {"flow": "auto", "after": result["save"]["id"],
+                                            "email": False}
+    repo, agent = FakeRepo(), FakeAgent()
+    command = PublishDesk(repo, agent, now=early).execute(QT, "d@x.com", email=False)["command"]
+    assert command["payload"] == {"email": False}
+    repo, agent = FakeRepo(), FakeAgent()
+    command = PublishDesk(repo, agent, now=early).execute(QT, "d@x.com")["command"]
+    assert "email" not in (command["payload"] or {})        # on by default
+    with pytest.raises(DeskRuleError, match="email must be true or false"):
+        PublishDesk(FakeRepo(), FakeAgent(), now=early).execute(QT, "d@x.com", email="no")
+
+
+def test_the_desk_state_says_whether_the_approval_held_the_email():
+    repo, _agent = _approved()
+    repo.rows[0]["payload"] = {"email": False}
+    state = GetDeskState(repo, FakeAgent(), now=lambda: _ny(DAY, 9, 0)).execute(QT)
+    assert state["published"]["email"] is False
+
+
+def test_send_emails_todays_published_unsent_book():
+    repo, agent = _approved()
+    result = SendDesk(repo, agent, now=lambda: _ny(DAY, 11, 0)).execute(QT, "d@x.com")
+    assert result["command"]["payload"] == {"flow": "send"}
+    assert agent.calls[-1] == ("Publish", result["command"]["id"])
+
+
+def test_send_is_refused_for_another_day_unapproved_or_sent():
+    with pytest.raises(DeskConflict, match="Only today's book is e-mailed"):
+        repo, agent = _approved()
+        SendDesk(repo, agent, now=lambda: _ny(DAY + timedelta(days=1), 8, 0)).execute(
+            QT, "d@x.com")
+    with pytest.raises(DeskConflict, match="not approved"):
+        SendDesk(FakeRepo(), FakeAgent(), now=lambda: _ny(DAY, 11, 0)).execute(QT, "d@x.com")
+    repo, agent = _approved(sent_at=_ny(DAY, 9, 30))
+    with pytest.raises(DeskConflict, match="already been e-mailed"):
+        SendDesk(repo, agent, now=lambda: _ny(DAY, 11, 0)).execute(QT, "d@x.com")

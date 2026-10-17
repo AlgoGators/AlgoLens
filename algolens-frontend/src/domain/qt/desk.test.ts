@@ -29,6 +29,7 @@ import {
   publishBlockedReason,
   publishSourceOf,
   rescindBlockedReason,
+  sendBlockedReason,
   rescindConfirmText,
   rescindOpen,
   formatCheckValue,
@@ -814,3 +815,33 @@ describe('check usage', () => {
   });
 });
 
+
+
+describe('send (D-66: e-mail an approved, unsent day)', () => {
+  const approved = deskState({
+    deadlines: deadlinesFor(D),
+    sendTracked: true,
+    publish: command({ kind: 'publish', status: 'done' }),
+    published: { published_by: 'd@x.com', published_at: EDT(D, '09:10'), publish_source: 'desk', sent_at: null },
+  });
+
+  it('is offered at once for a day approved without the e-mail', () => {
+    const held = { ...approved, published: { ...approved.published!, email: false } };
+    expect(sendBlockedReason(held, at(EDT(D, '09:12')))).toBeNull();
+  });
+
+  it('waits for the 09:30 send when the e-mail was asked for, then offers it if it did not go', () => {
+    expect(sendBlockedReason(approved, at(EDT(D, '09:12')))).toBe('The e-mail goes out at 09:30 New York');
+    expect(sendBlockedReason(approved, at(EDT(D, '11:00')))).toBeNull();
+  });
+
+  it('is closed once sent, while a command is open, and for another day', () => {
+    const sent = { ...approved, published: { ...approved.published!, sent_at: EDT(D, '09:30') } };
+    expect(sendBlockedReason(sent, at(EDT(D, '11:00')))).toBe('The book has already been e-mailed');
+    const sending = { ...approved, publish: command({ kind: 'publish', status: 'running' }) };
+    expect(sendBlockedReason(sending, at(EDT(D, '11:00')))).toBe('An approval or a send is in progress');
+    expect(sendBlockedReason(deskState({ deadlines: deadlinesFor(D) }), at(EDT(D, '11:00')))).toBe(
+      'The day is not approved',
+    );
+  });
+});

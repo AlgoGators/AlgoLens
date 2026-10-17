@@ -14,6 +14,8 @@ interface DeskEditFormProps {
   onSaved: (command: DeskCommand, agent: string) => void;
   /** C10: Approve on B answered with the publish row and its save. */
   onApproved?: (publish: DeskCommand, save: DeskCommand) => void;
+  /** D-66: whether Approve sends the day's e-mail (the panel's choice; on by default). */
+  sendEmail?: boolean;
   onCancel: () => void;
   /** The proposal changed under the draft (409 listing symbols): the panel reloads it. */
   onStale?: (message: string) => void;
@@ -29,7 +31,15 @@ interface DeskEditFormProps {
  * refuses the save if the proposal moved meanwhile. The parent keys this form
  * on the proposal, so the draft is rebuilt whenever the proposal changes.
  */
-export function DeskEditForm({ portfolioId, proposal, onSaved, onApproved, onCancel, onStale }: DeskEditFormProps) {
+export function DeskEditForm({
+  portfolioId,
+  proposal,
+  onSaved,
+  onApproved,
+  onCancel,
+  onStale,
+  sendEmail = true,
+}: DeskEditFormProps) {
   const { theme } = useTheme();
   const dark = theme === 'dark';
   const [draft, setDraft] = useState<Record<string, string>>(() =>
@@ -67,7 +77,7 @@ export function DeskEditForm({ portfolioId, proposal, onSaved, onApproved, onCan
     setSaveError(null);
     try {
       if (approve && onApproved) {
-        const result = await DeskService.approve(portfolioId, validation.changes, reason.trim());
+        const result = await DeskService.approve(portfolioId, validation.changes, reason.trim(), sendEmail);
         onApproved(result.command, result.save);
       } else {
         const result = await DeskService.save(portfolioId, validation.changes, reason.trim());

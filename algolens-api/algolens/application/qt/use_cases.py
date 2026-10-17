@@ -41,6 +41,7 @@ from algolens.domain.qt.desk import (
     RESCIND,
     SAVE,
     DeskRuleError,
+    approving_email,
     approving_flow,
     as_number,
     asked_vs_given,
@@ -48,6 +49,7 @@ from algolens.domain.qt.desk import (
     plan_desk_edit,
     proposal_snapshot,
     request_matches,
+    require_email_choice,
     require_reason,
     snapshot_sha256,
     three_books,
@@ -341,6 +343,8 @@ class GetDeskState:
         if published:
             # The C10 flow that approved the day ("override_b" for an override).
             published["flow"] = approving_flow(commands)
+            # D-66: whether that approval asked for the e-mail (False: the desk sends it).
+            published["email"] = approving_email(commands)
         publishing = any(c["status"] in OPEN_STATUSES for c in publishes)
         open_request = open_override_request(
             commands, now, _current_sha256(self.repo, portfolio_id, day)
@@ -433,12 +437,14 @@ class ApproveDesk:
         self.now = now or _utcnow
 
     def execute(
-        self, entry: Mapping[str, Any], edits: Any, reason: Any, requested_by: str
+        self, entry: Mapping[str, Any], edits: Any, reason: Any, requested_by: str,
+        email: Any = None,
     ) -> dict[str, Any]:
         _require_editable(entry)
         reason = require_reason(reason)
         if not isinstance(edits, list):
             raise DeskRuleError("changes must be a list of {symbol, quantity, expected}")
+        email = require_email_choice(email)
         portfolio_id = entry["portfolio_id"]
         day = _desk_day(self.repo, portfolio_id)
         _refuse_after_cutoff(self.repo, portfolio_id, day, self.now(), "Approval")
@@ -451,6 +457,7 @@ class ApproveDesk:
             lambda current: plan_desk_edit(current, edits) if edits else [],
             reason,
             requested_by,
+            email=email,
         )
         # RunDesk first: the publish runs on the portfolio's queue after it.
         save_outcome = self.agent.run_desk(save)
@@ -617,9 +624,10 @@ class PublishDesk:
 
     def execute(
         self, entry: Mapping[str, Any], requested_by: str, flow: Any = None,
-        acknowledged: Any = None,
+        acknowledged: Any = None, email: Any = None,
     ) -> dict[str, Any]:
         _require_editable(entry)
+        email = require_email_choice(email)
         portfolio_id = entry["portfolio_id"]
         day = _desk_day(self.repo, portfolio_id)
         _refuse_after_cutoff(self.repo, portfolio_id, day, self.now(), "Approval")
@@ -639,8 +647,37 @@ class PublishDesk:
             raise DeskRuleError("flow must be accept_c (or absent)")
         else:
             _refuse_outside_risk_limits(self.repo, self.agent, portfolio_id, day)
+        if not email:
+            # D-66: approved without the e-mail; the desk sends it later with Send.
+            payload = {**(payload or {}), "email": False}
         # Published (C3) and publish-already-open are refused under the day lock.
         command = self.repo.insert_publish(portfolio_id, day, requested_by, payload)
+        outcome = self.agent.publish(command)
+        return {"command": public_command(command), "agent": outcome}
+
+
+class SendDesk:
+    """D-66, the desk's Send: e-mail the day's approved book now, once, when it
+    was approved without the e-mail (or its send has not happened yet). Today's
+    book only: a past day's book must not reach anyone as today's (D-40).
+    Refused here (409) and by the engine otherwise."""
+
+    def __init__(self, repo: DeskRepositoryPort, agent: DeskAgentPort, now=None):
+        self.repo = repo
+        self.agent = agent
+        self.now = now or _utcnow
+
+    def execute(self, entry: Mapping[str, Any], requested_by: str) -> dict[str, Any]:
+        _require_editable(entry)
+        portfolio_id = entry["portfolio_id"]
+        day = _desk_day(self.repo, portfolio_id)
+        today = self.now().astimezone(NEW_YORK).date()
+        if day != today:
+            raise DeskConflict(
+                f"Only today's book is e-mailed: {day.isoformat()} is not today "
+                f"({today.isoformat()} in New York)"
+            )
+        command = self.repo.insert_send(portfolio_id, day, requested_by)
         outcome = self.agent.publish(command)
         return {"command": public_command(command), "agent": outcome}
 

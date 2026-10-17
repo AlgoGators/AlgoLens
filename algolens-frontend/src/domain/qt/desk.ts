@@ -59,6 +59,8 @@ export interface PublishedRecord {
   /** The C10 flow that approved the day: 'override_b' for an approved override; null for a
    * plain approval (or before the server reported it). */
   flow?: string | null;
+  /** D-66: false when the approval held the e-mail (the desk sends it with Send). */
+  email?: boolean | null;
 }
 
 /** The day's clock, in America/New_York, computed by the server. */
@@ -791,6 +793,30 @@ export function rescindBlockedReason(state: DeskState, nowMs: number): string | 
   const d = state.deadlines;
   if (!d || state.date < d.today || !before(nowMs, d.approveBy)) {
     return `The approval of the ${state.date} book can no longer be taken back: it is e-mailed at 09:30 New York`;
+  }
+  return null;
+}
+
+/**
+ * D-66, Send: why today's approved book cannot be e-mailed now, or null when it can. The API and
+ * the engine check again.
+ */
+export function sendBlockedReason(state: DeskState, nowMs: number): string | null {
+  if (!state.date) return 'No book for today yet';
+  if (deskLock(state) !== 'published') return 'The day is not approved';
+  if (state.published?.sent_at) return 'The book has already been e-mailed';
+  if (state.sendTracked === false) {
+    return 'This database does not record when the e-mail goes out (migration 026)';
+  }
+  const d = state.deadlines;
+  if (!d || state.date !== d.today) return "Only today's book is e-mailed";
+  if (state.publish && (state.publish.status === 'pending' || state.publish.status === 'running')) {
+    return 'An approval or a send is in progress';
+  }
+  if (rescindOpen(state)) return 'Taking the approval back is in progress';
+  // Approved with the e-mail: the 09:30 send goes on its own; Send is offered once it is due.
+  if (state.published?.email !== false && before(nowMs, d.approveBy)) {
+    return 'The e-mail goes out at 09:30 New York';
   }
   return null;
 }
