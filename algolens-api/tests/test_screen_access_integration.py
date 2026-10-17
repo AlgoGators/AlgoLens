@@ -310,7 +310,7 @@ def _metadata(db, day, published, portfolio=QT):
 
 
 def test_allocation_is_the_qt_book_of_the_latest_published_day(db):
-    from algolens.application.investor.use_cases import GetInvestorAllocation
+    from algolens.application.investor.use_cases import GetInvestorPortfolio
     from algolens.infrastructure.portfolio.strategy_registry import PostgresStrategyRegistry
 
     d1, d2 = date(2026, 10, 8), date(2026, 10, 9)
@@ -332,11 +332,12 @@ def test_allocation_is_the_qt_book_of_the_latest_published_day(db):
     _position(db, "qt_proposal", d1, "ZC.v.0", 7, 400)
     _position(db, "qt", d2, "ZC.v.0", 5, 400)  # the unpublished day
 
-    portfolios = GetInvestorAllocation(
+    # D-25: an investor with no link follows the QT book (decision 13).
+    portfolios = GetInvestorPortfolio(
         PostgresStrategyRegistry(connection_factory=db), investor_repo(db)
-    ).execute()
+    ).execute(_uid(db, "member@x.com"))
 
-    assert [p["portfolio_id"] for p in portfolios] == [QT]  # desk portfolios only
+    assert [(p["portfolio_id"], p["book"]) for p in portfolios] == [(QT, "qt")]
     book = portfolios[0]
     assert book["as_of"] == "2026-10-08"
     by_symbol = {p["symbol"]: p for p in book["positions"]}
@@ -350,15 +351,15 @@ def test_allocation_is_the_qt_book_of_the_latest_published_day(db):
 
 
 def test_allocation_with_nothing_published_is_empty(db):
-    from algolens.application.investor.use_cases import GetInvestorAllocation
+    from algolens.application.investor.use_cases import GetInvestorPortfolio
     from algolens.infrastructure.portfolio.strategy_registry import PostgresStrategyRegistry
 
     _metadata(db, date(2026, 10, 9), published=False)
     _position(db, "qt", date(2026, 10, 9), "ZC.v.0", 5, 400)
 
-    portfolios = GetInvestorAllocation(
+    portfolios = GetInvestorPortfolio(
         PostgresStrategyRegistry(connection_factory=db), investor_repo(db)
-    ).execute()
+    ).execute(_uid(db, "member@x.com"))
 
     assert portfolios[0]["as_of"] is None
     assert portfolios[0]["positions"] == [] and portfolios[0]["allocation"] == []
@@ -370,3 +371,32 @@ def test_role_for_reads_auth_users_now(db):
     assert repo.role_for(_uid(db, "member@x.com")) == "general_member"
     assert repo.role_for(999999) is None  # no such user: no role, so no access
 
+
+
+def test_an_investor_follows_the_book_an_admin_links_after_migration_005(db):
+    # D-25: before 005 every investor follows the QT book; after it an admin's link is read,
+    # logged append-only, and the investor reads only that book.
+    from pathlib import Path
+
+    from algolens.application.investor.use_cases import GetInvestorPortfolio
+    from algolens.infrastructure.portfolio.strategy_registry import PostgresStrategyRegistry
+
+    member = _uid(db, "member@x.com")
+    assert investor_repo(db).portfolio_link(member) == "absent"
+    sql = (Path(__file__).parent.parent / "migrations" / "005_investor_portfolio_links.sql").read_text("utf-8")
+    _q(db, sql)
+    assert investor_repo(db).portfolio_link(member) is None
+    assert investor_repo(db).set_portfolio_link(member, "CONSERVATIVE_PORTFOLIO", "system", "a@x.com")
+    assert investor_repo(db).set_portfolio_link(999999, "CONSERVATIVE_PORTFOLIO", "system", "a@x.com") is False
+    assert dict(investor_repo(db).portfolio_link(member)) == {"portfolio_id": "CONSERVATIVE_PORTFOLIO", "book": "system"}
+    _metadata(db, date(2026, 10, 8), published=True, portfolio="CONSERVATIVE_PORTFOLIO")
+    _position(db, "system", date(2026, 10, 8), "ZC.v.0", 3, 400, portfolio="CONSERVATIVE_PORTFOLIO")
+
+    [book] = GetInvestorPortfolio(
+        PostgresStrategyRegistry(connection_factory=db), investor_repo(db)).execute(member)
+
+    assert (book["portfolio_id"], book["book"], book["follows"]) == ("CONSERVATIVE_PORTFOLIO", "system", "model")
+    assert [p["symbol"] for p in book["positions"]] == ["ZC.v.0"]
+    log = _q(db, "SELECT user_id, portfolio_id, book FROM investor.portfolio_link_log")
+    assert [tuple(r.values()) if hasattr(r, "values") else tuple(r) for r in log] == [
+        (member, "CONSERVATIVE_PORTFOLIO", "system")]

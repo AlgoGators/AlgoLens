@@ -9,18 +9,24 @@ from collections.abc import Mapping
 from typing import Any
 
 from algolens.application.qt.ports import (
+    DeskAgentPort,
     DeskConflict,
     DeskForbidden,
     DeskNotFound,
+    DeskRiskUnavailable,
     SettingsRepositoryPort,
 )
 from algolens.domain.portfolio.registry import desk_edit_allowed
 from algolens.domain.qt.desk import require_reason
 from algolens.domain.qt.settings import (
+    DEFAULT_LOCKS,
     SettingsRuleError,
+    changed_paths,
     changes_to_overrides,
     check_overrides_apply,
     deep_merge,
+    is_hidden_path,
+    lock_for,
     settings_view,
 )
 
@@ -57,6 +63,30 @@ def _running(repo: SettingsRepositoryPort, portfolio_id: str):
 
 def _active(history):
     return next((row for row in history if row["is_active"]), None)
+
+
+def _locks(repo: SettingsRepositoryPort) -> list[tuple[str, ...]]:
+    """D-14: the admin's lock list (trading.desk_settings_locks); the starting list while the
+    table is absent (AlgoLens migration 004 not applied yet)."""
+    rows = repo.settings_locks()
+    if rows is None:
+        return list(DEFAULT_LOCKS)
+    return [tuple(row["path"]) for row in rows]
+
+
+def _engine_accepts(agent: DeskAgentPort, portfolio_id: str, overrides: Mapping[str, Any]) -> None:
+    """HD D-17: the engine checks a settings version before it is saved, with the checks a live
+    run makes at start-up; a refused version is never saved, and nothing is saved while the
+    engine cannot be asked (a bad version would stop the desk run, the 09:30 send and the 10:00
+    fallback until reverted)."""
+    try:
+        ok, error = agent.check_settings(portfolio_id, dict(overrides))
+    except DeskRiskUnavailable as exc:
+        raise DeskConflict(
+            f"The engine could not check this change ({exc.reason}); nothing was saved. Try again."
+        ) from None
+    if not ok:
+        raise SettingsRuleError(f"The engine refuses this change: {error}")
 
 
 def _require_settings_editor(entry: Mapping[str, Any]) -> None:
@@ -101,6 +131,7 @@ class GetSettings:
                     running_row["overrides"] if running_row else {},
                     active["overrides"] if active else {},
                     pending,
+                    _locks(self.repo),
                 ),
             }
         )
@@ -118,8 +149,9 @@ def _require_running(repo, portfolio_id):
 
 
 class SaveSettings:
-    def __init__(self, repo: SettingsRepositoryPort):
+    def __init__(self, repo: SettingsRepositoryPort, agent: DeskAgentPort):
         self.repo = repo
+        self.agent = agent
 
     def execute(
         self, entry: Mapping[str, Any], changes: Any, reason: Any, created_by: str
@@ -128,13 +160,14 @@ class SaveSettings:
         reason = require_reason(reason)
         portfolio_id = entry["portfolio_id"]
         running = _require_running(self.repo, portfolio_id)
-        edits = changes_to_overrides(running["config"], changes)
         active = _active(self.repo.config_versions(portfolio_id))
         base = active["overrides"] if active else {}
+        edits = changes_to_overrides(running["config"], changes, _locks(self.repo), base)
         overrides = deep_merge(base, edits)
         if overrides == base:
             raise SettingsRuleError("No setting changed")
         check_overrides_apply(running["config"], overrides)
+        _engine_accepts(self.agent, portfolio_id, overrides)
         row = self.repo.insert_config_version(
             portfolio_id,
             overrides,
@@ -145,12 +178,59 @@ class SaveSettings:
         return _version_row(row)
 
 
+def _check_lock_path(path: Any) -> list[str]:
+    if (
+        not isinstance(path, list)
+        or not path
+        or not all(isinstance(k, str) and k.strip() for k in path)
+    ):
+        raise SettingsRuleError("A lock needs a path: a list of keys, '*' for any key")
+    if is_hidden_path(path):
+        raise SettingsRuleError(f"{'.'.join(path)} is never shown to the desk; it needs no lock")
+    return [k.strip() for k in path]
+
+
+class ListSettingsLocks:
+    def __init__(self, repo: SettingsRepositoryPort):
+        self.repo = repo
+
+    def execute(self) -> dict[str, Any]:
+        rows = self.repo.settings_locks()
+        if rows is None:
+            return {"stored": False, "locks": [{"path": list(p)} for p in DEFAULT_LOCKS]}
+        return {"stored": True, "locks": [
+            {"path": list(r["path"]), "reason": r.get("reason"), "lockedBy": r.get("locked_by"),
+             "lockedAt": _iso(r.get("locked_at"))} for r in rows
+        ]}
+
+
+class ChangeSettingsLock:
+    """D-14: an admin locks or unlocks one setting (a path, or a pattern) for the desk."""
+
+    def __init__(self, repo: SettingsRepositoryPort):
+        self.repo = repo
+
+    def execute(self, path: Any, locked: Any, reason: Any, by: str) -> dict[str, Any]:
+        path = _check_lock_path(path)
+        if not isinstance(locked, bool):
+            raise SettingsRuleError("locked must be true or false")
+        reason = require_reason(reason)
+        if self.repo.settings_locks() is None:
+            raise DeskConflict(
+                "The lock list is not in the database yet (AlgoLens migration 004); "
+                "the starting locks apply until it is"
+            )
+        self.repo.set_settings_lock(path, locked, reason, by)
+        return ListSettingsLocks(self.repo).execute()
+
+
 class RevertSettings:
     """Restore an earlier version as a NEW version (history is append-only).
     Version 0 restores the config files alone (empty overrides)."""
 
-    def __init__(self, repo: SettingsRepositoryPort):
+    def __init__(self, repo: SettingsRepositoryPort, agent: DeskAgentPort):
         self.repo = repo
+        self.agent = agent
 
     def execute(
         self, entry: Mapping[str, Any], version: Any, reason: Any, created_by: str
@@ -170,6 +250,18 @@ class RevertSettings:
             overrides = row["overrides"]
         check_overrides_apply(running["config"], overrides)
         active = _active(self.repo.config_versions(portfolio_id))
+        # D-14: a revert may not change a locked setting either (it would undo or redo a
+        # locked value); a locked key it carries unchanged is fine.
+        locks = _locks(self.repo)
+        locked = [
+            ".".join(path) for path in changed_paths(active["overrides"] if active else {}, overrides)
+            if lock_for(path, locks)
+        ]
+        if locked:
+            raise SettingsRuleError(
+                "This version changes settings an admin locked: " + ", ".join(locked)
+            )
+        _engine_accepts(self.agent, portfolio_id, overrides)
         row = self.repo.insert_config_version(
             portfolio_id,
             dict(overrides),

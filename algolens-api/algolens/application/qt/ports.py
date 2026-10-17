@@ -153,6 +153,14 @@ class SettingsRepositoryPort(Protocol):
     def config_version(self, portfolio_id: str, version: int) -> Row | None:
         ...
 
+    def settings_locks(self) -> Sequence[Row] | None:
+        """D-14: trading.desk_settings_locks as [{path, reason, locked_by, locked_at}], or None
+        while the table is absent (AlgoLens migration 004)."""
+
+    def set_settings_lock(self, path: Sequence[str], locked: bool, reason: str, by: str) -> None:
+        """Lock or unlock one setting and log it (trading.desk_settings_lock_log), in one
+        transaction."""
+
     def insert_config_version(
         self,
         portfolio_id: str,
@@ -190,6 +198,18 @@ class DeskAgentPort(Protocol):
         ...
 
     def rescind(self, command: Row) -> str:
+        ...
+
+    def check_settings(self, portfolio_id: str, overrides: Mapping[str, Any]) -> tuple[bool, str]:
+        """HD D-17: whether a live run would accept `overrides` as the portfolio's desk settings
+        (CheckSettings, desk.proto 1.7.0): (ok, the refusal a run would give). Raises
+        DeskRiskUnavailable when the engine cannot be asked."""
+        ...
+
+    def get_run_status(self, portfolio_id: str, day: date) -> dict[str, Any]:
+        """D-56: the model run's state for the book and day (GetRunStatus): state
+        ('not_started', 'running', 'succeeded', 'refused', 'failed'), startedAt, finishedAt
+        (ISO or None) and message. Raises DeskRiskUnavailable when it cannot be read."""
         ...
 
     def get_desk_risk(self, portfolio_id: str, day: date) -> dict[str, Any]:

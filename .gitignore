@@ -18,3 +18,7 @@ algolens-api/logs/algolens.log
 tables/
 
 .pytest_cache/
+
+# Coverage reports (D-59 gates)
+.coverage
+coverage/

@@ -267,6 +267,15 @@ class FakeAgent:
         self.risk = risk if risk is not None else risk_report()
         self.risk_down = risk_down
         self.risk_calls = []
+        self.status = {"state": "succeeded", "startedAt": None, "finishedAt": None, "message": ""}
+        self.status_down = None
+        self.status_calls = []
+
+    def get_run_status(self, portfolio_id, day):
+        self.status_calls.append((portfolio_id, day))
+        if self.status_down:
+            raise DeskRiskUnavailable(self.status_down)
+        return self.status
 
     def get_desk_risk(self, portfolio_id, day):
         self.risk_calls.append((portfolio_id, day))
@@ -1214,3 +1223,24 @@ def test_send_is_refused_for_another_day_unapproved_or_sent():
     repo, agent = _approved(sent_at=_ny(DAY, 9, 30))
     with pytest.raises(DeskConflict, match="already been e-mailed"):
         SendDesk(repo, agent, now=lambda: _ny(DAY, 11, 0)).execute(QT, "d@x.com")
+
+
+def test_state_carries_todays_model_run_status_from_the_engine():
+    # D-56: the page shows running / failed / refused from GetRunStatus, for today (New York),
+    # even while the desk still shows an earlier book or none.
+    agent = FakeAgent()
+    agent.status = {"state": "failed", "startedAt": "2026-10-09T10:45:00+00:00",
+                    "finishedAt": None, "message": "strict_assertion"}
+    now = lambda: datetime(2026, 10, 9, 12, 0, tzinfo=timezone.utc)
+
+    state = GetDeskState(FakeRepo(), agent, now=now).execute(QT)
+
+    assert state["runStatus"] == {"date": "2026-10-09", **agent.status}
+    assert agent.status_calls == [(QT["portfolio_id"], date(2026, 10, 9))]
+
+
+def test_state_says_when_the_run_status_cannot_be_read():
+    agent = FakeAgent()
+    agent.status_down = "UNAVAILABLE"
+    state = GetDeskState(FakeRepo(), agent).execute(QT)
+    assert state["runStatus"]["unavailable"] == "UNAVAILABLE"

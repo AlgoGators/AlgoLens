@@ -7,7 +7,7 @@ import pytest
 from flask_jwt_extended import create_access_token, get_csrf_token
 
 import algolens.adapters.http.api as api_http
-from algolens.application.investor.use_cases import GetInvestorAllocation, UpdateReport
+from algolens.application.investor.use_cases import GetInvestorPortfolio, SetInvestorLink, UpdateReport
 from algolens.domain.investor.allocation import (
     InstrumentInfo,
     build_allocation,
@@ -131,6 +131,29 @@ class FakeInvestorRepo:
     def latest_published_day(self, portfolio_id):
         return self.published.get(portfolio_id)
 
+    # D-25: who follows which book ("absent": migration 005 not applied).
+    links = None
+
+    def portfolio_link(self, user_id):
+        if self.links is None:
+            return "absent"
+        return self.links.get(str(user_id))
+
+    def portfolio_links(self):
+        if self.links is None:
+            return None
+        return [{"user_id": int(u), **v} for u, v in self.links.items()]
+
+    def set_portfolio_link(self, user_id, portfolio_id, book, by):
+        if str(user_id) == "404":
+            return False
+        self.links[str(user_id)] = {"portfolio_id": portfolio_id, "book": book}
+        return True
+
+    def equity_curve(self, portfolio_id, book, until):
+        return [{"date": date(2026, 10, 8), "equity": 500000.0},
+                {"date": until, "equity": 510000.0}]
+
     def book_rows(self, portfolio_id, day, book):
         self.book_calls.append((portfolio_id, day, book))
         return [{"symbol": "ZC.v.0", "quantity": 2, "average_price": 400}]
@@ -160,15 +183,51 @@ class FakeInvestorRepo:
         return report
 
 
-def test_allocation_reads_only_the_qt_book_of_published_desk_portfolios():
+def test_an_investor_with_no_link_follows_the_qt_book_by_default():
+    # D-25, decision 13: one portfolio, the QT book unless an admin set the model book.
     repo = FakeInvestorRepo()
-    portfolios = GetInvestorAllocation(FakeRegistry(), repo).execute()
+    [portfolio] = GetInvestorPortfolio(FakeRegistry(), repo).execute("9")
 
-    assert [p["portfolio_id"] for p in portfolios] == ["QT_A", "QT_B"]
+    assert (portfolio["portfolio_id"], portfolio["book"], portfolio["follows"]) == ("QT_A", "qt", "qt")
+    assert portfolio["default"] is True
     assert repo.book_calls == [("QT_A", date(2026, 10, 9), "qt")]
-    assert portfolios[0]["as_of"] == "2026-10-09"
-    assert portfolios[0]["positions"][0]["notional"] == 40000
-    assert portfolios[1]["as_of"] is None and portfolios[1]["positions"] == []
+    assert portfolio["as_of"] == "2026-10-09" and portfolio["positions"][0]["notional"] == 40000
+    assert portfolio["performance"]["value"] == 510000.0
+    assert round(portfolio["performance"]["return"], 4) == 0.02
+
+
+def test_an_investor_sees_only_the_book_an_admin_set():
+    repo = FakeInvestorRepo()
+    repo.links = {"9": {"portfolio_id": "CONSERVATIVE_PORTFOLIO", "book": "system"}}
+    repo.published["CONSERVATIVE_PORTFOLIO"] = date(2026, 10, 7)
+    [portfolio] = GetInvestorPortfolio(FakeRegistry(), repo).execute("9")
+
+    assert (portfolio["portfolio_id"], portfolio["book"], portfolio["follows"]) == (
+        "CONSERVATIVE_PORTFOLIO", "system", "model")
+    assert repo.book_calls == [("CONSERVATIVE_PORTFOLIO", date(2026, 10, 7), "system")]
+    # Another investor, with no link, is not shown this one's book.
+    other = GetInvestorPortfolio(FakeRegistry(), repo).execute("10")[0]
+    assert other["portfolio_id"] == "QT_A"
+
+
+def test_a_link_to_a_retired_portfolio_falls_back_to_the_default():
+    repo = FakeInvestorRepo()
+    repo.links = {"9": {"portfolio_id": "GONE", "book": "qt"}}
+    [portfolio] = GetInvestorPortfolio(FakeRegistry(), repo).execute("9")
+    assert portfolio["portfolio_id"] == "QT_A" and portfolio["default"] is True
+
+
+def test_only_a_qt_book_or_a_model_book_can_be_set():
+    from algolens.application.shared.errors import ValidationError
+
+    repo = FakeInvestorRepo()
+    repo.links = {}
+    with pytest.raises(ValidationError, match="not a book an investor can follow"):
+        SetInvestorLink(FakeRegistry(), repo).execute(9, "QT_A", "system", "a@x.com")
+    with pytest.raises(ValidationError):
+        SetInvestorLink(FakeRegistry(), repo).execute(9, "CONSERVATIVE_PORTFOLIO", "qt", "a@x.com")
+    assert SetInvestorLink(FakeRegistry(), repo).execute(9, "QT_B", "qt", "a@x.com")["label"] == "QT B - QT book"
+    assert repo.links == {"9": {"portfolio_id": "QT_B", "book": "qt"}}
 
 
 # --- routes -------------------------------------------------------------------
@@ -268,3 +327,41 @@ def test_report_admin_routes_refuse_non_admins(client, screen_access, investor_r
     assert client.get("/api/admin/reports").status_code == 403
     assert client.patch("/api/admin/reports/1", json={"published": False}, headers=headers).status_code == 403
     assert client.get("/api/admin/reports/2/download").status_code == 403
+
+
+def test_admin_sets_which_book_an_investor_follows(client, screen_access, investor_repo):
+    investor_repo.links = {}
+    admin = _login(client, ["member"], screen_access, role="exec_board", email="admin@x.com")
+    listed = client.get("/api/admin/investor-links").get_json()
+    assert listed["stored"] is True and len(listed["choices"]) == 3
+    done = client.put("/api/admin/investors/9/portfolio",
+                      json={"portfolio_id": "CONSERVATIVE_PORTFOLIO", "book": "system"}, headers=admin)
+    assert done.status_code == 200 and done.get_json()["follows"] == "model"
+    bad = client.put("/api/admin/investors/9/portfolio",
+                     json={"portfolio_id": "QT_A", "book": "system"}, headers=admin)
+    assert bad.status_code == 400
+    missing = client.put("/api/admin/investors/404/portfolio",
+                         json={"portfolio_id": "QT_A", "book": "qt"}, headers=admin)
+    assert missing.status_code == 404
+
+    _login(client, ["investor"], screen_access)
+    [portfolio] = client.get("/api/investor/allocation").get_json()["portfolios"]
+    assert portfolio["portfolio_id"] == "CONSERVATIVE_PORTFOLIO" and portfolio["follows"] == "model"
+
+
+def test_setting_a_link_needs_migration_005(client, screen_access, investor_repo):
+    investor_repo.links = None
+    admin = _login(client, ["member"], screen_access, role="exec_board", email="admin@x.com")
+    response = client.put("/api/admin/investors/9/portfolio",
+                          json={"portfolio_id": "QT_A", "book": "qt"}, headers=admin)
+    assert response.status_code == 409
+    investor = _login(client, ["investor"], screen_access)
+    assert client.get("/api/investor/allocation").get_json()["portfolios"][0]["portfolio_id"] == "QT_A"
+
+
+def test_only_an_admin_sees_or_sets_the_links(client, screen_access, investor_repo):
+    investor_repo.links = {}
+    member = _login(client, ["member", "qt"], screen_access, role="team_lead")
+    assert client.get("/api/admin/investor-links").status_code == 403
+    assert client.put("/api/admin/investors/9/portfolio",
+                      json={"portfolio_id": "QT_A", "book": "qt"}, headers=member).status_code == 403

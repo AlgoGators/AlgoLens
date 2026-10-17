@@ -112,6 +112,10 @@ export const DeskApi = {
   revertSettings: async (portfolioId: string, version: number, reason: string) =>
     (await request<{ version: SettingsVersion }>('POST', `${desk(portfolioId)}/settings/revert`, { version, reason }))
       .version,
+  /** D-14: the admin's lock list for desk settings ("stored": false while migration 004 is not applied). */
+  settingsLocks: () => request<SettingsLocks>('GET', '/portfolio/desk/settings-locks'),
+  changeSettingsLock: (path: string[], locked: boolean, reason: string) =>
+    request<SettingsLocks>('POST', '/portfolio/desk/settings-locks', { path, locked, reason }),
   approval: (token: string) => request<ApprovalPage>('POST', '/portfolio/desk/approval', { token }),
   decide: (token: string, approved: boolean, reason: string) =>
     request<CommandResult>('POST', '/portfolio/desk/approval/decide', {
@@ -120,3 +124,16 @@ export const DeskApi = {
       reason: reason.trim() || null,
     }),
 };
+
+/** D-14: one lock on desk settings: a path of keys ("*" any key, "covariance_*" a prefix). */
+export interface SettingsLock {
+  path: string[];
+  reason?: string | null;
+  lockedBy?: string | null;
+  lockedAt?: string | null;
+}
+
+export interface SettingsLocks {
+  stored: boolean;
+  locks: SettingsLock[];
+}
