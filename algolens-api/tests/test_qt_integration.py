@@ -181,6 +181,8 @@ def test_portfolio_read_falls_back_to_system_only_when_unnamed(qt_db):
     assert (fallback.book, fallback.fell_back) == ("system", True)
     assert [p["symbol"] for p in fallback.positions] == ["ZC.v.0"]
     assert (exact.book, exact.fell_back, exact.positions) == ("qt", False, [])
+    # D-37: the model book has no qt rows; its system numbers are not served as "qt".
+    assert exact.book_missing is True and exact.latest is None
 
 
 def test_portfolio_read_scopes_executions_to_the_book(qt_db):

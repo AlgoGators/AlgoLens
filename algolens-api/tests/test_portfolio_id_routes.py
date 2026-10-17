@@ -79,9 +79,16 @@ class FakeRegistry:
 class FakeReader:
     def __init__(self):
         self.calls = []
+        # Portfolios with no rows in a named book other than system (D-37).
+        self.missing = set()
 
     def fetch_portfolio_rows(self, portfolio_id, book="qt", allow_fallback=True):
         self.calls.append((portfolio_id, book, allow_fallback))
+        if portfolio_id in self.missing and not allow_fallback:
+            return PortfolioDetailRows(
+                latest=None, equity_curve=[], equity_by_stream={}, positions=[],
+                executions=[], yesterday_positions=[], book=book, book_missing=True,
+            )
         served = "system" if allow_fallback else book
         return PortfolioDetailRows(
             latest=LATEST,
@@ -152,6 +159,17 @@ def test_portfolio_detail_defaults_to_qt_with_fallback(client, reader):
     assert body["portfolioGroup"] == "qt_conservative"
     # A paper book: listed, not added to the fund total.
     assert body["inFundTotal"] is False
+
+
+def test_a_named_book_with_no_rows_says_so(client, reader):
+    # D-37: "QT" on the model book is not the system numbers under the QT name.
+    _login(client)
+    reader.missing.add("QT_CONSERVATIVE_PORTFOLIO")
+
+    response = client.get("/portfolio/portfolios/QT_CONSERVATIVE_PORTFOLIO?book=qt")
+
+    assert response.status_code == 404
+    assert response.get_json()["missingBook"] == "qt"
 
 
 def test_gross_leverage_falls_back_to_portfolio_leverage_on_futures(client, reader):

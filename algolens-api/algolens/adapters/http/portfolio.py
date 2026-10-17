@@ -16,6 +16,7 @@ from algolens.adapters.serializers.portfolio import (
 )
 from algolens.application.portfolio.ports import IncubationError
 from algolens.application.portfolio.use_cases import (
+    BookNotWritten,
     GetIncubationPerformance,
     GetPortfolioDetail,
     GetStrategyDetail,
@@ -176,6 +177,8 @@ def get_portfolio(portfolio_id):
         return jsonify({"error": str(exc)}), 400
     except PortfolioNotFound:
         return jsonify({"error": "Portfolio not found"}), 404
+    except BookNotWritten as exc:
+        return jsonify({"error": str(exc), "missingBook": exc.book}), 404
     except StrategyDataNotFound:
         return jsonify({"error": "No data found for portfolio"}), 404
     except Exception as exc:

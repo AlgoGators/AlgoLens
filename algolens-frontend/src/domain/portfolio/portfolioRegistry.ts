@@ -74,6 +74,12 @@ export function findPortfolio(
  * QT portfolio before its first model run), not a fault.
  */
 export function describeBookLoadError(message: string): string {
+  // D-37: the book named on the toggle has no rows of its own (the model book has no QT book).
+  const missing = /"missingBook"\s*:\s*"([a-z_]+)"/.exec(message);
+  if (missing) {
+    const label = BOOK_TOGGLE_OPTIONS.find(o => o.book === missing[1])?.label ?? missing[1];
+    return `This portfolio has no ${label} book: no run has written ${label} rows for it. Its numbers are on System.`;
+  }
   if (/\b404\b/.test(message)) {
     return 'No run has written this portfolio yet. Its books appear after its first model run.';
   }

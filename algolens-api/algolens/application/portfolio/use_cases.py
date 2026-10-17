@@ -39,6 +39,14 @@ class StrategyDataNotFound(NotFoundError):
     """A known strategy has no live portfolio data yet."""
 
 
+class BookNotWritten(NotFoundError):
+    """D-37: the portfolio has no rows in the book the request named."""
+
+    def __init__(self, portfolio_id: str, book: str):
+        super().__init__(f"{portfolio_id} has no {book} rows")
+        self.book = book
+
+
 class PortfolioNotFound(NotFoundError):
     """No live registry entry exists for the requested portfolio id."""
 
@@ -353,6 +361,8 @@ class GetPortfolioDetail:
         rows = self.reader.fetch_portfolio_rows(
             portfolio_id, book=requested_book, allow_fallback=allow_fallback
         )
+        if getattr(rows, "book_missing", False):
+            raise BookNotWritten(portfolio_id, rows.book)
         detail = build_strategy_detail(cfg, rows)
         if detail is None:
             raise StrategyDataNotFound(portfolio_id)

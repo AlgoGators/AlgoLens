@@ -520,6 +520,24 @@ class PostgresPortfolioRepository:
         try:
             with conn.cursor() as cursor:
                 has_portfolio_type = self._has_portfolio_type(cursor)
+                if (
+                    not allow_fallback
+                    and book != FALLBACK_BOOK
+                    and has_portfolio_type
+                    and not self._portfolio_book_has_positions(cursor, portfolio_id, book)
+                ):
+                    # D-37: a named book with no rows of its own is not served as another
+                    # book's numbers under its name.
+                    return PortfolioDetailRows(
+                        latest=None,
+                        equity_curve=[],
+                        equity_by_stream={},
+                        positions=[],
+                        executions=[],
+                        yesterday_positions=[],
+                        book=book,
+                        book_missing=True,
+                    )
                 if not allow_fallback or book == FALLBACK_BOOK:
                     served_book, fell_back = book, False
                 elif not has_portfolio_type:

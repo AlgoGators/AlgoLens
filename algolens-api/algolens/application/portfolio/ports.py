@@ -24,6 +24,8 @@ class PortfolioDetailRows:
     # requested because the requested default book had no rows.
     book: str = DEFAULT_BOOK
     fell_back: bool = False
+    # D-37: a book named in the request that has no rows of its own (the model book's qt).
+    book_missing: bool = False
 
 
 @dataclass(frozen=True)
