@@ -229,6 +229,28 @@ def test_member_read_scopes_results_and_trades_to_the_book(qt_db):
     assert float(system.latest["current_portfolio_value"]) == 501000
 
 
+def test_portfolio_reads_carry_the_contract_sizes(qt_db):
+    # D-32: notionals need the contract multiplier; a root with no metadata is left out.
+    _exec(
+        qt_db,
+        """
+        INSERT INTO metadata.contract_metadata
+            ("Databento Symbol", "IB Symbol", "Name", "Exchange", "Asset Type", "Sector",
+             "Contract Size")
+        VALUES ('ZF', 'ZF', '5-Year Note', 'CBOT', 'Futures', 'Rates', '1,000')
+        """,
+    )
+    add_results(qt_db, "qt", D2, 500000)
+    add_position(qt_db, "qt", D2, "ZF.v.0", -5)
+    add_position(qt_db, "qt", D2, "QQQ", 2)
+
+    by_portfolio = repo(qt_db).fetch_portfolio_rows(QT, book="qt", allow_fallback=False)
+    by_strategy = repo(qt_db).fetch_detail_rows(STRATEGY, QT, book="qt", allow_fallback=False)
+
+    assert by_portfolio.contract_sizes == {"ZF": 1000.0}
+    assert by_strategy.contract_sizes == {"ZF": 1000.0}
+
+
 def test_closed_positions_compare_with_the_books_previous_date(qt_db):
     # D-35: "yesterday" is the book's previous date (a weekend or a gap in between),
     # not the calendar's yesterday.

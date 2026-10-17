@@ -9,6 +9,7 @@ from algolens.application.portfolio.ports import (
     IncubationPerformanceRows,
     PortfolioDetailRows,
 )
+from algolens.domain.investor.allocation import parse_contract_size
 from algolens.domain.portfolio.streams import (
     DEFAULT_BOOK,
     FALLBACK_BOOK,
@@ -399,6 +400,7 @@ class PostgresPortfolioRepository:
                     served_book,
                     has_portfolio_type=has_portfolio_type,
                 )
+                contract_sizes = self._contract_sizes(cursor, positions, executions)
         finally:
             conn.close()
 
@@ -411,6 +413,7 @@ class PostgresPortfolioRepository:
             yesterday_positions=yesterday_positions,
             book=served_book,
             fell_back=fell_back,
+            contract_sizes=contract_sizes,
         )
 
     # --- reads keyed by portfolio id (AlgoLens#102) ------------------------
@@ -418,6 +421,38 @@ class PostgresPortfolioRepository:
     # One portfolio is one book: these reads find a book by its portfolio id
     # and never match on the strategy id. A book with several sleeves is
     # netted per symbol.
+
+    def _contract_sizes(self, cursor, *row_lists):
+        """D-32: contract size by symbol root for the symbols in these rows.
+
+        metadata.contract_metadata."Contract Size" is TEXT ('1000', '0.1'); a root it does
+        not list (equities) is left out and counts with size 1.
+        """
+        roots = sorted(
+            {(row["symbol"] or "").split(".", 1)[0] for rows in row_lists for row in rows}
+        )
+        if not roots:
+            return {}
+        cursor.execute("SELECT to_regclass('metadata.contract_metadata') IS NOT NULL AS present")
+        present = cursor.fetchone()
+        if not present or not present["present"]:
+            return {}
+        cursor.execute(
+            """
+            SELECT DISTINCT ON (cm."Databento Symbol")
+                   cm."Databento Symbol" AS root, cm."Contract Size" AS contract_size
+            FROM metadata.contract_metadata cm
+            WHERE cm."Databento Symbol" = ANY(%s)
+            ORDER BY cm."Databento Symbol"
+            """,
+            (roots,),
+        )
+        sizes = {}
+        for row in cursor.fetchall():
+            size = parse_contract_size(row["contract_size"])
+            if size:
+                sizes[row["root"]] = size
+        return sizes
 
     def _has_column(self, cursor, table, column):
         cursor.execute(
@@ -637,6 +672,7 @@ class PostgresPortfolioRepository:
                     )
                 else:
                     executions = []
+                contract_sizes = self._contract_sizes(cursor, positions, executions)
         finally:
             conn.close()
 
@@ -649,6 +685,7 @@ class PostgresPortfolioRepository:
             yesterday_positions=yesterday,
             book=served_book,
             fell_back=fell_back,
+            contract_sizes=contract_sizes,
         )
 
     def list_incubating_strategies(self):

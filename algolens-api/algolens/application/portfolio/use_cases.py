@@ -91,9 +91,10 @@ def build_strategy_detail(
         stream: build_historical_data(stream_rows)
         for stream, stream_rows in rows.equity_by_stream.items()
     }
-    transformed_positions = transform_positions(rows.positions, current_value)
+    sizes = getattr(rows, "contract_sizes", None)
+    transformed_positions = transform_positions(rows.positions, current_value, sizes)
     stats = compute_return_stats(historical_data)
-    transformed_executions = transform_executions(rows.executions)
+    transformed_executions = transform_executions(rows.executions, sizes)
     transformed_finalized = transform_finalized(rows.yesterday_positions, rows.positions)
 
     volatility = float(latest["volatility"])

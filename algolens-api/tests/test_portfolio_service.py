@@ -75,6 +75,32 @@ def test_transform_positions_percent_of_total():
     assert out[0]["percentOfTotal"] == 50.0
 
 
+def test_notionals_apply_the_contract_size():
+    # D-32: 5 ZF at 103.65625 with contract size 1000 is $518,281.25, not $518; a root
+    # with no size (an equity) counts with 1.
+    from algolens.domain.portfolio.calculations import transform_executions, transform_positions
+
+    sizes = {"ZF": 1000.0, "MBT": 0.1}
+    positions = [
+        {"symbol": "ZF.v.0", "quantity": -5, "average_price": 103.65625},
+        {"symbol": "MBT.v.0", "quantity": 3, "average_price": 111026.67},
+        {"symbol": "AAPL", "quantity": 10, "average_price": 200},
+    ]
+    out = {p["symbol"]: p for p in transform_positions(positions, 1_000_000, sizes)}
+
+    assert out["ZF.v.0"]["notional"] == pytest.approx(518281.25)
+    assert out["ZF.v.0"]["percentOfTotal"] == pytest.approx(51.828125)
+    assert out["MBT.v.0"]["notional"] == pytest.approx(33308.0)
+    assert out["AAPL"]["notional"] == 2000.0
+
+    [trade] = transform_executions(
+        [{"symbol": "ZF.v.0", "side": "SELL", "quantity": 1, "price": 103.65625,
+          "commissions_fees": 1.5, "execution_time": None}],
+        sizes,
+    )
+    assert trade["notional"] == pytest.approx(103656.25)
+
+
 def test_transform_finalized_only_changed_positions():
     yesterday = [
         {
