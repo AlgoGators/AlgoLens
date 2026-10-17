@@ -5,11 +5,10 @@
 -- the front-end) to the internal strategy_type discriminator stored in the trading
 -- tables, plus display metadata and the starting equity used for return math.
 --
--- Safe to run more than once (IF NOT EXISTS + idempotent seed upsert). Applying it
--- is OPTIONAL for correctness: the backend falls back to a built-in default
--- registry (the single trend-following strategy) when this table is absent or
--- empty, so old and new code both work. Applying it is what unlocks adding further
--- strategies without a code change.
+-- Safe to run more than once (IF NOT EXISTS + idempotent seed upsert). It is
+-- required: the backend once fell back to a built-in default registry (the single
+-- trend-following strategy) when this table was absent or empty, but since D-23
+-- (2026-10-17) a failed or empty read is an error the screens show.
 
 CREATE TABLE IF NOT EXISTS trading.strategy_registry (
     id             TEXT PRIMARY KEY,            -- public API id, e.g. 'trendfollowing'
