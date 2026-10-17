@@ -1,6 +1,8 @@
 """Portfolio stream names produced by the trading engine."""
 
-PORTFOLIO_STREAMS = ("qt", "system", "benchmark")
+# The QT book and the model's book of the same portfolio (D-3). The model twin's "benchmark"
+# stream is gone with the twin (D-1); the engine never wrote it.
+PORTFOLIO_STREAMS = ("qt", "system")
 
 # Headline dashboard values represent the real book.
 PRIMARY_STREAM = "qt"

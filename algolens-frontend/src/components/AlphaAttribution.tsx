@@ -3,18 +3,13 @@ import { Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis, Legend } f
 import type { HistoricalDataPoint } from '../domain/portfolio/portfolioData';
 
 /**
- * Shows whether QT's decisions are adding value.
+ * Shows whether QT's decisions are adding value: one chart, two lines (D-3, HD 2026-10-16).
  *
- * The engine writes three streams and, until now, nothing displayed them:
+ *   system  the model's book of the desk's portfolio (A), from the first QT day
+ *   qt      what QT actually held -- the real book
  *
- *   qt         what QT actually decided -- the real book
- *   system     what the algorithm said today, given the real book
- *   benchmark  what the algorithm would have compounded to untouched
- *
- * The comparison that answers "has QT added value over time" is qt vs benchmark.
- * `system` is deliberately NOT the yardstick: position buffering anchors each
- * day's target on yesterday's actual position, so `system` drifts along with
- * QT's own decisions. It scores a single day's tweak; it cannot score a year.
+ * The gap between them is the desk's value. This replaces the model twin and the
+ * `benchmark` stream it was to feed, which the platform never wrote (D-1).
  */
 
 interface Props {
@@ -24,21 +19,19 @@ interface Props {
 
 const STREAM_STYLE: Record<string, { label: string; colour: string; description: string }> = {
     qt: {
-        label: 'QT (actual)',
+        label: 'QT book',
         colour: '#f97316',
         description: 'what we actually held',
     },
-    benchmark: {
-        label: 'System alone',
-        colour: '#6366f1',
-        description: 'never saw a QT edit',
-    },
     system: {
-        label: "Today's signal",
-        colour: '#94a3b8',
-        description: 'what the algorithm said today, given the real book',
+        label: 'Model book',
+        colour: '#6366f1',
+        description: "the model's book, before the desk's edits",
     },
 };
+
+/** The two books the chart compares, in drawing order. */
+export const COMPARED_STREAMS = ['system', 'qt'] as const;
 
 /** Merge the per-stream series into rows keyed by date, so recharts can align them. */
 function mergeByDate(
@@ -65,27 +58,31 @@ const money = (n: number) =>
 export function AlphaAttribution({ equityByStream, theme }: Props) {
     const dark = theme === 'dark';
 
-    const merged = useMemo(
-        () => (equityByStream ? mergeByDate(equityByStream) : []),
-        [equityByStream],
-    );
-
-    // The headline number: where the real book ended up versus where the
-    // untouched system would have. Only meaningful once both streams exist.
-    const spread = useMemo(() => {
-        if (!equityByStream) return null;
-        const qt = equityByStream.qt;
-        const bench = equityByStream.benchmark;
-        if (!qt?.length || !bench?.length) return null;
-        const qtFinal = qt[qt.length - 1].value;
-        const benchFinal = bench[bench.length - 1].value;
-        return { qtFinal, benchFinal, diff: qtFinal - benchFinal };
+    const compared = useMemo(() => {
+        const out: Record<string, HistoricalDataPoint[]> = {};
+        for (const stream of COMPARED_STREAMS) {
+            const points = equityByStream?.[stream];
+            if (points?.length) out[stream] = points;
+        }
+        return out;
     }, [equityByStream]);
 
-    const streams = equityByStream ? Object.keys(equityByStream) : [];
+    const merged = useMemo(() => mergeByDate(compared), [compared]);
 
-    // Before the dual-portfolio migration there is only one stream, so there is
-    // nothing to compare. Say so plainly rather than rendering an empty chart.
+    // The headline number: where the QT book ended up versus the model's book.
+    const spread = useMemo(() => {
+        const qt = compared.qt;
+        const model = compared.system;
+        if (!qt?.length || !model?.length) return null;
+        const qtFinal = qt[qt.length - 1].value;
+        const modelFinal = model[model.length - 1].value;
+        return { qtFinal, modelFinal, diff: qtFinal - modelFinal };
+    }, [compared]);
+
+    const streams = Object.keys(compared);
+
+    // Until the QT book has days of its own there is nothing to compare. Say so
+    // plainly rather than rendering an empty chart.
     if (streams.length < 2) {
         return (
             <div
@@ -96,9 +93,8 @@ export function AlphaAttribution({ equityByStream, theme }: Props) {
                     Discretionary alpha
                 </h3>
                 <p className={`text-sm ${dark ? 'text-gray-400' : 'text-gray-600'}`}>
-                    Not available yet. This compares the portfolio QT actually traded against
-                    what the system would have done untouched — it needs both streams, which
-                    begin accumulating once dual-portfolio tracking is live.
+                    Not available yet. This compares the QT book with the model&rsquo;s book of the
+                    same portfolio; it needs both, from the first QT day.
                 </p>
             </div>
         );
@@ -115,7 +111,7 @@ export function AlphaAttribution({ equityByStream, theme }: Props) {
                         Discretionary alpha
                     </h3>
                     <p className={`text-xs mt-1 ${dark ? 'text-gray-500' : 'text-gray-500'}`}>
-                        QT&rsquo;s book versus the same system left untouched
+                        The QT book against the model&rsquo;s book: the gap is the desk&rsquo;s value
                     </p>
                 </div>
 
@@ -129,7 +125,7 @@ export function AlphaAttribution({ equityByStream, theme }: Props) {
                             {money(Math.abs(spread.diff))}
                         </div>
                         <div className={`text-xs ${dark ? 'text-gray-500' : 'text-gray-500'}`}>
-                            {spread.diff >= 0 ? 'added by QT' : 'given up vs. system alone'}
+                            {spread.diff >= 0 ? 'added by the desk' : "given up vs. the model's book"}
                         </div>
                     </div>
                 )}
@@ -181,9 +177,6 @@ export function AlphaAttribution({ equityByStream, theme }: Props) {
                             dataKey={stream}
                             stroke={STREAM_STYLE[stream]?.colour ?? '#94a3b8'}
                             strokeWidth={stream === 'qt' ? 2 : 1.5}
-                            // The signal-of-the-day line is context, not a comparison
-                            // baseline, so it is visually subordinate.
-                            strokeDasharray={stream === 'system' ? '4 3' : undefined}
                             dot={false}
                             connectNulls
                         />
@@ -191,7 +184,7 @@ export function AlphaAttribution({ equityByStream, theme }: Props) {
                 </LineChart>
             </ResponsiveContainer>
 
-            <dl className="mt-4 grid grid-cols-1 gap-1 sm:grid-cols-3">
+            <dl className="mt-4 grid grid-cols-1 gap-1 sm:grid-cols-2">
                 {streams.map((stream) => (
                     <div key={stream} className="flex items-baseline gap-2">
                         <span

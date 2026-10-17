@@ -89,8 +89,8 @@ export function PerformanceOverview({ metrics, theme }: PerformanceOverviewProps
           </div>
           <div className={`text-xs ${theme === 'dark' ? 'text-gray-600' : 'text-gray-400'}`}>
             {metrics.advancedMetrics.informationRatio === null
-              ? 'Needs a benchmark stream'
-              : 'vs system alone'}
+              ? "Needs the model's book"
+              : "vs the model's book"}
           </div>
         </div>
 
