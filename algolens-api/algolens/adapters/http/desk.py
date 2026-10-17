@@ -147,6 +147,12 @@ def _body(required=True):
     return payload
 
 
+def _gone_user():
+    """D-44: a signed-in token whose user was deleted from auth.users does not decide an
+    override (its e-mail claim alone is not trusted)."""
+    return jsonify({"error": "This account no longer exists"}), 403
+
+
 def _approver_role(user):
     return next((role for role in APPROVER_ROLES if is_approver(user, role)), None)
 
@@ -304,6 +310,8 @@ def desk_rescind(portfolio_id):
 @handled
 def approval_lookup():
     user = current_user()
+    if user["role"] is None:
+        return _gone_user()
     role = _approver_role(user)
     if role is None and not can_use_qt_desk():
         return jsonify({"error": "Insufficient permissions"}), 403
@@ -326,6 +334,8 @@ def approval_lookup():
 def approval_decide():
     payload = _body()
     user = current_user()
+    if user["role"] is None:
+        return _gone_user()
     repo, agent, _settings = _desk_dependencies()
     result = DecideOverride(repo, agent).execute(
         payload.get("token"),

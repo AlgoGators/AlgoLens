@@ -36,7 +36,7 @@ function Deadline({ date, deadlines, nowMs }: { date: string; deadlines: DeskDea
 }
 
 /**
- * /qt/approve?token=... (A5). The engine e-mails this link to the VP and the
+ * /qt/approve#token=... (A5; the token rides the fragment, D-44, and older links use ?token=). The engine e-mails this link to the VP and the
  * President. The page shows the book the request snapshotted (C1): exactly
  * what an approval trades. Below it, the model book (system) next to the
  * desk's current proposal and the current qt book; either approver decides.
@@ -48,7 +48,13 @@ function Deadline({ date, deadlines, nowMs }: { date: string; deadlines: DeskDea
 export function ApprovalPage({ onDone }: { onDone: () => void }) {
   const { theme } = useTheme();
   const dark = theme === 'dark';
-  const token = approvalTokenFrom(window.location.search);
+  // Read once, then dropped from the address bar so it is not kept in the history (D-44).
+  const [token] = useState(() => approvalTokenFrom(window.location.search, window.location.hash));
+  useEffect(() => {
+    if (token && (window.location.search || window.location.hash)) {
+      window.history.replaceState(null, '', window.location.pathname);
+    }
+  }, [token]);
   const [page, setPage] = useState<ApprovalData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [reason, setReason] = useState('');

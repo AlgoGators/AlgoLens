@@ -437,3 +437,18 @@ def test_publish_accept_c_takes_the_flow_from_the_body(client, desk):
     assert response.status_code == 409  # no finished save yet
     assert "no finished save" in response.get_json()["error"]
 
+
+
+def test_a_deleted_user_cannot_look_up_or_decide(client, desk, screen_access):
+    # D-44: the token's e-mail claim alone is not trusted once the user is gone from auth.users.
+    _request_with_token(client, desk)
+    headers = _login(client, email="p@x.com", role="investor")
+    screen_access.roles["7"] = None  # deleted after signing in
+
+    page = client.post("/portfolio/desk/approval", json={"token": "secret-token"}, headers=headers)
+    decided = client.post("/portfolio/desk/approval/decide",
+                          json={"token": "secret-token", "approved": True}, headers=headers)
+
+    assert page.status_code == 403 and "no longer exists" in page.get_json()["error"]
+    assert decided.status_code == 403
+    assert not any(r["kind"] == "override_decision" for r in desk[0].rows)

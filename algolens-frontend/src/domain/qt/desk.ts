@@ -879,9 +879,15 @@ export function snapshotBySymbol(snapshot: SnapshotRow[] | null | undefined): Ma
 }
 
 /** Approval links carry the token in the query string: /qt/approve?token=... */
-export function approvalTokenFrom(search: string): string | null {
-  const token = new URLSearchParams(search).get('token');
-  return token && token.trim() ? token.trim() : null;
+export function approvalTokenFrom(search: string, hash = ''): string | null {
+  // D-44: the e-mailed link carries the token in the fragment (#token=...), which the browser
+  // never sends to the server, so it stays out of the proxy's access log. Links e-mailed before
+  // that carry it in the query and still work.
+  for (const params of [hash.replace(/^#/, ''), search]) {
+    const token = new URLSearchParams(params).get('token');
+    if (token && token.trim()) return token.trim();
+  }
+  return null;
 }
 
 // -- C10: the A -> B -> C approval ------------------------------------------------------------

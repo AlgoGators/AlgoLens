@@ -573,6 +573,12 @@ describe('approvalTokenFrom', () => {
     expect(approvalTokenFrom('?x=1')).toBeNull();
     expect(approvalTokenFrom('?token=')).toBeNull();
   });
+
+  it('prefers the fragment, which never reaches the server (D-44)', () => {
+    expect(approvalTokenFrom('', '#token=frag')).toBe('frag');
+    expect(approvalTokenFrom('?token=old', '#token=frag')).toBe('frag');
+    expect(approvalTokenFrom('?token=old', '')).toBe('old');
+  });
 });
 
 const risk = (over: Partial<DeskRisk>): DeskRisk => ({
