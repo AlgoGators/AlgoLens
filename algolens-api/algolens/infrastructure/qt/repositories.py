@@ -745,7 +745,8 @@ class PostgresDeskRepository:
         conn = self.connection_factory()
         try:
             with conn.cursor() as cursor:
-                cursor.execute("SELECT to_regclass('trading.desk_settings_locks') IS NOT NULL AS present")
+                cursor.execute(
+                    "SELECT to_regclass('trading.desk_settings_locks') IS NOT NULL AS present")
                 present = cursor.fetchone()
                 if not present or not present["present"]:
                     return None
@@ -771,7 +772,8 @@ class PostgresDeskRepository:
                     (list(path), reason, by),
                 )
             else:
-                cursor.execute("DELETE FROM trading.desk_settings_locks WHERE path = %s", (list(path),))
+                cursor.execute("DELETE FROM trading.desk_settings_locks WHERE path = %s",
+                               (list(path),))
             cursor.execute(
                 """
                 INSERT INTO trading.desk_settings_lock_log (path, locked, reason, changed_by)

@@ -211,9 +211,11 @@ def test_the_view_marks_locked_and_read_only_fields():
 
 def test_lock_routes_list_for_the_desk_and_change_for_an_admin(client, settings_repo):
     settings_repo.locks = [("live",)]
-    member = _login(client, role="exec_board", email="desk@x.com")
+    _login(client, role="exec_board", email="desk@x.com")
     listed = client.get("/portfolio/desk/settings-locks")
-    assert listed.status_code == 200 and listed.get_json()["locks"] == [{"path": ["live"], "reason": None, "lockedBy": None, "lockedAt": None}]
+    assert listed.status_code == 200
+    assert listed.get_json()["locks"] == [
+        {"path": ["live"], "reason": None, "lockedBy": None, "lockedAt": None}]
 
     desk_only = _login(client, role="team_lead")
     refused = client.post("/portfolio/desk/settings-locks",
@@ -246,7 +248,7 @@ def test_the_engine_checks_a_version_before_it_is_saved():
     SaveSettings(repo, ENGINE).execute(QT, [{"path": ["capital"], "value": 1}], "a", "d@x.com")
     assert ENGINE.calls[-1] == ("QT_CONSERVATIVE_PORTFOLIO", {"capital": 1})
 
-    ENGINE.answer = (False, "risk.modules[0].R_max must be at most 10")
+    ENGINE.answer = (False, "risk.modules[0].R_max must be at most 3")
     with pytest.raises(SettingsRuleError, match="The engine refuses this change: risk.modules"):
         SaveSettings(repo, ENGINE).execute(QT, [{"path": ["capital"], "value": 2}], "b", "d@x.com")
     with pytest.raises(SettingsRuleError, match="The engine refuses"):

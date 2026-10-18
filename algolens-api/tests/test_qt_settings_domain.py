@@ -244,7 +244,7 @@ LOCKED = [
 @pytest.mark.parametrize("path", LOCKED)
 def test_a_locked_setting_is_shown_greyed_out_and_cannot_be_changed(path):
     field = next(f for f in settings_view(FULL, {}, {}, False) if f["path"] == path)
-    assert field["locked"] is True and field["lockedBy"]
+    assert field["locked"] is True and field["lockPattern"]
     with pytest.raises(SettingsRuleError, match="locked by an admin"):
         changes_to_overrides(FULL, [{"path": path, "value": "changed"}])
 

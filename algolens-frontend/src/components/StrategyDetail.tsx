@@ -248,7 +248,6 @@ export function StrategyDetail({
             )}
           </button>
         </div>
-
       </div>
 
       {/* Tab Content */}

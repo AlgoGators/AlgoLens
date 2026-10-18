@@ -49,10 +49,10 @@ export function PortfolioBookView({
   const dark = theme === 'dark';
   const [requested, setRequested] = useState<PositionBook | null>(null);
   // D-68: which of the portfolio's two books is shown (QT first, ruling 20).
-  const [choiceKey, setChoiceKey] = useState<BookChoice['key']>(
+  const [selectedKey, setSelectedKey] = useState<BookChoice['key']>(
     choices?.some(c => c.key === 'qt') ? 'qt' : 'model',
   );
-  const choice = choices?.find(c => c.key === choiceKey) ?? null;
+  const choice = choices?.find(c => c.key === selectedKey) ?? null;
   const readId = choice ? choice.portfolio.portfolio_id : portfolio.portfolio_id;
   const readBook = choice ? choice.book : requested;
   const [strategy, setStrategy] = useState<Strategy | null>(null);
@@ -104,11 +104,11 @@ export function PortfolioBookView({
             key={c.key}
             type="button"
             role="radio"
-            aria-checked={c.key === choiceKey}
+            aria-checked={c.key === selectedKey}
             disabled={loading}
-            onClick={() => setChoiceKey(c.key)}
+            onClick={() => setSelectedKey(c.key)}
             className={`px-3 py-1.5 text-sm ${
-              c.key === choiceKey ? 'bg-orange-500 text-white' : dark ? 'text-gray-300' : 'text-gray-700'
+              c.key === selectedKey ? 'bg-orange-500 text-white' : dark ? 'text-gray-300' : 'text-gray-700'
             }`}
           >
             {c.label}

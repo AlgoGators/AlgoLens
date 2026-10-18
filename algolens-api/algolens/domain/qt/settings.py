@@ -97,9 +97,9 @@ READ_ONLY = (
      "Schema-1 behaviour migrated as is; changing it is its own measured change (see its note)."),
 )
 
-# D-15, D-78: the engine's bounds on the risk gate's limits (trade-ngin
-# src/risk/risk_module_config.cpp). Each is (lowest, highest, lowest exclusive, whole number).
-# D-78, Dominick's hard caps (2026-10-18), as risk_module_config.cpp holds them.
+# D-15, D-78: the engine's bounds on the risk gate's limits, Dominick's hard caps of 2026-10-18 as
+# trade-ngin src/risk/risk_module_config.cpp holds them. Each is (lowest, highest, lowest
+# exclusive, whole number).
 MODULE_BOUNDS = {
     "R_max": (0.0, 3.0, True, False),
     "R_jump_max": (0.0, 6.0, True, False),
@@ -301,7 +301,8 @@ def _check_bounds(path: Sequence[str], value: Any) -> None:
         raise SettingsRuleError(f"{name} must be a whole number (got {value})")
     if low is not None and (value <= low if bounds["minExclusive"] else value < low):
         raise SettingsRuleError(
-            f"{name} must be {'above' if bounds['minExclusive'] else 'at least'} {low} (got {value})"
+            f"{name} must be {'above' if bounds['minExclusive'] else 'at least'} {low} "
+            f"(got {value})"
         )
     if high is not None and value > high:
         raise SettingsRuleError(f"{name} must be at most {high} (got {value})")
@@ -492,13 +493,15 @@ def check_overrides_apply(running: Mapping[str, Any], overrides: Mapping[str, An
         for module in old:
             mine = by_id.get(module["id"])
             if mine is None:
-                raise SettingsRuleError(f"{name} drops the {module['id']} module; it cannot be removed")
+                raise SettingsRuleError(
+                    f"{name} drops the {module['id']} module; it cannot be removed")
             if mine.get("type") != module.get("type"):
                 raise SettingsRuleError(f"{name}.{module['id']}.type cannot be changed")
         for item in items:
             known = next((m for m in old if m["id"] == item["id"]), None)
             if known is None:
-                raise SettingsRuleError(f"{name} adds a module ({item['id']}) the engine does not run")
+                raise SettingsRuleError(
+                    f"{name} adds a module ({item['id']}) the engine does not run")
             walk(item, path + [item["id"]], known)
             _check_module(item, tuple(path) + (item["id"],))
 
@@ -547,13 +550,13 @@ def leaf_paths(tree: Mapping[str, Any], prefix: tuple[str, ...] = ()) -> dict[tu
     return leaves
 
 
+_MISSING = object()
+
+
 def changed_paths(before: Mapping[str, Any], after: Mapping[str, Any]) -> list[tuple[str, ...]]:
     """The settings whose value differs between two overrides objects."""
     a, b = leaf_paths(before or {}), leaf_paths(after or {})
     return sorted(p for p in set(a) | set(b) if a.get(p, _MISSING) != b.get(p, _MISSING))
-
-
-_MISSING = object()
 
 
 def _notes(node: Mapping[str, Any]) -> dict[str, str]:
@@ -639,7 +642,7 @@ def settings_view(
             "pending_from_files": False,
             "help": helps.get(path),
             "locked": lock is not None,
-            "lockedBy": list(lock) if lock else None,
+            "lockPattern": list(lock) if lock else None,
             "readOnly": read_only_reason(path),
             "bounds": bounds_for(path),
         }

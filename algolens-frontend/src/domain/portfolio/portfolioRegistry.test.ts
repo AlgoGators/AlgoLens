@@ -10,7 +10,6 @@ import {
   groupOf,
   portfolioName,
   representative,
-  switcherLabel,
   type PortfolioEntry,
   type PortfolioGroup,
 } from './portfolioRegistry';
@@ -66,11 +65,6 @@ describe('switcher', () => {
     expect(findPortfolio(groups, 'QTM')?.name).toBe('QT TF (model)');
     expect(findPortfolio(groups, 'nope')).toBeNull();
     expect(findPortfolio(groups, null)).toBeNull();
-  });
-
-  it('names a book plainly, with no (desk) mark (D-24)', () => {
-    expect(switcherLabel(groups[1].portfolios[0])).toBe('QT TF');
-    expect(switcherLabel(groups[0].portfolios[0])).toBe('Trend');
   });
 
   it('shows a group as one portfolio, named for its model book, opening on its QT book (D-24)', () => {

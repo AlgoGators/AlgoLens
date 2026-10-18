@@ -1161,7 +1161,6 @@ def test_accept_c_needs_a_finished_current_save_and_a_readable_check():
         PublishDesk(repo, FakeAgent(), now=lambda: NOW).execute(QT, "d@x.com", flow="bogus")
 
 
-
 # --- a future day (Dominick 2026-10-18, replacing D-43) ------------------------
 
 

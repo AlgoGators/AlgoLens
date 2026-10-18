@@ -246,7 +246,8 @@ class DeskClient:
             reply = stub.GetRunStatus(request, timeout=self.timeout)
         except grpc.RpcError as exc:
             log = logger.error if is_version_mismatch(exc) else logger.warning
-            log("[DESK] GetRunStatus %s %s failed: %s", portfolio_id, _day(day), describe_rpc_error(exc))
+            log("[DESK] GetRunStatus %s %s failed: %s", portfolio_id, _day(day),
+                describe_rpc_error(exc))
             raise DeskRiskUnavailable(status_name(exc)) from exc
         except Exception as exc:
             logger.error(

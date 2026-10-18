@@ -53,11 +53,6 @@ export function bookQuery(requested: PositionBook | null): string {
   return requested ? `?book=${encodeURIComponent(requested)}` : '';
 }
 
-/** A portfolio's book in the switcher: its name (D-24: no "(desk)" mark). */
-export function switcherLabel(entry: PortfolioEntry): string {
-  return entry.name;
-}
-
 /**
  * D-18, D-24: a portfolio as the screens show it. A group is one portfolio, named for its model
  * book (the fund's own, e.g. "Conservative"); a portfolio alone is named for itself.

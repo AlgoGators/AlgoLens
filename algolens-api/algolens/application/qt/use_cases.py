@@ -319,7 +319,8 @@ class GetDeskState:
         # D-56: today's model run as the engine reports it (running, failed, refused), so the
         # page says why there is no book yet instead of inferring it.
         today = date.fromisoformat(state["deadlines"]["today"])
-        state["runStatus"] = {"date": today.isoformat(), **_run_status(self.agent, portfolio_id, today)}
+        state["runStatus"] = {"date": today.isoformat(),
+                              **_run_status(self.agent, portfolio_id, today)}
         if day is None:
             return state
 

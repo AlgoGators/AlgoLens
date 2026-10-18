@@ -198,11 +198,11 @@ describe('locks, read-only settings and bounds (D-14, D-15, D-16)', () => {
     pending: null,
     pending_from_files: false,
   };
-  const bounds = { min: 0, max: 10, minExclusive: true, integer: false };
+  const bounds = { min: 0, max: 3, minExclusive: true, integer: false };
 
   it('greys out a locked or read-only setting, and says why', () => {
-    expect(isEditable({ ...base, locked: true, lockedBy: ['risk'] })).toBe(false);
-    expect(lockedReason({ ...base, locked: true, lockedBy: ['risk'] })).toBe('Locked by an admin (risk)');
+    expect(isEditable({ ...base, locked: true, lockPattern: ['risk'] })).toBe(false);
+    expect(lockedReason({ ...base, locked: true, lockPattern: ['risk'] })).toBe('Locked by an admin (risk)');
     expect(lockedReason({ ...base, readOnly: 'One legal value.' })).toBe('One legal value.');
     expect(lockedReason(base)).toBeNull();
     expect(isEditable(base)).toBe(true);
@@ -213,8 +213,9 @@ describe('locks, read-only settings and bounds (D-14, D-15, D-16)', () => {
     expect(buildSettingChanges([field], { [pathKey(field.path)]: '1000' }).invalid).toEqual(['risk.modules.carver.R_max']);
     expect(buildSettingChanges([field], { [pathKey(field.path)]: '0' }).invalid).toHaveLength(1);
     expect(buildSettingChanges([field], { [pathKey(field.path)]: '3' }).changes).toHaveLength(1);
+    expect(buildSettingChanges([field], { [pathKey(field.path)]: '3.5' }).invalid).toHaveLength(1);
     expect(outOfBounds(2.5, { min: 0, max: 100, minExclusive: false, integer: true })).toBe(true);
-    expect(boundsHint(bounds)).toBe('above 0 and at most 10');
+    expect(boundsHint(bounds)).toBe('above 0 and at most 3');
     expect(boundsHint({ min: 0, max: 100, minExclusive: false, integer: true })).toBe('at least 0 and at most 100, a whole number');
   });
 });

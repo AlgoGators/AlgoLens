@@ -197,7 +197,9 @@ class ListSettingsLocks:
     def execute(self) -> dict[str, Any]:
         rows = self.repo.settings_locks()
         if rows is None:
-            return {"stored": False, "locks": [{"path": list(p)} for p in DEFAULT_LOCKS]}
+            return {"stored": False, "locks": [
+                {"path": list(p), "reason": None, "lockedBy": None, "lockedAt": None}
+                for p in DEFAULT_LOCKS]}
         return {"stored": True, "locks": [
             {"path": list(r["path"]), "reason": r.get("reason"), "lockedBy": r.get("locked_by"),
              "lockedAt": _iso(r.get("locked_at"))} for r in rows
@@ -254,7 +256,8 @@ class RevertSettings:
         # locked value); a locked key it carries unchanged is fine.
         locks = _locks(self.repo)
         locked = [
-            ".".join(path) for path in changed_paths(active["overrides"] if active else {}, overrides)
+            ".".join(path)
+            for path in changed_paths(active["overrides"] if active else {}, overrides)
             if lock_for(path, locks)
         ]
         if locked:

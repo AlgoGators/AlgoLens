@@ -36,8 +36,8 @@ function Deadline({ date, deadlines, nowMs }: { date: string; deadlines: DeskDea
 }
 
 /**
- * /qt/approve#token=... (A5; the token rides the fragment, D-44, and older links use ?token=). The engine e-mails this link to the VP and the
- * President. The page shows the book the request snapshotted (C1): exactly
+ * /qt/approve#token=... (A5; the token rides the fragment, D-44, and older links use
+ * ?token=). The engine e-mails this link to the VP and the President. The page shows the book the request snapshotted (C1): exactly
  * what an approval trades. Below it, the model book (system) next to the
  * desk's current proposal and the current qt book; either approver decides.
  * Once the desk changes the proposal the snapshot no longer matches and the

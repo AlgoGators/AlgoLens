@@ -26,7 +26,7 @@ export interface SettingField {
   help?: string | null;
   /** D-14: an admin locked it (the lock pattern that covers it); shown greyed out. */
   locked?: boolean;
-  lockedBy?: string[] | null;
+  lockPattern?: string[] | null;
   /** D-16: why it cannot be changed (one legal value, or it mirrors another setting). */
   readOnly?: string | null;
   /** D-15: the engine's bounds on a risk gate limit. */
@@ -78,7 +78,8 @@ export function isEditable(field: SettingField): boolean {
 export function lockedReason(field: SettingField): string | null {
   if (field.readOnly) return field.readOnly;
   if (field.locked) {
-    const by = field.lockedBy && field.lockedBy.join('.') !== field.path.join('.') ? ` (${field.lockedBy.join('.')})` : '';
+    const pattern = field.lockPattern?.join('.');
+    const by = pattern && pattern !== field.path.join('.') ? ` (${pattern})` : '';
     return `Locked by an admin${by}`;
   }
   return null;

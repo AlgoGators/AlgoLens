@@ -375,7 +375,7 @@ class GetPortfolioDetail:
                 "deskEditable": desk_edit_allowed(cfg),
                 "requestedBook": requested_book,
                 # D-20: the portfolio's strategies (sleeves), not the portfolio called a strategy.
-                "strategies": [dict(s) for s in getattr(rows, "sleeves", ())],
+                "strategies": [dict(s) for s in rows.sleeves],
             }
         )
         return detail

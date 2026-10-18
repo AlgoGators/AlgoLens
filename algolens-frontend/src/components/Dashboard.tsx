@@ -33,7 +33,6 @@ type SettingsScreen = 'profile' | 'account' | 'privacy' | null;
 type ActiveTab = 'portfolio' | 'incubation' | 'builder' | 'news' | 'profile';
 
 export function Dashboard({ onLogout }: DashboardProps) {
-  const [selectedStrategy, setSelectedStrategy] = useState<string | null>(null);
   const [settingsScreen, setSettingsScreen] = useState<SettingsScreen>(null);
   const [showBuilder, setShowBuilder] = useState(false);
   const [activeTab, setActiveTab] = useState<ActiveTab>('portfolio');
@@ -113,7 +112,6 @@ export function Dashboard({ onLogout }: DashboardProps) {
   useEffect(() => {
     if (activeTab === 'incubation' && !isInternalMember) {
       setActiveTab('portfolio');
-      setSelectedStrategy(null);
     }
   }, [activeTab, isInternalMember]);
 
@@ -127,7 +125,6 @@ export function Dashboard({ onLogout }: DashboardProps) {
     }
 
     setActiveTab(tab as ActiveTab);
-    setSelectedStrategy(null);
 
     if (tab === 'builder') {
       setShowBuilder(true);
@@ -165,14 +162,12 @@ export function Dashboard({ onLogout }: DashboardProps) {
           onHomeClick={() => {
             setShowBuilder(false);
             setActiveTab('portfolio');
-            setSelectedStrategy(null);
           }}
           onIncubationClick={() => {
             if (!isInternalMember) return;
             setShowBuilder(false);
             setSettingsScreen(null);
             setActiveTab('incubation');
-            setSelectedStrategy(null);
           }}
         />
       )}

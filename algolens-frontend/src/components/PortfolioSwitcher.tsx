@@ -9,7 +9,7 @@ import {
 interface PortfolioSwitcherProps {
   groups: PortfolioGroup[];
   selected: string | null;
-  onSelect: (portfolioId: string | null) => void;
+  onSelect: (portfolioId: string) => void;
 }
 
 /**
