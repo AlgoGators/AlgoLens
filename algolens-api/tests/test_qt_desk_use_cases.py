@@ -1162,22 +1162,22 @@ def test_accept_c_needs_a_finished_current_save_and_a_readable_check():
 
 
 
-# --- a future day (D-43) ------------------------------------------------------
+# --- a future day (Dominick 2026-10-18, replacing D-43) ------------------------
 
 
-def test_a_future_day_is_not_approved_but_takes_edits():
+def test_a_future_day_is_approved_once_its_book_exists():
+    # No reason to wait for the day itself: the model's book exists, so the desk decides.
     eve = lambda: _ny(DAY - timedelta(days=1), 20, 0)  # noqa: E731  the evening before
-    repo, agent = FakeRepo(), FakeAgent()
-    with pytest.raises(DeskConflict, match="it is a future day"):
-        ApproveDesk(repo, agent, now=eve).execute(QT, [], "r", "d@x.com")
-    with pytest.raises(DeskConflict, match="it is a future day"):
-        PublishDesk(repo, agent, now=eve).execute(QT, "d@x.com")
-    with pytest.raises(DeskConflict, match="An override request of the"):
-        RequestOverride(repo, agent, now=eve).execute(QT, "r", "d@x.com")
-    assert repo.rows == [] and agent.calls == []
-    SaveDeskEdit(repo, agent, now=eve).execute(
-        QT, [{"symbol": "ZC.v.0", "quantity": 0, "expected": 3}], "r", "d@x.com")
-    assert [r["kind"] for r in repo.rows] == ["save"]
+    for run, kind in [
+        (lambda repo, agent: PublishDesk(repo, agent, now=eve).execute(QT, "d@x.com"), "publish"),
+        (lambda repo, agent: RequestOverride(repo, agent, now=eve).execute(QT, "r", "d@x.com"),
+         "override_request"),
+        (lambda repo, agent: SaveDeskEdit(repo, agent, now=eve).execute(
+            QT, [{"symbol": "ZC.v.0", "quantity": 0, "expected": 3}], "r", "d@x.com"), "save"),
+    ]:
+        repo = FakeRepo()
+        run(repo, FakeAgent())
+        assert [r["kind"] for r in repo.rows] == [kind]
 
 
 # --- approve with or without the e-mail; Send (D-66) ----------------------------------------
