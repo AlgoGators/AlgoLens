@@ -78,7 +78,7 @@ class PostgresInvestorRepository:
         try:
             with conn.cursor() as cursor:
                 if not self._links_present(cursor):
-                    return "absent"
+                    return None
                 cursor.execute(
                     "SELECT portfolio_id, book FROM investor.portfolio_links WHERE user_id = %s",
                     (int(user_id),),
@@ -105,7 +105,8 @@ class PostgresInvestorRepository:
         conn = self.connection_factory()
         try:
             with conn.cursor() as cursor:
-                cursor.execute("SELECT id FROM auth.users WHERE id = %s FOR UPDATE", (int(user_id),))
+                cursor.execute("SELECT id FROM auth.users WHERE id = %s FOR UPDATE",
+                               (int(user_id),))
                 if cursor.fetchone() is None:
                     conn.rollback()
                     return False

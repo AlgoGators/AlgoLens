@@ -7,8 +7,13 @@ from algolens.domain.investor.allocation import InstrumentInfo, build_allocation
 from algolens.domain.investor.links import LinkRuleError, book_choices, check_link, resolve_link
 from algolens.domain.investor.reports import ReportRuleError, validate_title, validate_upload
 
+
 class ReportNotFound(NotFoundError):
     """No report with that id (or, for investors, not published)."""
+
+
+class InvestorNotFound(NotFoundError):
+    """No user with that id to link a book to."""
 
 
 class InvestorRepositoryPort(Protocol):
@@ -24,8 +29,8 @@ class InvestorRepositoryPort(Protocol):
         ...
 
     def portfolio_link(self, user_id):
-        """D-25: {portfolio_id, book} the investor follows, None when none is set, or the
-        string "absent" while migration 005 is not applied."""
+        """D-25: {portfolio_id, book} the investor follows; None when none is set or while
+        migration 005 is not applied."""
         ...
 
     def portfolio_links(self):
@@ -69,7 +74,7 @@ class GetInvestorPortfolio:
     def execute(self, user_id):
         choices = book_choices(self.registry.list())
         link = self.repo.portfolio_link(user_id)
-        choice, is_default = resolve_link(choices, link if isinstance(link, dict) else None)
+        choice, is_default = resolve_link(choices, link)
         if choice is None:
             return []
         portfolio_id, book = choice["portfolio_id"], choice["book"]
@@ -134,9 +139,10 @@ class SetInvestorLink:
         except LinkRuleError as exc:
             raise ValidationError(str(exc)) from None
         if self.repo.portfolio_links() is None:
-            raise LinkNotStored("The investor links are not in the database yet (AlgoLens migration 005)")
+            raise LinkNotStored(
+                "The investor links are not in the database yet (AlgoLens migration 005)")
         if not self.repo.set_portfolio_link(user_id, choice["portfolio_id"], choice["book"], by):
-            raise ReportNotFound(f"No user {user_id}")
+            raise InvestorNotFound(f"No user {user_id}")
         return choice
 
 

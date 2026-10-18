@@ -382,7 +382,7 @@ def test_an_investor_follows_the_book_an_admin_links_after_migration_005(db):
     from algolens.infrastructure.portfolio.strategy_registry import PostgresStrategyRegistry
 
     member = _uid(db, "member@x.com")
-    assert investor_repo(db).portfolio_link(member) == "absent"
+    assert investor_repo(db).portfolio_link(member) is None   # 005 not applied: as no link
     sql = (Path(__file__).parent.parent / "migrations" / "005_investor_portfolio_links.sql").read_text("utf-8")
     _q(db, sql)
     assert investor_repo(db).portfolio_link(member) is None

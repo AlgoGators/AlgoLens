@@ -36,6 +36,7 @@ from algolens.application.identity.screen_access import (
 from algolens.application.investor.use_cases import (
     GetInvestorPortfolio,
     GetReportFile,
+    InvestorNotFound,
     LinkNotStored,
     ListInvestorLinks,
     ListReports,
@@ -62,6 +63,7 @@ _ERRORS = (
     (ValidationError, 400),
     (ScreenUserNotFound, 404),
     (ReportNotFound, 404),
+    (InvestorNotFound, 404),
     (ScreenAccessUnavailable, 503),
 )
 
@@ -258,7 +260,8 @@ def admin_set_investor_link(user_id):
     choice = SetInvestorLink(registry, repo).execute(
         user_id, payload.get("portfolio_id"), payload.get("book"), _admin_email()
     )
-    current_app.logger.info("[INVESTOR] %s set user %s to follow %s", _admin_email(), user_id, choice["label"])
+    current_app.logger.info("[INVESTOR] %s set user %s to follow %s", _admin_email(), user_id,
+                            choice["label"])
     return jsonify(choice), 200
 
 

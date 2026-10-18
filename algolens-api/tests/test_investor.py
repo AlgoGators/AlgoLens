@@ -131,12 +131,12 @@ class FakeInvestorRepo:
     def latest_published_day(self, portfolio_id):
         return self.published.get(portfolio_id)
 
-    # D-25: who follows which book ("absent": migration 005 not applied).
+    # D-25: who follows which book (None: migration 005 not applied).
     links = None
 
     def portfolio_link(self, user_id):
         if self.links is None:
-            return "absent"
+            return None
         return self.links.get(str(user_id))
 
     def portfolio_links(self):
@@ -210,6 +210,15 @@ def test_an_investor_sees_only_the_book_an_admin_set():
     assert other["portfolio_id"] == "QT_A"
 
 
+def test_the_retired_twin_is_never_offered_and_a_desk_portfolio_offers_both_books():
+    from algolens.domain.investor.links import book_choices
+    registry = FakeRegistry().list() + [
+        {"portfolio_id": "QT_CONSERVATIVE_MODEL_PORTFOLIO", "name": "Twin", "desk_editable": False}]
+    assert [(c["portfolio_id"], c["book"]) for c in book_choices(registry)] == [
+        ("CONSERVATIVE_PORTFOLIO", "system"), ("QT_A", "qt"), ("QT_A", "system"),
+        ("QT_B", "qt"), ("QT_B", "system")]
+
+
 def test_a_link_to_a_retired_portfolio_falls_back_to_the_default():
     repo = FakeInvestorRepo()
     repo.links = {"9": {"portfolio_id": "GONE", "book": "qt"}}
@@ -223,9 +232,10 @@ def test_only_a_qt_book_or_a_model_book_can_be_set():
     repo = FakeInvestorRepo()
     repo.links = {}
     with pytest.raises(ValidationError, match="not a book an investor can follow"):
-        SetInvestorLink(FakeRegistry(), repo).execute(9, "QT_A", "system", "a@x.com")
-    with pytest.raises(ValidationError):
         SetInvestorLink(FakeRegistry(), repo).execute(9, "CONSERVATIVE_PORTFOLIO", "qt", "a@x.com")
+    # A desk portfolio's own model rows are its Model side (D-68).
+    assert SetInvestorLink(FakeRegistry(), repo).execute(
+        9, "QT_A", "system", "a@x.com")["label"] == "QT A - Model book"
     assert SetInvestorLink(FakeRegistry(), repo).execute(9, "QT_B", "qt", "a@x.com")["label"] == "QT B - QT book"
     assert repo.links == {"9": {"portfolio_id": "QT_B", "book": "qt"}}
 
@@ -333,12 +343,12 @@ def test_admin_sets_which_book_an_investor_follows(client, screen_access, invest
     investor_repo.links = {}
     admin = _login(client, ["member"], screen_access, role="exec_board", email="admin@x.com")
     listed = client.get("/api/admin/investor-links").get_json()
-    assert listed["stored"] is True and len(listed["choices"]) == 3
+    assert listed["stored"] is True and len(listed["choices"]) == 5
     done = client.put("/api/admin/investors/9/portfolio",
                       json={"portfolio_id": "CONSERVATIVE_PORTFOLIO", "book": "system"}, headers=admin)
     assert done.status_code == 200 and done.get_json()["follows"] == "model"
     bad = client.put("/api/admin/investors/9/portfolio",
-                     json={"portfolio_id": "QT_A", "book": "system"}, headers=admin)
+                     json={"portfolio_id": "CONSERVATIVE_PORTFOLIO", "book": "qt"}, headers=admin)
     assert bad.status_code == 400
     missing = client.put("/api/admin/investors/404/portfolio",
                          json={"portfolio_id": "QT_A", "book": "qt"}, headers=admin)
@@ -355,7 +365,7 @@ def test_setting_a_link_needs_migration_005(client, screen_access, investor_repo
     response = client.put("/api/admin/investors/9/portfolio",
                           json={"portfolio_id": "QT_A", "book": "qt"}, headers=admin)
     assert response.status_code == 409
-    investor = _login(client, ["investor"], screen_access)
+    _login(client, ["investor"], screen_access)
     assert client.get("/api/investor/allocation").get_json()["portfolios"][0]["portfolio_id"] == "QT_A"
 
 
