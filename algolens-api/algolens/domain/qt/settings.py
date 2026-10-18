@@ -99,14 +99,15 @@ READ_ONLY = (
 
 # D-15, D-78: the engine's bounds on the risk gate's limits (trade-ngin
 # src/risk/risk_module_config.cpp). Each is (lowest, highest, lowest exclusive, whole number).
+# D-78, Dominick's hard caps (2026-10-18), as risk_module_config.cpp holds them.
 MODULE_BOUNDS = {
-    "R_max": (0.0, 10.0, True, False),
-    "R_jump_max": (0.0, 10.0, True, False),
-    "R_shock_max": (0.0, 10.0, True, False),
+    "R_max": (0.0, 3.0, True, False),
+    "R_jump_max": (0.0, 6.0, True, False),
+    "R_shock_max": (0.0, 6.0, True, False),
     "max_gross_leverage": (0.0, 10.0, True, False),
     "max_net_leverage": (0.0, 10.0, True, False),
-    "per_name_cap": (0.0, 10.0, True, False),
-    "trim_max": (0, 100, False, True),
+    "per_name_cap": (0.0, 4.0, True, False),
+    "trim_max": (0, 20, False, True),
     "confidence_level": (0.0, 1.0, True, False),
     "min_gate_dates": (3, None, False, True),
     "lookback_period": (3, None, False, True),
@@ -362,11 +363,10 @@ def _set(tree: dict[str, Any], path: Sequence[str], value: Any) -> None:
 def _check_module(module: Mapping[str, Any], path: Sequence[str]) -> None:
     """The cross-field bounds of one risk gate module (risk_module_config.cpp)."""
     name = ".".join(path)
-    gross, cap = module.get("max_gross_leverage"), module.get("per_name_cap")
-    if value_type(gross) == "number" and value_type(cap) == "number" and cap > gross:
+    gross, net = module.get("max_gross_leverage"), module.get("max_net_leverage")
+    if value_type(gross) == "number" and value_type(net) == "number" and net > gross:
         raise SettingsRuleError(
-            f"{name}.per_name_cap must be at most max_gross_leverage (one name cannot carry more "
-            f"than the whole book's gross limit): {cap} against {gross}"
+            f"{name}.max_net_leverage must be at most max_gross_leverage: {net} against {gross}"
         )
     period, gate = module.get("lookback_period"), module.get("min_gate_dates")
     if value_type(period) == "number" and value_type(gate) == "number" and period < gate:

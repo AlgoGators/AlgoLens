@@ -299,7 +299,7 @@ RISK = {
 def test_each_gate_limit_is_its_own_field_with_its_bounds():
     fields = {tuple(f["path"]): f for f in settings_view(RISK, {}, {}, False)}
     r_max = fields[("risk", "modules", "carver", "R_max")]
-    assert r_max["value"] == 2.25 and r_max["bounds"]["max"] == 10.0
+    assert r_max["value"] == 2.25 and r_max["bounds"]["max"] == 3.0
     assert fields[("risk", "modules", "carver", "trim_max")]["bounds"]["integer"] is True
     assert not any(f["type"] == "array" and f["path"][:2] == ["risk", "modules"]
                    for f in fields.values())
@@ -315,8 +315,10 @@ def test_a_gate_change_is_saved_as_the_whole_module_and_moves_its_mirror():
 
 
 @pytest.mark.parametrize("key, value, needle", [
-    ("R_max", 1000, "at most 10"), ("per_name_cap", 9.0, "at most max_gross_leverage"),
-    ("trim_max", 1000, "at most 100"), ("trim_max", 2.5, "whole number"),
+    ("R_max", 3.5, "at most 3"), ("R_jump_max", 6.5, "at most 6"), ("R_shock_max", 1000, "at most 6"),
+    ("per_name_cap", 5, "at most 4"), ("max_gross_leverage", 10.5, "at most 10"),
+    ("max_net_leverage", 9.0, "at most max_gross_leverage"),
+    ("trim_max", 21, "at most 20"), ("trim_max", 2.5, "whole number"),
     ("max_gross_leverage", 0, "above 0"), ("confidence_level", 1.5, "at most 1"),
 ])
 def test_a_gate_limit_out_of_the_engines_bounds_is_refused(key, value, needle):
@@ -389,7 +391,7 @@ def test_the_shipped_config_shows_every_section_with_help_and_hides_only_the_qt_
 
 def test_the_shipped_gate_limits_are_fields_and_a_change_moves_the_mirror():
     fields = {tuple(f["path"]): f for f in settings_view(SHIPPED, {}, {}, False)}
-    assert fields[("risk", "modules", "carver", "per_name_cap")]["bounds"]["max"] == 10.0
+    assert fields[("risk", "modules", "carver", "per_name_cap")]["bounds"]["max"] == 4.0
     overrides = changes_to_overrides(
         SHIPPED, [{"path": ["risk", "modules", "carver", "max_net_leverage"], "value": 5.0}])
     assert overrides["risk"]["risk_reporting"] == {"max_net_leverage": 5.0}
