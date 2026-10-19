@@ -29,6 +29,8 @@ class PortfolioDetailRows:
     # D-32: contract size by symbol root (metadata.contract_metadata); a root not listed
     # counts with size 1 (equities).
     contract_sizes: Mapping[str, float] = field(default_factory=dict)
+    # D-20: the book's strategies (sleeves) on its latest date: [{name, positions}].
+    sleeves: Sequence[Mapping[str, Any]] = ()
 
 
 @dataclass(frozen=True)

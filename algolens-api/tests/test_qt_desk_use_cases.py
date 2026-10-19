@@ -267,6 +267,15 @@ class FakeAgent:
         self.risk = risk if risk is not None else risk_report()
         self.risk_down = risk_down
         self.risk_calls = []
+        self.status = {"state": "succeeded", "startedAt": None, "finishedAt": None, "message": ""}
+        self.status_down = None
+        self.status_calls = []
+
+    def get_run_status(self, portfolio_id, day):
+        self.status_calls.append((portfolio_id, day))
+        if self.status_down:
+            raise DeskRiskUnavailable(self.status_down)
+        return self.status
 
     def get_desk_risk(self, portfolio_id, day):
         self.risk_calls.append((portfolio_id, day))
@@ -1152,23 +1161,22 @@ def test_accept_c_needs_a_finished_current_save_and_a_readable_check():
         PublishDesk(repo, FakeAgent(), now=lambda: NOW).execute(QT, "d@x.com", flow="bogus")
 
 
+# --- a future day (Dominick 2026-10-18, replacing D-43) ------------------------
 
-# --- a future day (D-43) ------------------------------------------------------
 
-
-def test_a_future_day_is_not_approved_but_takes_edits():
+def test_a_future_day_is_approved_once_its_book_exists():
+    # No reason to wait for the day itself: the model's book exists, so the desk decides.
     eve = lambda: _ny(DAY - timedelta(days=1), 20, 0)  # noqa: E731  the evening before
-    repo, agent = FakeRepo(), FakeAgent()
-    with pytest.raises(DeskConflict, match="it is a future day"):
-        ApproveDesk(repo, agent, now=eve).execute(QT, [], "r", "d@x.com")
-    with pytest.raises(DeskConflict, match="it is a future day"):
-        PublishDesk(repo, agent, now=eve).execute(QT, "d@x.com")
-    with pytest.raises(DeskConflict, match="An override request of the"):
-        RequestOverride(repo, agent, now=eve).execute(QT, "r", "d@x.com")
-    assert repo.rows == [] and agent.calls == []
-    SaveDeskEdit(repo, agent, now=eve).execute(
-        QT, [{"symbol": "ZC.v.0", "quantity": 0, "expected": 3}], "r", "d@x.com")
-    assert [r["kind"] for r in repo.rows] == ["save"]
+    for run, kind in [
+        (lambda repo, agent: PublishDesk(repo, agent, now=eve).execute(QT, "d@x.com"), "publish"),
+        (lambda repo, agent: RequestOverride(repo, agent, now=eve).execute(QT, "r", "d@x.com"),
+         "override_request"),
+        (lambda repo, agent: SaveDeskEdit(repo, agent, now=eve).execute(
+            QT, [{"symbol": "ZC.v.0", "quantity": 0, "expected": 3}], "r", "d@x.com"), "save"),
+    ]:
+        repo = FakeRepo()
+        run(repo, FakeAgent())
+        assert [r["kind"] for r in repo.rows] == [kind]
 
 
 # --- approve with or without the e-mail; Send (D-66) ----------------------------------------
@@ -1214,3 +1222,24 @@ def test_send_is_refused_for_another_day_unapproved_or_sent():
     repo, agent = _approved(sent_at=_ny(DAY, 9, 30))
     with pytest.raises(DeskConflict, match="already been e-mailed"):
         SendDesk(repo, agent, now=lambda: _ny(DAY, 11, 0)).execute(QT, "d@x.com")
+
+
+def test_state_carries_todays_model_run_status_from_the_engine():
+    # D-56: the page shows running / failed / refused from GetRunStatus, for today (New York),
+    # even while the desk still shows an earlier book or none.
+    agent = FakeAgent()
+    agent.status = {"state": "failed", "startedAt": "2026-10-09T10:45:00+00:00",
+                    "finishedAt": None, "message": "strict_assertion"}
+    now = lambda: datetime(2026, 10, 9, 12, 0, tzinfo=timezone.utc)
+
+    state = GetDeskState(FakeRepo(), agent, now=now).execute(QT)
+
+    assert state["runStatus"] == {"date": "2026-10-09", **agent.status}
+    assert agent.status_calls == [(QT["portfolio_id"], date(2026, 10, 9))]
+
+
+def test_state_says_when_the_run_status_cannot_be_read():
+    agent = FakeAgent()
+    agent.status_down = "UNAVAILABLE"
+    state = GetDeskState(FakeRepo(), agent).execute(QT)
+    assert state["runStatus"]["unavailable"] == "UNAVAILABLE"

@@ -30,14 +30,20 @@ def desk_edit_allowed(entry: Mapping[str, Any]) -> bool:
     )
 
 
-def counts_in_fund_total(entry: Mapping[str, Any]) -> bool:
-    """Whether a book is added to the fund's total on the portfolio page.
+# D-1: the model twin is retired; until its registry row is set inactive on a database it is
+# still listed, and it never counts (it was a paper copy of the QT book's capital).
+RETIRED_TWIN = "QT_CONSERVATIVE_MODEL_PORTFOLIO"
 
-    A book in a portfolio group (the QT desk book and its untouched model twin)
-    is a paper book until it sends positions: it is listed but not added up.
-    An ungrouped book (trendfollowing) counts.
+
+def counts_in_fund_total(entry: Mapping[str, Any]) -> bool:
+    """Whether a book is added to the fund's total on the portfolio page (D-24).
+
+    The fund total is its own rule, not "ungrouped": a model book counts whether or not it is
+    grouped with a QT book (decision 18 shows the two as one portfolio), and a desk-editable QT
+    book does not, so a portfolio is counted once, by its model book. The retired twin never
+    counts.
     """
-    return not entry.get("portfolio_group")
+    return not entry.get("desk_editable") and entry.get("portfolio_id") != RETIRED_TWIN
 
 
 def portfolio_entries(registry: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:

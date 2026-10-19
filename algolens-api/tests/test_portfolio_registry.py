@@ -72,3 +72,5 @@ def test_fund_total_counts_ungrouped_books_only():
     assert not counts_in_fund_total(_row("QT_CONSERVATIVE_PORTFOLIO", group="qt_conservative", editable=True))
     assert not counts_in_fund_total(_row("QT_CONSERVATIVE_MODEL_PORTFOLIO", group="qt_conservative"))
     assert counts_in_fund_total(_row("P", group=""))
+    # D-24: grouping the fund's model book with its QT book keeps it in the total.
+    assert counts_in_fund_total(_row("CONSERVATIVE_PORTFOLIO", group="qt_conservative"))

@@ -374,6 +374,8 @@ class GetPortfolioDetail:
                 "assetClass": asset_class_for(cfg.get("strategy_type")),
                 "deskEditable": desk_edit_allowed(cfg),
                 "requestedBook": requested_book,
+                # D-20: the portfolio's strategies (sleeves), not the portfolio called a strategy.
+                "strategies": [dict(s) for s in rows.sleeves],
             }
         )
         return detail

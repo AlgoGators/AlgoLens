@@ -15,6 +15,8 @@ interface StrategyDetailProps {
   backLabel?: string;
   /** Rendered under the title, e.g. the book toggle of a portfolio view. */
   headerExtra?: React.ReactNode;
+  /** The portfolio's name when it differs from the book's (D-24: a group shown as one). */
+  title?: string;
   /** Rendered between the header and the chart, e.g. the QT desk panel. */
   children?: React.ReactNode;
 }
@@ -22,8 +24,9 @@ interface StrategyDetailProps {
 export function StrategyDetail({
   strategy,
   onBack,
-  backLabel = 'Back to Strategies',
+  backLabel = 'Back to all portfolios',
   headerExtra,
+  title,
   children,
 }: StrategyDetailProps) {
   const [selectedPeriod, setSelectedPeriod] = useState('1M');
@@ -93,7 +96,7 @@ export function StrategyDetail({
       <div className="mb-6">
         <div className="flex items-start justify-between">
           <div className="flex-1">
-            <h1 className="text-2xl md:text-3xl mb-1">{strategy.name}</h1>
+            <h1 className="text-2xl md:text-3xl mb-1">{title ?? strategy.name}</h1>
             <p className={theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}>
               {strategy.description}
             </p>
@@ -245,17 +248,6 @@ export function StrategyDetail({
             )}
           </button>
         </div>
-
-        <button
-          onClick={onBack}
-          className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors ${theme === 'dark'
-              ? 'text-gray-300 hover:text-white hover:bg-gray-900'
-              : 'text-gray-700 hover:text-black hover:bg-gray-100'
-            }`}
-        >
-          <ArrowLeft className="w-5 h-5" />
-          <span>{backLabel}</span>
-        </button>
       </div>
 
       {/* Tab Content */}

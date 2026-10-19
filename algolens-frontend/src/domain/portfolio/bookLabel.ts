@@ -6,9 +6,10 @@
  */
 export type PositionBook = 'system' | 'qt_proposal' | 'qt';
 
+// D-24: the books by the names the desk and the members use (Model and QT, the request B).
 const BOOK_NAMES: Record<PositionBook, string> = {
-  system: 'System book',
-  qt_proposal: 'QT proposal',
+  system: 'Model book',
+  qt_proposal: 'Request (B)',
   qt: 'QT book',
 };
 

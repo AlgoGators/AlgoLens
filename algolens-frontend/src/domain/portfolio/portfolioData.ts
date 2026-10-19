@@ -97,6 +97,8 @@ export interface Strategy {
   fellBack?: boolean;
   /** Set by the portfolio-id endpoint (/portfolio/portfolios/<id>). */
   portfolioId?: string;
+  /** D-20: the portfolio's strategies (sleeves) on its latest day, with the symbols each holds. */
+  strategies?: { name: string; positions: number }[];
   portfolioGroup?: string | null;
   assetClass?: 'futures' | 'equity';
   /** desk_editable and futures (ruling 13). */
