@@ -49,6 +49,7 @@ import {
   type DeskDeadlines,
   type DeskRisk,
   type DeskState,
+  runStatusMessage,
 } from './desk';
 
 const proposal: BookPosition[] = [
@@ -572,6 +573,12 @@ describe('approvalTokenFrom', () => {
     expect(approvalTokenFrom('?x=1')).toBeNull();
     expect(approvalTokenFrom('?token=')).toBeNull();
   });
+
+  it('prefers the fragment, which never reaches the server (D-44)', () => {
+    expect(approvalTokenFrom('', '#token=frag')).toBe('frag');
+    expect(approvalTokenFrom('?token=old', '#token=frag')).toBe('frag');
+    expect(approvalTokenFrom('?token=old', '')).toBe('old');
+  });
 });
 
 const risk = (over: Partial<DeskRisk>): DeskRisk => ({
@@ -843,5 +850,28 @@ describe('send (D-66: e-mail an approved, unsent day)', () => {
     expect(sendBlockedReason(deskState({ deadlines: deadlinesFor(D) }), at(EDT(D, '11:00')))).toBe(
       'The day is not approved',
     );
+  });
+});
+
+describe('runStatusMessage (D-56)', () => {
+  const at = { date: '2026-10-09', startedAt: '2026-10-09T10:47:00Z', finishedAt: null, message: '' };
+  it('says nothing once the run succeeded', () => {
+    expect(runStatusMessage({ ...at, state: 'succeeded' })).toBeNull();
+    expect(runStatusMessage(null)).toBeNull();
+  });
+  it('names a running, refused or failed run in the engine words', () => {
+    expect(runStatusMessage({ ...at, state: 'running' })).toBe(
+      "Today's model run is running (since 06:47 New York).",
+    );
+    expect(runStatusMessage({ ...at, state: 'refused', message: 'risk_refusal' })).toContain(
+      'was refused: risk_refusal',
+    );
+    expect(runStatusMessage({ ...at, state: 'failed', message: 'strict_assertion' })).toContain(
+      'failed: strict_assertion. It is retried every 15 minutes',
+    );
+    expect(runStatusMessage({ ...at, state: 'not_started' })).toContain('has not started yet');
+  });
+  it('says when the engine cannot be asked', () => {
+    expect(runStatusMessage({ date: '2026-10-09', unavailable: 'UNAVAILABLE' })).toContain('UNAVAILABLE');
   });
 });

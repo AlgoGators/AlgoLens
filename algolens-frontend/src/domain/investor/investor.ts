@@ -1,7 +1,8 @@
 /**
- * The investor screen: the qt book of each desk portfolio's latest PUBLISHED
- * day (the book that was e-mailed out), and the reports and letters an admin
- * uploads. The server picks the day and book; nothing here widens that.
+ * The investor screen (D-25): the one portfolio and book the investor follows (the QT book by
+ * default, or the model book an admin set, decision 13) on its latest PUBLISHED day, with its
+ * record to that day, and the reports and letters an admin uploads. The server picks the
+ * portfolio, the book and the day; nothing here widens that.
  */
 
 export interface InvestorPosition {
@@ -28,7 +29,14 @@ export interface SectorAllocation {
 export interface InvestorPortfolio {
   portfolio_id: string;
   name: string;
-  portfolio_group: string | null;
+  portfolio_group?: string | null;
+  /** D-25: the row set followed ("qt" the desk's final book, "system" a model book). */
+  book?: 'qt' | 'system';
+  follows?: 'qt' | 'model';
+  label?: string;
+  /** No admin set a book: the investor follows the QT book (decision 13). */
+  default?: boolean;
+  performance?: InvestorPerformance;
   /** The published day shown (YYYY-MM-DD), or null when none is published yet. */
   as_of: string | null;
   gross_notional: number;
@@ -92,3 +100,34 @@ export function checkReportFile(file: { name: string; size: number; type: string
   if (!looksPdf) return 'Only PDF files can be uploaded';
   return null;
 }
+
+export interface InvestorPerformance {
+  /** The book's equity by day up to the published day shown. */
+  curve: { date: string; equity: number }[];
+  value: number | null;
+  /** Since the first day of the record, as a fraction (0.02 = +2%). */
+  return: number | null;
+}
+
+/** "QT book" or "Model book": what an investor follows, in their words. */
+export function followsLabel(portfolio: InvestorPortfolio): string {
+  return portfolio.follows === 'model' ? 'Model book' : 'QT book';
+}
+
+/** D-25: one (portfolio, book) an admin can set an investor to follow. */
+export interface InvestorBookChoice {
+  portfolio_id: string;
+  book: 'qt' | 'system';
+  follows: 'qt' | 'model';
+  label: string;
+  name: string;
+}
+
+export interface InvestorLinks {
+  stored: boolean;
+  choices: InvestorBookChoice[];
+  links: { user_id: number; portfolio_id: string; book: 'qt' | 'system' }[];
+}
+
+/** The key of a choice for a <select> ("QT_A|qt"). */
+export const choiceKey = (c: { portfolio_id: string; book: string }) => `${c.portfolio_id}|${c.book}`;

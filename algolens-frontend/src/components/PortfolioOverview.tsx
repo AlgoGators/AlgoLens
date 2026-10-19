@@ -146,7 +146,7 @@ export function PortfolioOverview({ data, onBuilderClick }: PortfolioOverviewPro
       </div>
 
       <div className="flex items-center justify-between mb-6">
-        <h2 className="text-xl">Investment Strategies</h2>
+        <h2 className="text-xl">Portfolios</h2>
       </div>
     </div>
   );

@@ -5,8 +5,11 @@ import {
   activeToggleBook,
   bookQuery,
   deskGroups,
+  bookChoices,
   findPortfolio,
-  switcherLabel,
+  groupOf,
+  portfolioName,
+  representative,
   type PortfolioEntry,
   type PortfolioGroup,
 } from './portfolioRegistry';
@@ -64,16 +67,42 @@ describe('switcher', () => {
     expect(findPortfolio(groups, null)).toBeNull();
   });
 
-  it('marks the desk book', () => {
-    expect(switcherLabel(groups[1].portfolios[0])).toBe('QT TF (desk)');
-    expect(switcherLabel(groups[1].portfolios[1])).toBe('QT TF (model)');
-    expect(switcherLabel(groups[0].portfolios[0])).toBe('Trend');
+  it('shows a group as one portfolio, named for its model book, opening on its QT book (D-24)', () => {
+    expect(portfolioName(groups[1])).toBe('QT TF (model)');
+    expect(portfolioName(groups[0])).toBe('Trend');
+    expect(representative(groups[1]).portfolio_id).toBe('QT');
+    expect(groupOf(groups, 'QTM')?.group).toBe('qt_conservative');
+  });
+
+  it('gives a portfolio its Model and QT books (D-68)', () => {
+    expect(bookChoices(groups[1]).map(c => [c.label, c.portfolio.portfolio_id, c.book])).toEqual([
+      ['Model', 'QTM', 'system'],
+      ['QT', 'QT', null],
+    ]);
+    // A QT portfolio with no model book grouped yet: its own model rows.
+    const alone: PortfolioGroup = { group: 'QT', grouped: false, portfolios: [groups[1].portfolios[0]] };
+    expect(bookChoices(alone).map(c => [c.label, c.portfolio.portfolio_id, c.book])).toEqual([
+      ['Model', 'QT', 'system'],
+      ['QT', 'QT', null],
+    ]);
+    expect(bookChoices(groups[0]).map(c => c.label)).toEqual(['Model']);
+  });
+
+  it('names the desk toggle by role (D-24)', () => {
+    expect(BOOK_TOGGLE_OPTIONS.map(o => o.label)).toEqual(['Proposal (A)', 'Request (B)', 'Final (C)']);
   });
 });
 
 describe('describeBookLoadError', () => {
   it('explains a portfolio with no run yet', () => {
     expect(describeBookLoadError('API request failed: 404 NOT FOUND. Body: {}')).toMatch(/No run has written/);
+  });
+
+  it('says a named book has no rows instead of showing another book (D-37)', () => {
+    const message = 'API request failed: 404 NOT FOUND. Body: {"error":"X has no qt rows","missingBook":"qt"}';
+    expect(describeBookLoadError(message)).toBe(
+      'This portfolio has no Final (C) book: no run has written Final (C) rows for it. Its numbers are on its model book.',
+    );
   });
 
   it('passes other failures through', () => {

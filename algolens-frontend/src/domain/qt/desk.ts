@@ -107,7 +107,20 @@ export interface DeskState {
   openOverrideRequestId?: number | null;
   /** The engine's risk check of the day's qt book (C9); null before the first book. */
   risk?: DeskRiskResult | null;
+  /** D-56: today's model run as the engine reports it (GetRunStatus). */
+  runStatus?: RunStatus | null;
 }
+
+/** D-56: GetRunStatus for today's model run, or why it could not be read. */
+export type RunStatus =
+  | {
+      date: string;
+      state: 'not_started' | 'running' | 'succeeded' | 'refused' | 'failed' | 'unspecified';
+      startedAt: string | null;
+      finishedAt: string | null;
+      message: string;
+    }
+  | { date: string; unavailable: string };
 
 /** Which run wrote the day's qt book (desk.proto DeskRiskState). */
 /** 'incomplete' (desk.proto 1.6.0): a qt book a desk or override run did not finish writing. */
@@ -866,9 +879,15 @@ export function snapshotBySymbol(snapshot: SnapshotRow[] | null | undefined): Ma
 }
 
 /** Approval links carry the token in the query string: /qt/approve?token=... */
-export function approvalTokenFrom(search: string): string | null {
-  const token = new URLSearchParams(search).get('token');
-  return token && token.trim() ? token.trim() : null;
+export function approvalTokenFrom(search: string, hash = ''): string | null {
+  // D-44: the e-mailed link carries the token in the fragment (#token=...), which the browser
+  // never sends to the server, so it stays out of the proxy's access log. Links e-mailed before
+  // that carry it in the query and still work.
+  for (const params of [hash.replace(/^#/, ''), search]) {
+    const token = new URLSearchParams(params).get('token');
+    if (token && token.trim()) return token.trim();
+  }
+  return null;
 }
 
 // -- C10: the A -> B -> C approval ------------------------------------------------------------
@@ -981,4 +1000,30 @@ export function acceptCBlockedReason(state: DeskState, nowMs?: number): string |
   // Decision 5: only the engine's gate blocks C (a bound limit is fine: C was cut to fit it).
   if (riskBreached(risk)) return riskBlockedMessage(risk, "The engine's book (C) is");
   return null;
+}
+
+/**
+ * D-56: what the page says about today's model run, from the engine's GetRunStatus, or null when
+ * the run succeeded (the book itself is the answer).
+ */
+export function runStatusMessage(status: RunStatus | null | undefined): string | null {
+  if (!status) return null;
+  if ('unavailable' in status) {
+    return `The engine could not report today's model run (${status.unavailable}).`;
+  }
+  const why = status.message ? `: ${status.message}` : '';
+  switch (status.state) {
+    case 'not_started':
+      return `Today's model run (${status.date}) has not started yet.`;
+    case 'running':
+      return status.startedAt
+        ? `Today's model run is running (since ${newYorkTime(status.startedAt)} New York).`
+        : "Today's model run is running.";
+    case 'refused':
+      return `Today's model run was refused${why}. The book was held at the previous day's positions.`;
+    case 'failed':
+      return `Today's model run failed${why}. It is retried every 15 minutes.`;
+    default:
+      return null;
+  }
 }

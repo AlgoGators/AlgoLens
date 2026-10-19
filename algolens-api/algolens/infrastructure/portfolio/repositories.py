@@ -9,6 +9,7 @@ from algolens.application.portfolio.ports import (
     IncubationPerformanceRows,
     PortfolioDetailRows,
 )
+from algolens.domain.investor.allocation import parse_contract_size
 from algolens.domain.portfolio.streams import (
     DEFAULT_BOOK,
     FALLBACK_BOOK,
@@ -25,7 +26,22 @@ class PostgresPortfolioRepository:
     def __init__(self, connection_factory=None):
         self.connection_factory = connection_factory or get_db_connection
 
-    def _fetch_latest_live_results(self, cursor, strategy_type, portfolio_id):
+    def _fetch_latest_live_results(self, cursor, strategy_type, portfolio_id, book=None):
+        if book is not None:
+            # D-34: the served book's own row; a book with no results of its own
+            # (qt_proposal) shows the system row's numbers, as the portfolio-id read does.
+            cursor.execute(
+                """
+                SELECT * FROM trading.live_results
+                WHERE config::jsonb->>'strategy_type' = %s
+                AND portfolio_id = %s
+                AND portfolio_type IN (%s, 'system')
+                ORDER BY date DESC, (portfolio_type = %s) DESC
+                LIMIT 1
+                """,
+                (strategy_type, portfolio_id, book, book),
+            )
+            return cursor.fetchone()
         cursor.execute(
             """
             SELECT * FROM trading.live_results
@@ -227,18 +243,22 @@ class PostgresPortfolioRepository:
         )
         return cursor.fetchall()
 
-    def _fetch_recent_executions(self, cursor, strategy_type, portfolio_id):
+    def _fetch_recent_executions(self, cursor, strategy_type, portfolio_id, book=None):
+        # D-34: with a book, only that book's trades (the QT book's copy of a model day's
+        # trades is not listed next to the system ones).
+        book_filter = "AND portfolio_type = %s" if book is not None else ""
+        params = (strategy_type, portfolio_id) + ((book,) if book is not None else ())
         cursor.execute(
-            """
+            f"""
             SELECT symbol, side, quantity, price,
                    execution_time, commissions_fees
             FROM trading.executions
             WHERE strategy_id = %s
-            AND portfolio_id = %s
+            AND portfolio_id = %s {book_filter}
             ORDER BY execution_time DESC
             LIMIT 100
             """,
-            (strategy_type, portfolio_id),
+            params,
         )
         return cursor.fetchall()
 
@@ -258,10 +278,17 @@ class PostgresPortfolioRepository:
                 WHERE strategy_id = %s
                 AND portfolio_id = %s
                 AND portfolio_type = %s
-                AND updated_at::date = (CURRENT_DATE - INTERVAL '1 day')::date
+                AND date = (
+                    SELECT max(date) FROM trading.positions
+                    WHERE strategy_id = %s AND portfolio_id = %s AND portfolio_type = %s
+                    AND date < (
+                        SELECT max(date) FROM trading.positions
+                        WHERE strategy_id = %s AND portfolio_id = %s AND portfolio_type = %s
+                    )
+                )
                 ORDER BY symbol, updated_at DESC
                 """,
-                (strategy_type, portfolio_id, book),
+                (strategy_type, portfolio_id, book) * 3,
             )
             return cursor.fetchall()
 
@@ -276,10 +303,17 @@ class PostgresPortfolioRepository:
             FROM trading.positions
             WHERE strategy_id = %s
             AND portfolio_id = %s
-            AND updated_at::date = (CURRENT_DATE - INTERVAL '1 day')::date
+            AND date = (
+                SELECT max(date) FROM trading.positions
+                WHERE strategy_id = %s AND portfolio_id = %s
+                AND date < (
+                    SELECT max(date) FROM trading.positions
+                    WHERE strategy_id = %s AND portfolio_id = %s
+                )
+            )
             ORDER BY symbol, updated_at DESC
             """,
-            (strategy_type, portfolio_id),
+            (strategy_type, portfolio_id) * 3,
         )
         return cursor.fetchall()
 
@@ -319,6 +353,13 @@ class PostgresPortfolioRepository:
                     allow_fallback,
                     has_portfolio_type,
                 )
+                if self._has_column(cursor, "live_results", "portfolio_type"):
+                    latest = (
+                        self._fetch_latest_live_results(
+                            cursor, strategy_type, portfolio_id, served_book
+                        )
+                        or latest
+                    )
                 if has_portfolio_type or served_book == FALLBACK_BOOK:
                     # The headline curve follows the served book so the page
                     # shows one book throughout.
@@ -345,8 +386,12 @@ class PostgresPortfolioRepository:
                     served_book,
                     has_portfolio_type=has_portfolio_type,
                 )
+                executions_have_book = self._has_column(cursor, "executions", "portfolio_type")
                 executions = self._fetch_recent_executions(
-                    cursor, strategy_type, portfolio_id
+                    cursor,
+                    strategy_type,
+                    portfolio_id,
+                    served_book if executions_have_book else None,
                 )
                 yesterday_positions = self._fetch_yesterday_positions(
                     cursor,
@@ -355,6 +400,7 @@ class PostgresPortfolioRepository:
                     served_book,
                     has_portfolio_type=has_portfolio_type,
                 )
+                contract_sizes = self._contract_sizes(cursor, positions, executions)
         finally:
             conn.close()
 
@@ -367,6 +413,7 @@ class PostgresPortfolioRepository:
             yesterday_positions=yesterday_positions,
             book=served_book,
             fell_back=fell_back,
+            contract_sizes=contract_sizes,
         )
 
     # --- reads keyed by portfolio id (AlgoLens#102) ------------------------
@@ -374,6 +421,38 @@ class PostgresPortfolioRepository:
     # One portfolio is one book: these reads find a book by its portfolio id
     # and never match on the strategy id. A book with several sleeves is
     # netted per symbol.
+
+    def _contract_sizes(self, cursor, *row_lists):
+        """D-32: contract size by symbol root for the symbols in these rows.
+
+        metadata.contract_metadata."Contract Size" is TEXT ('1000', '0.1'); a root it does
+        not list (equities) is left out and counts with size 1.
+        """
+        roots = sorted(
+            {(row["symbol"] or "").split(".", 1)[0] for rows in row_lists for row in rows}
+        )
+        if not roots:
+            return {}
+        cursor.execute("SELECT to_regclass('metadata.contract_metadata') IS NOT NULL AS present")
+        present = cursor.fetchone()
+        if not present or not present["present"]:
+            return {}
+        cursor.execute(
+            """
+            SELECT DISTINCT ON (cm."Databento Symbol")
+                   cm."Databento Symbol" AS root, cm."Contract Size" AS contract_size
+            FROM metadata.contract_metadata cm
+            WHERE cm."Databento Symbol" = ANY(%s)
+            ORDER BY cm."Databento Symbol"
+            """,
+            (roots,),
+        )
+        sizes = {}
+        for row in cursor.fetchall():
+            size = parse_contract_size(row["contract_size"])
+            if size:
+                sizes[row["root"]] = size
+        return sizes
 
     def _has_column(self, cursor, table, column):
         cursor.execute(
@@ -492,10 +571,17 @@ class PostgresPortfolioRepository:
                    daily_unrealized_pnl, daily_realized_pnl, updated_at
             FROM trading.positions
             WHERE portfolio_id = %s {book_filter}
-            AND updated_at::date = (CURRENT_DATE - INTERVAL '1 day')::date
+            AND date = (
+                SELECT max(date) FROM trading.positions
+                WHERE portfolio_id = %s {book_filter}
+                AND date < (
+                    SELECT max(date) FROM trading.positions
+                    WHERE portfolio_id = %s {book_filter}
+                )
+            )
             ORDER BY symbol, updated_at DESC
             """,
-            params,
+            params * 3,
         )
         return cursor.fetchall()
 
@@ -514,12 +600,51 @@ class PostgresPortfolioRepository:
         )
         return cursor.fetchall()
 
+    def _portfolio_sleeves(self, cursor, portfolio_id, book, has_portfolio_type):
+        """D-20: the strategies (sleeves) of the book's latest date, with how many symbols each
+        holds there."""
+        book_filter = "AND portfolio_type = %s" if has_portfolio_type else ""
+        params = (portfolio_id, book) if has_portfolio_type else (portfolio_id,)
+        cursor.execute(
+            f"""
+            SELECT strategy_name AS name, count(*) FILTER (WHERE quantity <> 0) AS positions
+            FROM trading.positions
+            WHERE portfolio_id = %s {book_filter}
+            AND date = (
+                SELECT max(date) FROM trading.positions
+                WHERE portfolio_id = %s {book_filter}
+            )
+            GROUP BY strategy_name
+            ORDER BY strategy_name
+            """,
+            params * 2,
+        )
+        return [{"name": r["name"], "positions": int(r["positions"])} for r in cursor.fetchall()]
+
     def fetch_portfolio_rows(self, portfolio_id, book=DEFAULT_BOOK, allow_fallback=True):
         """Detail rows for one portfolio's book, found by portfolio id alone."""
         conn = self.connection_factory()
         try:
             with conn.cursor() as cursor:
                 has_portfolio_type = self._has_portfolio_type(cursor)
+                if (
+                    not allow_fallback
+                    and book != FALLBACK_BOOK
+                    and has_portfolio_type
+                    and not self._portfolio_book_has_positions(cursor, portfolio_id, book)
+                ):
+                    # D-37: a named book with no rows of its own is not served as another
+                    # book's numbers under its name.
+                    return PortfolioDetailRows(
+                        latest=None,
+                        equity_curve=[],
+                        equity_by_stream={},
+                        positions=[],
+                        executions=[],
+                        yesterday_positions=[],
+                        book=book,
+                        book_missing=True,
+                    )
                 if not allow_fallback or book == FALLBACK_BOOK:
                     served_book, fell_back = book, False
                 elif not has_portfolio_type:
@@ -568,6 +693,12 @@ class PostgresPortfolioRepository:
                     )
                 else:
                     executions = []
+                contract_sizes = self._contract_sizes(cursor, positions, executions)
+                sleeves = (
+                    self._portfolio_sleeves(cursor, portfolio_id, served_book, has_portfolio_type)
+                    if has_portfolio_type or served_book == FALLBACK_BOOK
+                    else []
+                )
         finally:
             conn.close()
 
@@ -580,6 +711,8 @@ class PostgresPortfolioRepository:
             yesterday_positions=yesterday,
             book=served_book,
             fell_back=fell_back,
+            contract_sizes=contract_sizes,
+            sleeves=sleeves,
         )
 
     def list_incubating_strategies(self):

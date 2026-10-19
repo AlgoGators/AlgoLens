@@ -53,7 +53,7 @@ promotion or a demotion takes effect on the next click.
 | until 09:30 | The QT edits, saves, requests overrides and **approves**. An approval freezes the day and sends nothing yet. |
 | **09:30** | **Send.** Every approved day is e-mailed (the daily report and CSV). An approval made between 09:30 and 10:00 is sent at once. |
 | **10:00** | **Fallback.** If the day is not approved, the model's book A is published and sent, any unapproved desk edits are thrown away, and the President is alerted: "QT did not approve … the model's book was sent at 10:00". |
-| a future day | A book dated after today (New York) takes edits but cannot be approved, and no override can be requested for it, until its own day (D-43). |
+| a future day | A book dated after today (New York) is approved, edited or overridden as soon as its model run has written it (Dominick 2026-10-18); an approval stands once the next day is built on it. |
 | after 10:00 | Approving is refused: "Approval of the <day> book closed at 10:00 New York…". Saving, override requests and decisions are refused because the day is published. |
 
 The moment that counts for an approval is **when Approve was pressed** (the row's `created_at`),

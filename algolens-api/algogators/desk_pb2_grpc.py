@@ -53,6 +53,9 @@ class DeskServiceStub:
     over the margin cap), and DESK_RISK_STATE_INCOMPLETE (5): a qt book a
     desk or override run did not finish (it blocks). Additive only. Every
     publish path refuses on it.
+    1.7.0  2026-10-17  CheckSettings, SettingsCheckRequest, SettingsCheck (HD D-17): whether a
+    live run would accept a desk settings change, asked before AlgoLens
+    saves it. Additive only.
 
     """
 
@@ -97,6 +100,11 @@ class DeskServiceStub:
                 request_serializer=algogators_dot_desk__pb2.DeskRiskRequest.SerializeToString,
                 response_deserializer=algogators_dot_desk__pb2.DeskRisk.FromString,
                 _registered_method=True)
+        self.CheckSettings = channel.unary_unary(
+                '/algogators.desk.DeskService/CheckSettings',
+                request_serializer=algogators_dot_desk__pb2.SettingsCheckRequest.SerializeToString,
+                response_deserializer=algogators_dot_desk__pb2.SettingsCheck.FromString,
+                _registered_method=True)
 
 
 class DeskServiceServicer:
@@ -127,6 +135,9 @@ class DeskServiceServicer:
     over the margin cap), and DESK_RISK_STATE_INCOMPLETE (5): a qt book a
     desk or override run did not finish (it blocks). Additive only. Every
     publish path refuses on it.
+    1.7.0  2026-10-17  CheckSettings, SettingsCheckRequest, SettingsCheck (HD D-17): whether a
+    live run would accept a desk settings change, asked before AlgoLens
+    saves it. Additive only.
 
     """
 
@@ -201,6 +212,17 @@ class DeskServiceServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def CheckSettings(self, request, context):
+        """Since 1.7.0 (HD D-17). Whether a live run would accept `overrides_json` as the portfolio's
+        desk settings (the active trading.strategy_config row): the runners' own start-up checks on
+        the config files with the overrides merged in (qt_settings_check). Books nothing and touches
+        no table. AlgoLens asks before saving a settings version and never saves a refused one.
+        UNAVAILABLE when the check cannot be run; AlgoLens then refuses the save too.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_DeskServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -239,6 +261,11 @@ def add_DeskServiceServicer_to_server(servicer, server):
                     request_deserializer=algogators_dot_desk__pb2.DeskRiskRequest.FromString,
                     response_serializer=algogators_dot_desk__pb2.DeskRisk.SerializeToString,
             ),
+            'CheckSettings': grpc.unary_unary_rpc_method_handler(
+                    servicer.CheckSettings,
+                    request_deserializer=algogators_dot_desk__pb2.SettingsCheckRequest.FromString,
+                    response_serializer=algogators_dot_desk__pb2.SettingsCheck.SerializeToString,
+            ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
             'algogators.desk.DeskService', rpc_method_handlers)
@@ -275,6 +302,9 @@ class DeskService:
     over the margin cap), and DESK_RISK_STATE_INCOMPLETE (5): a qt book a
     desk or override run did not finish (it blocks). Additive only. Every
     publish path refuses on it.
+    1.7.0  2026-10-17  CheckSettings, SettingsCheckRequest, SettingsCheck (HD D-17): whether a
+    live run would accept a desk settings change, asked before AlgoLens
+    saves it. Additive only.
 
     """
 
@@ -457,6 +487,33 @@ class DeskService:
             '/algogators.desk.DeskService/GetDeskRisk',
             algogators_dot_desk__pb2.DeskRiskRequest.SerializeToString,
             algogators_dot_desk__pb2.DeskRisk.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def CheckSettings(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/algogators.desk.DeskService/CheckSettings',
+            algogators_dot_desk__pb2.SettingsCheckRequest.SerializeToString,
+            algogators_dot_desk__pb2.SettingsCheck.FromString,
             options,
             channel_credentials,
             insecure,

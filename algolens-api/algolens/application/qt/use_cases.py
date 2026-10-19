@@ -9,7 +9,7 @@ user's action.
 
 import logging
 from collections.abc import Mapping
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Any
 
 from algolens.application.qt.ports import (
@@ -170,16 +170,12 @@ def _refuse_after_cutoff(
     raise DeskConflict(closed_message(day, action))
 
 
-def _refuse_future_day(day, now: datetime, action: str) -> None:
-    """A future day's book is not approved, by the desk or through an
-    override (D-43): it would freeze on prices its own morning run has not
-    seen. Edits to it are still taken. The engine refuses it too."""
-    today = now.astimezone(NEW_YORK).date()
-    if day > today:
-        raise DeskConflict(
-            f"{action} of the {day.isoformat()} book opens on {day.isoformat()}: it is a "
-            f"future day (today is {today.isoformat()} in New York)"
-        )
+def _run_status(agent: DeskAgentPort, portfolio_id: str, day) -> dict[str, Any]:
+    """D-56: the engine's word on the model run of `day`, or {"unavailable": <reason>}."""
+    try:
+        return agent.get_run_status(portfolio_id, day)
+    except DeskRiskUnavailable as exc:
+        return {"unavailable": exc.reason}
 
 
 def _desk_risk(agent: DeskAgentPort, portfolio_id: str, day) -> dict[str, Any]:
@@ -320,6 +316,11 @@ class GetDeskState:
             # {"unavailable": reason}; None before the first book.
             "risk": None,
         }
+        # D-56: today's model run as the engine reports it (running, failed, refused), so the
+        # page says why there is no book yet instead of inferring it.
+        today = date.fromisoformat(state["deadlines"]["today"])
+        state["runStatus"] = {"date": today.isoformat(),
+                              **_run_status(self.agent, portfolio_id, today)}
         if day is None:
             return state
 
@@ -448,7 +449,6 @@ class ApproveDesk:
         portfolio_id = entry["portfolio_id"]
         day = _desk_day(self.repo, portfolio_id)
         _refuse_after_cutoff(self.repo, portfolio_id, day, self.now(), "Approval")
-        _refuse_future_day(day, self.now(), "Approval")
         # An Approve with no edit approves B as it stands (the model's A, or
         # the last save): the engine still runs it, so C is checked the same way.
         save, publish = self.repo.approve_proposal(
@@ -493,7 +493,6 @@ class RequestOverride:
         portfolio_id = entry["portfolio_id"]
         day = _desk_day(self.repo, portfolio_id)
         _refuse_after_cutoff(self.repo, portfolio_id, day, self.now(), "An override request")
-        _refuse_future_day(day, self.now(), "An override request")
         # One transaction: the C3 refusals, one open request a day (C2) and
         # the proposal snapshot with its hash (C1).
         command = self.repo.insert_override_request(portfolio_id, day, requested_by, reason)
@@ -631,7 +630,6 @@ class PublishDesk:
         portfolio_id = entry["portfolio_id"]
         day = _desk_day(self.repo, portfolio_id)
         _refuse_after_cutoff(self.repo, portfolio_id, day, self.now(), "Approval")
-        _refuse_future_day(day, self.now(), "Approval")
         payload = None
         if flow == "accept_c":
             # C10: the QT approves the engine's book C, knowing it differs.

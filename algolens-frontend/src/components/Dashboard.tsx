@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { Header } from './Header';
 import { PortfolioOverview } from './PortfolioOverview';
 import { StrategyList } from './StrategyList';
-import { StrategyDetail } from './StrategyDetail';
 import { BottomNav } from './BottomNav';
 import { ProfileScreen } from './ProfileScreen';
 import { AccountSettings } from './AccountSettings';
@@ -13,7 +12,14 @@ import { EmptyPortfolioScreen } from './EmptyPortfolioScreen';
 import { IncubationScreen } from './IncubationScreen';
 import { PortfolioSwitcher } from './PortfolioSwitcher';
 import { PortfolioBookView } from './PortfolioBookView';
-import { findPortfolio, type PortfolioList } from '../domain/portfolio/portfolioRegistry';
+import {
+  bookChoices,
+  findPortfolio,
+  groupOf,
+  portfolioName,
+  representative,
+  type PortfolioList,
+} from '../domain/portfolio/portfolioRegistry';
 import type { PortfolioData } from '../domain/portfolio/portfolioData';
 import { PortfolioApplicationService } from '../application/portfolio/portfolioService';
 import { useScreens } from '../adapters/react/ScreenContext';
@@ -27,7 +33,6 @@ type SettingsScreen = 'profile' | 'account' | 'privacy' | null;
 type ActiveTab = 'portfolio' | 'incubation' | 'builder' | 'news' | 'profile';
 
 export function Dashboard({ onLogout }: DashboardProps) {
-  const [selectedStrategy, setSelectedStrategy] = useState<string | null>(null);
   const [settingsScreen, setSettingsScreen] = useState<SettingsScreen>(null);
   const [showBuilder, setShowBuilder] = useState(false);
   const [activeTab, setActiveTab] = useState<ActiveTab>('portfolio');
@@ -91,11 +96,22 @@ export function Dashboard({ onLogout }: DashboardProps) {
   const selectedPortfolio = portfolioList
     ? findPortfolio(portfolioList.groups, selectedPortfolioId)
     : null;
+  const selectedGroup = portfolioList ? groupOf(portfolioList.groups, selectedPortfolioId) : null;
+  // D-22, D-24: one card per portfolio (a group is one, named for its model book), showing the
+  // book it opens on. Books the registry does not group stay one card each.
+  const overviewCards = !portfolioData
+    ? []
+    : !portfolioList || portfolioList.groups.length === 0
+      ? portfolioData.strategies
+      : portfolioList.groups.flatMap(group => {
+        const entry = representative(group);
+        const card = portfolioData.strategies.find(s => s.id === entry.id);
+        return card ? [{ ...card, name: portfolioName(group) }] : [];
+      });
 
   useEffect(() => {
     if (activeTab === 'incubation' && !isInternalMember) {
       setActiveTab('portfolio');
-      setSelectedStrategy(null);
     }
   }, [activeTab, isInternalMember]);
 
@@ -109,7 +125,6 @@ export function Dashboard({ onLogout }: DashboardProps) {
     }
 
     setActiveTab(tab as ActiveTab);
-    setSelectedStrategy(null);
 
     if (tab === 'builder') {
       setShowBuilder(true);
@@ -147,35 +162,34 @@ export function Dashboard({ onLogout }: DashboardProps) {
           onHomeClick={() => {
             setShowBuilder(false);
             setActiveTab('portfolio');
-            setSelectedStrategy(null);
           }}
           onIncubationClick={() => {
             if (!isInternalMember) return;
             setShowBuilder(false);
             setSettingsScreen(null);
             setActiveTab('incubation');
-            setSelectedStrategy(null);
           }}
         />
       )}
 
       {activeTab === 'portfolio' && (
         <div className="max-w-5xl mx-auto px-4 md:px-6 py-6 md:py-8">
-          {portfolioList && portfolioList.groups.length > 0 && (
+          {/* D-20, D-22: the picker sits above an open portfolio; the overview lists each
+              portfolio once (its card), and the page's one back control returns to it. */}
+          {selectedPortfolio && selectedGroup && portfolioList && (
             <PortfolioSwitcher
               groups={portfolioList.groups}
-              selected={selectedPortfolio ? selectedPortfolio.portfolio_id : null}
-              onSelect={(id) => {
-                setSelectedPortfolioId(id);
-                setSelectedStrategy(null);
-              }}
+              selected={selectedPortfolio.portfolio_id}
+              onSelect={(id) => setSelectedPortfolioId(id)}
             />
           )}
-          {selectedPortfolio ? (
+          {selectedPortfolio && selectedGroup ? (
             <PortfolioBookView
               // Remount per portfolio: nothing of the previous one survives a switch.
-              key={selectedPortfolio.portfolio_id}
+              key={selectedGroup.group}
               portfolio={selectedPortfolio}
+              title={portfolioName(selectedGroup)}
+              choices={bookChoices(selectedGroup)}
               onBack={() => setSelectedPortfolioId(null)}
               // Read-only here: the desk lives on the QT screen.
             />
@@ -226,22 +240,23 @@ export function Dashboard({ onLogout }: DashboardProps) {
             <EmptyPortfolioScreen onClose={() => {
               // Close action - could navigate to a help page or do nothing
             }} />
-          ) : !selectedStrategy ? (
+          ) : (
             <>
               <PortfolioOverview data={portfolioData} onBuilderClick={() => {
                 setShowBuilder(true);
                 setActiveTab('builder');
               }} />
+              {/* D-21: a card opens the same page as the picker, with the Model / QT switch. */}
               <StrategyList
-                strategies={portfolioData.strategies}
-                onSelectStrategy={setSelectedStrategy}
+                strategies={overviewCards}
+                onSelectStrategy={(id) => {
+                  const entry = portfolioList?.groups
+                    .flatMap(g => g.portfolios)
+                    .find(p => p.id === id);
+                  if (entry) setSelectedPortfolioId(entry.portfolio_id);
+                }}
               />
             </>
-          ) : (
-            <StrategyDetail
-              strategy={portfolioData.strategies.find(s => s.id === selectedStrategy)!}
-              onBack={() => setSelectedStrategy(null)}
-            />
           )}
         </div>
       )}

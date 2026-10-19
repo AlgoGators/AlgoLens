@@ -1,4 +1,10 @@
-from algolens.infrastructure.portfolio.strategy_registry import PostgresStrategyRegistry
+import psycopg2
+import pytest
+
+from algolens.infrastructure.portfolio.strategy_registry import (
+    PostgresStrategyRegistry,
+    RegistryUnavailable,
+)
 
 
 class FakeCursor:
@@ -135,3 +141,24 @@ def test_get_portfolio_finds_entry_by_portfolio_id():
 
     assert registry.get_portfolio("A_PORTFOLIO")["id"] == "a"
     assert registry.get_portfolio("NOPE") is None
+
+
+def test_a_failed_read_is_an_error_not_a_default_list():
+    # D-23: a built-in default once replaced a failed read and hid the QT books.
+    def broken():
+        raise psycopg2.OperationalError("connection refused")
+
+    registry = PostgresStrategyRegistry(connection_factory=broken)
+
+    with pytest.raises(RegistryUnavailable, match="could not be read"):
+        registry.list(active_only=True)
+
+
+def test_an_empty_registry_is_an_error():
+    cursor = FakeCursor(has_lifecycle=True, rows=[])
+    connection = FakeConnection(cursor)
+    registry = PostgresStrategyRegistry(connection_factory=lambda: connection)
+
+    with pytest.raises(RegistryUnavailable, match="empty"):
+        registry.list(active_only=True)
+    assert connection.closed

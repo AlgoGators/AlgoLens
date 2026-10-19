@@ -16,6 +16,7 @@ import {
   proposalKey,
   publishSourceOf,
   rescindBlockedReason,
+  runStatusMessage,
   sendBlockedReason,
   rescindConfirmText,
   serverClockOffsetMs,
@@ -255,6 +256,7 @@ export function DeskPanel({ portfolioId, book, reloadBook }: DeskPanelProps) {
 
   const serverNow = browserNow + clockOffset;
   const dayStatus = state ? deskDayStatus(state, serverNow) : null;
+  const runStatus = state ? runStatusMessage(state.runStatus) : null;
   // Crossing 09:30 or 10:00 changes the phase: ask the server again then.
   const phase = dayStatus?.phase;
   const lastPhase = useRef<DayPhase | undefined>(undefined);
@@ -438,6 +440,12 @@ export function DeskPanel({ portfolioId, book, reloadBook }: DeskPanelProps) {
       </div>
 
       {dayStatus && state.deadlines && <DayBanner status={dayStatus} nowMs={serverNow} dark={dark} />}
+
+      {runStatus && (
+        <p data-testid="run-status" className={`mt-3 text-sm ${muted}`}>
+          {runStatus}
+        </p>
+      )}
 
       {state.seeded && (
         <ApprovalPipeline

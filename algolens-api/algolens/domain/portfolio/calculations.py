@@ -24,12 +24,22 @@ def build_historical_data(equity_curve: Sequence[Any]) -> list[dict[str, Any]]:
     ]
 
 
-def transform_positions(positions: Sequence[Any], current_value: float) -> list[dict[str, Any]]:
+def contract_size(symbol: str | None, sizes: Mapping[str, float] | None) -> float:
+    """D-32: the contract multiplier of a symbol ('ZF.v.0' -> sizes['ZF']); 1 when unknown."""
+    root = (symbol or "").split(".", 1)[0]
+    return float((sizes or {}).get(root) or 1.0)
+
+
+def transform_positions(
+    positions: Sequence[Any],
+    current_value: float,
+    sizes: Mapping[str, float] | None = None,
+) -> list[dict[str, Any]]:
     transformed = []
     for pos in positions:
         quantity = float(_get(pos, "quantity"))
         average_price = float(_get(pos, "average_price"))
-        notional = abs(quantity * average_price)
+        notional = abs(quantity * average_price * contract_size(_get(pos, "symbol"), sizes))
         transformed.append(
             {
                 "symbol": _get(pos, "symbol"),
@@ -92,19 +102,22 @@ def compute_return_stats(historical_data: Sequence[Mapping[str, Any]]) -> dict[s
     }
 
 
-def transform_executions(executions: Sequence[Any]) -> list[dict[str, Any]]:
+def transform_executions(
+    executions: Sequence[Any], sizes: Mapping[str, float] | None = None
+) -> list[dict[str, Any]]:
     transformed = []
     for execution in executions:
         exec_time = _get(execution, "execution_time")
         quantity = float(_get(execution, "quantity"))
         price = float(_get(execution, "price"))
+        size = contract_size(_get(execution, "symbol"), sizes)
         transformed.append(
             {
                 "symbol": _get(execution, "symbol"),
                 "side": _get(execution, "side"),
                 "quantity": quantity,
                 "price": price,
-                "notional": quantity * price,
+                "notional": quantity * price * size,
                 "commission": float(_get(execution, "commissions_fees")),
                 "date": exec_time.isoformat() if exec_time else None,
             }

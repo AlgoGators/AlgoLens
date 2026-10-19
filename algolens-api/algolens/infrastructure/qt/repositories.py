@@ -739,6 +739,49 @@ class PostgresDeskRepository:
         finally:
             conn.close()
 
+    # --- settings locks (D-14, AlgoLens migration 004) ------------------------
+
+    def settings_locks(self):
+        conn = self.connection_factory()
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    "SELECT to_regclass('trading.desk_settings_locks') IS NOT NULL AS present")
+                present = cursor.fetchone()
+                if not present or not present["present"]:
+                    return None
+                cursor.execute(
+                    "SELECT path, reason, locked_by, locked_at FROM trading.desk_settings_locks "
+                    "ORDER BY path"
+                )
+                return cursor.fetchall()
+        finally:
+            conn.close()
+
+    def set_settings_lock(self, path, locked, reason, by):
+        with self._transaction() as cursor:
+            if locked:
+                cursor.execute(
+                    """
+                    INSERT INTO trading.desk_settings_locks (path, reason, locked_by)
+                    VALUES (%s, %s, %s)
+                    ON CONFLICT (path) DO UPDATE
+                       SET reason = EXCLUDED.reason, locked_by = EXCLUDED.locked_by,
+                           locked_at = now()
+                    """,
+                    (list(path), reason, by),
+                )
+            else:
+                cursor.execute("DELETE FROM trading.desk_settings_locks WHERE path = %s",
+                               (list(path),))
+            cursor.execute(
+                """
+                INSERT INTO trading.desk_settings_lock_log (path, locked, reason, changed_by)
+                VALUES (%s, %s, %s, %s)
+                """,
+                (list(path), locked, reason, by),
+            )
+
     def config_versions(self, portfolio_id, limit=50):
         return self._read(
             """

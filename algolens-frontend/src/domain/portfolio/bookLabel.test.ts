@@ -8,13 +8,13 @@ describe('describeServedBook', () => {
 
   it('names each known book', () => {
     expect(describeServedBook({ book: 'qt' })).toBe('QT book');
-    expect(describeServedBook({ book: 'system' })).toBe('System book');
-    expect(describeServedBook({ book: 'qt_proposal' })).toBe('QT proposal');
+    expect(describeServedBook({ book: 'system' })).toBe('Model book');
+    expect(describeServedBook({ book: 'qt_proposal' })).toBe('Request (B)');
   });
 
   it('says when the default QT book fell back to system', () => {
     expect(describeServedBook({ book: 'system', fellBack: true })).toBe(
-      'System book (no QT book yet)',
+      'Model book (no QT book yet)',
     );
   });
 

@@ -181,6 +181,8 @@ def test_portfolio_read_falls_back_to_system_only_when_unnamed(qt_db):
     assert (fallback.book, fallback.fell_back) == ("system", True)
     assert [p["symbol"] for p in fallback.positions] == ["ZC.v.0"]
     assert (exact.book, exact.fell_back, exact.positions) == ("qt", False, [])
+    # D-37: the model book has no qt rows; its system numbers are not served as "qt".
+    assert exact.book_missing is True and exact.latest is None
 
 
 def test_portfolio_read_scopes_executions_to_the_book(qt_db):
@@ -207,6 +209,63 @@ def test_portfolio_read_ignores_strategy_id(qt_db):
 
     assert rows.latest is not None
     assert [p["symbol"] for p in rows.positions] == ["ZC.v.0"]
+
+
+def test_member_read_scopes_results_and_trades_to_the_book(qt_db):
+    # D-34: the member page (strategy-id read) listed the model's trades next to the QT
+    # book's copy of them, and took its numbers from whichever book wrote last.
+    add_results(qt_db, "system", D2, 501000)
+    add_results(qt_db, "qt", D2, 502000)
+    add_position(qt_db, "qt", D2, "ZC.v.0", 1)
+    add_execution(qt_db, "system", D2, "e1", "ZC.v.0")
+    add_execution(qt_db, "qt", D2, "e1", "ZS.v.0")
+
+    rows = repo(qt_db).fetch_detail_rows(STRATEGY, QT, book="qt", allow_fallback=False)
+    system = repo(qt_db).fetch_detail_rows(STRATEGY, QT, book="system", allow_fallback=False)
+
+    assert [e["symbol"] for e in rows.executions] == ["ZS.v.0"]
+    assert float(rows.latest["current_portfolio_value"]) == 502000
+    assert [e["symbol"] for e in system.executions] == ["ZC.v.0"]
+    assert float(system.latest["current_portfolio_value"]) == 501000
+
+
+def test_portfolio_reads_carry_the_contract_sizes(qt_db):
+    # D-32: notionals need the contract multiplier; a root with no metadata is left out.
+    _exec(
+        qt_db,
+        """
+        INSERT INTO metadata.contract_metadata
+            ("Databento Symbol", "IB Symbol", "Name", "Exchange", "Asset Type", "Sector",
+             "Contract Size")
+        VALUES ('ZF', 'ZF', '5-Year Note', 'CBOT', 'Futures', 'Rates', '1,000')
+        """,
+    )
+    add_results(qt_db, "qt", D2, 500000)
+    add_position(qt_db, "qt", D2, "ZF.v.0", -5)
+    add_position(qt_db, "qt", D2, "QQQ", 2)
+
+    by_portfolio = repo(qt_db).fetch_portfolio_rows(QT, book="qt", allow_fallback=False)
+    by_strategy = repo(qt_db).fetch_detail_rows(STRATEGY, QT, book="qt", allow_fallback=False)
+
+    assert by_portfolio.contract_sizes == {"ZF": 1000.0}
+    assert by_strategy.contract_sizes == {"ZF": 1000.0}
+
+
+def test_closed_positions_compare_with_the_books_previous_date(qt_db):
+    # D-35: "yesterday" is the book's previous date (a weekend or a gap in between),
+    # not the calendar's yesterday.
+    d0 = date(2026, 10, 5)
+    add_results(qt_db, "qt", D2, 500000)
+    add_position(qt_db, "qt", d0, "ZS.v.0", 4)
+    add_position(qt_db, "qt", D2, "ZC.v.0", 1)
+
+    by_portfolio = repo(qt_db).fetch_portfolio_rows(QT, book="qt", allow_fallback=False)
+    by_strategy = repo(qt_db).fetch_detail_rows(STRATEGY, QT, book="qt", allow_fallback=False)
+
+    for rows in (by_portfolio, by_strategy):
+        assert [(p["symbol"], float(p["quantity"])) for p in rows.yesterday_positions] == [
+            ("ZS.v.0", 4.0)
+        ]
 
 
 # --- A3-A6: the desk against the real command log ----------------------------
@@ -236,6 +295,9 @@ class NullAgent:
 
     def record_decision(self, decision, token):
         return self._lost(decision, token)
+
+    def get_run_status(self, portfolio_id, day):
+        return {"state": "succeeded", "startedAt": None, "finishedAt": None, "message": ""}
 
     def get_desk_risk(self, portfolio_id, day):
         # Not a command: the risk report of the model's book, inside the limits, so the
@@ -869,6 +931,13 @@ RUN_CONFIG = {
 }
 
 
+class AcceptingEngine:
+    """CheckSettings (D-17) that accepts: the engine's own check is tested in trade-ngin."""
+
+    def check_settings(self, portfolio_id, overrides):
+        return True, ""
+
+
 def report_settings(factory, day, version, config=RUN_CONFIG, portfolio=QT):
     """A live run of the 022 binary writing settings_used."""
     _exec(
@@ -899,10 +968,10 @@ def test_settings_versions_keep_exactly_one_active(qt_db):
     report_settings(qt_db, D1, None)
     repo = desk_repo(qt_db)
 
-    SaveSettings(repo).execute(
+    SaveSettings(repo, AcceptingEngine()).execute(
         entry(qt_db), [{"path": ["risk", "max_leverage"], "value": 1.5}], "less risk", "d@x.com"
     )
-    SaveSettings(repo).execute(
+    SaveSettings(repo, AcceptingEngine()).execute(
         entry(qt_db), [{"path": ["strategies", "tf", "lookbacks"], "value": [8, 16]}], "faster", "d@x.com"
     )
 
@@ -920,7 +989,7 @@ def test_settings_versions_keep_exactly_one_active(qt_db):
     report_settings(qt_db, D2, 2, config={**RUN_CONFIG, "risk": {"max_leverage": 1.5, "max_drawdown": 0.3}})
     assert GetSettings(repo).execute(entry(qt_db))["pending"] is False
 
-    RevertSettings(repo).execute(entry(qt_db), 1, "undo faster", "d@x.com")
+    RevertSettings(repo, AcceptingEngine()).execute(entry(qt_db), 1, "undo faster", "d@x.com")
     rows = config_rows(qt_db)
     assert [(r["version"], r["is_active"]) for r in rows] == [(1, False), (2, False), (3, True)]
     assert rows[2]["overrides"] == {"risk": {"max_leverage": 1.5}}
@@ -940,7 +1009,7 @@ def test_settings_refuse_unknown_keys_and_hidden_sections(qt_db):
         {"path": ["database", "host"], "value": "x"},
     ):
         with pytest.raises(SettingsRuleError):
-            SaveSettings(desk_repo(qt_db)).execute(entry(qt_db), [change], "r", "d@x.com")
+            SaveSettings(desk_repo(qt_db), AcceptingEngine()).execute(entry(qt_db), [change], "r", "d@x.com")
     assert config_rows(qt_db) == []
 
 
@@ -1176,3 +1245,42 @@ def test_before_029_the_command_log_refuses_a_rescind_row(qt_db):
     with pytest.raises(psycopg2.IntegrityError):
         RescindDesk(desk_repo(qt_db), NullAgent()).execute(entry(qt_db), "desk@x.com")
     assert [c["kind"] for c in commands(qt_db)] == ["publish"]
+
+
+def test_the_settings_lock_list_from_migration_004(qt_db):
+    # D-14: before 004 the repository reports no table (the starting locks apply); after it
+    # the seeded list is read, an admin's lock and unlock land, and each is logged.
+    from pathlib import Path
+
+    assert desk_repo(qt_db).settings_locks() is None
+    sql = (Path(__file__).parent.parent / "migrations" / "004_desk_settings_locks.sql").read_text("utf-8")
+    with qt_db.setup.cursor() as cur:
+        cur.execute(sql)
+        cur.execute("GRANT SELECT, INSERT, UPDATE, DELETE ON trading.desk_settings_locks TO algolens_test_app")
+        cur.execute("GRANT SELECT, INSERT ON trading.desk_settings_lock_log TO algolens_test_app")
+        cur.execute("GRANT USAGE ON SEQUENCE trading.desk_settings_lock_log_id_seq TO algolens_test_app")
+
+    seeded = [tuple(r["path"]) for r in desk_repo(qt_db).settings_locks()]
+    assert ("use_optimization",) in seeded and ("strategies", "*", "type") in seeded and len(seeded) == 9
+
+    desk_repo(qt_db).set_settings_lock(["risk", "max_drawdown"], True, "freeze it", "admin@x.com")
+    desk_repo(qt_db).set_settings_lock(["live"], False, "open live", "admin@x.com")
+    paths = [tuple(r["path"]) for r in desk_repo(qt_db).settings_locks()]
+    assert ("risk", "max_drawdown") in paths and ("live",) not in paths
+    log = _exec(qt_db, "SELECT path, locked, reason FROM trading.desk_settings_lock_log ORDER BY id")
+    assert [(tuple(r["path"]), r["locked"], r["reason"]) for r in log] == [
+        (("risk", "max_drawdown"), True, "freeze it"), (("live",), False, "open live")]
+
+
+
+def test_a_portfolio_read_lists_its_strategies(qt_db):
+    # D-20: a portfolio holds strategies (sleeves); the read names them with what each holds.
+    add_results(qt_db, "qt", D2, 500000)
+    add_position(qt_db, "qt", D2, "ZC.v.0", 2, sleeve="TREND")
+    add_position(qt_db, "qt", D2, "ZS.v.0", 1, sleeve="TREND")
+    add_position(qt_db, "qt", D2, "ES.v.0", 0, sleeve="FAST")
+    add_position(qt_db, "qt", D1, "CL.v.0", 1, sleeve="OLD")
+
+    rows = repo(qt_db).fetch_portfolio_rows(QT, book="qt", allow_fallback=False)
+
+    assert list(rows.sleeves) == [{"name": "FAST", "positions": 0}, {"name": "TREND", "positions": 2}]

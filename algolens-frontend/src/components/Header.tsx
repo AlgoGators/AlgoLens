@@ -4,6 +4,7 @@ import logo from '../assets/logo.png';
 import { useScreens } from '../adapters/react/ScreenContext';
 import { useTheme } from '../adapters/react/ThemeContext';
 import { ScreenSwitcher } from './ScreenSwitcher';
+import { dailyBellDue, newYorkDate } from '../domain/notifications/dailyBell';
 
 interface HeaderProps {
   onProfileClick: () => void;
@@ -32,27 +33,12 @@ export function Header({
 
   const OUTLOOK_URL = 'https://login.microsoftonline.com/common/oauth2/v2.0/authorize?client_id=9199bf20-a13f-4107-85dc-02114787ef48&scope=https%3A%2F%2Foutlook.office.com%2F.default%20openid%20profile%20offline_access&redirect_uri=https%3A%2F%2Foutlook.live.com%2Fmail%2F&client-request-id=db1c7baa-e08c-3071-7a19-53c59751400e&response_mode=fragment&client_info=1&prompt=select_account&nonce=019b9607-602c-78ec-971e-ab36297d8aed&state=eyJpZCI6IjAxOWI5NjA3LTYwMmMtNzY4MS05NGI3LTkzZDZlZDI4ZjdiZiIsIm1ldGEiOnsiaW50ZXJhY3Rpb25UeXBlIjoicmVkaXJlY3QifX0%3D%7CaHR0cHM6Ly9vdXRsb29rLmxpdmUuY29tL21haWwvMC8_ZGVlcGxpbms9bWFpbCUyRjAlMkY&claims=%7B%22access_token%22%3A%7B%22xms_cc%22%3A%7B%22values%22%3A%5B%22CP1%22%5D%7D%7D%7D&x-client-SKU=msal.js.browser&x-client-VER=4.26.0&response_type=code&code_challenge=edvy3GffheuAG3xMagQGunjdE7B2ST-J3LKoL2izw9Q&code_challenge_method=S256&cobrandid=ab0455a0-8d03-46b9-b18b-df2f57b9e44c&fl=dob,flname,wld';
 
-  // Check if it's 9:30 AM EST or later today
+  // The bell lights from 09:30 New York until the day is dismissed (D-26).
   useEffect(() => {
     const checkNotificationTime = () => {
-      const now = new Date();
-      // Convert to EST (UTC-5)
-      const estOffset = -5 * 60; // EST offset in minutes
-      const localOffset = now.getTimezoneOffset();
-      const estTime = new Date(now.getTime() + (localOffset + estOffset) * 60000);
-
-      const hours = estTime.getHours();
-      const minutes = estTime.getMinutes();
-
-      // Check if it's 9:30 AM EST or later (until end of day)
-      if (hours > 9 || (hours === 9 && minutes >= 30)) {
-        // Check if notification was already dismissed today
-        const lastDismissed = localStorage.getItem('notificationDismissed');
-        const today = estTime.toDateString();
-
-        if (lastDismissed !== today) {
-          setHasNewNotification(true);
-        }
+      const due = dailyBellDue(Date.now());
+      if (due && localStorage.getItem('notificationDismissed') !== due) {
+        setHasNewNotification(true);
       }
     };
 
@@ -63,12 +49,7 @@ export function Header({
   }, []);
 
   const handleDismissNotification = () => {
-    const now = new Date();
-    const estOffset = -5 * 60;
-    const localOffset = now.getTimezoneOffset();
-    const estTime = new Date(now.getTime() + (localOffset + estOffset) * 60000);
-
-    localStorage.setItem('notificationDismissed', estTime.toDateString());
+    localStorage.setItem('notificationDismissed', newYorkDate(Date.now()));
     setHasNewNotification(false);
     setShowNotification(false);
   };

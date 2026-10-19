@@ -3,6 +3,7 @@ import { Download, FileText } from 'lucide-react';
 import { useTheme } from '../../adapters/react/ThemeContext';
 import { InvestorService } from '../../application/identity/screenService';
 import {
+  followsLabel,
   formatBytes,
   formatCompactMoney,
   formatWeight,
@@ -81,7 +82,8 @@ export function InvestorHome() {
       <div>
         <h1 className="text-2xl mb-1">Investor</h1>
         <p className={`text-sm ${muted}`}>
-          The fund's published book: the positions sent out on the latest trading day.
+          Your portfolio as published: the positions sent out on the latest trading day, and its
+          record to that day.
         </p>
       </div>
 
@@ -95,7 +97,14 @@ export function InvestorHome() {
         portfolios.map(portfolio => (
           <section key={portfolio.portfolio_id} className="space-y-6">
             <div className="flex flex-wrap items-end justify-between gap-2">
-              <h2 className="text-xl">{portfolio.name}</h2>
+              <div>
+                <h2 className="text-xl">{portfolio.name}</h2>
+                {/* D-25: the book this investor follows (decision 13). */}
+                <p className={`text-sm ${muted}`} data-testid="investor-follows">
+                  You follow its {followsLabel(portfolio)}
+                  {portfolio.default ? ' (the default)' : ''}.
+                </p>
+              </div>
               <span className={`text-sm ${muted}`}>
                 {portfolio.as_of ? `As of ${formatDay(portfolio.as_of)}` : 'Nothing published yet'}
               </span>
@@ -117,6 +126,25 @@ export function InvestorHome() {
                     <div className="text-2xl">{portfolio.allocation.length}</div>
                   </Card>
                 </div>
+
+                {portfolio.performance && portfolio.performance.value !== null && (
+                  <div className="grid grid-cols-2 gap-4" data-testid="investor-performance">
+                    <Card className="p-4">
+                      <div className={`text-sm mb-1 ${muted}`}>Value</div>
+                      <div className="text-2xl">{formatCompactMoney(portfolio.performance.value)}</div>
+                    </Card>
+                    <Card className="p-4">
+                      <div className={`text-sm mb-1 ${muted}`}>
+                        Return since {formatDay(portfolio.performance.curve[0].date)}
+                      </div>
+                      <div className="text-2xl">
+                        {portfolio.performance.return === null
+                          ? '-'
+                          : `${portfolio.performance.return >= 0 ? '+' : ''}${(portfolio.performance.return * 100).toFixed(2)}%`}
+                      </div>
+                    </Card>
+                  </div>
+                )}
 
                 <div>
                   <SectionTitle>Allocation by sector</SectionTitle>

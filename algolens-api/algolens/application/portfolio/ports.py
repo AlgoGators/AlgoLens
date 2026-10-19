@@ -1,7 +1,7 @@
 """Portfolio application ports."""
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 from algolens.application.shared.errors import ValidationError
@@ -24,6 +24,13 @@ class PortfolioDetailRows:
     # requested because the requested default book had no rows.
     book: str = DEFAULT_BOOK
     fell_back: bool = False
+    # D-37: a book named in the request that has no rows of its own (the model book's qt).
+    book_missing: bool = False
+    # D-32: contract size by symbol root (metadata.contract_metadata); a root not listed
+    # counts with size 1 (equities).
+    contract_sizes: Mapping[str, float] = field(default_factory=dict)
+    # D-20: the book's strategies (sleeves) on its latest date: [{name, positions}].
+    sleeves: Sequence[Mapping[str, Any]] = ()
 
 
 @dataclass(frozen=True)

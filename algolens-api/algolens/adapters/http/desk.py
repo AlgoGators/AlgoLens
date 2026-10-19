@@ -15,6 +15,7 @@ import psycopg2
 from flask import Blueprint, current_app, jsonify, request
 from flask_jwt_extended import get_jwt_identity, jwt_required
 
+from algolens.adapters.http.access import admin_only
 from algolens.adapters.http.portfolio import (
     can_use_qt_desk,
     current_user,
@@ -41,7 +42,9 @@ from algolens.application.qt.use_cases import (
     SaveDeskEdit,
 )
 from algolens.application.qt.settings_use_cases import (
+    ChangeSettingsLock,
     GetSettings,
+    ListSettingsLocks,
     RevertSettings,
     SaveSettings,
 )
@@ -145,6 +148,12 @@ def _body(required=True):
     if not isinstance(payload, dict):
         raise DeskRuleError("Request body must be a JSON object")
     return payload
+
+
+def _gone_user():
+    """D-44: a signed-in token whose user was deleted from auth.users does not decide an
+    override (its e-mail claim alone is not trusted)."""
+    return jsonify({"error": "This account no longer exists"}), 403
 
 
 def _approver_role(user):
@@ -304,6 +313,8 @@ def desk_rescind(portfolio_id):
 @handled
 def approval_lookup():
     user = current_user()
+    if user["role"] is None:
+        return _gone_user()
     role = _approver_role(user)
     if role is None and not can_use_qt_desk():
         return jsonify({"error": "Insufficient permissions"}), 403
@@ -326,6 +337,8 @@ def approval_lookup():
 def approval_decide():
     payload = _body()
     user = current_user()
+    if user["role"] is None:
+        return _gone_user()
     repo, agent, _settings = _desk_dependencies()
     result = DecideOverride(repo, agent).execute(
         payload.get("token"),
@@ -357,8 +370,8 @@ def settings_get(portfolio_id):
 @handled
 def settings_save(portfolio_id):
     payload = _body()
-    repo, _agent, _settings = _desk_dependencies()
-    version = SaveSettings(repo).execute(
+    repo, agent, _settings = _desk_dependencies()
+    version = SaveSettings(repo, agent).execute(
         _portfolio(portfolio_id),
         payload.get("changes"),
         payload.get("reason"),
@@ -374,11 +387,38 @@ def settings_save(portfolio_id):
 @handled
 def settings_revert(portfolio_id):
     payload = _body()
-    repo, _agent, _settings = _desk_dependencies()
-    version = RevertSettings(repo).execute(
+    repo, agent, _settings = _desk_dependencies()
+    version = RevertSettings(repo, agent).execute(
         _portfolio(portfolio_id),
         payload.get("version"),
         payload.get("reason"),
         current_user()["email"],
     )
     return jsonify({"version": version}), 201
+
+
+# --- D-14: the admin's lock list for desk settings ------------------------------
+
+
+@desk_bp.route("/settings-locks", methods=["GET"])
+@jwt_required()
+@desk_enabled
+@desk_user
+@handled
+def settings_locks_list():
+    repo, _agent, _settings = _desk_dependencies()
+    return jsonify(ListSettingsLocks(repo).execute()), 200
+
+
+@desk_bp.route("/settings-locks", methods=["POST"])
+@jwt_required()
+@desk_enabled
+@admin_only
+@handled
+def settings_locks_change():
+    payload = _body()
+    repo, _agent, _settings = _desk_dependencies()
+    result = ChangeSettingsLock(repo).execute(
+        payload.get("path"), payload.get("locked"), payload.get("reason"), current_user()["email"]
+    )
+    return jsonify(result), 200

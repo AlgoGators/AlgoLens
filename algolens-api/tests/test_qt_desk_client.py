@@ -58,6 +58,19 @@ class RecordingDesk(desk_pb2_grpc.DeskServiceServicer):
     def GetDeskRisk(self, request, context):
         return self._reply("GetDeskRisk", request, self.risk, context)
 
+    def CheckSettings(self, request, context):
+        import json as _json
+
+        overrides = _json.loads(request.overrides_json)
+        ok = overrides.get("risk", {}).get("max_drawdown", 0) < 1
+        reply = desk_pb2.SettingsCheck(ok=ok, error="" if ok else "max_drawdown must be below 1")
+        return self._reply("CheckSettings", request, reply, context)
+
+    def GetRunStatus(self, request, context):
+        reply = desk_pb2.RunStatus(state=desk_pb2.RUN_STATE_REFUSED, message="risk_refusal: R over")
+        reply.started_at.FromJsonString("2026-10-08T10:47:00Z")
+        return self._reply("GetRunStatus", request, reply, context)
+
 
 @pytest.fixture
 def desk_server():
@@ -106,7 +119,7 @@ def test_each_rpc_carries_the_command_row(desk_server):
         "QT_CONSERVATIVE_PORTFOLIO", "2026-10-08", 43)
     # Every call carried the version header, built from the vendored protos.
     assert servicer.headers == [f"common={API_VERSIONS['common']},desk={API_VERSIONS['desk']}"] * 5
-    assert API_VERSIONS["desk"] == "1.6.0"
+    assert API_VERSIONS["desk"] == "1.7.0"
 
 
 def test_version_refusal_is_logged_and_swallowed(desk_server, caplog):
@@ -255,3 +268,33 @@ def test_get_desk_risk_maps_an_incomplete_book(desk_server):
         blockers=[desk_pb2.RiskBreach(term="incomplete", detail="save again")])
     report = DeskClient(address).get_desk_risk("QT_CONSERVATIVE_PORTFOLIO", date(2026, 10, 8))
     assert report["state"] == "incomplete" and report["blocksPublish"] is True
+
+
+def test_get_run_status_maps_the_state_and_times(desk_server):
+    # D-56: the desk page shows the model run's state from the engine, not an inference.
+    servicer, address = desk_server
+    status = DeskClient(address).get_run_status("P", date(2026, 10, 8))
+    assert status == {"state": "refused", "startedAt": "2026-10-08T10:47:00+00:00",
+                      "finishedAt": None, "message": "risk_refusal: R over"}
+    name, request = servicer.requests[-1]
+    assert (name, request.portfolio_id, request.date) == ("GetRunStatus", "P", "2026-10-08")
+
+
+def test_get_run_status_raises_when_the_engine_is_unreachable():
+    with pytest.raises(DeskRiskUnavailable):
+        DeskClient("127.0.0.1:1", timeout=0.5).get_run_status("P", date(2026, 10, 8))
+
+
+def test_check_settings_sends_the_overrides_and_returns_the_answer(desk_server):
+    # D-17: the engine is asked before a settings version is saved.
+    servicer, address = desk_server
+    client = DeskClient(address)
+    assert client.check_settings("P", {"risk": {"max_drawdown": 0.25}}) == (True, "")
+    assert client.check_settings("P", {"risk": {"max_drawdown": 2}}) == (False, "max_drawdown must be below 1")
+    name, request = servicer.requests[-1]
+    assert name == "CheckSettings" and request.portfolio_id == "P"
+
+
+def test_check_settings_raises_when_the_engine_is_unreachable():
+    with pytest.raises(DeskRiskUnavailable):
+        DeskClient("127.0.0.1:1", timeout=0.5).check_settings("P", {})

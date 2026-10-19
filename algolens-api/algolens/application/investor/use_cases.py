@@ -2,15 +2,18 @@
 
 from typing import Protocol
 
-from algolens.application.shared.errors import NotFoundError
+from algolens.application.shared.errors import NotFoundError, ValidationError
 from algolens.domain.investor.allocation import InstrumentInfo, build_allocation
+from algolens.domain.investor.links import LinkRuleError, book_choices, check_link, resolve_link
 from algolens.domain.investor.reports import ReportRuleError, validate_title, validate_upload
-
-INVESTOR_BOOK = "qt"
 
 
 class ReportNotFound(NotFoundError):
     """No report with that id (or, for investors, not published)."""
+
+
+class InvestorNotFound(NotFoundError):
+    """No user with that id to link a book to."""
 
 
 class InvestorRepositoryPort(Protocol):
@@ -23,6 +26,23 @@ class InvestorRepositoryPort(Protocol):
         ...
 
     def instruments(self, roots) -> dict[str, InstrumentInfo]:
+        ...
+
+    def portfolio_link(self, user_id):
+        """D-25: {portfolio_id, book} the investor follows; None when none is set or while
+        migration 005 is not applied."""
+        ...
+
+    def portfolio_links(self):
+        """[{user_id, portfolio_id, book, set_by, set_at}], or None while 005 is not applied."""
+        ...
+
+    def set_portfolio_link(self, user_id, portfolio_id, book, by):
+        """Upsert and log; False when the user does not exist."""
+        ...
+
+    def equity_curve(self, portfolio_id, book, until):
+        """[{date, equity}] of the book up to `until` (the published day shown)."""
         ...
 
     def list_reports(self, published_only: bool) -> list[dict]:
@@ -39,41 +59,95 @@ class InvestorRepositoryPort(Protocol):
         ...
 
 
-class GetInvestorAllocation:
-    """For every desk portfolio, the qt book of its latest published day."""
+class LinkNotStored(ValidationError):
+    """The investor links are not in the database yet (AlgoLens migration 005)."""
+
+
+class GetInvestorPortfolio:
+    """D-25: the one portfolio and book the investor follows (decision 13: the QT book unless an
+    admin set the model book), on its latest published day, with its record up to that day."""
+
+    def __init__(self, registry, repo: InvestorRepositoryPort):
+        self.registry = registry
+        self.repo = repo
+
+    def execute(self, user_id):
+        choices = book_choices(self.registry.list())
+        link = self.repo.portfolio_link(user_id)
+        choice, is_default = resolve_link(choices, link)
+        if choice is None:
+            return []
+        portfolio_id, book = choice["portfolio_id"], choice["book"]
+        day = self.repo.latest_published_day(portfolio_id)
+        positions, allocation, gross, curve = [], [], 0.0, []
+        if day is not None:
+            rows = self.repo.book_rows(portfolio_id, day, book)
+            roots = sorted({(r.get("symbol") or "").split(".", 1)[0] for r in rows})
+            positions, allocation, gross = build_allocation(rows, self.repo.instruments(roots))
+            curve = [
+                {"date": _iso(p["date"]), "equity": float(p["equity"])}
+                for p in self.repo.equity_curve(portfolio_id, book, day)
+            ]
+        first, last = (curve[0]["equity"], curve[-1]["equity"]) if curve else (None, None)
+        return [{
+            "portfolio_id": portfolio_id,
+            "name": choice["name"],
+            "book": book,
+            "follows": choice["follows"],
+            "label": choice["label"],
+            "default": is_default,
+            "as_of": day.isoformat() if day is not None else None,
+            "gross_notional": gross,
+            "positions": positions,
+            "allocation": allocation,
+            "performance": {
+                "curve": curve,
+                "value": last,
+                "return": (last / first - 1) if first and last is not None else None,
+            },
+        }]
+
+
+class ListInvestorLinks:
+    """D-25, the admin's view: who follows what, and what can be followed."""
 
     def __init__(self, registry, repo: InvestorRepositoryPort):
         self.registry = registry
         self.repo = repo
 
     def execute(self):
-        portfolios = []
-        seen = set()
-        for cfg in self.registry.list():
-            portfolio_id = cfg.get("portfolio_id")
-            if not cfg.get("desk_editable") or portfolio_id in seen:
-                continue
-            seen.add(portfolio_id)
-            day = self.repo.latest_published_day(portfolio_id)
-            positions, allocation, gross = [], [], 0.0
-            if day is not None:
-                rows = self.repo.book_rows(portfolio_id, day, INVESTOR_BOOK)
-                roots = sorted({(r.get("symbol") or "").split(".", 1)[0] for r in rows})
-                positions, allocation, gross = build_allocation(
-                    rows, self.repo.instruments(roots)
-                )
-            portfolios.append(
-                {
-                    "portfolio_id": portfolio_id,
-                    "name": cfg.get("name") or portfolio_id,
-                    "portfolio_group": cfg.get("portfolio_group"),
-                    "as_of": day.isoformat() if day is not None else None,
-                    "gross_notional": gross,
-                    "positions": positions,
-                    "allocation": allocation,
-                }
-            )
-        return portfolios
+        links = self.repo.portfolio_links()
+        return {
+            "stored": links is not None,
+            "choices": book_choices(self.registry.list()),
+            "links": [
+                {"user_id": r["user_id"], "portfolio_id": r["portfolio_id"], "book": r["book"],
+                  "set_by": r.get("set_by"), "set_at": _iso(r.get("set_at"))}
+                for r in (links or [])
+            ],
+        }
+
+
+class SetInvestorLink:
+    def __init__(self, registry, repo: InvestorRepositoryPort):
+        self.registry = registry
+        self.repo = repo
+
+    def execute(self, user_id, portfolio_id, book, by):
+        try:
+            choice = check_link(book_choices(self.registry.list()), portfolio_id, book)
+        except LinkRuleError as exc:
+            raise ValidationError(str(exc)) from None
+        if self.repo.portfolio_links() is None:
+            raise LinkNotStored(
+                "The investor links are not in the database yet (AlgoLens migration 005)")
+        if not self.repo.set_portfolio_link(user_id, choice["portfolio_id"], choice["book"], by):
+            raise InvestorNotFound(f"No user {user_id}")
+        return choice
+
+
+def _iso(value):
+    return value.isoformat() if hasattr(value, "isoformat") else value
 
 
 class ListReports:

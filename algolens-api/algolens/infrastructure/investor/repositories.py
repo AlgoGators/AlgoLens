@@ -66,6 +66,83 @@ class PostgresInvestorRepository:
             (portfolio_id, day, book),
         )
 
+    # --- D-25: who follows which book (migration 005) ------------------------
+
+    def _links_present(self, cursor):
+        cursor.execute("SELECT to_regclass('investor.portfolio_links') IS NOT NULL AS present")
+        row = cursor.fetchone()
+        return bool(row and row["present"])
+
+    def portfolio_link(self, user_id):
+        conn = self.connection_factory()
+        try:
+            with conn.cursor() as cursor:
+                if not self._links_present(cursor):
+                    return None
+                cursor.execute(
+                    "SELECT portfolio_id, book FROM investor.portfolio_links WHERE user_id = %s",
+                    (int(user_id),),
+                )
+                return cursor.fetchone()
+        finally:
+            conn.close()
+
+    def portfolio_links(self):
+        conn = self.connection_factory()
+        try:
+            with conn.cursor() as cursor:
+                if not self._links_present(cursor):
+                    return None
+                cursor.execute(
+                    "SELECT user_id, portfolio_id, book, set_by, set_at "
+                    "FROM investor.portfolio_links ORDER BY user_id"
+                )
+                return cursor.fetchall()
+        finally:
+            conn.close()
+
+    def set_portfolio_link(self, user_id, portfolio_id, book, by):
+        conn = self.connection_factory()
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute("SELECT id FROM auth.users WHERE id = %s FOR UPDATE",
+                               (int(user_id),))
+                if cursor.fetchone() is None:
+                    conn.rollback()
+                    return False
+                cursor.execute(
+                    """
+                    INSERT INTO investor.portfolio_links (user_id, portfolio_id, book, set_by)
+                    VALUES (%s, %s, %s, %s)
+                    ON CONFLICT (user_id) DO UPDATE
+                       SET portfolio_id = EXCLUDED.portfolio_id, book = EXCLUDED.book,
+                           set_by = EXCLUDED.set_by, set_at = now()
+                    """,
+                    (int(user_id), portfolio_id, book, by),
+                )
+                cursor.execute(
+                    "INSERT INTO investor.portfolio_link_log (user_id, portfolio_id, book, set_by) "
+                    "VALUES (%s, %s, %s, %s)",
+                    (int(user_id), portfolio_id, book, by),
+                )
+            conn.commit()
+            return True
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+    def equity_curve(self, portfolio_id, book, until):
+        return self._read(
+            """
+            SELECT timestamp::date AS date, equity FROM trading.equity_curve
+            WHERE portfolio_id = %s AND portfolio_type = %s AND timestamp::date <= %s
+            ORDER BY timestamp
+            """,
+            (portfolio_id, book, until),
+        )
+
     def instruments(self, roots):
         if not roots:
             return {}

@@ -1,24 +1,23 @@
 import React from 'react';
 import { useTheme } from '../adapters/react/ThemeContext';
 import {
-  switcherLabel,
+  portfolioName,
+  representative,
   type PortfolioGroup,
 } from '../domain/portfolio/portfolioRegistry';
 
 interface PortfolioSwitcherProps {
   groups: PortfolioGroup[];
   selected: string | null;
-  onSelect: (portfolioId: string | null) => void;
-  /** The "All strategies" chip (the member screen's overview). */
-  showAll?: boolean;
+  onSelect: (portfolioId: string) => void;
 }
 
 /**
- * The portfolio switcher (ruling 20): sits above everything on the portfolio
- * tab. Related portfolios (one portfolio_group) are shown together, e.g. the
- * QT desk book next to its untouched model twin.
+ * The portfolio picker (ruling 20, D-20, D-22): one chip per portfolio above its page. A group
+ * (a QT book with its model book) is one portfolio; its two books are the switch inside it. The
+ * way back to every portfolio is the page's own back control, not a chip.
  */
-export function PortfolioSwitcher({ groups, selected, onSelect, showAll = true }: PortfolioSwitcherProps) {
+export function PortfolioSwitcher({ groups, selected, onSelect }: PortfolioSwitcherProps) {
   const { theme } = useTheme();
   const dark = theme === 'dark';
 
@@ -38,47 +37,22 @@ export function PortfolioSwitcher({ groups, selected, onSelect, showAll = true }
       className={`mb-6 pb-4 border-b ${dark ? 'border-gray-800' : 'border-gray-200'}`}
     >
       <div className="flex flex-wrap items-center gap-2">
-        {showAll && (
-          <button type="button" className={chip(selected === null)} onClick={() => onSelect(null)}>
-            All strategies
-          </button>
-        )}
-        {groups.map(group =>
-          group.grouped ? (
-            <div
+        {groups.map(group => {
+          const entry = representative(group);
+          const active = group.portfolios.some(p => p.portfolio_id === selected);
+          return (
+            <button
               key={group.group}
-              role="group"
-              aria-label={group.group}
-              className={`flex flex-wrap items-center gap-1 rounded-full px-1 py-0.5 border border-dashed ${
-                dark ? 'border-gray-700' : 'border-gray-300'
-              }`}
+              type="button"
+              className={chip(active)}
+              aria-pressed={active}
+              onClick={() => onSelect(entry.portfolio_id)}
+              title={group.portfolios.map(p => p.portfolio_id).join(', ')}
             >
-              {group.portfolios.map(entry => (
-                <button
-                  key={entry.portfolio_id}
-                  type="button"
-                  className={chip(selected === entry.portfolio_id)}
-                  onClick={() => onSelect(entry.portfolio_id)}
-                  title={entry.portfolio_id}
-                >
-                  {switcherLabel(entry)}
-                </button>
-              ))}
-            </div>
-          ) : (
-            group.portfolios.map(entry => (
-              <button
-                key={entry.portfolio_id}
-                type="button"
-                className={chip(selected === entry.portfolio_id)}
-                onClick={() => onSelect(entry.portfolio_id)}
-                title={entry.portfolio_id}
-              >
-                {switcherLabel(entry)}
-              </button>
-            ))
-          ),
-        )}
+              {portfolioName(group)}
+            </button>
+          );
+        })}
       </div>
     </nav>
   );

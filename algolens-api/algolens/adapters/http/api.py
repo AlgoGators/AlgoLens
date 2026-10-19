@@ -19,7 +19,7 @@ from functools import wraps
 
 import psycopg2
 from flask import Blueprint, Response, current_app, jsonify, request
-from flask_jwt_extended import get_jwt, jwt_required
+from flask_jwt_extended import get_jwt, get_jwt_identity, jwt_required
 
 from algolens.adapters.http.access import (
     admin_only,
@@ -34,13 +34,18 @@ from algolens.application.identity.screen_access import (
     SetUserScreens,
 )
 from algolens.application.investor.use_cases import (
-    GetInvestorAllocation,
+    GetInvestorPortfolio,
     GetReportFile,
+    InvestorNotFound,
+    LinkNotStored,
+    ListInvestorLinks,
     ListReports,
     ReportNotFound,
+    SetInvestorLink,
     UpdateReport,
     UploadReport,
 )
+from algolens.application.shared.errors import ValidationError
 from algolens.domain.identity.screens import INVESTOR, ScreenRuleError
 from algolens.domain.investor.reports import MAX_REPORT_BYTES, ReportRuleError
 from algolens.infrastructure.config.dependencies import (
@@ -54,8 +59,11 @@ api_bp = Blueprint("api", __name__)
 _ERRORS = (
     (ScreenRuleError, 400),
     (ReportRuleError, 400),
+    (LinkNotStored, 409),
+    (ValidationError, 400),
     (ScreenUserNotFound, 404),
     (ReportNotFound, 404),
+    (InvestorNotFound, 404),
     (ScreenAccessUnavailable, 503),
 )
 
@@ -225,8 +233,36 @@ def admin_update_report(report_id):
 @requires_screen(INVESTOR)
 @handled
 def investor_allocation():
+    # D-25: only the portfolio and book this investor follows (the QT book by default).
     registry, repo = create_investor_dependencies()
-    return jsonify({"portfolios": GetInvestorAllocation(registry, repo).execute()}), 200
+    portfolios = GetInvestorPortfolio(registry, repo).execute(get_jwt_identity())
+    return jsonify({"portfolios": portfolios}), 200
+
+
+@api_bp.route("/admin/investor-links", methods=["GET"])
+@jwt_required()
+@admin_only
+@handled
+def admin_investor_links():
+    registry, repo = create_investor_dependencies()
+    return jsonify(ListInvestorLinks(registry, repo).execute()), 200
+
+
+@api_bp.route("/admin/investors/<int:user_id>/portfolio", methods=["PUT"])
+@jwt_required()
+@admin_only
+@handled
+def admin_set_investor_link(user_id):
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return jsonify({"error": "Request body must be a JSON object"}), 400
+    registry, repo = create_investor_dependencies()
+    choice = SetInvestorLink(registry, repo).execute(
+        user_id, payload.get("portfolio_id"), payload.get("book"), _admin_email()
+    )
+    current_app.logger.info("[INVESTOR] %s set user %s to follow %s", _admin_email(), user_id,
+                            choice["label"])
+    return jsonify(choice), 200
 
 
 @api_bp.route("/investor/reports", methods=["GET"])

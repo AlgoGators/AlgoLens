@@ -33,11 +33,12 @@ def test_hidden_sections_and_credentials_are_never_shown():
     assert visible["broker"] == {"account": "U1"}
 
 
-def test_backtest_settings_and_config_comments_are_never_shown():
+def test_backtest_settings_and_config_comments_are_never_shown_as_settings():
     visible = visible_config(RUNNING)
     assert "backtest" not in visible
-    # execution and live are kept from the desk whole (platform and ops switches).
-    assert "execution" not in visible and "live" not in visible
+    # D-14: execution and live are shown (locked), only their backtest keys are not.
+    assert visible["execution"] == {"position_limit_live": 500}
+    assert visible["live"] == {"historical_days": 730}
     assert visible_config({"general": {"x": 1, "_note": "doc"}}) == {"general": {"x": 1}}
 
 
@@ -205,7 +206,7 @@ def test_restoring_a_version_applies_the_value_rules():
     check_overrides_apply(TYPED, {"risk": {"max_leverage": 1}})
 
 
-# -- what the desk may not change (Dom, 2026-10-14) ------------------------------
+# -- D-14, D-19: everything shown; the admin's locks greyed out, never hidden ---------
 
 FULL = {
     "qt": {"desk_editable": True},
@@ -213,8 +214,10 @@ FULL = {
     "execution": {"slippage_bps": 1, "position_limit_live": 500},
     "strategy_defaults": {"fdm": [[1, 1]]},
     "optimization": {"max_iterations": 100},
-    "general": {"initial_capital": 500000, "use_optimization": True,
-                "covariance_stale_dates": 5, "covariance_history_prices": 756},
+    "initial_capital": 500000,
+    "use_optimization": True,
+    "covariance_stale_dates": 5,
+    "covariance_history_prices": 756,
     "strategies": {"TREND": {"type": "TrendFollowingStrategy", "enabled_live": True,
                              "default_allocation": 1, "config": {"idm": 2.5, "risk_target": 0.2}}},
     "risk": {"max_drawdown": 0.3},
@@ -222,37 +225,185 @@ FULL = {
 }
 
 
-def test_platform_ops_and_model_structure_are_kept_from_the_desk():
+def test_every_section_but_the_qt_block_is_shown():
     visible = visible_config(FULL)
-    assert set(visible) == {"general", "strategies", "risk", "equity_slow_rule"}
-    assert visible["general"] == {"initial_capital": 500000}
-    assert visible["strategies"] == {"TREND": {"config": {"idm": 2.5, "risk_target": 0.2}}}
-    assert visible["risk"] == {"max_drawdown": 0.3}
+    assert "qt" not in visible
+    assert {"live", "execution", "strategy_defaults", "optimization", "use_optimization",
+            "covariance_stale_dates", "strategies"} <= set(visible)
 
 
-@pytest.mark.parametrize("path", [
-    ["qt", "desk_editable"], ["live", "historical_days"], ["execution", "position_limit_live"],
+LOCKED = [
+    ["live", "historical_days"], ["execution", "position_limit_live"],
     ["strategy_defaults", "fdm"], ["optimization", "max_iterations"],
-    ["general", "use_optimization"], ["general", "covariance_stale_dates"],
+    ["use_optimization"], ["covariance_stale_dates"], ["covariance_history_prices"],
     ["strategies", "TREND", "type"], ["strategies", "TREND", "enabled_live"],
     ["strategies", "TREND", "default_allocation"],
-])
-def test_a_locked_setting_cannot_be_changed(path):
+]
+
+
+@pytest.mark.parametrize("path", LOCKED)
+def test_a_locked_setting_is_shown_greyed_out_and_cannot_be_changed(path):
+    field = next(f for f in settings_view(FULL, {}, {}, False) if f["path"] == path)
+    assert field["locked"] is True and field["lockPattern"]
+    with pytest.raises(SettingsRuleError, match="locked by an admin"):
+        changes_to_overrides(FULL, [{"path": path, "value": "changed"}])
+
+
+def test_the_qt_block_is_never_a_setting():
     with pytest.raises(SettingsRuleError, match="may not be changed from AlgoLens"):
-        changes_to_overrides(FULL, [{"path": path, "value": 1}])
+        changes_to_overrides(FULL, [{"path": ["qt", "desk_editable"], "value": False}])
+
+
+def test_an_admin_unlock_makes_a_setting_editable():
+    overrides = changes_to_overrides(FULL, [{"path": ["use_optimization"], "value": False}], locks=())
+    assert overrides == {"use_optimization": False}
 
 
 def test_the_desk_still_changes_risk_capital_and_signal_settings():
     overrides = changes_to_overrides(FULL, [
         {"path": ["risk", "max_drawdown"], "value": 0.25},
-        {"path": ["general", "initial_capital"], "value": 400000},
+        {"path": ["initial_capital"], "value": 400000},
         {"path": ["strategies", "TREND", "config", "idm"], "value": 2.0},
         {"path": ["equity_slow_rule", "pairs"], "value": [[16, 64]]},
     ])
     assert overrides["strategies"] == {"TREND": {"config": {"idm": 2.0}}}
 
 
-def test_an_old_version_touching_a_locked_setting_cannot_be_restored():
-    with pytest.raises(SettingsRuleError):
-        check_overrides_apply(FULL, {"optimization": {"max_iterations": 50}})
+def test_a_version_holding_a_now_locked_key_does_not_block_later_saves():
+    # D-14: a version saved before #138 carries optimization.max_iterations; locking it must
+    # not make every later save fail. The key is carried as it is.
+    check_overrides_apply(FULL, {"optimization": {"max_iterations": 50}})
 
+
+# -- D-15: the risk gate's limits as fields, with the engine's bounds and the mirror --------
+
+RISK = {
+    "sizing_mode": "half_compounding",
+    "_sizing_note": "required; half_compounding sizes on starting capital less the drawdown",
+    "risk": {
+        "schema": 2,
+        "modules": [{"id": "carver", "type": "carver", "R_max": 2.25, "R_jump_max": 4.5,
+                     "R_shock_max": 4.0, "per_name_cap": 2, "trim_max": 5, "max_net_leverage": 6.0,
+                     "max_gross_leverage": 8.0, "lookback_period": 252, "min_gate_dates": 21,
+                     "lookback_unit": "dates", "confidence_level": 0.99,
+                     "_overlay_limits_note": "the overlay limits"}],
+        "risk_reporting": {"type": "carver", "window": "all_bars", "lookback_period": 252,
+                           "confidence_level": 0.99, "max_net_leverage": 6.0,
+                           "max_gross_leverage": 8.0, "_note": "mirrors the gate"},
+        "max_drawdown": 0.3,
+        "_description": "Risk configuration",
+    },
+}
+
+
+def test_each_gate_limit_is_its_own_field_with_its_bounds():
+    fields = {tuple(f["path"]): f for f in settings_view(RISK, {}, {}, False)}
+    r_max = fields[("risk", "modules", "carver", "R_max")]
+    assert r_max["value"] == 2.25 and r_max["bounds"]["max"] == 3.0
+    assert fields[("risk", "modules", "carver", "trim_max")]["bounds"]["integer"] is True
+    assert not any(f["type"] == "array" and f["path"][:2] == ["risk", "modules"]
+                   for f in fields.values())
+
+
+def test_a_gate_change_is_saved_as_the_whole_module_and_moves_its_mirror():
+    overrides = changes_to_overrides(
+        RISK, [{"path": ["risk", "modules", "carver", "max_gross_leverage"], "value": 6.0}])
+    [module] = overrides["risk"]["modules"]
+    assert module["max_gross_leverage"] == 6.0 and module["type"] == "carver"
+    assert module["R_max"] == 2.25  # the rest of the module as it runs
+    assert overrides["risk"]["risk_reporting"] == {"max_gross_leverage": 6.0}
+
+
+@pytest.mark.parametrize("key, value, needle", [
+    ("R_max", 3.5, "at most 3"), ("R_jump_max", 6.5, "at most 6"), ("R_shock_max", 1000, "at most 6"),
+    ("per_name_cap", 5, "at most 4"), ("max_gross_leverage", 10.5, "at most 10"),
+    ("max_net_leverage", 9.0, "at most max_gross_leverage"),
+    ("trim_max", 21, "at most 20"), ("trim_max", 2.5, "whole number"),
+    ("max_gross_leverage", 0, "above 0"), ("confidence_level", 1.5, "at most 1"),
+])
+def test_a_gate_limit_out_of_the_engines_bounds_is_refused(key, value, needle):
+    with pytest.raises(SettingsRuleError, match=needle):
+        changes_to_overrides(RISK, [{"path": ["risk", "modules", "carver", key], "value": value}])
+
+
+@pytest.mark.parametrize("path, new", [
+    (["risk", "modules", "carver", "type"], "none"),
+    (["risk", "modules", "carver", "lookback_unit"], "bars"),
+    (["risk", "risk_reporting", "max_gross_leverage"], 5.0),
+    (["risk", "schema"], 3),
+    (["sizing_mode"], "full_compounding"),
+])
+def test_read_only_settings_say_why_and_cannot_be_changed(path, new):
+    field = next(f for f in settings_view(RISK, {}, {}, False) if f["path"] == path)
+    assert field["readOnly"]
+    with pytest.raises(SettingsRuleError, match="read-only"):
+        changes_to_overrides(RISK, [{"path": path, "value": new}])
+
+
+@pytest.mark.parametrize("overrides, needle", [
+    ({"risk": {"modules": []}}, "list of modules"),
+    ({"risk": {"modules": [{"id": "carver", "type": "none"}]}}, "type cannot be changed"),
+    ({"risk": {"modules": [{"id": "other", "type": "carver"}]}}, "drops the carver module"),
+])
+def test_a_version_cannot_switch_the_gate_off_or_remove_it(overrides, needle):
+    with pytest.raises(SettingsRuleError, match=needle):
+        check_overrides_apply(RISK, overrides)
+
+
+# -- D-16: every visible field has its explanation ---------------------------------------
+
+def test_every_field_shows_the_config_files_explanation():
+    fields = settings_view(RISK, {}, {}, False)
+    assert all(f["help"] for f in fields)
+    by_path = {tuple(f["path"]): f["help"] for f in fields}
+    assert by_path[("risk", "modules", "carver", "R_max")] == "the overlay limits"
+    assert by_path[("risk", "max_drawdown")] == "Risk configuration"
+
+
+# -- D-19: the rules tested against the config the engine ships for the QT book -----------
+# tests/fixtures/qt_conservative_settings_used.json is live_run_metadata.settings_used of a
+# QT_CONSERVATIVE_PORTFOLIO run: trade-ngin's config_template/portfolios/qt_conservative as the
+# engine merges and reports it (no database or e-mail section).
+
+import json as _json
+from pathlib import Path as _Path
+
+from algolens.domain.qt.settings import DEFAULT_LOCKS, matches
+
+SHIPPED = _json.loads(
+    (_Path(__file__).parent / "fixtures" / "qt_conservative_settings_used.json").read_text("utf-8")
+)["config"]
+
+
+def test_every_starting_lock_covers_a_setting_of_the_shipped_config():
+    paths = [f["path"] for f in settings_view(SHIPPED, {}, {}, False)]
+    for lock in DEFAULT_LOCKS:
+        assert any(matches(lock, p) for p in paths), lock
+
+
+def test_the_shipped_config_shows_every_section_with_help_and_hides_only_the_qt_block():
+    fields = settings_view(SHIPPED, {}, {}, False)
+    sections = {f["path"][0] for f in fields}
+    assert "qt" not in sections and "backtest" not in sections and "portfolio_id" not in sections
+    assert {"live", "execution", "optimization", "use_optimization", "risk", "strategies"} <= sections
+    assert [f["path"] for f in fields if not f["help"]] == []
+
+
+def test_the_shipped_gate_limits_are_fields_and_a_change_moves_the_mirror():
+    fields = {tuple(f["path"]): f for f in settings_view(SHIPPED, {}, {}, False)}
+    assert fields[("risk", "modules", "carver", "per_name_cap")]["bounds"]["max"] == 4.0
+    overrides = changes_to_overrides(
+        SHIPPED, [{"path": ["risk", "modules", "carver", "max_net_leverage"], "value": 5.0}])
+    assert overrides["risk"]["risk_reporting"] == {"max_net_leverage": 5.0}
+    check_overrides_apply(SHIPPED, overrides)
+
+
+
+def test_initial_capital_moves_starting_capital_which_is_read_only():
+    # D-60 found it: the engine refuses a run whose starting_capital differs from initial_capital.
+    overrides = changes_to_overrides(SHIPPED, [{"path": ["initial_capital"], "value": 450000.0}])
+    assert overrides == {"initial_capital": 450000.0, "starting_capital": 450000.0}
+    field = next(f for f in settings_view(SHIPPED, {}, {}, False) if f["path"] == ["starting_capital"])
+    assert "Follows initial_capital" in field["readOnly"]
+    with pytest.raises(SettingsRuleError, match="read-only"):
+        changes_to_overrides(SHIPPED, [{"path": ["starting_capital"], "value": 450000.0}])
