@@ -6,10 +6,12 @@ from email import policy
 
 import pytest
 
-from algolens.application.reports.ports import Mailer, QueuedReport, ReportQueue
+from algolens.application.reports.ports import Mailer, QueuedReport, RecipientSource, ReportQueue
 from algolens.application.reports.use_cases import SendQueuedReports
 from algolens.domain.reports import daily
 from algolens.domain.reports.daily import ReportPayloadError, parse_daily_report
+from algolens.domain.reports.recipients import NoRecipientsError, resolve_recipients
+from algolens.infrastructure.reports.recipients import EnvRecipients
 from algolens.infrastructure.reports.mailer import build_message
 from algolens.infrastructure.reports.renderer import HtmlReportRenderer
 from report_fixture import sample_payload
@@ -92,9 +94,9 @@ def test_render_minimal_report_has_no_empty_sections():
 
 def test_message_is_text_plus_html_with_related_images():
     out = HtmlReportRenderer().render_daily(parse_daily_report(sample_payload()))
-    raw = bytes(build_message("reports@algogators.org", ["a@x.com", "b@x.com"], out))
+    raw = bytes(build_message("reports@algogators.org", ["a@x.com", "b@x.com"], ["vp@x.com"], out))
     msg = email.message_from_bytes(raw, policy=policy.default)
-    assert msg["To"] == "a@x.com, b@x.com"
+    assert msg["To"] == "a@x.com, b@x.com" and msg["Cc"] == "vp@x.com"
     assert msg.get_body(("plain",)) is not None
     assert "cid:equity" in msg.get_body(("html",)).get_content()
     cids = {part["Content-ID"] for part in msg.walk() if part.get_content_maintype() == "image"}
@@ -119,16 +121,33 @@ class FakeQueue(ReportQueue):
 
 
 class FakeMailer(Mailer):
-    def __init__(self, fail_for=()):
-        self.delivered, self.fail_for = [], set(fail_for)
+    def __init__(self, fail_on_call=None):
+        self.delivered, self.fail_on_call, self.calls = [], fail_on_call, 0
 
-    def send(self, recipients, email_):
-        if recipients[0] in self.fail_for:
+    def send(self, to, cc, email_):
+        self.calls += 1
+        if self.calls == self.fail_on_call:
             raise ConnectionError("smtp down")
-        self.delivered.append((tuple(recipients), email_.subject))
+        self.delivered.append((tuple(to), tuple(cc), email_.subject))
 
 
-def _item(i, payload=None, recipients=("dom@x.com",), report_type="daily_trading"):
+class FakeRecipients(RecipientSource):
+    def __init__(self, to):
+        self._to = to
+
+    def to_emails(self):
+        return self._to
+
+
+APPROVERS = {"vp": "raohemdutt@ufl.edu", "president": "dominickdupuy@ufl.edu"}
+
+
+def _worker(queue, mailer, to=("qt1@ufl.edu",)):
+    return SendQueuedReports(queue, HtmlReportRenderer(), mailer, FakeRecipients(to), APPROVERS,
+                             EnvRecipients({}).excluded())
+
+
+def _item(i, payload=None, recipients=(), report_type="daily_trading"):
     return QueuedReport(id=i, report_type=report_type, portfolio_id="P", recipients=recipients,
                         payload=payload if payload is not None else sample_payload(), attempts=1)
 
@@ -137,12 +156,12 @@ def test_worker_sends_and_records_each_outcome_without_blocking_the_rest():
     queue = FakeQueue([
         _item(1),
         _item(2, payload={"schema_version": 9}),          # unparseable
-        _item(3, recipients=("down@x.com",)),             # mail server refuses
+        _item(3),                                         # the mail server refuses this send
         _item(4, report_type="weekly"),                   # unknown type
         _item(5),
     ])
-    mailer = FakeMailer(fail_for={"down@x.com"})
-    summary = SendQueuedReports(queue, HtmlReportRenderer(), mailer)()
+    mailer = FakeMailer(fail_on_call=2)
+    summary = _worker(queue, mailer)()
     assert (summary.sent, summary.failed) == (2, 3)
     assert queue.sent == [1, 5]
     assert "ReportPayloadError" in queue.failed[2]
@@ -152,5 +171,52 @@ def test_worker_sends_and_records_each_outcome_without_blocking_the_rest():
 
 
 def test_worker_with_an_empty_queue_does_nothing():
-    summary = SendQueuedReports(FakeQueue([]), HtmlReportRenderer(), FakeMailer())()
+    summary = _worker(FakeQueue([]), FakeMailer())()
     assert (summary.sent, summary.failed) == (0, 0)
+
+
+# --- recipient rules --------------------------------------------------------------------------
+
+
+def test_qts_are_to_and_vp_and_president_are_cc():
+    who = resolve_recipients(["QT1@ufl.edu", "qt2@ufl.edu"], APPROVERS)
+    assert who.to == ("qt1@ufl.edu", "qt2@ufl.edu")
+    assert who.cc == ("raohemdutt@ufl.edu", "dominickdupuy@ufl.edu")
+
+
+def test_an_approver_who_is_also_a_qt_is_cc_only():
+    who = resolve_recipients(["qt1@ufl.edu", "raohemdutt@ufl.edu"], APPROVERS)
+    assert who.to == ("qt1@ufl.edu",) and "raohemdutt@ufl.edu" in who.cc
+
+
+def test_excluded_addresses_are_never_addressed_anywhere():
+    excluded = EnvRecipients({}).excluded()
+    for kwargs in (dict(to_emails=["DHebrank@msn.com", "qt1@ufl.edu"], approvers=APPROVERS),
+                   dict(to_emails=["qt1@ufl.edu"], approvers={"vp": "dhebrank@msn.com"}),
+                   dict(to_emails=["qt1@ufl.edu"], approvers=APPROVERS,
+                        extra_to=["dhebrank@msn.com"])):
+        who = resolve_recipients(excluded=excluded, **kwargs)
+        assert "dhebrank@msn.com" not in who.everyone
+
+
+def test_the_built_in_exclusion_survives_a_missing_or_empty_variable():
+    assert "dhebrank@msn.com" in EnvRecipients({}).excluded()
+    assert "dhebrank@msn.com" in EnvRecipients({"REPORT_EXCLUDE": ""}).excluded()
+    assert "x@y.com" in EnvRecipients({"REPORT_EXCLUDE": "X@y.com"}).excluded()
+
+
+def test_with_no_to_addresses_the_approvers_become_the_to_line():
+    who = resolve_recipients([], APPROVERS)
+    assert who.to == ("raohemdutt@ufl.edu", "dominickdupuy@ufl.edu") and who.cc == ()
+
+
+def test_nobody_left_means_nothing_is_sent():
+    with pytest.raises(NoRecipientsError):
+        resolve_recipients(["dhebrank@msn.com"], {}, excluded=["dhebrank@msn.com"])
+
+
+def test_worker_mail_has_the_cc_and_no_excluded_address():
+    queue, mailer = FakeQueue([_item(1)]), FakeMailer()
+    _worker(queue, mailer, to=("qt1@ufl.edu", "dhebrank@msn.com"))()
+    (to, cc, _subject), = mailer.delivered
+    assert to == ("qt1@ufl.edu",) and cc == ("raohemdutt@ufl.edu", "dominickdupuy@ufl.edu")

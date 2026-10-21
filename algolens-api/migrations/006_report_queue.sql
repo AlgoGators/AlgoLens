@@ -19,7 +19,9 @@ CREATE TABLE IF NOT EXISTS reports.report_queue (
     report_type  TEXT        NOT NULL CHECK (report_type IN ('daily_trading')),
     portfolio_id TEXT        NOT NULL CHECK (btrim(portfolio_id) <> ''),
     report_date  DATE        NOT NULL,
-    recipients   TEXT[]      NOT NULL CHECK (cardinality(recipients) > 0),
+    -- extra To addresses; usually empty. AlgoLens adds the QTs (To, REPORT_TO) and the VP and
+    -- President (Cc, QT_APPROVERS) when it sends, and never addresses the exclusion list (REPORT_EXCLUDE).
+    recipients   TEXT[]      NOT NULL DEFAULT '{}',
     payload      JSONB       NOT NULL,
     status       TEXT        NOT NULL DEFAULT 'queued'
                              CHECK (status IN ('queued', 'sending', 'sent', 'failed')),

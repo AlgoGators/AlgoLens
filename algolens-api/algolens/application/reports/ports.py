@@ -9,7 +9,7 @@ class QueuedReport:
     id: int
     report_type: str
     portfolio_id: str
-    recipients: tuple
+    recipients: tuple  # extra To addresses the enqueuer asked for; the rules add the rest
     payload: dict
     attempts: int
 
@@ -43,7 +43,13 @@ class ReportRenderer(ABC):
         """A RenderedEmail for a DailyReport."""
 
 
+class RecipientSource(ABC):
+    @abstractmethod
+    def to_emails(self):
+        """The addresses on the To line (the QTs)."""
+
+
 class Mailer(ABC):
     @abstractmethod
-    def send(self, recipients, email):
-        """Deliver a RenderedEmail to the recipients, or raise."""
+    def send(self, to, cc, email):
+        """Deliver a RenderedEmail to the To and Cc addresses, or raise."""

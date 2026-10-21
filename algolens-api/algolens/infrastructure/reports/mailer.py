@@ -9,12 +9,14 @@ from email.utils import formatdate, make_msgid
 from algolens.application.reports.ports import Mailer
 
 
-def build_message(sender, recipients, email):
+def build_message(sender, to, cc, email):
     """multipart/alternative (text, then HTML), with the charts inline on the HTML part."""
     msg = EmailMessage()
     msg["Subject"] = email.subject
     msg["From"] = sender
-    msg["To"] = ", ".join(recipients)
+    msg["To"] = ", ".join(to)
+    if cc:
+        msg["Cc"] = ", ".join(cc)
     msg["Date"] = formatdate(localtime=False)
     msg["Message-ID"] = make_msgid(domain="algolens")
     msg.set_content(email.text)
@@ -34,7 +36,7 @@ class SmtpMailer(Mailer):
     def __init__(self, env=None):
         self.env = os.environ if env is None else env
 
-    def send(self, recipients, email):
+    def send(self, to, cc, email):
         host = self.env.get("SMTP_HOST")
         user = self.env.get("SMTP_USER")
         password = self.env.get("SMTP_PASSWORD")
@@ -42,7 +44,7 @@ class SmtpMailer(Mailer):
         if not (host and sender):
             raise RuntimeError("SMTP_HOST and REPORT_FROM (or SMTP_USER) must be set")
         port = int(self.env.get("SMTP_PORT", "587"))
-        message = build_message(sender, list(recipients), email)
+        message = build_message(sender, list(to), list(cc), email)
         context = ssl.create_default_context()
         if port == 465:
             server = smtplib.SMTP_SSL(host, port, context=context, timeout=30)
@@ -53,4 +55,4 @@ class SmtpMailer(Mailer):
                 server.starttls(context=context)
             if user and password:
                 server.login(user, password)
-            server.send_message(message)
+            server.send_message(message, to_addrs=list(to) + list(cc))

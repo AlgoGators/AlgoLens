@@ -17,6 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from algolens.application.reports.use_cases import SendQueuedReports  # noqa: E402
 from algolens.infrastructure.reports.mailer import SmtpMailer  # noqa: E402
 from algolens.infrastructure.reports.queue import PostgresReportQueue  # noqa: E402
+from algolens.infrastructure.reports.recipients import EnvRecipients  # noqa: E402
 from algolens.infrastructure.reports.renderer import HtmlReportRenderer  # noqa: E402
 
 
@@ -26,7 +27,9 @@ def main():
     args = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
-    send = SendQueuedReports(PostgresReportQueue(), HtmlReportRenderer(), SmtpMailer())
+    who = EnvRecipients()
+    send = SendQueuedReports(PostgresReportQueue(), HtmlReportRenderer(), SmtpMailer(), who,
+                             who.approvers(), who.excluded())
     failed_any = False
     while True:
         summary = send()

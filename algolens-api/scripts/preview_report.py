@@ -43,11 +43,11 @@ def main():
         html = html.replace(f"cid:{cid}", uri)
     (out / "report.html").write_text(html, encoding="utf-8")
     (out / "report.eml").write_bytes(
-        bytes(build_message("reports@algolens.local", ["preview@example.com"], email)))
+        bytes(build_message("reports@algolens.local", ["preview@example.com"], [], email)))
     print(f"wrote {out / 'report.html'} and {out / 'report.eml'}")
 
     if args.send:
-        SmtpMailer(os.environ).send([args.send], email)
+        SmtpMailer(os.environ).send([args.send], [], email)
         print(f"sent to {args.send}")
 
 
