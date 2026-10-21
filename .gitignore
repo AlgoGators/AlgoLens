@@ -22,3 +22,4 @@ tables/
 # Coverage reports (D-59 gates)
 .coverage
 coverage/
+algolens-api/preview/

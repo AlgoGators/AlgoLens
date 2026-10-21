@@ -9,3 +9,5 @@ gunicorn==26.2.0
 grpcio==1.84.0
 protobuf==7.36.2
 tzdata==2026.5
+Jinja2==3.1.6
+matplotlib==3.10.8
