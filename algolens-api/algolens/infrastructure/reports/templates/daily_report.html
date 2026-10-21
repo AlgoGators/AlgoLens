@@ -17,8 +17,8 @@
   .num { font-variant-numeric: tabular-nums; }
   .label { font-size: 11px; letter-spacing: 0.2em; text-transform: uppercase; color: #6C6A66; }
   .th { font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: #6C6A66;
-        padding: 0 8px 8px 8px; border-bottom: 1px solid #14141A; font-weight: 500; }
-  .td { font-size: 13px; color: #2B2A30; padding: 10px 8px; border-bottom: 1px solid #ECEAE5; }
+        padding: 0 8px 10px 8px; border-bottom: 2px solid #14141A; font-weight: 500; }
+  .td { font-size: 13px; color: #2B2A30; padding: 12px 8px; border-bottom: 2px solid #D9D6CF; }
   .r { text-align: right; }
   .up { color: #14141A; font-weight: 600; }
   .down { color: #D94A00; font-weight: 600; }
@@ -118,8 +118,8 @@
       <td class="td num r {{ 'up' if r.pnl >= 0 else 'down' }}">{{ fmt.signed_money(r.pnl) }}</td>
     </tr>
     {% endfor %}
-    <tr><td class="td" colspan="4" style="border-bottom:0;border-top:1px solid #14141A;font-weight:600;color:#14141A;">Total</td>
-        <td class="td num r {{ 'up' if report.total_realized_pnl >= 0 else 'down' }}" style="border-bottom:0;border-top:1px solid #14141A;">{{ fmt.signed_money(report.total_realized_pnl) }}</td></tr>
+    <tr><td class="td" colspan="4" style="border-bottom:0;border-top:2px solid #14141A;font-weight:600;color:#14141A;">Total</td>
+        <td class="td num r {{ 'up' if report.total_realized_pnl >= 0 else 'down' }}" style="border-bottom:0;border-top:2px solid #14141A;">{{ fmt.signed_money(report.total_realized_pnl) }}</td></tr>
   </table>
   {% endif %}
 
