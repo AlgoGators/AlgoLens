@@ -6,6 +6,6 @@ psycopg2-binary==2.9.13
 Werkzeug==3.1.9
 python-dotenv==1.2.4
 gunicorn==26.2.0
-grpcio==1.84.0
+grpcio==1.85.0
 protobuf==7.36.2
 tzdata==2026.5
