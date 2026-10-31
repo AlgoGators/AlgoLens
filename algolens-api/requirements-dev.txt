@@ -2,4 +2,4 @@
 -r requirements.txt
 pytest
 pytest-cov==6.0.0
-grpcio-tools==1.84.0
+grpcio-tools==1.85.0
